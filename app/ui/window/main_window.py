@@ -1,7 +1,7 @@
 # main_window.py
 
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSizePolicy, QCheckBox, QPushButton,
-                             QMessageBox, QSplitter, QLabel, QComboBox)
+                             QMessageBox, QSplitter, QComboBox)
 from PySide6.QtCore import Qt, QSettings, QPoint
 from PySide6.QtGui import QPixmap, QKeySequence, QAction, QColor
 import qtawesome as qta
@@ -12,8 +12,8 @@ from app.handlers import BatchOCRHandler, ManualOCRHandler, StitchHandler, Split
 from app.core import ProjectModel
 from app.ui.dialogs import SettingsDialog
 from app.ui.window.translation_window import TranslationWindow
-from assets import (COLORS, MAIN_STYLESHEET, IV_BUTTON_STYLES, ADVANCED_CHECK_STYLES, RIGHT_WIDGET_STYLES,
-                    DEFAULT_TEXT_STYLE, DELETE_ROW_STYLES, get_style_diff, MANUALOCR_STYLES)
+from assets import (COLORS, MAIN_STYLESHEET, ADVANCED_CHECK_STYLES, RIGHT_WIDGET_STYLES,
+                    DEFAULT_TEXT_STYLE, DELETE_ROW_STYLES, get_style_diff)
 import easyocr, os, gc, json, traceback
 
 class MainWindow(QMainWindow):
@@ -542,7 +542,7 @@ class MainWindow(QMainWindow):
             lang_code = self.language_map.get(self.model.original_language, 'ko')
             use_gpu = self.settings.value("use_gpu", "true").lower() == "true"
             print(f"Initializing EasyOCR reader for {context}: Lang='{lang_code}', GPU={use_gpu}")
-            self.reader = easyocr.Reader([lang_code], gpu=use_gpu)
+            self.reader = easyocr.Reader([lang_code], gpu=use_gpu, model_storage_directory='.EasyOCR/model')
             print("EasyOCR reader initialized successfully.")
             return True
         except Exception as e:
