@@ -16,3 +16,5 @@ clean.bat
 test.py
 .venv/
 pyqt5
+docs-site-guide.md
+initmodels.py

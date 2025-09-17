@@ -1,7 +1,5 @@
 # home_window.py
 # Contains the main "Home" window, its components, and related logic.
-
-import sys
 import os
 import zipfile
 import tempfile
@@ -12,10 +10,9 @@ import traceback
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton, QFrame, QMainWindow, QLabel, QMessageBox,
                              QScrollArea, QHBoxLayout, QDialog)
 from PySide6.QtCore import Qt, QSettings, QDateTime, QThread, Signal, QEvent
-from app.utils import new_project, open_project, import_from_wfwf, correct_filenames
 from assets.styles import (HOME_STYLES, HOME_LEFT_LAYOUT_STYLES)
-from app.ui.window import CustomTitleBar, WindowResizer
-from app.ui.widgets import TitleBarState
+from app.ui.window.chrome import CustomTitleBar, WindowResizer
+from app.ui.widgets.menu_bar import TitleBarState
 
 
 class ProjectItemWidget(QFrame):
@@ -305,15 +302,19 @@ class Home(QMainWindow):
                     item.deleteLater()
 
     def new_project(self):
+        from app.utils.project_processing import new_project
         new_project(self)
 
     def open_project(self):
+        from app.utils.project_processing import open_project
         open_project(self)
 
     def import_from_wfwf(self):
+        from app.utils.project_processing import import_from_wfwf
         import_from_wfwf(self)
 
     def correct_filenames(self, directory):
+        from app.utils.project_processing import correct_filenames
         return correct_filenames(directory)
 
     def update_recent_projects(self, project_path):

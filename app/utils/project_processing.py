@@ -4,7 +4,7 @@ import json
 import tempfile
 import re
 from shutil import copyfile, rmtree
-from app.ui.dialogs import NewProjectDialog, ImportWFWFDialog
+from app.ui.dialogs.project_dialog import NewProjectDialog, ImportWFWFDialog
 from PySide6.QtWidgets import QMessageBox, QFileDialog, QDialog, QApplication
 from PySide6.QtCore import QDateTime, QDir, Qt
 
@@ -126,7 +126,7 @@ def launch_project(self, mmtl_path):
         self.launch_main_app(mmtl_path)
     elif hasattr(self, 'main_window'):
         # Called from MenuBar class
-        from main import LoadingDialog, ProjectLoaderThread
+        from app.ui.window.main_window import LoadingDialog, ProjectLoaderThread
         
         # Show loading dialog
         loading_dialog = LoadingDialog(self)

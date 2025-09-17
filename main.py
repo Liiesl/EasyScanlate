@@ -73,6 +73,7 @@ except ImportError:
         except ImportError:
             print("CRITICAL ERROR: PySide6 is not installed...")
         sys.exit(1)
+
 class CustomSplashScreen(QSplashScreen):
     """A custom splash screen to show loading messages."""
     def __init__(self, pixmap):
@@ -115,6 +116,8 @@ def get_relative_time(timestamp_str):
     years = seconds // 31536000
     return f"{years} year{'s' if years > 1 else ''} ago"
 
+# main.py
+
 class Preloader(QThread):
     """
     Performs initial, non-GUI tasks in a separate thread.
@@ -135,9 +138,13 @@ class Preloader(QThread):
             recent_projects = settings.value("recent_projects", [])
             recent_timestamps = settings.value("recent_timestamps", {})
             
+            # --- IMPROVED LOOP ---
             for path in recent_projects:
+                filename = os.path.basename(path)
+                # Update the splash screen BEFORE the potentially blocking call
+                self.progress_update.emit(f"Verifying: {filename}...")
+                
                 if os.path.exists(path):
-                    filename = os.path.basename(path)
                     timestamp = recent_timestamps.get(path, "")
                     last_opened = get_relative_time(timestamp)
                     projects_data.append({
@@ -165,6 +172,7 @@ def on_preload_finished(projects_data):
     global home_window, splash, preloader
     print("[ENTRY] Preloading finished. Handling window creation.")
 
+    preloader.progress_update.emit("Importing necessary packages...")
     # --- Import Home from the correct module ---
     from app.ui.window.home_window import Home
     
