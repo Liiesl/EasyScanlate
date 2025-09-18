@@ -1,0 +1,76 @@
+name: Build MangaOCRTool with Nuitka and NSIS Online Installer
+
+on:
+  push:
+    branches:
+      - test-deploy
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      # 1. Get the code from repository
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      # 2. Set up a Python environment
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 3. Install project's dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+          pip install -r requirements.txt
+
+      # 4. Run Nuitka build
+      - name: Build Executable with Nuitka
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          script-name: main.py
+          mode: standalone
+          include-data-dir: 'model=model'
+          mingw64: true
+          enable-plugins: pyside6
+          windows-icon-from-ico: launcher/app_icon.ico
+          company-name: "YourCompany"
+          product-name: "MangaOCRTool"
+          file-description: "ManhwaOCR"
+          file-version: "1.0.0.0"
+          product-version: "1.0.0.0"
+
+      # 5. Create a ZIP archive of the PyTorch libraries
+      - name: Zip PyTorch Libraries
+        run: |
+          cd build/main.dist
+          powershell Compress-Archive -Path torch, torchvision, torchaudio -DestinationPath ..\..\pytorch-libs.zip
+          cd ..\..
+        shell: pwsh
+
+      # 6. Upload the PyTorch ZIP as a workflow artifact
+      - name: Upload PyTorch Library Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytorch-libs
+          path: pytorch-libs.zip
+
+      # 7. Install NSIS using Chocolatey
+      - name: Install NSIS
+        run: choco install nsis
+
+      # 8. Compile the NSIS installer using the script from the repository
+      #    Ensure the path 'installer/installer.nsi' matches where you created the file.
+      - name: Compile NSIS installer
+        run: makensis assets/installer.nsi
+
+      # 9. Upload the final installer as a downloadable artifact
+      - name: Upload Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MangaOCRTool-Installer
+          # The OutFile in your .nsi script is "MangaOCRTool-Installer.exe"
+          path: MangaOCRTool-Installer.exe
