@@ -3,8 +3,8 @@ name: Build and Release MangaOCRTool
 # Workflow Trigger
 on:
   push:
-    tags:
-      - 'v*.*.*'
+    branches:
+      - production-workflow
 
 jobs:
   build-and-release-windows:
