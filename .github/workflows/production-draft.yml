@@ -34,7 +34,7 @@ jobs:
         with:
           script-name: main.py
           mode: standalone
-          include-data-dir: 'model=model'
+          include-data-dir: 'EasyOCR/model=EasyOCR/model'
           mingw64: true
           enable-plugins: pyside6
           windows-icon-from-ico: launcher/app_icon.ico
@@ -44,15 +44,15 @@ jobs:
           file-version: "1.0.0.0"
           product-version: "1.0.0.0"
 
-      # 5. Create a ZIP archive of the PyTorch libraries
-      - name: Zip PyTorch Libraries
+      # 5. Create a ZIP archive of the PyTorch libraries with best compression
+      - name: Zip PyTorch Libraries with 7-Zip
         run: |
           cd build/main.dist
-          powershell Compress-archive -Path torch -DestinationPath ..\..\pytorch-libs.zip
+          7z a -tzip -mx=9 ..\..\pytorch-libs.zip torch
           cd ..\..
         shell: pwsh
 
-      # pload PyTorch ZIP as a workflow artifact
+      # Upload PyTorch ZIP as a workflow artifact
       - name: Upload PyTorch Libraries as Artifact
         uses: actions/upload-artifact@v4
         with:
