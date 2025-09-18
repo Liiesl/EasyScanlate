@@ -2,9 +2,11 @@ name: Build and Release MangaOCRTool
 
 # Workflow Trigger
 on:
+  workflow_dispatch:
+
   push:
-    branches:
-      - production-workflow
+    tags:
+      - 'v*.*.*'
 
 jobs:
   build-and-release-windows:
