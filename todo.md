@@ -1,16 +1,7 @@
 ## what i need
 
 ### done (completed in the last 30 days)
-- stitch images
-- major folder layout refactoring
-- fix input on simple mode losing focus after input key.
-- split images
-- create loading splash screen
-- deprecate apply translation (replaced by real time editing)
-- textbox styles ui rework
-- export images & project improvement:
-    - dialog where to save
-    - default name the same as project.
+- rewrite to PySide6
 
 ### currently in progress
 - implement watermarking
