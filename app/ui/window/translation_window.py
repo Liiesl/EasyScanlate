@@ -1,8 +1,8 @@
-from PyQt5.QtWidgets import ( QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QComboBox,
+from PySide6.QtWidgets import ( QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QComboBox,
                              QScrollArea, QTextEdit, QFrame, QGridLayout, QCheckBox, QProgressBar, 
-                             QMessageBox, QWidget, QShortcut, QSplitter )
-from PyQt5.QtCore import Qt, QSize, pyqtSignal, QEvent, QTimer
-from PyQt5.QtGui import QKeySequence
+                             QMessageBox, QWidget, QSplitter )
+from PySide6.QtCore import Qt, QSize, Signal, QEvent, QTimer
+from PySide6.QtGui import QShortcut, QKeySequence
 import qtawesome as qta
 from app.core.translations import TranslationThread, _get_text_for_profile_static, generate_for_translate_content, generate_retranslate_content, import_translation_file_content
 
@@ -16,7 +16,7 @@ PLACEHOLDER_STYLE = "QFrame { background-color: #252525; border: 1px solid #444;
 class TranslationWindow(QDialog):
     """ A dialog window to manage the translation process with an integrated,
     multi-column comparison view and a chat-like interface for Gemini. """
-    translation_complete = pyqtSignal(str, dict)
+    translation_complete = Signal(str, dict)
 
     def __init__(self, api_key, model_name, ocr_results, profiles, parent=None):
         super().__init__(parent)

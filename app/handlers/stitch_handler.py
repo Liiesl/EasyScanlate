@@ -1,8 +1,8 @@
 # app/stitch_handler.py
 
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QPushButton, QMessageBox
-from PyQt5.QtCore import QObject, Qt
-from PyQt5.QtGui import QPixmap, QPainter
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QMessageBox
+from PySide6.QtCore import QObject, Qt
+from PySide6.QtGui import QPixmap, QPainter
 from app.ui.components import ResizableImageLabel
 import qtawesome as qta
 import os

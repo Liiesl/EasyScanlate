@@ -560,7 +560,7 @@ WFWF_STYLES = """
             }
         """
 
-from PyQt5.QtGui import QColor
+from PySide6.QtGui import QColor
 
 DEFAULT_GRADIENT = {
     'color1': QColor(255, 255, 255).name(QColor.HexArgb), # White

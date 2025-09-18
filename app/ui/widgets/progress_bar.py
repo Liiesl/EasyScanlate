@@ -1,5 +1,5 @@
-from PyQt5.QtWidgets import QProgressBar
-from PyQt5.QtCore import QTimer, QDateTime
+from PySide6.QtWidgets import QProgressBar
+from PySide6.QtCore import QTimer, QDateTime
 
 class CustomProgressBar(QProgressBar):
     def __init__(self, parent=None):

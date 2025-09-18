@@ -1,5 +1,5 @@
-from PyQt5.QtWidgets import QScrollArea, QWidget, QHBoxLayout, QPushButton
-from PyQt5.QtCore import pyqtSignal
+from PySide6.QtWidgets import QScrollArea, QWidget, QHBoxLayout, QPushButton
+from PySide6.QtCore import Signal
 import qtawesome as qta
 from assets import IV_BUTTON_STYLES
     
@@ -11,11 +11,11 @@ class CustomScrollArea(QScrollArea):
     # This signal is emitted when the "Save" button in the overlay is clicked.
     # It passes the button widget itself, which the main window uses to
     # position the save menu correctly.
-    save_requested = pyqtSignal(QWidget)
+    save_requested = Signal(QWidget)
     # This signal is emitted when the "Actions" menu button is clicked,
     # passing the button to allow for correct menu positioning.
-    action_menu_requested = pyqtSignal(QWidget)
-    resized = pyqtSignal()
+    action_menu_requested = Signal(QWidget)
+    resized = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)

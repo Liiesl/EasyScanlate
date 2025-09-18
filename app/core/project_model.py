@@ -1,5 +1,5 @@
 import os, json, traceback, zipfile, math, sys
-from PyQt5.QtCore import QObject, pyqtSignal
+from PySide6.QtCore import QObject, Signal
 
 class ProjectModel(QObject):
     """
@@ -10,14 +10,14 @@ class ProjectModel(QObject):
     """
     # --- Signals ---
     # Emitted when a project is successfully loaded.
-    project_loaded = pyqtSignal()
+    project_loaded = Signal()
     # Emitted with an error message if project loading fails.
-    project_load_failed = pyqtSignal(str)
+    project_load_failed = Signal(str)
     # Emitted after any data change (e.g., text edit, deletion, new OCR results).
     # The payload is a list of affected filenames for targeted UI updates.
-    model_updated = pyqtSignal(list)
+    model_updated = Signal(list)
     # Emitted when the list of profiles changes (new profile added).
-    profiles_updated = pyqtSignal()
+    profiles_updated = Signal()
 
     def __init__(self):
         super().__init__()

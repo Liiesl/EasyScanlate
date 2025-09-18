@@ -1,8 +1,8 @@
 # --- START OF FILE image_area_widgets.py ---
 
-from PyQt5.QtWidgets import QGraphicsTextItem, QGraphicsItem, QGraphicsRectItem
-from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPointF, QObject,QLineF
-from PyQt5.QtGui import QPainter, QFont, QBrush, QColor, QPen, QPainterPath, QLinearGradient, QTransform, QPolygonF
+from PySide6.QtWidgets import QGraphicsTextItem, QGraphicsItem, QGraphicsRectItem
+from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QObject,QLineF
+from PySide6.QtGui import QPainter, QFont, QBrush, QColor, QPen, QPainterPath, QLinearGradient, QTransform, QPolygonF
 
 # --- NEW: Custom Item for Selection and Resize Handles ---
 class SelectionFrameItem(QGraphicsItem):

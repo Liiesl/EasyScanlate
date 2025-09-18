@@ -1,5 +1,5 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton
-from PyQt5.QtCore import Qt
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton
+from PySide6.QtCore import Qt
 import qtawesome as qta
 from assets import MENU_STYLES
 

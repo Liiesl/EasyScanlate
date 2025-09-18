@@ -1,6 +1,6 @@
 # --- START OF FILE ocr_processor.py ---
 
-from PyQt5.QtCore import QThread, pyqtSignal
+from PySide6.QtCore import QThread, Signal
 import os
 import numpy as np
 from PIL import Image, ImageEnhance # Added ImageEnhance
@@ -9,9 +9,9 @@ import time
 from app.utils.data_processing import group_and_merge_text # Import merging function
 
 class OCRProcessor(QThread):
-    ocr_progress = pyqtSignal(int)  # Progress for the current image (0-100)
-    ocr_finished = pyqtSignal(list)  # Results for the current image (list of dicts)
-    error_occurred = pyqtSignal(str)
+    ocr_progress = Signal(int)  # Progress for the current image (0-100)
+    ocr_finished = Signal(list)  # Results for the current image (list of dicts)
+    error_occurred = Signal(str)
 
     def __init__(self, image_path, reader,
                  # Filters

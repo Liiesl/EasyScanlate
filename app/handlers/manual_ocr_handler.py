@@ -5,8 +5,8 @@ import math
 import numpy as np
 from PIL import Image
 
-from PyQt5.QtWidgets import QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
-from PyQt5.QtCore import QPoint, QBuffer
+from PySide6.QtWidgets import QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtCore import QPoint, QBuffer
 from app.utils.data_processing import group_and_merge_text
 from app.ui.components import ResizableImageLabel
 from assets import MANUALOCR_STYLES

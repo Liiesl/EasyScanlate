@@ -1,8 +1,8 @@
 # app/handlers/split_handler.py
 
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QMessageBox
-from PyQt5.QtCore import QObject, Qt, QRectF
-from PyQt5.QtGui import QPixmap, QPainter, QPen, QColor
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QMessageBox
+from PySide6.QtCore import QObject, Qt, QRectF
+from PySide6.QtGui import QPixmap, QPainter, QPen, QColor
 from app.ui.components import ResizableImageLabel
 import qtawesome as qta
 import os

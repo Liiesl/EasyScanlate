@@ -1,18 +1,18 @@
 # app/ui/components/image_area/label.py
 
-from PyQt5.QtWidgets import QGraphicsScene, QSizePolicy, QGraphicsRectItem, QGraphicsView, QRubberBand, QGraphicsLineItem, QGraphicsEllipseItem
-from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint, QRect, QSize, QTimer
-from PyQt5.QtGui import QPainter, QColor, QPen, QBrush
+from PySide6.QtWidgets import QGraphicsScene, QSizePolicy, QGraphicsRectItem, QGraphicsView, QRubberBand, QGraphicsLineItem, QGraphicsEllipseItem
+from PySide6.QtCore import Qt, Signal, QRectF, QPoint, QRect, QSize, QTimer
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush
 from app.ui.components.image_area.textbox import TextBoxItem
 
 class ResizableImageLabel(QGraphicsView):
     # Signals
-    textBoxDeleted = pyqtSignal(object)
-    textBoxSelected = pyqtSignal(object, object, bool)
-    manual_area_selected = pyqtSignal(QRectF, object)
-    stitching_selection_changed = pyqtSignal(object, bool)
+    textBoxDeleted = Signal(object)
+    textBoxSelected = Signal(object, object, bool)
+    manual_area_selected = Signal(QRectF, object)
+    stitching_selection_changed = Signal(object, bool)
     # NEW: Signal to report a click's location during split mode
-    split_indicator_requested = pyqtSignal(object, int)
+    split_indicator_requested = Signal(object, int)
 
 
     def __init__(self, pixmap, filename):

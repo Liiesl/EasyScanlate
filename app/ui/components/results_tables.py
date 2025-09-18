@@ -1,15 +1,15 @@
 # --- START OF FILE results_widget.py ---
 
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame, QScrollArea, QStackedWidget,
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame, QScrollArea, QStackedWidget,
                              QPushButton, QTableWidget, QTableWidgetItem, QMessageBox, QHeaderView,
                              QTextEdit, QAbstractItemView, QStyledItemDelegate)
-from PyQt5.QtCore import Qt, pyqtSignal, QEvent
+from PySide6.QtCore import Qt, Signal, QEvent
 import qtawesome as qta
 import math
 from assets import SIMPLE_VIEW_STYLES, DELETE_ROW_STYLES
 
 class ResultsWidget(QWidget):
-    rowSelected = pyqtSignal(object)  # Signal to emit the row_number when selected
+    rowSelected = Signal(object)  # Signal to emit the row_number when selected
     def __init__(self, main_window, combine_action, find_action):
         super().__init__()
         self.main_window = main_window

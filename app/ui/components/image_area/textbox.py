@@ -1,14 +1,14 @@
 
-from PyQt5.QtWidgets import QGraphicsTextItem, QGraphicsItem, QGraphicsRectItem
-from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPointF, QObject
-from PyQt5.QtGui import QPainter, QFont, QBrush, QColor, QPen, QPainterPath, QLinearGradient
+from PySide6.QtWidgets import QGraphicsTextItem, QGraphicsItem, QGraphicsRectItem
+from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QObject
+from PySide6.QtGui import QPainter, QFont, QBrush, QColor, QPen, QPainterPath, QLinearGradient
 
 from app.ui.components.image_area.textbox_frame import SelectionFrameItem
 
 # --- Signal class remains the same ---
 class TextBoxSignals(QObject):
-    rowDeleted = pyqtSignal(object)
-    selectedChanged = pyqtSignal(bool, object)
+    rowDeleted = Signal(object)
+    selectedChanged = Signal(bool, object)
 
 class TextBoxItem(QGraphicsRectItem):
     def __init__(self, rect, row_number, text="", original_rect=None, initial_style=None):

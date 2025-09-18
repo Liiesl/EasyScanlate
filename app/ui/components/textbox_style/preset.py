@@ -1,12 +1,12 @@
-from PyQt5.QtWidgets import QPushButton, QMenu
-from PyQt5.QtGui import QPainter, QPen, QColor, QBrush, QFont, QLinearGradient
-from PyQt5.QtCore import Qt, pyqtSignal
+from PySide6.QtWidgets import QPushButton, QMenu
+from PySide6.QtGui import QPainter, QPen, QColor, QBrush, QFont, QLinearGradient
+from PySide6.QtCore import Qt, Signal
 from assets import DEFAULT_GRADIENT
 
 class PresetButton(QPushButton):
     """A button that displays a preview of a style preset."""
-    overwrite_requested = pyqtSignal(int)
-    delete_requested = pyqtSignal(int)
+    overwrite_requested = Signal(int)
+    delete_requested = Signal(int)
 
     def __init__(self, index, parent=None):
         super().__init__(parent)

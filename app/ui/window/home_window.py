@@ -1,7 +1,5 @@
 # home_window.py
 # Contains the main "Home" window, its components, and related logic.
-
-import sys
 import os
 import zipfile
 import tempfile
@@ -9,13 +7,12 @@ import time
 from shutil import rmtree
 import traceback
 
-from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton, QFrame, QMainWindow, QLabel, QMessageBox,
+from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton, QFrame, QMainWindow, QLabel, QMessageBox,
                              QScrollArea, QHBoxLayout, QDialog)
-from PyQt5.QtCore import Qt, QSettings, QDateTime, QThread, pyqtSignal, QEvent
-from app.utils import new_project, open_project, import_from_wfwf, correct_filenames
+from PySide6.QtCore import Qt, QSettings, QDateTime, QThread, Signal, QEvent
 from assets.styles import (HOME_STYLES, HOME_LEFT_LAYOUT_STYLES)
-from app.ui.window import CustomTitleBar, WindowResizer
-from app.ui.widgets import TitleBarState
+from app.ui.window.chrome import CustomTitleBar, WindowResizer
+from app.ui.widgets.menu_bar import TitleBarState
 
 
 class ProjectItemWidget(QFrame):
@@ -160,9 +157,9 @@ class LoadingDialog(QDialog):
         QApplication.processEvents()
 
 class ProjectLoaderThread(QThread):
-    finished = pyqtSignal(str, str)
-    error = pyqtSignal(str)
-    progress_update = pyqtSignal(str)
+    finished = Signal(str, str)
+    error = Signal(str)
+    progress_update = Signal(str)
 
     def __init__(self, mmtl_path):
         super().__init__()
@@ -196,8 +193,9 @@ class ProjectLoaderThread(QThread):
                 rmtree(temp_dir, ignore_errors=True)
 
 class Home(QMainWindow):
-    def __init__(self):
+    def __init__(self, progress_signal=None):
         super().__init__()
+        self.progress_signal = progress_signal
         self.settings = QSettings("YourCompany", "MangaOCRTool")
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -206,6 +204,13 @@ class Home(QMainWindow):
         self.resizer = WindowResizer(self)
         
     def init_ui(self):
+        def report_progress(message):
+            """Helper function to report progress if the signal is available."""
+            if self.progress_signal:
+                self.progress_signal.emit(message)
+                time.sleep(0.15) # Pause to make the message readable
+
+        report_progress("Initializing main window...")
         self.setMinimumSize(800, 600)
         
         self.container = QFrame()
@@ -213,10 +218,12 @@ class Home(QMainWindow):
         self.main_layout.setContentsMargins(1, 1, 1, 1)
         self.main_layout.setSpacing(0)
         
+        report_progress("Creating custom title bar...")
         self.title_bar = CustomTitleBar(self)
         self.main_layout.addWidget(self.title_bar)
         self.title_bar.setState(TitleBarState.HOME)
 
+        report_progress("Applying styles...")
         self.setStyleSheet(HOME_STYLES)
         
         self.content_widget = QWidget()
@@ -226,6 +233,7 @@ class Home(QMainWindow):
         self.content_layout_hbox = QHBoxLayout(self.content_widget)
         self.content_layout_hbox.setContentsMargins(10, 10, 10, 10)
     
+        report_progress("Building action panel...")
         self.left_layout_layout = QVBoxLayout()
         self.left_layout_layout.setContentsMargins(10, 10, 10, 10)
         self.left_layout_layout.setSpacing(15)
@@ -248,6 +256,7 @@ class Home(QMainWindow):
         self.left_layout.setMaximumWidth(200)
         self.left_layout.setStyleSheet(HOME_LEFT_LAYOUT_STYLES)
         
+        report_progress("Configuring project list...")
         self.content = QWidget()
         self.content_layout = QVBoxLayout(self.content)
         
@@ -258,65 +267,54 @@ class Home(QMainWindow):
         self.projects_list = ProjectsListWidget()
         self.content_layout.addWidget(self.projects_list)
         
+        report_progress("Assembling final layout...")
         self.content_layout_hbox.addWidget(self.left_layout)
         self.content_layout_hbox.addWidget(self.content, 1)
         
-        self.load_recent_projects()
+        # REMOVED call to self.load_recent_projects()
+
+    def populate_recent_projects(self, projects_data):
+        """Populates the project list from preloaded data."""
+        self.projects_list.clear()
+        for project in projects_data:
+            project_item = self.projects_list.add_project(
+                name=project["name"],
+                path=project["path"],
+                last_opened=project["last_opened"]
+            )
+            project_item.main_window = self
 
     def changeEvent(self, event):
         if event.type() == QEvent.WindowStateChange:
             self.title_bar.update_maximize_icon()
         super().changeEvent(event)
 
-    def get_relative_time(self, timestamp_str):
-        if not timestamp_str: return "Never opened"
-        timestamp = QDateTime.fromString(timestamp_str, Qt.ISODate)
-        seconds = timestamp.secsTo(QDateTime.currentDateTime())
-        if seconds < 0: return timestamp.toString("MMM d, yyyy h:mm AP")
-        if seconds < 60: return "Just now"
-        minutes = seconds // 60
-        if minutes < 60: return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
-        hours = seconds // 3600
-        if hours < 24: return f"{hours} hour{'s' if hours > 1 else ''} ago"
-        days = seconds // 86400
-        if days < 7: return f"{days} day{'s' if days > 1 else ''} ago"
-        weeks = seconds // 604800
-        if weeks < 4: return f"{weeks} week{'s' if weeks > 1 else ''} ago"
-        months = seconds // 2592000
-        if months < 12: return f"{months} month{'s' if months > 1 else ''} ago"
-        years = seconds // 31536000
-        return f"{years} year{'s' if years > 1 else ''} ago"
-
-    def load_recent_projects(self):
-        recent_projects = self.settings.value("recent_projects", [])
-        recent_timestamps = self.settings.value("recent_timestamps", {})
-        
-        self.projects_list.clear()
-        for path in recent_projects:
-            if os.path.exists(path):
-                filename = os.path.basename(path)
-                timestamp = recent_timestamps.get(path, "")
-                last_opened = self.get_relative_time(timestamp)
-                project_item = self.projects_list.add_project(filename, path, last_opened)
-                project_item.main_window = self
-
     def open_project_from_path(self, path):
         if os.path.exists(path):
             self.launch_main_app(path)
         else:
             QMessageBox.warning(self, "Error", "Project file no longer exists")
-            self.load_recent_projects()
+            # Refresh the list in-memory if a file is not found.
+            # This is a simple way to handle it without re-reading settings.
+            all_items = [self.projects_list.projects_layout.itemAt(i).widget() for i in range(self.projects_list.projects_layout.count() - 1)]
+            for item in all_items:
+                if item and item.path == path:
+                    item.deleteLater()
 
     def new_project(self):
+        from app.utils.project_processing import new_project
         new_project(self)
 
     def open_project(self):
+        from app.utils.project_processing import open_project
         open_project(self)
 
     def import_from_wfwf(self):
+        from app.utils.project_processing import import_from_wfwf
         import_from_wfwf(self)
 
     def correct_filenames(self, directory):
+        from app.utils.project_processing import correct_filenames
         return correct_filenames(directory)
 
     def update_recent_projects(self, project_path):

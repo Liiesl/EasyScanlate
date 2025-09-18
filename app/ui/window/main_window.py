@@ -1,7 +1,9 @@
-from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSizePolicy, QCheckBox, QPushButton,
-                             QMessageBox, QSplitter, QAction, QLabel, QComboBox)
-from PyQt5.QtCore import Qt, QSettings, QPoint
-from PyQt5.QtGui import QPixmap, QKeySequence, QColor
+# main_window.py
+
+from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSizePolicy, QCheckBox, QPushButton,
+                             QMessageBox, QSplitter, QComboBox)
+from PySide6.QtCore import Qt, QSettings, QPoint
+from PySide6.QtGui import QPixmap, QKeySequence, QAction, QColor
 import qtawesome as qta
 from app.utils.file_io import export_ocr_results, import_translation_file, export_rendered_images
 from app.ui.components import ResizableImageLabel, CustomScrollArea, ResultsWidget, TextBoxStylePanel, FindReplaceWidget
@@ -10,8 +12,8 @@ from app.handlers import BatchOCRHandler, ManualOCRHandler, StitchHandler, Split
 from app.core import ProjectModel
 from app.ui.dialogs import SettingsDialog
 from app.ui.window.translation_window import TranslationWindow
-from assets import (COLORS, MAIN_STYLESHEET, IV_BUTTON_STYLES, ADVANCED_CHECK_STYLES, RIGHT_WIDGET_STYLES,
-                    DEFAULT_TEXT_STYLE, DELETE_ROW_STYLES, get_style_diff, MANUALOCR_STYLES)
+from assets import (COLORS, MAIN_STYLESHEET, ADVANCED_CHECK_STYLES, RIGHT_WIDGET_STYLES,
+                    DEFAULT_TEXT_STYLE, DELETE_ROW_STYLES, get_style_diff)
 import easyocr, os, gc, json, traceback
 
 class MainWindow(QMainWindow):
@@ -153,7 +155,8 @@ class MainWindow(QMainWindow):
         self.profile_selector = QComboBox(self)
         self.profile_selector.setFixedWidth(220)
         self.profile_selector.setToolTip("Switch between different text profiles (e.g., Original, User Edits, Translations).")
-        self.profile_selector.activated[str].connect(self.switch_active_profile)
+        # --- CORRECTED LINE ---
+        self.profile_selector.activated.connect(self.on_profile_selected)
         file_button_layout.addWidget(self.profile_selector)
 
         self.btn_import_export_menu = QPushButton(qta.icon('fa5s.bars', color='white'), "")
@@ -166,22 +169,31 @@ class MainWindow(QMainWindow):
         button_layout.addLayout(file_button_layout)
         right_panel.addLayout(button_layout)
 
-        self.find_replace_widget = FindReplaceWidget(self)
-        right_panel.addWidget(self.find_replace_widget)
-        self.find_replace_widget.hide()
+        # --- FIX STARTS HERE ---
+        # The creation of FindReplaceWidget is moved to after ResultsWidget is created.
 
         self.right_content_splitter = QSplitter(Qt.Horizontal)
         self.style_panel = TextBoxStylePanel(default_style=DEFAULT_TEXT_STYLE)
         self.style_panel.hide()
         self.right_content_splitter.addWidget(self.style_panel)
 
+        # 1. Create ResultsWidget first, as FindReplaceWidget depends on it.
         self.results_widget = ResultsWidget(self, self.combine_action, self.find_action)
         self.results_widget.rowSelected.connect(self.on_result_row_selected)
+
+        # 2. Now it is safe to create FindReplaceWidget.
+        self.find_replace_widget = FindReplaceWidget(self)
+        right_panel.addWidget(self.find_replace_widget) # Add it to the layout above the splitter
+        self.find_replace_widget.hide()
+
+        # 3. Add the now-created results_widget to the splitter.
         self.right_content_splitter.addWidget(self.results_widget)
         self.right_content_splitter.setStretchFactor(0, 0)
         self.right_content_splitter.setStretchFactor(1, 1)
         right_panel.addWidget(self.right_content_splitter, 1)
         self.style_panel_size = None
+
+        # --- FIX ENDS HERE ---
 
         bottom_controls_layout = QHBoxLayout()
         self.btn_translate = QPushButton(qta.icon('fa5s.language', color='white'), "AI Translation")
@@ -210,6 +222,16 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(splitter)
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
+
+    # --- NEW METHOD TO HANDLE THE SIGNAL ---
+    def on_profile_selected(self, index):
+        """
+        Slot to handle the QComboBox's activated(int) signal.
+        It retrieves the text of the selected item and calls the appropriate method.
+        """
+        profile_name = self.profile_selector.itemText(index)
+        if profile_name:
+            self.switch_active_profile(profile_name)
 
     def _show_menu(self, menu_class, button, position):
         """ Creates, positions, and shows a popup menu.
@@ -520,7 +542,7 @@ class MainWindow(QMainWindow):
             lang_code = self.language_map.get(self.model.original_language, 'ko')
             use_gpu = self.settings.value("use_gpu", "true").lower() == "true"
             print(f"Initializing EasyOCR reader for {context}: Lang='{lang_code}', GPU={use_gpu}")
-            self.reader = easyocr.Reader([lang_code], gpu=use_gpu)
+            self.reader = easyocr.Reader([lang_code], gpu=use_gpu, model_storage_directory='.EasyOCR/model')
             print("EasyOCR reader initialized successfully.")
             return True
         except Exception as e:

@@ -1,10 +1,10 @@
 import os
 import json
 import functools
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton, QFrame,
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton, QFrame,
                              QGroupBox, QHBoxLayout, QScrollArea)
-from PyQt5.QtCore import Qt, pyqtSignal, QSettings
-from PyQt5.QtGui import QColor
+from PySide6.QtCore import Qt, Signal, QSettings
+from PySide6.QtGui import QColor
 import qtawesome as qta
 from app.ui.components import PresetButton
 # TEXT_BOX_STYLE_PANEL_STYLESHEET is no longer needed here
@@ -32,7 +32,7 @@ class TextBoxStylePanel(QWidget):
     to customize the appearance of a TextBoxItem. It manages style state,
     presets, and communication with the main application.
     """
-    style_changed = pyqtSignal(dict)
+    style_changed = Signal(dict)
 
     def __init__(self, parent=None, default_style=None):
         super().__init__(parent)

@@ -1,8 +1,8 @@
 import sys
-from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget,
+from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget,
                              QDialogButtonBox, QGridLayout, QStyle, QTabWidget, QInputDialog, QFrame, QTabBar) # Added QInputDialog, QFrame
-from PyQt5.QtCore import (Qt, pyqtSignal, pyqtSlot, QSize, QPoint, QRegularExpression, QSettings)
-from PyQt5.QtGui import (QColor, QPixmap, QPainter, QRegularExpressionValidator, QIcon, QRegion)
+from PySide6.QtCore import (Qt, Signal, Slot, QSize, QPoint, QRegularExpression, QSettings)
+from PySide6.QtGui import (QColor, QPixmap, QPainter, QRegularExpressionValidator, QIcon, QRegion)
 # Import the new modular widgets from the helper file
 from app.ui.dialogs.BetterColorDialog.Helper1 import HueRing, ColorSquare, CheckerboardWidget, EyedropperHelper, ColorSlidersWidget
 from app.ui.dialogs.BetterColorDialog.ColorDialogStyles import CUSTOM_COLOR_DIALOG_V2_STYLESHEET
@@ -13,7 +13,7 @@ class CustomColorDialog(QDialog):
     Picker on left, controls (tabs, hex) below picker, previews/swatches on right.
     Swatches are now tabbed, with recent colors displayed below them.
     """
-    colorSelected = pyqtSignal(QColor)
+    colorSelected = Signal(QColor)
 
     # Constants for settings
     SETTINGS_GROUP = "CustomColorDialogRingV2_LayoutB"
@@ -294,7 +294,7 @@ class CustomColorDialog(QDialog):
         # The '+' tab should not have a close button
         self.swatch_tabs.tabBar().setTabButton(index, QTabBar.RightSide, None)
 
-    @pyqtSlot(int)
+    @Slot(int)
     def _handle_swatch_tab_change(self, index):
         """Handles clicks on the swatch tabs, specifically activating the '+' tab."""
         if index < 0: return
@@ -312,7 +312,7 @@ class CustomColorDialog(QDialog):
                 self._add_new_swatch_tab(new_swatch_group, set_as_current=True, at_index=plus_tab_index)
                 self._save_swatches_data()
 
-    @pyqtSlot(int)
+    @Slot(int)
     def _close_swatch_tab(self, index):
         """Removes the swatch tab at the given index from the model and UI."""
         # Prevent closing if it's the last real tab
@@ -346,7 +346,7 @@ class CustomColorDialog(QDialog):
         button.clicked.connect(lambda checked=False, c=QColor(color): self._swatch_clicked(c))
         return button
 
-    @pyqtSlot(QColor)
+    @Slot(QColor)
     def _swatch_clicked(self, color):
         if color.isValid():
             self.update_controls(color, source="swatch")
@@ -477,23 +477,23 @@ class CustomColorDialog(QDialog):
             self.preview_new_bg.update()
 
     # --- Signal Handlers (Unchanged from previous refactor) ---
-    @pyqtSlot(int, int)
+    @Slot(int, int)
     def _square_sv_changed(self, saturation, value):
         if self._updating_controls: return
         new_color = QColor.fromHsv(self._get_current_hue(), saturation, value, self._get_current_alpha())
         self.update_controls(new_color, source="square")
-    @pyqtSlot(int)
+    @Slot(int)
     def _hue_ring_changed(self, hue):
         if self._updating_controls: return
         if hasattr(self.color_square, 'setHue'): self.color_square.setHue(hue)
         s, v = self._get_current_sv()
         new_color = QColor.fromHsv(hue, s, v, self._get_current_alpha())
         self.update_controls(new_color, source="hue_ring")
-    @pyqtSlot(QColor)
+    @Slot(QColor)
     def _slider_widget_color_changed(self, color):
         if self._updating_controls: return
         self.update_controls(color, source="sliders_widget")
-    @pyqtSlot(str)
+    @Slot(str)
     def hex_changed(self, text):
         if self._updating_controls or not self.hex_edit: return
         processed_text = text.strip().upper()
@@ -512,12 +512,12 @@ class CustomColorDialog(QDialog):
             if len(candidate_text[1:]) in [3, 6]:
                 if temp_color.alpha() != self._get_current_alpha(): temp_color.setAlpha(self._get_current_alpha())
             self.update_controls(temp_color, source="hex")
-    @pyqtSlot()
+    @Slot()
     def _reset_color(self):
         self.update_controls(self._initial_color, source="reset")
 
     # --- Eyedropper Methods (Unchanged) ---
-    @pyqtSlot()
+    @Slot()
     def _activate_eyedropper(self):
         if self._eyedropper_helper and self._eyedropper_helper._active:
             self._eyedropper_helper.stop(); self._eyedropper_helper.deleteLater(); self._eyedropper_helper = None
@@ -525,8 +525,8 @@ class CustomColorDialog(QDialog):
         self._eyedropper_helper.colorSelected.connect(self._handle_eyedropper_result)
         self._eyedropper_helper.cancelled.connect(self._handle_eyedropper_result)
         self._eyedropper_helper.start()
-    @pyqtSlot(QColor)
-    @pyqtSlot()
+    @Slot(QColor)
+    @Slot()
     def _handle_eyedropper_result(self, color=None):
         sender_helper = self.sender()
         if sender_helper and isinstance(sender_helper, EyedropperHelper):

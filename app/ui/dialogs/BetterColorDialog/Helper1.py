@@ -1,9 +1,9 @@
 import math
 import sys
-from PyQt5.QtWidgets import (QWidget, QSizePolicy, QApplication, QTabWidget, QGridLayout, QVBoxLayout,
+from PySide6.QtWidgets import (QWidget, QSizePolicy, QApplication, QTabWidget, QGridLayout, QVBoxLayout,
                              QLabel, QSlider, QSpinBox, QAbstractSpinBox, QHBoxLayout, QLineEdit)
-from PyQt5.QtCore import (Qt, pyqtSignal, QSize, QPoint, QPointF, QObject)
-from PyQt5.QtGui import (QColor, QPainter, QConicalGradient, QCursor, QBrush, QPen, QLinearGradient, QPainterPath) # Added QPainterPath
+from PySide6.QtCore import (Qt, Signal, QSize, QPoint, QPointF, QObject)
+from PySide6.QtGui import (QColor, QPainter, QConicalGradient, QCursor, QBrush, QPen, QLinearGradient, QPainterPath) # Added QPainterPath
 # --- NEW IMPORTS for Global Eyedropper ---
 # You must run: pip install pynput
 try:
@@ -72,7 +72,7 @@ class ColorSlidersWidget(QWidget):
     A self-contained widget with RGB/HSV tabs for color component selection.
     It emits a signal when the color is changed via its controls.
     """
-    colorChanged = pyqtSignal(QColor)
+    colorChanged = Signal(QColor)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -260,7 +260,7 @@ class ColorSlidersWidget(QWidget):
 # --- Color Square (Saturation/Value) - Unchanged Logic ---
 class ColorSquare(QWidget):
     """ A widget displaying Saturation/Value for a given Hue. """
-    svChanged = pyqtSignal(int, int) # Emits saturation (0-255), value (0-255)
+    svChanged = Signal(int, int) # Emits saturation (0-255), value (0-255)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -425,7 +425,7 @@ class ColorSquare(QWidget):
 # --- NEW: Hue Ring ---
 class HueRing(QWidget):
     """ A widget displaying a hue spectrum in a ring, allowing selection. """
-    hueChanged = pyqtSignal(int) # Emits hue (0-359)
+    hueChanged = Signal(int) # Emits hue (0-359)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -567,8 +567,8 @@ class EyedropperHelper(QObject):
     events anywhere on the screen. This avoids the need to hide the main dialog.
     Requires `pip install pynput`.
     """
-    colorSelected = pyqtSignal(QColor)
-    cancelled = pyqtSignal()
+    colorSelected = Signal(QColor)
+    cancelled = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)

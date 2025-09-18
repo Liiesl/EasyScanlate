@@ -1,8 +1,8 @@
 import os
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QLabel, QComboBox, QSpinBox, 
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QComboBox, QSpinBox, 
                              QHBoxLayout, QPushButton, QFrame, QButtonGroup, QCheckBox)
-from PyQt5.QtCore import pyqtSignal, Qt, QSize
-from PyQt5.QtGui import QFontDatabase, QColor, QIcon
+from PySide6.QtCore import Signal, Qt, QSize
+from PySide6.QtGui import QFontDatabase, QColor, QIcon
 import qtawesome as qta
 from assets import TYPOGRAPHY_PANEL_STYLE
 
@@ -11,7 +11,7 @@ class TypographyStylePanel(QWidget):
     A widget panel for managing the typography styles of a text box, including
     font properties and text color (solid or gradient).
     """
-    style_changed = pyqtSignal()
+    style_changed = Signal()
 
     def __init__(self, color_chooser_fn, parent=None):
         """

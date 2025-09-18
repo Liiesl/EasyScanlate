@@ -1,7 +1,7 @@
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QLabel, QComboBox, QSpinBox, 
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QComboBox, QSpinBox, 
                              QHBoxLayout, QPushButton, QFrame)
-from PyQt5.QtCore import pyqtSignal, Qt, QSize, QPoint
-from PyQt5.QtGui import QColor, QIcon, QPixmap, QPainter, QBrush, QPolygon
+from PySide6.QtCore import Signal, Qt, QSize, QPoint
+from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter, QBrush, QPolygon
 from assets import SHAPE_PANEL_STYLE
 
 class ShapeStylePanel(QWidget):
@@ -9,7 +9,7 @@ class ShapeStylePanel(QWidget):
     A widget panel for managing the shape, fill, and stroke styles of a text box.
     It emits a signal when any of its managed style properties change.
     """
-    style_changed = pyqtSignal()
+    style_changed = Signal()
 
     def __init__(self, color_chooser_fn, parent=None):
         """

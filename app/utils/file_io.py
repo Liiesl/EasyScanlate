@@ -1,8 +1,8 @@
 import os
 import ast
 import json
-from PyQt5.QtWidgets import QMessageBox, QFileDialog
-from PyQt5.QtCore import QRectF
+from PySide6.QtWidgets import QMessageBox, QFileDialog
+from PySide6.QtCore import QRectF
 from app.ui.components import ResizableImageLabel
 import zipfile
 
@@ -238,8 +238,8 @@ def export_rendered_images(self):
             widget.setUpdatesEnabled(False)
 
     import tempfile, shutil
-    from PyQt5.QtGui import QImage, QPainter
-    from PyQt5.QtCore import Qt
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtCore import Qt
 
     temp_dir = tempfile.mkdtemp()
     translated_images = []

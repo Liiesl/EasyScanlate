@@ -1,6 +1,6 @@
-from PyQt5.QtWidgets import ( QVBoxLayout, QPushButton, QProgressBar,  QLabel, QListWidget,  QLineEdit, 
+from PySide6.QtWidgets import ( QVBoxLayout, QPushButton, QProgressBar,  QLabel, QListWidget,  QLineEdit, 
                             QFileDialog, QStatusBar, QHBoxLayout, QDialog, QDialogButtonBox, QComboBox)
-from PyQt5.QtCore import Qt, QDir, QThread, pyqtSignal
+from PySide6.QtCore import Qt, QDir, QThread, Signal
 from assets import NEW_PROJECT_STYLES, WFWF_STYLES
 import os, tempfile, requests
 from shutil import rmtree
@@ -108,9 +108,9 @@ class ImportWFWFDialog(QDialog):
         self.url_input.setEnabled(True)
 
 class ImportDownloadWorker(QThread):
-    progress = pyqtSignal(int)
-    status = pyqtSignal(str)
-    finished = pyqtSignal(bool)
+    progress = Signal(int)
+    status = Signal(str)
+    finished = Signal(bool)
 
     def __init__(self, url, output_dir):
         super().__init__()

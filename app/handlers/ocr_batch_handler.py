@@ -1,5 +1,5 @@
 import os, gc
-from PyQt5.QtCore import QObject, pyqtSignal
+from PySide6.QtCore import QObject, Signal
 from app.core.ocr_processor import OCRProcessor
 from app.core.project_model import ProjectModel
 from app.ui.widgets import CustomProgressBar # Import the progress bar
@@ -10,10 +10,10 @@ class BatchOCRHandler(QObject):
     This object lives in the main thread but orchestrates worker QThreads.
     """
     # --- DELETED: This signal is no longer needed ---
-    # batch_progress = pyqtSignal(int)
-    batch_finished = pyqtSignal(int)
-    error_occurred = pyqtSignal(str)
-    processing_stopped = pyqtSignal()
+    # batch_progress = Signal(int)
+    batch_finished = Signal(int)
+    error_occurred = Signal(str)
+    processing_stopped = Signal()
 
     # --- MODIFIED: Constructor now accepts the ProjectModel and the progress bar ---
     def __init__(self, image_paths, reader, settings, starting_row_number, model: ProjectModel, progress_bar: CustomProgressBar):

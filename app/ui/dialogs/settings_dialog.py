@@ -1,7 +1,7 @@
-from PyQt5.QtWidgets import (QDialog, QDoubleSpinBox, QVBoxLayout, QFormLayout,
+from PySide6.QtWidgets import (QDialog, QDoubleSpinBox, QVBoxLayout, QFormLayout,
                              QComboBox, QSpinBox, QDialogButtonBox, QTabWidget,
                              QWidget, QLineEdit, QKeySequenceEdit, QCheckBox) # Added QLabel
-from PyQt5.QtGui import QKeySequence
+from PySide6.QtGui import QKeySequence
 
 GEMINI_MODELS_WITH_INFO = [
     ("gemini-2.5-flash", "500 req/day (free tier)"),

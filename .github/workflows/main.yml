@@ -1,0 +1,55 @@
+# .github/workflows/main.yml
+
+name: Build MangaOCRTool with Nuitka
+
+# This workflow runs on every push to the 'test-deploy' branch
+on:
+  push:
+    branches:
+      - test-deploy
+
+jobs:
+  build-windows: 
+    runs-on: windows-latest 
+
+    steps:
+      # 1. Get the code from repository
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      # 2. Set up a Python environment
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12' 
+
+      # 3. Install project's dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+          pip install -r requirements.txt 
+
+      # 4. Run Nuitka build
+      - name: Build Executable with Nuitka
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          script-name: main.py 
+          mode: standalone
+          include-data-dir: 'EasyOCR/model=EasyOCR/model'
+          mingw64: true
+          enable-plugins: pyside6
+          windows-icon-from-ico: assets/app_icon.ico
+          company-name: "YourCompany"
+          product-name: "MangaOCRTool"
+          file-description: "ManhwaOCR"
+          file-version: "1.0.0.0"
+          product-version: "1.0.0.0"
+
+      # 5. Upload the final .exe file as a downloadable artifact
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MangaOCRTool-Windows
+          path: build/main.dist/
+          compression-level: 9

@@ -1,16 +1,16 @@
 # translations.py
 import re
 import google.generativeai as genai
-from PyQt5.QtCore import QThread, pyqtSignal
+from PySide6.QtCore import QThread, Signal
 
 class TranslationThread(QThread):
     """
     Worker thread for performing the Gemini API call.
     Streams the translation back to the parent window.
     """
-    translation_progress = pyqtSignal(str)
-    translation_finished = pyqtSignal(str)
-    translation_failed = pyqtSignal(str)
+    translation_progress = Signal(str)
+    translation_finished = Signal(str)
+    translation_failed = Signal(str)
 
     def __init__(self, api_key, full_prompt, model_name, parent=None):
         super().__init__(parent)

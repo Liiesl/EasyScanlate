@@ -1,6 +1,6 @@
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
-from PyQt5.QtCore import Qt, QPoint, QObject, QEvent, QRect
-from PyQt5.QtGui import QCursor
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtCore import Qt, QPoint, QObject, QEvent, QRect
+from PySide6.QtGui import QCursor
 import qtawesome
 
 # MODIFIED: Import MenuBar and the new TitleBarState enum

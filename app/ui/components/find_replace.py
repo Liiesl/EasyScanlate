@@ -1,8 +1,8 @@
 # --- START OF FILE app/find_replace.py ---
 
-from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QLineEdit, QPushButton, QLabel, QTextEdit, QCheckBox, QSizePolicy, QAbstractItemView, QFrame) # Added QFrame
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtGui import QTextCursor, QTextCharFormat, QColor, QSyntaxHighlighter, QFont, QTextDocument
+from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QLineEdit, QPushButton, QLabel, QTextEdit, QCheckBox, QSizePolicy, QAbstractItemView, QFrame) # Added QFrame
+from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QSyntaxHighlighter, QFont, QTextDocument
 import qtawesome as qta
 import re
 from assets import FIND_REPLACE_STYLESHEET
@@ -40,8 +40,8 @@ class SearchHighlighter(QSyntaxHighlighter):
 
 # --- FindReplaceWidget Class ---
 class FindReplaceWidget(QWidget):
-    closed = pyqtSignal()
-    request_update_ocr_data = pyqtSignal(object, str)
+    closed = Signal()
+    request_update_ocr_data = Signal(object, str)
 
     def __init__(self, main_window):
         super().__init__(main_window)
