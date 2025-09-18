@@ -1,12 +1,17 @@
-name: Build MangaOCRTool with Nuitka and NSIS Online Installer
+name: Build and Release MangaOCRTool
 
+#
+# --- CHANGE 1: Workflow Trigger ---
+# This workflow now runs ONLY when you push a tag matching the pattern 'v*.*.*'
+# For example: v1.0.0, v1.2.3, v2.0.0-beta1
+#
 on:
   push:
-    branches:
-      - test-deploy
+    tags:
+      - 'v*.*.*'
 
 jobs:
-  build-windows:
+  build-and-release-windows:
     runs-on: windows-latest
 
     steps:
@@ -47,30 +52,34 @@ jobs:
       - name: Zip PyTorch Libraries
         run: |
           cd build/main.dist
-          powershell Compress-Archive -Path torch, torchvision, torchaudio -DestinationPath ..\..\pytorch-libs.zip
+          powershell Compress-archive -Path torch -DestinationPath ..\..\pytorch-libs.zip
           cd ..\..
         shell: pwsh
 
-      # 6. Upload the PyTorch ZIP as a workflow artifact
-      - name: Upload PyTorch Library Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytorch-libs
-          path: pytorch-libs.zip
-
-      # 7. Install NSIS using Chocolatey
+      #
+      # --- CHANGE 2: Compile the NSIS installer FIRST ---
+      # We now use `github.ref_name` which contains the tag that triggered the workflow.
+      #
       - name: Install NSIS
         run: choco install nsis
 
-      # 8. Compile the NSIS installer using the script from the repository
-      #    Ensure the path 'installer/installer.nsi' matches where you created the file.
       - name: Compile NSIS installer
-        run: makensis assets/installer.nsi
+        run: makensis /DLATEST_TAG=${{ github.ref_name }} assets/installer.nsi
 
-      # 9. Upload the final installer as a downloadable artifact
-      - name: Upload Installer Artifact
-        uses: actions/upload-artifact@v4
+      #
+      # --- CHANGE 3: Create a single, unified GitHub Release ---
+      # This step creates a new release based on the tag and uploads BOTH the installer
+      # and the PyTorch libraries as assets to that one release.
+      #
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
         with:
-          name: MangaOCRTool-Installer
-          # The OutFile in your .nsi script is "MangaOCRTool-Installer.exe"
-          path: MangaOCRTool-Installer.exe
+          # The tag_name now comes directly from the event that triggered the workflow
+          tag_name: ${{ github.ref_name }}
+          # Upload both files to the release page
+          files: |
+            MangaOCRTool-Installer.exe
+            pytorch-libs.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
