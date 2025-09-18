@@ -1,10 +1,6 @@
 name: Build and Release MangaOCRTool
 
-#
-# --- CHANGE 1: Workflow Trigger ---
-# This workflow now runs ONLY when you push a tag matching the pattern 'v*.*.*'
-# For example: v1.0.0, v1.2.3, v2.0.0-beta1
-#
+# Workflow Trigger
 on:
   push:
     tags:
@@ -56,27 +52,37 @@ jobs:
           cd ..\..
         shell: pwsh
 
-      #
-      # --- CHANGE 2: Compile the NSIS installer FIRST ---
-      # We now use `github.ref_name` which contains the tag that triggered the workflow.
-      #
+      # pload PyTorch ZIP as a workflow artifact
+      - name: Upload PyTorch Libraries as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytorch-libs
+          path: pytorch-libs.zip
+
+      # Compile the NSIS installer FIRST ---
       - name: Install NSIS
         run: choco install nsis
 
       - name: Compile NSIS installer
         run: makensis /DLATEST_TAG=${{ github.ref_name }} assets/installer.nsi
 
-      #
-      # --- CHANGE 3: Create a single, unified GitHub Release ---
-      # This step creates a new release based on the tag and uploads BOTH the installer
-      # and the PyTorch libraries as assets to that one release.
-      #
-      - name: Create GitHub Release
+      # CHANGE 4: Upload Installer as a workflow artifact
+      - name: Upload Installer as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: MangaOCRTool-Installer.exe
+
+      # Create a DRAFT GitHub Release for manual review
+      - name: Create Draft GitHub Release
         id: create_release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           # The tag_name now comes directly from the event that triggered the workflow
           tag_name: ${{ github.ref_name }}
+          draft: true 
+          preserve_order: true
+          body_path: changelog.md
           # Upload both files to the release page
           files: |
             MangaOCRTool-Installer.exe
