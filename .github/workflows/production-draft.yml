@@ -61,6 +61,21 @@ jobs:
           name: pytorch-libs
           path: pytorch-libs.7z
 
+      # Zip the entire build output (excluding torch) for debugging
+      - name: Zip Full Build Output (Without PyTorch)
+        run: |
+          cd build/main.dist
+          7z a -t7z -mx=9 ..\..\build-output.zip * -xr!torch
+          cd ..\..
+        shell: pwsh
+
+      # Upload the zipped build output as an artifact
+      - name: Upload Full Build Output as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-build-output
+          path: build-output.7z
+
       # Compile the NSIS installer
       - name: Install NSIS
         run: choco install nsis
