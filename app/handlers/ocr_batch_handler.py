@@ -2,7 +2,7 @@ import os, gc
 from PySide6.QtCore import QObject, Signal
 from app.core.ocr_processor import OCRProcessor
 from app.core.project_model import ProjectModel
-from app.ui.widgets import CustomProgressBar # Import the progress bar
+from app.ui.widgets.progress_bar import CustomProgressBar # Import the progress bar
 
 class BatchOCRHandler(QObject):
     """

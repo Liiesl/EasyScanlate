@@ -342,7 +342,7 @@ class Home(QMainWindow):
 
     def handle_project_loaded(self, mmtl_path, temp_dir):
         try:
-            from app.ui.window import MainWindow # Defer heavy import
+            from app.ui.window.main_window import MainWindow # Defer heavy import
             self.update_recent_projects(mmtl_path)
             
             self.main_window = MainWindow()

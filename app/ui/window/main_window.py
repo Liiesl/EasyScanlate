@@ -7,7 +7,9 @@ from PySide6.QtGui import QPixmap, QKeySequence, QAction, QColor
 import qtawesome as qta
 from app.utils.file_io import export_ocr_results, import_translation_file, export_rendered_images
 from app.ui.components import ResizableImageLabel, CustomScrollArea, ResultsWidget, TextBoxStylePanel, FindReplaceWidget
-from app.ui.widgets import CustomProgressBar, MenuBar, ImportExportMenu, SaveMenu, ActionMenu
+from app.ui.widgets.menu_bar import MenuBar
+from app.ui.widgets.progress_bar import CustomProgressBar
+from app.ui.widgets.menus import SaveMenu, ActionMenu, ImportExportMenu
 from app.handlers import BatchOCRHandler, ManualOCRHandler, StitchHandler, SplitHandler
 from app.core import ProjectModel
 from app.ui.dialogs import SettingsDialog

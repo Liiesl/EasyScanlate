@@ -18,3 +18,4 @@ pyqt5
 docs-site-guide.md
 initmodels.py
 restart.bat
+test_torch
