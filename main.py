@@ -307,7 +307,7 @@ class UIManager(QObject):
             msg_box.setWindowTitle("Download Required")
             msg_box.setText("<h3>Additional Libraries Required</h3>")
             msg_box.setInformativeText(
-                "To function correctly, this application needs to download the PyTorch library, which is over 4GB in size.<br><br>"
+                "To function correctly, this application needs to download the PyTorch library, which is over 1.8GB (4GB when unpacked) in size.<br><br>"
                 "This can take a significant amount of time depending on your internet connection. Please ensure you have a stable connection and enough free disk space before proceeding."
             )
             proceed_button = msg_box.addButton("Proceed", QMessageBox.YesRole)
