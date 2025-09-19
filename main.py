@@ -4,6 +4,10 @@
 
 import sys
 import os
+# --- NEW IMPORTS for downloader ---
+import urllib.request
+import json
+import zipfile
 
 # --- Dependency Checking ---
 
@@ -125,9 +129,82 @@ class Preloader(QThread):
     """
     finished = Signal(list)  # Signal will emit the list of loaded project data
     progress_update = Signal(str)
+    # --- NEW: Signal for handling critical preload failures ---
+    preload_failed = Signal(str)
+
+    def check_and_download_torch(self):
+        """
+        Checks if PyTorch ('torch') is installed. If not, downloads and extracts it
+        from a specified GitHub release before the main app starts.
+        Returns True on success or if already present, False on critical failure.
+        """
+        try:
+            import torch
+            self.progress_update.emit("PyTorch libraries found.")
+            return True
+        except ImportError:
+            self.progress_update.emit("PyTorch not found. Preparing download...")
+
+        # --- ACTION REQUIRED: Configure your GitHub repository details here ---
+        GH_OWNER = "YourGitHubUsername"  # Your GitHub username
+        GH_REPO = "YourRepoName"          # Your repository name
+        ASSET_NAME = "torch_libs.zip"     # The exact name of the asset in your release
+        
+        if GH_OWNER == "YourGitHubUsername":
+            error_msg = "Initial setup required: Please configure GitHub repository details in main.py inside the 'check_and_download_torch' function before compiling."
+            self.progress_update.emit("ERROR: GitHub details not configured.")
+            self.preload_failed.emit(error_msg)
+            return False
+            
+        try:
+            api_url = f"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}/releases/latest"
+            self.progress_update.emit("Connecting to GitHub...")
+            with urllib.request.urlopen(api_url) as response:
+                if response.status != 200: raise Exception(f"GitHub API returned status {response.status}")
+                release_data = json.loads(response.read().decode())
+            
+            download_url = next((asset["browser_download_url"] for asset in release_data.get("assets", []) if asset["name"] == ASSET_NAME), None)
+            if not download_url: raise Exception(f"Asset '{ASSET_NAME}' not found in the latest release.")
+
+            self.progress_update.emit(f"Downloading '{ASSET_NAME}'...")
+            zip_path = os.path.join(os.getcwd(), ASSET_NAME)
+
+            with urllib.request.urlopen(download_url) as response:
+                if response.status != 200: raise Exception(f"Download failed. Status: {response.status}")
+                total_size = int(response.getheader('Content-Length', 0))
+                bytes_downloaded = 0
+                chunk_size = 8192
+                with open(zip_path, 'wb') as f:
+                    while chunk := response.read(chunk_size):
+                        f.write(chunk)
+                        bytes_downloaded += len(chunk)
+                        if total_size > 0:
+                            percent = (bytes_downloaded / total_size) * 100
+                            self.progress_update.emit(f"Downloading... {int(percent)}%")
+            
+            self.progress_update.emit("Download complete. Extracting files...")
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(".")
+            
+            os.remove(zip_path)
+            self.progress_update.emit("Extraction complete. Verifying...")
+
+            import torch
+            self.progress_update.emit("PyTorch successfully installed.")
+            return True
+
+        except Exception as e:
+            error_message = f"Failed to download required libraries.\n\nError: {e}\n\nPlease check your internet connection and try again. If the issue persists, the asset may be missing from the GitHub release."
+            self.preload_failed.emit(error_message)
+            return False
 
     def run(self):
         """The entry point for the thread."""
+        
+        # --- NEW: Run the PyTorch check first ---
+        if not self.check_and_download_torch():
+            return  # Stop preloading on failure
+
         self.progress_update.emit("Loading application settings...")
         
         # --- Actually preload the recent projects data ---
@@ -162,6 +239,15 @@ class Preloader(QThread):
 # --- Global variables to hold instances ---
 splash = None
 home_window = None
+
+# --- NEW: Handler for critical startup failures ---
+def on_preload_failed(error_message):
+    """Shows a critical error message box and terminates the application."""
+    global splash
+    if splash:
+        splash.close()
+    QMessageBox.critical(None, "Application Startup Error", error_message)
+    sys.exit(1)
 
 def on_preload_finished(projects_data):
     """
@@ -245,6 +331,8 @@ if __name__ == '__main__':
     preloader = Preloader()
     preloader.progress_update.connect(splash.showMessage)
     preloader.finished.connect(on_preload_finished)
+    # --- NEW: Connect the failure signal ---
+    preloader.preload_failed.connect(on_preload_failed)
     preloader.start()
 
     sys.exit(app.exec())

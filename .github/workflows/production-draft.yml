@@ -46,41 +46,45 @@ jobs:
           file-version: "1.0.0.0"
           product-version: "1.0.0.0"
 
-      # 5. Create a ZIP archive of the PyTorch libraries with best compression
+      # 5. Create a 7z archive of the PyTorch libraries with best compression
       - name: Zip PyTorch Libraries with 7-Zip
         run: |
           cd build/main.dist
-          7z a -tzip -mx=9 ..\..\pytorch-libs.zip torch
+          7z a -t7z -mx=9 ..\..\pytorch-libs.7z torch
           cd ..\..
         shell: pwsh
 
-      # Upload PyTorch ZIP as a workflow artifact
+      # Upload PyTorch 7z as a workflow artifact
       - name: Upload PyTorch Libraries as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: pytorch-libs
-          path: pytorch-libs.zip
+          path: pytorch-libs.7z
 
-      # Compile the NSIS installer FIRST ---
+      # Compile the NSIS installer
       - name: Install NSIS
         run: choco install nsis
+      
+      - name: Add NSIS to PATH
+        run: echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: pwsh
 
       - name: Compile NSIS installer
-        run: makensis /DLATEST_TAG=${{ github.ref_name }} assets/installer.nsi
+        # The /DLATEST_TAG is no longer needed as the URL is removed from the script
+        run: makensis assets/installer.nsi
 
-      # CHANGE 4: Upload Installer as a workflow artifact
+      # 6. Upload Installer as a workflow artifact
       - name: Upload Installer as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer
           path: MangaOCRTool-Installer.exe
 
-      # Create a DRAFT GitHub Release for manual review
+      # 7. Create a DRAFT GitHub Release
       - name: Create Draft GitHub Release
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
-          # The tag_name now comes directly from the event that triggered the workflow
           tag_name: ${{ github.ref_name }}
           draft: true 
           preserve_order: true
@@ -88,6 +92,6 @@ jobs:
           # Upload both files to the release page
           files: |
             MangaOCRTool-Installer.exe
-            pytorch-libs.zip
+            pytorch-libs.7z
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
