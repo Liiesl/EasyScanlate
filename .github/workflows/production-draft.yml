@@ -71,7 +71,7 @@ jobs:
 
       - name: Compile NSIS installer
         # The /DLATEST_TAG is no longer needed as the URL is removed from the script
-        run: makensis assets/installer.nsi
+        run: makensis dev\installer\installer.nsi
 
       # 6. Upload Installer as a workflow artifact
       - name: Upload Installer as Artifact
