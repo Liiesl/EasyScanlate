@@ -1,13 +1,20 @@
 # main.py
 # Application entry point with a splash screen for a smooth startup.
 # FIXED to prevent multiple Home windows and handle app termination properly.
+# FIXED to clean up partial downloads on cancellation.
+# --- MODIFIED: Download archive to temp directory to avoid permission errors ---
+# --- MODIFIED: Check for elevated privileges on Windows before download ---
 
 import sys
 import os
-# --- NEW IMPORTS for downloader ---
+# --- NEW IMPORTS for downloader and 7z extraction ---
 import urllib.request
 import json
-import zipfile
+import py7zr # <--- ADDED for .7z support
+import tempfile # <--- MODIFIED: Added to handle temporary file downloads
+# --- NEW IMPORT for Windows administrator check ---
+import ctypes
+
 
 # --- Dependency Checking ---
 
@@ -16,9 +23,11 @@ import zipfile
 IS_RUNNING_AS_SCRIPT = "__nuitka_version__" not in locals()
 
 try:
-    from PySide6.QtWidgets import QApplication, QSplashScreen, QMessageBox
+    from PySide6.QtWidgets import QApplication, QSplashScreen, QMessageBox, QDialog
     from PySide6.QtCore import Qt, QThread, Signal, QSettings, QDateTime, QObject
     from PySide6.QtGui import QPixmap, QPainter, QFont, QColor
+    # --- NEW: Import the download dialog ---
+    from app.ui.window.download_dialog import DownloadDialog
 except ImportError:
     # This entire block will only be executed if running as a script,
     # as Nuitka will bundle PySide6, preventing this error.
@@ -56,7 +65,7 @@ except ImportError:
             copy_button = msg_box.addButton("Copy Commands", QMessageBox.ActionRole)
             msg_box.setDefaultButton(QMessageBox.Ok)
 
-            msg_box.exec_() # Show the dialog and wait for user interaction
+            msg_box.exec() # Show the dialog and wait for user interaction
 
             # If the user clicked our custom "Copy" button, copy the commands
             if msg_box.clickedButton() == copy_button:
@@ -67,15 +76,19 @@ except ImportError:
                     confirm_msg = QMessageBox()
                     confirm_msg.setIcon(QMessageBox.Information)
                     confirm_msg.setText("Commands copied to clipboard!")
-                    confirm_msg.exec_()
+                    confirm_msg.exec()
                 except Exception as e:
                     # Handle cases where clipboard access might fail
                     error_msg = QMessageBox()
                     error_msg.setIcon(QMessageBox.Warning)
                     error_msg.setText(f"Could not access clipboard:\n{e}")
-                    error_msg.exec_()
+                    error_msg.exec()
         except ImportError:
-            print("CRITICAL ERROR: PySide6 is not installed...")
+            # If py7zr is missing when running as a script, this provides a better error.
+            if 'py7zr' not in sys.modules:
+                 print("CRITICAL ERROR: The 'py7zr' library is not installed. Please run 'pip install py7zr'.")
+            else:
+                 print("CRITICAL ERROR: PySide6 is not installed...")
         sys.exit(1)
 
 class CustomSplashScreen(QSplashScreen):
@@ -129,8 +142,18 @@ class Preloader(QThread):
     """
     finished = Signal(list)  # Signal will emit the list of loaded project data
     progress_update = Signal(str)
+    # --- NEW: Signal for the download progress bar ---
+    download_progress = Signal(int)
     # --- NEW: Signal for handling critical preload failures ---
     preload_failed = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._is_cancelled = False
+
+    def cancel(self):
+        """Public method to signal cancellation to the thread."""
+        self._is_cancelled = True
 
     def check_and_download_torch(self):
         """
@@ -146,15 +169,19 @@ class Preloader(QThread):
             self.progress_update.emit("PyTorch not found. Preparing download...")
 
         # --- ACTION REQUIRED: Configure your GitHub repository details here ---
-        GH_OWNER = "YourGitHubUsername"  # Your GitHub username
-        GH_REPO = "YourRepoName"          # Your repository name
-        ASSET_NAME = "torch_libs.zip"     # The exact name of the asset in your release
+        GH_OWNER = "Liiesl"      # Your GitHub username
+        GH_REPO = "ManhwaOCR"              # Your repository name
+        ASSET_NAME = "torch_libs.7z"          # <--- MODIFIED to use .7z
         
         if GH_OWNER == "YourGitHubUsername":
             error_msg = "Initial setup required: Please configure GitHub repository details in main.py inside the 'check_and_download_torch' function before compiling."
             self.progress_update.emit("ERROR: GitHub details not configured.")
             self.preload_failed.emit(error_msg)
             return False
+            
+        # --- MODIFIED: Use the system's temporary directory for the download ---
+        # This prevents permission errors if the app is in a protected location.
+        archive_path = os.path.join(tempfile.gettempdir(), ASSET_NAME)
             
         try:
             api_url = f"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}/releases/latest"
@@ -167,26 +194,37 @@ class Preloader(QThread):
             if not download_url: raise Exception(f"Asset '{ASSET_NAME}' not found in the latest release.")
 
             self.progress_update.emit(f"Downloading '{ASSET_NAME}'...")
-            zip_path = os.path.join(os.getcwd(), ASSET_NAME)
 
             with urllib.request.urlopen(download_url) as response:
                 if response.status != 200: raise Exception(f"Download failed. Status: {response.status}")
                 total_size = int(response.getheader('Content-Length', 0))
                 bytes_downloaded = 0
                 chunk_size = 8192
-                with open(zip_path, 'wb') as f:
+                with open(archive_path, 'wb') as f:
                     while chunk := response.read(chunk_size):
+                        # --- MODIFIED: Check for cancellation during download ---
+                        if self._is_cancelled:
+                            self.progress_update.emit("Download cancelled.")
+                            return False # Exit gracefully, finally block will clean up.
+
                         f.write(chunk)
                         bytes_downloaded += len(chunk)
                         if total_size > 0:
                             percent = (bytes_downloaded / total_size) * 100
                             self.progress_update.emit(f"Downloading... {int(percent)}%")
+                            self.download_progress.emit(int(percent))
             
+            # --- MODIFIED: Check for cancellation before extraction ---
+            if self._is_cancelled:
+                self.progress_update.emit("Operation cancelled before extraction.")
+                return False # Exit gracefully, finally block will clean up.
+
             self.progress_update.emit("Download complete. Extracting files...")
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(".")
+            # By default, extractall() extracts to the current working directory,
+            # which is the desired behavior.
+            with py7zr.SevenZipFile(archive_path, mode='r') as z:
+                z.extractall()
             
-            os.remove(zip_path)
             self.progress_update.emit("Extraction complete. Verifying...")
 
             import torch
@@ -197,13 +235,17 @@ class Preloader(QThread):
             error_message = f"Failed to download required libraries.\n\nError: {e}\n\nPlease check your internet connection and try again. If the issue persists, the asset may be missing from the GitHub release."
             self.preload_failed.emit(error_message)
             return False
+        finally:
+            # --- MODIFIED: This block ensures the archive is removed on success, failure, or cancellation ---
+            if os.path.exists(archive_path):
+                os.remove(archive_path)
 
     def run(self):
         """The entry point for the thread."""
         
         # --- NEW: Run the PyTorch check first ---
         if not self.check_and_download_torch():
-            return  # Stop preloading on failure
+            return  # Stop preloading on failure or cancellation
 
         self.progress_update.emit("Loading application settings...")
         
@@ -240,6 +282,68 @@ class Preloader(QThread):
 splash = None
 home_window = None
 
+# --- NEW: UI Manager to handle switching between splash and download dialog ---
+class UIManager(QObject):
+    def __init__(self, splash, preloader, parent=None):
+        super().__init__(parent)
+        self.splash = splash
+        self.preloader = preloader
+        self.download_dialog = None
+
+        # Connect signals that this manager will handle
+        self.preloader.progress_update.connect(self.route_progress_message)
+    
+    def route_progress_message(self, message):
+        """
+        This slot determines whether to show a message on the splash screen
+        or to create and show the download dialog.
+        """
+        if "Preparing download..." in message and not self.download_dialog:
+            self.splash.hide()
+
+            # --- Confirmation Dialog before starting the download ---
+            msg_box = QMessageBox()
+            msg_box.setIcon(QMessageBox.Information)
+            msg_box.setWindowTitle("Download Required")
+            msg_box.setText("<h3>Additional Libraries Required</h3>")
+            msg_box.setInformativeText(
+                "To function correctly, this application needs to download the PyTorch library, which is over 4GB in size.<br><br>"
+                "This can take a significant amount of time depending on your internet connection. Please ensure you have a stable connection and enough free disk space before proceeding."
+            )
+            proceed_button = msg_box.addButton("Proceed", QMessageBox.YesRole)
+            cancel_button = msg_box.addButton("I'll do it later", QMessageBox.NoRole)
+            msg_box.setDefaultButton(proceed_button)
+            msg_box.exec()
+
+            if msg_box.clickedButton() == cancel_button:
+                sys.exit(0) # Exit the application if user cancels
+
+            # --- User proceeded, now show the actual download dialog ---
+            self.download_dialog = DownloadDialog()
+            
+            self.preloader.progress_update.disconnect(self.route_progress_message)
+            self.preloader.progress_update.connect(self.download_dialog.update_status)
+            self.preloader.download_progress.connect(self.download_dialog.update_progress)
+            
+            self.preloader.finished.connect(self.download_dialog.accept)
+            self.preloader.preload_failed.connect(self.download_dialog.reject)
+
+            result = self.download_dialog.exec()
+
+            # --- MODIFIED: Handle cancellation from the download dialog ---
+            # If the user cancelled, the dialog is Rejected.
+            if result == QDialog.Rejected:
+                # Signal the thread to stop and clean up.
+                self.preloader.cancel()
+                # Crucially, wait for the thread to finish its cleanup before exiting.
+                self.preloader.wait()
+                # Now, exit the application cleanly.
+                sys.exit(0)
+
+            self.preloader.progress_update.connect(self.route_progress_message)
+        else:
+            self.splash.showMessage(message)
+
 # --- NEW: Handler for critical startup failures ---
 def on_preload_failed(error_message):
     """Shows a critical error message box and terminates the application."""
@@ -258,7 +362,9 @@ def on_preload_finished(projects_data):
     global home_window, splash, preloader
     print("[ENTRY] Preloading finished. Handling window creation.")
 
-    preloader.progress_update.emit("Importing necessary packages...")
+    # Show a final message on the splash screen before it closes.
+    splash.showMessage("Loading main window...")
+    
     # --- Import Home from the correct module ---
     from app.ui.window.home_window import Home
     
@@ -268,7 +374,7 @@ def on_preload_finished(projects_data):
         # Now the Home window can also send messages to the splash screen.
         home_window = Home(progress_signal=preloader.progress_update)
         
-        preloader.progress_update.emit("Populating recent projects...")
+        splash.showMessage("Populating recent projects...")
         # --- Populate the home window with the preloaded data ---
         home_window.populate_recent_projects(projects_data)
         print("[ENTRY] Home window instance created and populated.")
@@ -306,6 +412,57 @@ def on_preload_finished(projects_data):
 
 
 if __name__ == '__main__':
+    # --- NEW: Administrator check for Windows before starting the app ---
+    # This check is performed only if torch needs to be downloaded, as that is the
+    # only operation that requires elevated privileges for extraction.
+    if sys.platform == 'win32':
+        NEEDS_DOWNLOAD = False
+        try:
+            # Check if torch is missing.
+            import torch
+        except ImportError:
+            NEEDS_DOWNLOAD = True
+
+        if NEEDS_DOWNLOAD:
+            try:
+                # Check if the application is already running as an administrator.
+                is_currently_admin = ctypes.windll.shell32.IsUserAnAdmin()
+            except Exception:
+                is_currently_admin = False # Assume not admin if the check fails.
+
+            if not is_currently_admin:
+                # If not admin, a restart with elevated privileges is required.
+                # A temporary QApplication instance is needed to show a message box.
+                app = QApplication(sys.argv)
+                
+                msg_box = QMessageBox()
+                msg_box.setIcon(QMessageBox.Warning)
+                msg_box.setWindowTitle("Administrator Privileges Required")
+                msg_box.setText("To download and install required libraries, this application needs to be run with administrator privileges.")
+                msg_box.setInformativeText("Do you want to automatically restart the application as an administrator?")
+                
+                restart_button = msg_box.addButton("Restart as Admin", QMessageBox.YesRole)
+                cancel_button = msg_box.addButton("Cancel", QMessageBox.NoRole)
+                msg_box.setDefaultButton(restart_button)
+                msg_box.exec()
+
+                if msg_box.clickedButton() == restart_button:
+                    # Re-run the script/executable with the 'runas' verb to request elevation.
+                    try:
+                        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
+                    except Exception as e:
+                         # If the re-launch fails, show a final error message.
+                        error_msg = QMessageBox()
+                        error_msg.setIcon(QMessageBox.Critical)
+                        error_msg.setWindowTitle("Relaunch Failed")
+                        error_msg.setText(f"Failed to restart with administrator privileges:\n{e}")
+                        error_msg.exec()
+                        sys.exit(1) # Exit with an error code.
+                
+                # Exit the current, non-elevated instance.
+                # This happens whether the user chose to restart or cancel.
+                sys.exit(0)
+
     # The dependency check is now at the top of the file, so if we get here,
     # we can assume PySide6 is installed.
     app = QApplication(sys.argv)
@@ -329,10 +486,14 @@ if __name__ == '__main__':
     splash.show()
 
     preloader = Preloader()
-    preloader.progress_update.connect(splash.showMessage)
+    
+    # --- NEW: Set up the UI Manager to handle UI transitions ---
+    ui_manager = UIManager(splash, preloader)
+
+    # --- Connect final outcome signals ---
     preloader.finished.connect(on_preload_finished)
-    # --- NEW: Connect the failure signal ---
     preloader.preload_failed.connect(on_preload_failed)
+    
     preloader.start()
 
     sys.exit(app.exec())
