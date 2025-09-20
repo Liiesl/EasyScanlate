@@ -5,6 +5,7 @@
 # --- MODIFIED: Download archive to temp directory to avoid permission errors ---
 # --- MODIFIED: Check for elevated privileges on Windows before download ---
 # --- MODIFIED: Restart application with standard privileges after admin-level download and extraction is complete ---
+# --- FIXED: Correctly handle dialog closing and application restart logic ---
 
 import sys
 import os
@@ -338,6 +339,10 @@ class UIManager(QObject):
             self.preloader.progress_update.connect(self.download_dialog.update_status)
             self.preloader.download_progress.connect(self.download_dialog.update_progress)
             
+            # --- MODIFIED: Connect restart signal to UNBLOCK the dialog ---
+            # This is the crucial fix. It makes the dialog.exec() call return.
+            self.preloader.restart_required.connect(self.download_dialog.accept)
+            
             self.preloader.finished.connect(self.download_dialog.accept)
             self.preloader.preload_failed.connect(self.download_dialog.reject)
 
@@ -354,9 +359,10 @@ class UIManager(QObject):
                 sys.exit(0)
 
             self.preloader.progress_update.connect(self.route_progress_message)
-        # --- MODIFIED: Do not show the restart message on the splash screen ---
         elif "Restarting to drop" in message:
-            pass # The restart handler will show its own message box.
+            # We don't want to display this technical message on the splash screen.
+            # The dedicated message box in `on_restart_required` is better.
+            pass
         else:
             self.splash.showMessage(message)
 
@@ -445,65 +451,71 @@ if __name__ == '__main__':
         except ImportError:
             NEEDS_DOWNLOAD = True
 
-        if NEEDS_DOWNLOAD:
-            try:
-                # Check if the application is already running as an administrator.
-                is_currently_admin = ctypes.windll.shell32.IsUserAnAdmin()
-            except Exception:
-                is_currently_admin = False # Assume not admin if the check fails.
+        try:
+            # We need to know the admin status regardless of download need for the Preloader
+            is_currently_admin = ctypes.windll.shell32.IsUserAnAdmin()
+        except Exception:
+            is_currently_admin = False # Assume not admin if the check fails.
 
-            if not is_currently_admin:
-                # If not admin, a restart with elevated privileges is required.
-                # A temporary QApplication instance is needed to show a message box.
-                app = QApplication(sys.argv)
-                
-                msg_box = QMessageBox()
-                msg_box.setIcon(QMessageBox.Warning)
-                msg_box.setWindowTitle("Administrator Privileges Required")
-                msg_box.setText("To download and install required libraries, this application needs to be run with administrator privileges.")
-                msg_box.setInformativeText("Do you want to automatically restart the application as an administrator?")
-                
-                restart_button = msg_box.addButton("Restart as Admin", QMessageBox.YesRole)
-                cancel_button = msg_box.addButton("Cancel", QMessageBox.NoRole)
-                msg_box.setDefaultButton(restart_button)
-                msg_box.exec()
+        if NEEDS_DOWNLOAD and not is_currently_admin:
+            # If not admin, a restart with elevated privileges is required.
+            # A temporary QApplication instance is needed to show a message box.
+            app = QApplication(sys.argv)
+            
+            msg_box = QMessageBox()
+            msg_box.setIcon(QMessageBox.Warning)
+            msg_box.setWindowTitle("Administrator Privileges Required")
+            msg_box.setText("To download and install required libraries, this application needs to be run with administrator privileges.")
+            msg_box.setInformativeText("Do you want to automatically restart the application as an administrator?")
+            
+            restart_button = msg_box.addButton("Restart as Admin", QMessageBox.YesRole)
+            cancel_button = msg_box.addButton("Cancel", QMessageBox.NoRole)
+            msg_box.setDefaultButton(restart_button)
+            msg_box.exec()
 
-                if msg_box.clickedButton() == restart_button:
-                    # Re-run the script/executable with the 'runas' verb to request elevation.
-                    try:
-                        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
-                    except Exception as e:
-                         # If the re-launch fails, show a final error message.
-                        error_msg = QMessageBox()
-                        error_msg.setIcon(QMessageBox.Critical)
-                        error_msg.setWindowTitle("Relaunch Failed")
-                        error_msg.setText(f"Failed to restart with administrator privileges:\n{e}")
-                        error_msg.exec()
-                        sys.exit(1) # Exit with an error code.
-                
-                # Exit the current, non-elevated instance.
-                # This happens whether the user chose to restart or cancel.
-                sys.exit(0)
+            if msg_box.clickedButton() == restart_button:
+                # Re-run the script/executable with the 'runas' verb to request elevation.
+                try:
+                    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv[1:]), None, 1)
+                except Exception as e:
+                     # If the re-launch fails, show a final error message.
+                    error_msg = QMessageBox()
+                    error_msg.setIcon(QMessageBox.Critical)
+                    error_msg.setWindowTitle("Relaunch Failed")
+                    error_msg.setText(f"Failed to restart with administrator privileges:\n{e}")
+                    error_msg.exec()
+                    sys.exit(1) # Exit with an error code.
+            
+            # Exit the current, non-elevated instance.
+            # This happens whether the user chose to restart or cancel.
+            sys.exit(0)
 
     # The dependency check is now at the top of the file, so if we get here,
     # we can assume PySide6 is installed.
     app = QApplication(sys.argv)
 
     # --- NEW: Function to handle restarting with standard privileges ---
-    def restart_as_user():
+    def on_restart_required():
         """
-        Shows a confirmation message and restarts the app using explorer.exe to drop privileges.
-        This function is connected to the preloader's signal and runs on the main thread.
+        Shows a confirmation message, relaunches the app non-elevated, and quits.
+        This function is connected to the preloader's signal and runs on the main thread
+        AFTER the download dialog has been un-blocked.
         """
+        global splash, app
+        if splash:
+            splash.close()
+            
         QMessageBox.information(None, "Restart Required", 
                                 "The required libraries have been installed successfully.\n\n"
                                 "The application will now restart with normal user permissions.")
         
-        # Using explorer.exe to launch the executable is a common trick to ensure
-        # it starts non-elevated from an elevated parent process.
-        # It also correctly handles passing command-line arguments.
-        args = " ".join(sys.argv[1:])
-        subprocess.Popen(f'explorer.exe "{sys.executable}" {args}')
+        # --- MODIFIED: Use a more reliable restart method ---
+        # Using the "open" verb with ShellExecuteW is the standard way to launch an
+        # application, and it will launch it with standard user privileges.
+        try:
+            ctypes.windll.shell32.ShellExecuteW(None, "open", sys.executable, " ".join(sys.argv[1:]), None, 1)
+        except Exception as e:
+            QMessageBox.critical(None, "Relaunch Failed", f"Failed to restart the application:\n{e}")
         
         # Exit the current elevated application cleanly.
         app.quit()
@@ -536,7 +548,7 @@ if __name__ == '__main__':
     preloader.finished.connect(on_preload_finished)
     preloader.preload_failed.connect(on_preload_failed)
     # --- NEW: Connect the restart signal to its handler ---
-    preloader.restart_required.connect(restart_as_user)
+    preloader.restart_required.connect(on_restart_required)
     
     preloader.start()
 
