@@ -19,3 +19,4 @@ docs-site-guide.md
 initmodels.py
 retry-update.bat
 test_torch
+minimal_module

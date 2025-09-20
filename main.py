@@ -170,7 +170,7 @@ class Preloader(QThread):
 
         # --- ACTION REQUIRED: Configure your GitHub repository details here ---
         GH_OWNER = "Liiesl"      # Your GitHub username
-        GH_REPO = "ManhwaOCR"              # Your repository name
+        GH_REPO = "test-easyocr-compile"              # Your repository name
         ASSET_NAME = "torch_libs.7z"          # <--- MODIFIED to use .7z
         
         if GH_OWNER == "YourGitHubUsername":
