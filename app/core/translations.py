@@ -1,6 +1,6 @@
 # translations.py
 import re
-import google.generativeai as genai
+from google import genai
 from PySide6.QtCore import QThread, Signal
 
 class TranslationThread(QThread):
@@ -21,10 +21,12 @@ class TranslationThread(QThread):
 
     def run(self):
         try:
-            genai.configure(api_key=self.api_key)
-            model = genai.GenerativeModel(self.model_name)
+            client = genai.Client(api_key=self.api_key)
             
-            response_stream = model.generate_content(self.full_prompt, stream=True)
+            response_stream = client.models.generate_content_stream(
+                model=self.model_name,
+                contents=self.full_prompt,
+            )
             full_response_text = ""
             
             for chunk in response_stream:
@@ -45,6 +47,7 @@ class TranslationThread(QThread):
                 
         except Exception as e:
             self.translation_failed.emit(f"Gemini API Error: {str(e)}")
+
     def stop(self):
         self._is_running = False
 
