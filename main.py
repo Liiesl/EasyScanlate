@@ -4,6 +4,7 @@
 # FIXED to clean up partial downloads on cancellation.
 # --- MODIFIED: Download archive to temp directory to avoid permission errors ---
 # --- MODIFIED: Check for elevated privileges on Windows before download ---
+# --- MODIFIED: Restart application with standard privileges after admin-level download and extraction is complete ---
 
 import sys
 import os
@@ -14,6 +15,8 @@ import py7zr # <--- ADDED for .7z support
 import tempfile # <--- MODIFIED: Added to handle temporary file downloads
 # --- NEW IMPORT for Windows administrator check ---
 import ctypes
+# --- NEW IMPORT for restarting the application ---
+import subprocess
 
 
 # --- Dependency Checking ---
@@ -146,10 +149,13 @@ class Preloader(QThread):
     download_progress = Signal(int)
     # --- NEW: Signal for handling critical preload failures ---
     preload_failed = Signal(str)
+    # --- NEW: Signal to trigger an application restart to de-elevate privileges ---
+    restart_required = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, is_admin=False, parent=None):
         super().__init__(parent)
         self._is_cancelled = False
+        self.is_admin = is_admin # --- MODIFIED: Store admin status
 
     def cancel(self):
         """Public method to signal cancellation to the thread."""
@@ -229,6 +235,13 @@ class Preloader(QThread):
 
             import torch
             self.progress_update.emit("PyTorch successfully installed.")
+
+            # --- NEW: If download was performed with admin rights, trigger a restart to de-elevate ---
+            if self.is_admin:
+                self.progress_update.emit("Restarting to drop admin privileges...")
+                self.restart_required.emit()
+                return False # Stop further preloading; the app will restart.
+
             return True
 
         except Exception as e:
@@ -245,7 +258,7 @@ class Preloader(QThread):
         
         # --- NEW: Run the PyTorch check first ---
         if not self.check_and_download_torch():
-            return  # Stop preloading on failure or cancellation
+            return  # Stop preloading on failure, cancellation, or if a restart is triggered
 
         self.progress_update.emit("Loading application settings...")
         
@@ -341,6 +354,9 @@ class UIManager(QObject):
                 sys.exit(0)
 
             self.preloader.progress_update.connect(self.route_progress_message)
+        # --- MODIFIED: Do not show the restart message on the splash screen ---
+        elif "Restarting to drop" in message:
+            pass # The restart handler will show its own message box.
         else:
             self.splash.showMessage(message)
 
@@ -416,7 +432,8 @@ if __name__ == '__main__':
     if getattr(sys, 'frozen', False): # 'frozen' is true for a Nuitka/PyInstaller exe
         app_path = os.path.dirname(os.path.abspath(sys.executable))
         os.chdir(app_path)
-
+    
+    is_currently_admin = False # --- NEW: Initialize admin status flag
     # --- NEW: Administrator check for Windows before starting the app ---
     # This check is performed only if torch needs to be downloaded, as that is the
     # only operation that requires elevated privileges for extraction.
@@ -471,6 +488,25 @@ if __name__ == '__main__':
     # The dependency check is now at the top of the file, so if we get here,
     # we can assume PySide6 is installed.
     app = QApplication(sys.argv)
+
+    # --- NEW: Function to handle restarting with standard privileges ---
+    def restart_as_user():
+        """
+        Shows a confirmation message and restarts the app using explorer.exe to drop privileges.
+        This function is connected to the preloader's signal and runs on the main thread.
+        """
+        QMessageBox.information(None, "Restart Required", 
+                                "The required libraries have been installed successfully.\n\n"
+                                "The application will now restart with normal user permissions.")
+        
+        # Using explorer.exe to launch the executable is a common trick to ensure
+        # it starts non-elevated from an elevated parent process.
+        # It also correctly handles passing command-line arguments.
+        args = " ".join(sys.argv[1:])
+        subprocess.Popen(f'explorer.exe "{sys.executable}" {args}')
+        
+        # Exit the current elevated application cleanly.
+        app.quit()
     
     # Check if application is already running (optional)
     app.setApplicationName("ManhwaOCR")
@@ -490,7 +526,8 @@ if __name__ == '__main__':
     splash = CustomSplashScreen(pixmap)
     splash.show()
 
-    preloader = Preloader()
+    # --- MODIFIED: Pass the admin status to the preloader ---
+    preloader = Preloader(is_admin=is_currently_admin)
     
     # --- NEW: Set up the UI Manager to handle UI transitions ---
     ui_manager = UIManager(splash, preloader)
@@ -498,6 +535,8 @@ if __name__ == '__main__':
     # --- Connect final outcome signals ---
     preloader.finished.connect(on_preload_finished)
     preloader.preload_failed.connect(on_preload_failed)
+    # --- NEW: Connect the restart signal to its handler ---
+    preloader.restart_required.connect(restart_as_user)
     
     preloader.start()
 
