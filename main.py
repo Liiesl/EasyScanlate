@@ -412,6 +412,11 @@ def on_preload_finished(projects_data):
 
 
 if __name__ == '__main__':
+    # It ensures the app's working directory is where the .exe is, not C:\Windows\System32
+    if getattr(sys, 'frozen', False): # 'frozen' is true for a Nuitka/PyInstaller exe
+        app_path = os.path.dirname(os.path.abspath(sys.executable))
+        os.chdir(app_path)
+
     # --- NEW: Administrator check for Windows before starting the app ---
     # This check is performed only if torch needs to be downloaded, as that is the
     # only operation that requires elevated privileges for extraction.
