@@ -1,4 +1,3 @@
-; installer.nsi
 ; NSIS Script for MangaOCRTool Application
 ; =============================================
 
@@ -45,7 +44,7 @@ SetCompressor lzma
 ; --- Language ---
 !insertmacro MUI_LANGUAGE "English"
 
-; --- Section Descriptions ---
+; --- Component Page Descriptions (Pre-defined text) ---
 LangString DESC_SecApp ${LANG_ENGLISH} "Install the main application files."
 LangString DESC_SecShortcuts ${LANG_ENGLISH} "Create shortcuts in the Start Menu and on the Desktop."
 LangString DESC_SecFileAssoc ${LANG_ENGLISH} "Associate .mmtl files with this application."
@@ -104,15 +103,9 @@ Section "Main Application" SecApp
   WriteRegStr HKLM "${REG_UNINSTALL_KEY}" "InstallDate" "${INSTALL_DATE_YYYYMMDD}"
   WriteRegDWORD HKLM "${REG_UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "${REG_UNINSTALL_KEY}" "NoRepair" 1
-  
-  !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
-    !insertmacro MUI_DESCRIPTION_TEXT ${SecApp} "$(DESC_SecApp)"
-  !insertmacro MUI_FUNCTION_DESCRIPTION_END
 SectionEnd
 
-SectionGroup "Shortcuts" SecShortcuts
-  AddSize 1
-  
+SectionGroup "Shortcuts" SecShortcuts  
   Section "Start Menu Shortcut" SecStartMenu
     CreateDirectory "${STARTMENU_FOLDER}"
     CreateShortCut "${STARTMENU_FOLDER}\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
@@ -122,14 +115,9 @@ SectionGroup "Shortcuts" SecShortcuts
   Section "Desktop Shortcut" SecDesktop
     CreateShortCut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
   SectionEnd
-  
-  !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
-    !insertmacro MUI_DESCRIPTION_TEXT ${SecShortcuts} "$(DESC_SecShortcuts)"
-  !insertmacro MUI_FUNCTION_DESCRIPTION_END
 SectionGroupEnd
 
 Section "Register File Association" SecFileAssoc
-  AddSize 0
   SetRegView 64
   
   DetailPrint "Registering .mmtl file association..."
@@ -137,24 +125,27 @@ Section "Register File Association" SecFileAssoc
   WriteRegStr HKCR "MangaOCRTool.MMTLFile" "" "Manga OCR Tool Project"
   WriteRegStr HKCR "MangaOCRTool.MMTLFile\DefaultIcon" "" "$INSTDIR\${APP_EXE},0"
   WriteRegStr HKCR "MangaOCRTool.MMTLFile\shell\open\command" "" '"$INSTDIR\${APP_EXE}" "%1"'
-  
-  !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
-    !insertmacro MUI_DESCRIPTION_TEXT ${SecFileAssoc} "$(DESC_SecFileAssoc)"
-  !insertmacro MUI_FUNCTION_DESCRIPTION_END
 SectionEnd
 
 Section "Add Application to Path" SecAppPath
-  AddSize 0
   SetRegView 64
 
   DetailPrint "Registering application path..."
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\${APP_EXE}" "" "$INSTDIR\${APP_EXE}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\${APP_EXE}" "Path" "$INSTDIR"
-  
-  !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
-    !insertmacro MUI_DESCRIPTION_TEXT ${SecAppPath} "$(DESC_SecAppPath)"
-  !insertmacro MUI_FUNCTION_DESCRIPTION_END
 SectionEnd
+
+; =========================================================================
+; --- Descriptions for Components Page (This is the corrected block) ---
+; This block must be OUTSIDE all Section/Function blocks.
+; =========================================================================
+!insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecApp} "$(DESC_SecApp)"
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecShortcuts} "$(DESC_SecShortcuts)"
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecFileAssoc} "$(DESC_SecFileAssoc)"
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecAppPath} "$(DESC_SecAppPath)"
+!insertmacro MUI_FUNCTION_DESCRIPTION_END
+
 
 ; --- Uninstaller Logic ---
 
@@ -228,5 +219,4 @@ CleanupRegistry:
   DeleteRegKey HKLM "${REG_UNINSTALL_KEY}"
   ; Also remove the app's own registry key, if it exists.
   DeleteRegKey /ifempty HKLM "${REG_APP_KEY}"
-  
 SectionEnd
