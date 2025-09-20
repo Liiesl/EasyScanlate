@@ -29,7 +29,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
           pip install -r requirements.txt
-          pip install py7zr 
 
       # 4. Run Nuitka build
       - name: Build Executable with Nuitka
@@ -66,7 +65,7 @@ jobs:
       - name: Zip Full Build Output (Without PyTorch)
         run: |
           cd build/main.dist
-          7z a -t7z -mx=9 ..\..\build-output.zip * -xr!torch
+          7z a -t7z -mx=9 ..\..\build-output.7z * -xr!torch
           cd ..\..
         shell: pwsh
 
