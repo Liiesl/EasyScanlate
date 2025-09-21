@@ -60,8 +60,8 @@ jobs:
       - name: Upload PyTorch Libraries as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pytorch-libs
-          path: pytorch-libs.7z
+          name: torch_libs.7z
+          path: torch_libs.7z
 
       # Zip the entire build output (excluding torch) for debugging
       - name: Zip Full Build Output (Without PyTorch)
@@ -76,7 +76,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: full-build-output
-          path: build-output.7z
+          path: build_output.7z
 
       # Compile the NSIS installer
       - name: Install NSIS
