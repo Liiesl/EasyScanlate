@@ -52,7 +52,7 @@ jobs:
       - name: Zip PyTorch Libraries with 7-Zip
         run: |
           cd build/main.dist
-          7z a -t7z -mx=9 ..\..\pytorch-libs.7z torch
+          7z a -t7z -mx=9 ..\..\torch_libs.7z torch
           cd ..\..
         shell: pwsh
 
@@ -67,7 +67,7 @@ jobs:
       - name: Zip Full Build Output (Without PyTorch)
         run: |
           cd build/main.dist
-          7z a -t7z -mx=9 ..\..\build-output.7z * -xr!torch
+          7z a -t7z -mx=9 ..\..\build_output.7z * -xr!torch
           cd ..\..
         shell: pwsh
 
