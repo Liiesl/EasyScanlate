@@ -113,6 +113,6 @@ jobs:
           # Upload both files to the release page
           files: |
             MangaOCRTool-Installer.exe
-            pytorch-libs.7z
+            torch_libs.7z
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
