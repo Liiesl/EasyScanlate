@@ -544,7 +544,7 @@ class MainWindow(QMainWindow):
             lang_code = self.language_map.get(self.model.original_language, 'ko')
             use_gpu = self.settings.value("use_gpu", "true").lower() == "true"
             print(f"Initializing EasyOCR reader for {context}: Lang='{lang_code}', GPU={use_gpu}")
-            self.reader = easyocr.Reader([lang_code], gpu=use_gpu, model_storage_directory='.EasyOCR/model')
+            self.reader = easyocr.Reader([lang_code], gpu=use_gpu, model_storage_directory='OCR/model')
             print("EasyOCR reader initialized successfully.")
             return True
         except Exception as e:

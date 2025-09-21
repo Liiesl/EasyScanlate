@@ -11,6 +11,8 @@ on:
 jobs:
   build-and-release-windows:
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       # 1. Get the code from repository
@@ -36,7 +38,7 @@ jobs:
         with:
           script-name: main.py
           mode: standalone
-          include-data-dir: 'EasyOCR/model=EasyOCR/model'
+          include-data-dir: 'OCR/model=OCR/model'
           mingw64: true
           enable-plugins: pyside6
           windows-icon-from-ico: assets/app_icon.ico
@@ -94,6 +96,10 @@ jobs:
         with:
           name: windows-installer
           path: MangaOCRTool-Installer.exe
+
+      - name: Move Installer to Root Directory
+        run: Move-Item -Path dev/installer/MangaOCRTool-Installer.exe -Destination .
+        shell: pwsh
 
       # 7. Create a DRAFT GitHub Release
       - name: Create Draft GitHub Release
