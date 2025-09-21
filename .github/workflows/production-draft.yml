@@ -90,16 +90,16 @@ jobs:
         # The /DLATEST_TAG is no longer needed as the URL is removed from the script
         run: makensis dev\installer\installer.nsi
 
+      - name: Move Installer to Root Directory
+        run: Move-Item -Path dev/installer/MangaOCRTool-Installer.exe -Destination .
+        shell: pwsh
+
       # 6. Upload Installer as a workflow artifact
       - name: Upload Installer as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer
           path: MangaOCRTool-Installer.exe
-
-      - name: Move Installer to Root Directory
-        run: Move-Item -Path dev/installer/MangaOCRTool-Installer.exe -Destination .
-        shell: pwsh
 
       # 7. Create a DRAFT GitHub Release
       - name: Create Draft GitHub Release
