@@ -21,9 +21,9 @@ import easyocr, os, gc, json, traceback
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Manhwa OCR Tool")
+        self.setWindowTitle("Easy Scanlate")
         self.setGeometry(100, 100, 1200, 600)
-        self.settings = QSettings("YourCompany", "MangaOCRTool")
+        self.settings = QSettings("Liiesl", "EasyScanlate")
         self._load_filter_settings()
         
         # The model is the single source of truth for project data.

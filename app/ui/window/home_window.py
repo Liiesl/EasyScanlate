@@ -196,7 +196,7 @@ class Home(QMainWindow):
     def __init__(self, progress_signal=None):
         super().__init__()
         self.progress_signal = progress_signal
-        self.settings = QSettings("YourCompany", "MangaOCRTool")
+        self.settings = QSettings("Liiesl", "EasyScanlate")
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         

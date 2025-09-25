@@ -38,7 +38,7 @@ class TextBoxStylePanel(QWidget):
         super().__init__(parent)
         self.setObjectName("TextBoxStylePanel")
         self.setMinimumWidth(400)
-        self.settings = QSettings("YourCompany", "MangaOCRTool")
+        self.settings = QSettings("Liiesl", "EasyScanlate")
         self.presets = []
         self._original_default_style = default_style if default_style else {}
         self._default_style = self._ensure_gradient_defaults(self._original_default_style)

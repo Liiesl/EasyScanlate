@@ -245,7 +245,7 @@ class Preloader(QThread):
         self.progress_update.emit("Finding recent projects...")
         projects_data = []
         try:
-            settings = QSettings("YourCompany", "MangaOCRTool")
+            settings = QSettings("Liiesl", "EasyScanlate")
             recent_projects = settings.value("recent_projects", [])
             recent_timestamps = settings.value("recent_timestamps", {})
             
