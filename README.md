@@ -1,8 +1,8 @@
-# EasyScanlate
+# EasyScanlate (formerly ManhwaOCR)
 an app that lets you MTL your manhwa with ease. designed with simplicity at its core .
 
 ## Table of Contents
-- [EasyScanlate](#easyscanlate)
+- [EasyScanlate (formerly ManhwaOCR)](#easyscanlate-formerly-manhwaocr)
   - [Table of Contents](#table-of-contents)
 - [Workflow](#workflow)
   - [Create Project](#create-project)
