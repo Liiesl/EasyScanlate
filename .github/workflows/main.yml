@@ -1,6 +1,6 @@
 # .github/workflows/main.yml
 
-name: Build MangaOCRTool with Nuitka
+name: Build EasyScanlate with Nuitka
 
 # This workflow runs on every push to the 'test-deploy' branch
 on:
@@ -40,9 +40,9 @@ jobs:
           mingw64: true
           enable-plugins: pyside6
           windows-icon-from-ico: assets/app_icon.ico
-          company-name: "YourCompany"
-          product-name: "MangaOCRTool"
-          file-description: "ManhwaOCR"
+          company-name: "Liiesl"
+          product-name: "EasyScanlate"
+          file-description: "EasyScanlate"
           file-version: "1.0.0.0"
           product-version: "1.0.0.0"
 
@@ -50,6 +50,6 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MangaOCRTool-Windows
+          name: EasyScanlate-Windows
           path: build/main.dist/
           compression-level: 9
