@@ -1,8 +1,8 @@
-# ManhwaOCR
+# EasyScanlate
 an app that lets you MTL your manhwa with ease. designed with simplicity at its core .
 
 ## Table of Contents
-- [ManhwaOCR](#manhwaocr)
+- [EasyScanlate](#easyscanlate)
   - [Table of Contents](#table-of-contents)
 - [Workflow](#workflow)
   - [Create Project](#create-project)
@@ -76,8 +76,8 @@ If these commands return version numbers, you're good to proceed.
 Clone this repository to your local machine using the following command:
 
 ```bash
-git clone https://github.com/Liiesl/ManhwaOCR.git
-cd ManhwaOCR
+git clone https://github.com/Liiesl/EasyScanlate.git
+cd EasyScanlate
 ```
 
 ## Step 2: Install Required Dependencies
@@ -133,9 +133,9 @@ I recommend using **Nuitka** for compilation as it offers better performance and
 
 2.  **Run the Compilation Command**: From the root directory of the project, run the following command:
     ```bash
-    python -m nuitka --onefile --plugin-enable=pyside6 --windows-icon-from-ico=app_icon.ico --company-name="YourCompany" --product-name="MangaOCRTool Launcher" --file-description="Launcher for ManhwaOCR" --file-version="1.0.0.0" --product-version="1.0.0.0" --output-filename="mmtl_launcher.exe" mmtl_launcher.py
+    python -m nuitka --onefile --plugin-enable=pyside6 --windows-icon-from-ico=app_icon.ico --company-name="Liiesl" --product-name="EasyScanlate Launcher" --file-description="Launcher for EasyScanlate" --file-version="1.0.0.0" --product-version="1.0.0.0" --output-filename="mmtl_launcher.exe" mmtl_launcher.py
     ```
-    This will generate a single executable file in the `mmtl_launcher.dist` folder. Move this file to a permanent location (e.g., the ManhwaOCR root folder or `C:\Program Files\ManhwaOCR`).
+    This will generate a single executable file in the `mmtl_launcher.dist` folder. Move this file to a permanent location (e.g., the EasyScanlate root folder or `C:\Program Files\EasyScanlate`).
 
 3.  **Set File Association (Windows)**: To open `.mmtl` files with a double-click, you need to associate the file type with the new launcher.
     *   Find any `.mmtl` file on your system.
