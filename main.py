@@ -168,7 +168,7 @@ class Preloader(QThread):
 
         # --- ACTION REQUIRED: Configure your GitHub repository details here ---
         GH_OWNER = "Liiesl"      # Your GitHub username
-        GH_REPO = "ManhwaOCR"              # Your repository name
+        GH_REPO = "EasyScanlate"              # Your repository name
         ASSET_NAME = "torch_libs.7z"          # <--- MODIFIED to use .7z
         
         if GH_OWNER == "YourGitHubUsername":
@@ -213,7 +213,7 @@ class Preloader(QThread):
                 self.progress_update.emit("Operation cancelled before extraction.")
                 return False
 
-            self.progress_update.emit("Download complete. Extracting files...")
+            self.progress_update.emit("Download complete. Extracting files... This may take a few minutes...")
             with py7zr.SevenZipFile(archive_path, mode='r') as z:
                 z.extractall()
             
@@ -440,7 +440,7 @@ if __name__ == '__main__':
 
     app = QApplication(sys.argv)
     
-    app.setApplicationName("ManhwaOCR")
+    app.setApplicationName("EasyScanlate")
     app.setApplicationVersion("1.0")
 
     pixmap = QPixmap(500, 250)
@@ -449,7 +449,7 @@ if __name__ == '__main__':
     painter.setPen(QColor(220, 220, 220))
     font = QFont("Segoe UI", 24, QFont.Bold)
     painter.setFont(font)
-    painter.drawText(pixmap.rect().adjusted(0, -20, 0, -20), Qt.AlignCenter, "ManhwaOCR")
+    painter.drawText(pixmap.rect().adjusted(0, -20, 0, -20), Qt.AlignCenter, "EasyScanlate")
     painter.end()
 
     splash = CustomSplashScreen(pixmap)

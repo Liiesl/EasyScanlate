@@ -1,4 +1,6 @@
-name: Build and Release MangaOCRTool
+# .github/workflows/main.yml
+
+name: Build EasyScanlate with Nuitka
 
 # Workflow Trigger
 on:
@@ -10,7 +12,7 @@ on:
 
 jobs:
   build-and-release-windows:
-    runs-on: windows-latest
+    runs-on: windows-latest 
     permissions:
       contents: write
 
@@ -23,28 +25,28 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.12' 
 
       # 3. Install project's dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
-          pip install -r requirements.txt
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+          pip install -r requirements.txt 
 
       # 4. Run Nuitka build
       - name: Build Executable with Nuitka
         uses: Nuitka/Nuitka-Action@main
         with:
-          script-name: main.py
+          script-name: main.py 
           mode: standalone
           include-data-dir: 'OCR/model=OCR/model'
           mingw64: true
           enable-plugins: pyside6
           windows-icon-from-ico: assets/app_icon.ico
-          company-name: "YourCompany"
-          product-name: "MangaOCRTool"
-          file-description: "ManhwaOCR"
+          company-name: "Liiesl"
+          product-name: "EasyScanlate"
+          file-description: "EasyScanlate"
           file-version: "1.0.0.0"
           product-version: "1.0.0.0"
 
@@ -52,7 +54,7 @@ jobs:
       - name: Zip PyTorch Libraries with 7-Zip
         run: |
           cd build/main.dist
-          7z a -t7z -mx=9 ..\..\torch_libs.7z torch
+          7z a -t7z -mx=9 -mf=off ..\..\torch_libs.7z torch
           cd ..\..
         shell: pwsh
 
@@ -67,7 +69,7 @@ jobs:
       - name: Zip Full Build Output (Without PyTorch)
         run: |
           cd build/main.dist
-          7z a -t7z -mx=9 ..\..\build_output.7z * -xr!torch
+          7z a -t7z -mx=9 -mf=off ..\..\build_output.7z * -xr!torch
           cd ..\..
         shell: pwsh
 
@@ -91,7 +93,7 @@ jobs:
         run: makensis dev\installer\installer.nsi
 
       - name: Move Installer to Root Directory
-        run: Move-Item -Path dev/installer/MangaOCRTool-Installer.exe -Destination .
+        run: Move-Item -Path dev/installer/EasyScanlate-Installer.exe -Destination .
         shell: pwsh
 
       # 6. Upload Installer as a workflow artifact
@@ -99,7 +101,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer
-          path: MangaOCRTool-Installer.exe
+          path: EasyScanlate-Installer.exe
 
       # 7. Create a DRAFT GitHub Release
       - name: Create Draft GitHub Release
@@ -112,7 +114,7 @@ jobs:
           body_path: changelog.md
           # Upload both files to the release page
           files: |
-            MangaOCRTool-Installer.exe
+            EasyScanlate-Installer.exe
             torch_libs.7z
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,11 +1,11 @@
-; NSIS Script for MangaOCRTool Application
+; NSIS Script for EasyScanlate Application
 ; =============================================
 
 !include "MUI2.nsh"
 
 ; --- Application Information ---
-!define APP_NAME "MangaOCRTool"
-!define APP_PUBLISHER "YourCompany"
+!define APP_NAME "EasyScanlate"
+!define APP_PUBLISHER "Liie"
 !define APP_EXE "main.exe"
 !define APP_VERSION "0.0.1" ; Use a consistent versioning scheme
 
@@ -28,7 +28,7 @@ SetCompressor lzma
 !define MUI_ABORTWARNING
 !define MUI_ICON "..\..\assets\app_icon.ico"
 !define MUI_UNICON "..\..\assets\app_icon.ico"
-!define MUI_WELCOMEPAGE_TEXT "This setup will guide you through the installation of MangaOCRTool.$\r$\n$\r$\nClick Next to continue."
+!define MUI_WELCOMEPAGE_TEXT "This setup will guide you through the installation of EasyScanlate.$\r$\n$\r$\nClick Next to continue."
 
 ; --- Installer Pages ---
 !insertmacro MUI_PAGE_WELCOME
@@ -121,10 +121,10 @@ Section "Register File Association" SecFileAssoc
   SetRegView 64
   
   DetailPrint "Registering .mmtl file association..."
-  WriteRegStr HKCR ".mmtl" "" "MangaOCRTool.MMTLFile"
-  WriteRegStr HKCR "MangaOCRTool.MMTLFile" "" "Manga OCR Tool Project"
-  WriteRegStr HKCR "MangaOCRTool.MMTLFile\DefaultIcon" "" "$INSTDIR\${APP_EXE},0"
-  WriteRegStr HKCR "MangaOCRTool.MMTLFile\shell\open\command" "" '"$INSTDIR\${APP_EXE}" "%1"'
+  WriteRegStr HKCR ".mmtl" "" "EasyScanlate.MMTLFile"
+  WriteRegStr HKCR "EasyScanlate.MMTLFile" "" "Manga OCR Tool Project"
+  WriteRegStr HKCR "EasyScanlate.MMTLFile\DefaultIcon" "" "$INSTDIR\${APP_EXE},0"
+  WriteRegStr HKCR "EasyScanlate.MMTLFile\shell\open\command" "" '"$INSTDIR\${APP_EXE}" "%1"'
 SectionEnd
 
 Section "Add Application to Path" SecAppPath
@@ -178,7 +178,7 @@ HandleManualUninstall:
   
     ; Prompt the user.
     MessageBox MB_YESNO|MB_ICONQUESTION \
-      "Do you want to completely remove MangaOCRTool, including the large PyTorch libraries (over 4GB)?$\r$\n$\r$\nClicking 'No' will preserve these libraries to speed up future installations." \
+      "Do you want to completely remove EasyScanlate, including the large PyTorch libraries (over 4GB)?$\r$\n$\r$\nClicking 'No' will preserve these libraries to speed up future installations." \
       IDYES CompleteRemove IDNO PreserveTorch
     
     Goto CleanupRegistry ; Should not be reached, but as a fallback.
@@ -214,7 +214,7 @@ CleanupRegistry:
   SetRegView 64
   DetailPrint "Removing registry keys..."
   DeleteRegKey HKCR ".mmtl"
-  DeleteRegKey HKCR "MangaOCRTool.MMTLFile"
+  DeleteRegKey HKCR "EasyScanlate.MMTLFile"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\${APP_EXE}"
   DeleteRegKey HKLM "${REG_UNINSTALL_KEY}"
   ; Also remove the app's own registry key, if it exists.
