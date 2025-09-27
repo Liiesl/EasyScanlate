@@ -95,9 +95,14 @@ class ActionMenu(QWidget):
         layout.setSpacing(1)
 
         # Action Buttons
-        btn_hide_text = QPushButton(qta.icon('fa5s.eye-slash', color='white'), " Hide Text")
-        btn_hide_text.clicked.connect(lambda: (self.main_window.hide_text(), self.close()))
+        btn_hide_text = QPushButton(qta.icon('fa5s.eye-slash', color='white'), " Show/Hide Text")
+        btn_hide_text.clicked.connect(lambda: (self.main_window.toggle_text_visibility(), self.close()))
         layout.addWidget(btn_hide_text)
+        
+        # --- NEW: Context Fill Button ---
+        btn_context_fill = QPushButton(qta.icon('fa5s.fill-drip', color='white'), " Context Fill")
+        btn_context_fill.clicked.connect(lambda: (self.main_window.start_context_fill(), self.close()))
+        layout.addWidget(btn_context_fill)
 
         btn_split_images = QPushButton(qta.icon('fa5s.object-ungroup', color='white'), " Split Images")
         btn_split_images.clicked.connect(lambda: (self.main_window.split_images(), self.close()))
@@ -108,7 +113,8 @@ class ActionMenu(QWidget):
         layout.addWidget(btn_stitch_images)
 
         # Placeholders
-        btn_hide_text.setEnabled(False)
+        btn_hide_text.setEnabled(True)
+        btn_context_fill.setEnabled(True) # --- NEW ---
         btn_split_images.setEnabled(True)
         btn_stitch_images.setEnabled(True)
 

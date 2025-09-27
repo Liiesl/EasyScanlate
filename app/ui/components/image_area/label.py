@@ -1,8 +1,8 @@
 # app/ui/components/image_area/label.py
 
-from PySide6.QtWidgets import QGraphicsScene, QSizePolicy, QGraphicsRectItem, QGraphicsView, QRubberBand, QGraphicsLineItem, QGraphicsEllipseItem
+from PySide6.QtWidgets import QGraphicsScene, QSizePolicy, QGraphicsRectItem, QGraphicsView, QRubberBand, QGraphicsLineItem, QGraphicsEllipseItem, QGraphicsPathItem
 from PySide6.QtCore import Qt, Signal, QRectF, QPoint, QRect, QSize, QTimer
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QPainterPath
 from app.ui.components.image_area.textbox import TextBoxItem
 
 class ResizableImageLabel(QGraphicsView):
@@ -15,8 +15,15 @@ class ResizableImageLabel(QGraphicsView):
     split_indicator_requested = Signal(object, int)
 
 
-    def __init__(self, pixmap, filename):
+    # --- MODIFICATION START ---
+    def __init__(self, pixmap, filename, main_window):
+        """
+        The constructor now accepts a reference to the main_window to avoid
+        fragile parent traversal.
+        """
         super().__init__()
+        self.main_window = main_window # Store the reference
+        # --- MODIFICATION END ---
         self.setScene(QGraphicsScene())
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -31,6 +38,8 @@ class ResizableImageLabel(QGraphicsView):
         self.text_boxes = []
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.original_text_entries = {}
+        # --- NEW: Store persistent selection visuals ---
+        self.selection_visuals = []
 
         self._is_manual_select_active = False
         self._is_selection_active = False
@@ -110,6 +119,32 @@ class ResizableImageLabel(QGraphicsView):
                 self.text_boxes.append(text_box)
 
         QTimer.singleShot(0, self.update_view_transform)
+    
+    # --- MODIFICATION: This method now handles complex QPainterPath objects ---
+    def draw_selections(self, paths):
+        """Draws multiple persistent selection shapes (paths) on the scene."""
+        self.clear_selection_visuals()
+        selection_brush = QBrush(QColor(255, 80, 80, 120)) # Semi-transparent red
+        selection_pen = QPen(QColor(255, 0, 0), 1)
+        for path in paths:
+            # Use QGraphicsPathItem to render the complex shape
+            item = QGraphicsPathItem(path)
+            item.setBrush(selection_brush)
+            item.setPen(selection_pen)
+            item.setZValue(1100) # Ensure it's above selection overlay
+            self.scene().addItem(item)
+            self.selection_visuals.append(item)
+
+    def clear_selection_visuals(self):
+        """Removes all persistent selection rectangles from the scene."""
+        for item in self.selection_visuals:
+            self.scene().removeItem(item)
+        self.selection_visuals.clear()
+        
+    def set_text_visibility(self, visible):
+        """Sets the visibility of all text boxes on this label."""
+        for text_box in self.text_boxes:
+            text_box.setVisible(visible)
 
     def enable_stitching_selection(self, enabled):
         """Activates or deactivates the click-to-select mode for stitching."""
@@ -186,14 +221,33 @@ class ResizableImageLabel(QGraphicsView):
             
             self.split_visuals.append({'line': line, 'handle': handle})
 
-
+    # --- MODIFICATION START ---
     def set_manual_selection_enabled(self, enabled):
+        """
+        Enables or disables manual selection mode (for OCR or Context Fill) and
+        dynamically connects the selection signal to the correct active handler
+        using the stored main_window reference.
+        """
         self._is_manual_select_active = enabled
         if enabled:
-            if not self._is_selection_active: self.setCursor(Qt.CrossCursor)
+            # Use the direct reference to the main window to find the active handler.
+            if self.main_window.manual_ocr_handler.is_active:
+                self.manual_area_selected.connect(self.main_window.manual_ocr_handler.handle_area_selected)
+            elif self.main_window.context_fill_handler.is_active:
+                self.manual_area_selected.connect(self.main_window.context_fill_handler.handle_area_selected)
+
+            if not self._is_selection_active:
+                self.setCursor(Qt.CrossCursor)
         else:
+            # Disconnect all slots from the signal to prevent dangling connections.
+            try:
+                self.manual_area_selected.disconnect()
+            except (TypeError, RuntimeError):
+                pass  # It's okay if it was already disconnected.
+            
             if not self._is_stitching_mode_active and not self._is_split_selection_active:
                 self.setCursor(Qt.ArrowCursor)
+    # --- MODIFICATION END ---
 
     def mousePressEvent(self, event):
         if event.button() != Qt.LeftButton:
@@ -250,12 +304,11 @@ class ResizableImageLabel(QGraphicsView):
             self._rubber_band_origin = QPoint()
             if final_rect_viewport.width() > 4 and final_rect_viewport.height() > 4:
                 rect_scene = self.mapToScene(final_rect_viewport).boundingRect()
-                self._is_selection_active = True
-                self.setCursor(Qt.ArrowCursor)
+                # --- MODIFICATION: The handler now manages selection state.
+                # Do not set _is_selection_active or change cursor here.
                 self.manual_area_selected.emit(rect_scene, self)
             else:
                  self._rubber_band.hide()
-                 self._is_selection_active = False
             event.accept()
         else:
             super().mouseReleaseEvent(event)
@@ -282,9 +335,11 @@ class ResizableImageLabel(QGraphicsView):
         else:
             super().mouseMoveEvent(event)
 
-    def clear_active_selection(self):
+    # --- MODIFIED: Renamed for clarity ---
+    def clear_rubber_band(self):
+        """Hides the temporary rubber band used for drawing a selection."""
         if self._rubber_band: self._rubber_band.hide()
-        self._is_selection_active = False
+        # Reset cursor if mode is still active
         self.set_manual_selection_enabled(self._is_manual_select_active)
 
     def hasHeightForWidth(self):
@@ -298,6 +353,20 @@ class ResizableImageLabel(QGraphicsView):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        QTimer.singleShot(0, self.update_view_transform)
+        
+    def update_pixmap(self, new_pixmap: QPixmap):
+        """Updates the label's pixmap and redraws the view."""
+        self.original_pixmap = new_pixmap
+        self.current_pixmap = new_pixmap
+        
+        if self.pixmap_item:
+            self.pixmap_item.setPixmap(self.current_pixmap)
+        
+        self.scene().setSceneRect(0, 0, self.original_pixmap.width(), self.original_pixmap.height())
+        
+        # Trigger a resize and transform update to reflect the new pixmap
+        self.updateGeometry()
         QTimer.singleShot(0, self.update_view_transform)
 
     def update_view_transform(self):
@@ -378,7 +447,7 @@ class ResizableImageLabel(QGraphicsView):
                 if tb.row_number == row_number or float(tb.row_number) == float(row_number):
                      item_to_remove = tb
                      break
-            except (TypeError, ValueError):
+            except (ValueError, TypeError):
                  if str(tb.row_number) == str(row_number):
                       item_to_remove = tb
                       break
@@ -407,6 +476,8 @@ class ResizableImageLabel(QGraphicsView):
         if self.scene():
             for tb in self.text_boxes[:]: tb.cleanup()
             self.text_boxes = []
+            # --- MODIFICATION: Cleanup new visual items ---
+            self.clear_selection_visuals()
             for visual in self.split_visuals:
                 self.scene().removeItem(visual['line'])
                 self.scene().removeItem(visual['handle'])
