@@ -3,8 +3,8 @@
 **/__pycache__/
 translated_manhwa.zip
 generate-ascii-tree.py
-/launcher/mmtl_launcher.exe
-/launcher/launcher.exe
+mmtl_launcher.exe
+launcher.exe
 nuitka.bash
 *.build
 *.dist
