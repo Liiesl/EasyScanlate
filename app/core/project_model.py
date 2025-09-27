@@ -3,7 +3,7 @@ from PySide6.QtCore import QObject, Signal
 
 class ProjectModel(QObject):
     """
-    A central data management class for the Manhwa OCR Tool project.
+    A central data management class for the Easy Scanlate project.
     It holds all project data, provides methods to manipulate it,
     and emits signals when the data changes.
     Inherits from QObject to support Qt's signal/slot mechanism.

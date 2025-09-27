@@ -1,28 +1,21 @@
 # main.py
 # Application entry point with a splash screen for a smooth startup.
-# FIXED to prevent multiple Home windows and handle app termination properly.
 
-import sys
-import os
+import sys, os, urllib.request, json, py7zr, tempfile, shutil, ctypes, time
 
 # --- Dependency Checking ---
-
-# Nuitka provides the __nuitka_version__ attribute during compilation.
-# We check if it's NOT defined, meaning we are running as a normal script.
+# Check if we are running as a normal script.
 IS_RUNNING_AS_SCRIPT = "__nuitka_version__" not in locals()
 
 try:
-    from PySide6.QtWidgets import QApplication, QSplashScreen, QMessageBox
+    from PySide6.QtWidgets import QApplication, QSplashScreen, QMessageBox, QDialog
     from PySide6.QtCore import Qt, QThread, Signal, QSettings, QDateTime, QObject
     from PySide6.QtGui import QPixmap, QPainter, QFont, QColor
+    from app.ui.window.download_dialog import DownloadDialog
 except ImportError:
     # This entire block will only be executed if running as a script,
-    # as Nuitka will bundle PySide6, preventing this error.
     if IS_RUNNING_AS_SCRIPT:
         try:
-            # If this import succeeds, it means the user has PyQt5.
-            # We need to inform them to install PySide6.
-            # We will use PyQt5 components to show a more robust and helpful error message.
             from PyQt5.QtWidgets import QApplication, QMessageBox #type: ignore
             from PyQt5.QtCore import Qt #type: ignore
 
@@ -38,40 +31,41 @@ except ImportError:
                 "To resolve this, please uninstall PyQt5 and then install PySide6."
             )
             
-            # --- NEW: Make the informative text selectable by the user ---
+            # Make the informative text selectable by the user
             msg_box.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-            # --- NEW: Place the commands in a collapsible "Details" section ---
-            # This text is naturally copyable.
+            # Place the commands in a collapsible "Details" section
             commands = "pip uninstall PyQt5\npip install pyside6"
             msg_box.setDetailedText(
                 "Run the following commands in your terminal or command prompt:\n\n" + commands
             )
-            
-            # --- NEW: Add a custom button to copy the commands to the clipboard ---
+
+            # Add a custom button to copy the commands to the clipboard
             copy_button = msg_box.addButton("Copy Commands", QMessageBox.ActionRole)
             msg_box.setDefaultButton(QMessageBox.Ok)
 
-            msg_box.exec_() # Show the dialog and wait for user interaction
+            msg_box.exec() # Show the dialog and wait for user interaction
 
-            # If the user clicked our custom "Copy" button, copy the commands
             if msg_box.clickedButton() == copy_button:
                 try:
                     clipboard = QApplication.clipboard()
                     clipboard.setText(commands)
-                    # Optional: Show a confirmation message
                     confirm_msg = QMessageBox()
                     confirm_msg.setIcon(QMessageBox.Information)
                     confirm_msg.setText("Commands copied to clipboard!")
-                    confirm_msg.exec_()
+                    confirm_msg.exec()
                 except Exception as e:
                     # Handle cases where clipboard access might fail
                     error_msg = QMessageBox()
                     error_msg.setIcon(QMessageBox.Warning)
                     error_msg.setText(f"Could not access clipboard:\n{e}")
-                    error_msg.exec_()
+                    error_msg.exec()
         except ImportError:
-            print("CRITICAL ERROR: PySide6 is not installed...")
+            # If py7zr is missing when running as a script, this provides a better error.
+            if 'py7zr' not in sys.modules:
+                 print("CRITICAL ERROR: The 'py7zr' library is not installed. Please run 'pip install py7zr'.")
+            else:
+                 print("CRITICAL ERROR: PySide6 is not installed...")
         sys.exit(1)
 
 class CustomSplashScreen(QSplashScreen):
@@ -116,7 +110,6 @@ def get_relative_time(timestamp_str):
     years = seconds // 31536000
     return f"{years} year{'s' if years > 1 else ''} ago"
 
-# main.py
 
 class Preloader(QThread):
     """
@@ -124,24 +117,175 @@ class Preloader(QThread):
     This now includes loading the recent projects list.
     """
     finished = Signal(list)  # Signal will emit the list of loaded project data
-    progress_update = Signal(str)
+    progress_update = Signal(str) 
+    download_progress = Signal(int) # download progress bar
+    preload_failed = Signal(str) # critical preload failures
+    download_complete = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._is_cancelled = False
+
+    def cancel(self):
+        """Public method to signal cancellation to the thread."""
+        self._is_cancelled = True
+
+    def check_and_download_torch(self):
+        """
+        Checks for PyTorch. If not found, downloads, COMBINES, and extracts it.
+        Handles multi-part, pausable, and resumable downloads.
+        """
+        try:
+            import torch
+            self.progress_update.emit("PyTorch libraries found.")
+            return True
+        except ImportError:
+            self.progress_update.emit("PyTorch not found. Preparing download...")
+
+        GH_OWNER = "Liiesl"
+        GH_REPO = "EasyScanlate"
+        ASSET_NAME_BASE = "torch_libs.7z"
+        COMBINED_ARCHIVE_NAME = "torch_libs_combined.7z" # --- NEW ---
+        MAX_RETRIES = 3
+
+        if GH_OWNER == "YourGitHubUsername":
+            error_msg = "Initial setup required: Please configure GitHub repository details in main.py."
+            self.preload_failed.emit(error_msg)
+            return False
+
+        download_dir = os.path.join(tempfile.gettempdir(), "easyscanlate_torch_libs")
+        os.makedirs(download_dir, exist_ok=True)
+        downloaded_parts = []
+        combined_archive_path = os.path.join(download_dir, COMBINED_ARCHIVE_NAME) # --- NEW ---
+
+        try:
+            api_url = f"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}/releases/latest"
+            self.progress_update.emit("Connecting to GitHub...")
+            with urllib.request.urlopen(api_url) as response:
+                if response.status != 200:
+                    raise Exception(f"GitHub API returned status {response.status}")
+                release_data = json.loads(response.read().decode())
+
+            assets = sorted([asset for asset in release_data.get("assets", []) if asset["name"].startswith(ASSET_NAME_BASE)], key=lambda x: x['name'])
+            if not assets:
+                raise Exception(f"No assets matching '{ASSET_NAME_BASE}.*' found in the latest release.")
+
+            total_download_size = sum(asset['size'] for asset in assets)
+            total_bytes_downloaded = 0
+
+            # Calculate already downloaded size for resume progress
+            for asset in assets:
+                local_path = os.path.join(download_dir, asset['name'])
+                if os.path.exists(local_path):
+                    total_bytes_downloaded += os.path.getsize(local_path)
+
+            for asset in assets:
+                if self._is_cancelled:
+                    self.progress_update.emit("Download cancelled.")
+                    return False
+
+                asset_name = asset['name']
+                download_url = asset['browser_download_url']
+                asset_size = asset['size']
+                local_path = os.path.join(download_dir, asset_name)
+                downloaded_parts.append(local_path)
+
+                current_size = 0
+                if os.path.exists(local_path):
+                    current_size = os.path.getsize(local_path)
+
+                if current_size >= asset_size:
+                    self.progress_update.emit(f"Part '{asset_name}' already downloaded.")
+                    continue
+
+                self.progress_update.emit(f"Downloading part '{asset_name}'...")
+
+                for attempt in range(MAX_RETRIES):
+                    if self._is_cancelled:
+                        return False
+                    try:
+                        req = urllib.request.Request(download_url)
+                        req.add_header('Range', f'bytes={current_size}-')
+                        
+                        with urllib.request.urlopen(req) as response:
+                            if response.status not in [200, 206]:
+                                raise Exception(f"Download failed for {asset_name}. Status: {response.status}")
+                            
+                            with open(local_path, 'ab') as f:
+                                while chunk := response.read(8192):
+                                    if self._is_cancelled:
+                                        self.progress_update.emit("Download cancelled during part download.")
+                                        return False
+                                    
+                                    f.write(chunk)
+                                    total_bytes_downloaded += len(chunk)
+                                    percent = (total_bytes_downloaded / total_download_size) * 100
+                                    self.progress_update.emit(f"Downloading... {int(percent)}%")
+                                    self.download_progress.emit(int(percent))
+                        
+                        break
+                    
+                    except Exception as e:
+                        if attempt < MAX_RETRIES - 1:
+                            self.progress_update.emit(f"Download of '{asset_name}' failed (Attempt {attempt + 1}). Retrying in 5 seconds... Error: {e}")
+                            time.sleep(5)
+                        else:
+                            raise Exception(f"Failed to download '{asset_name}' after {MAX_RETRIES} attempts.") from e
+
+            if self._is_cancelled: return False
+
+            # Combine the downloaded parts before extraction
+            self.progress_update.emit("Combining downloaded parts...")
+            with open(combined_archive_path, 'wb') as combined_file:
+                for part_path in downloaded_parts:
+                    with open(part_path, 'rb') as part_file:
+                        shutil.copyfileobj(part_file, combined_file)
+            
+            self.progress_update.emit("Extracting... This may take several minutes.")
+            # Extract from the combined file
+            with py7zr.SevenZipFile(combined_archive_path, mode='r') as z:
+                z.extractall()
+            
+            self.progress_update.emit("Extraction complete.")
+            self.download_complete.emit()
+            return False
+
+        except Exception as e:
+            error_message = f"Failed to download required libraries.\n\nError: {e}\n\nPlease check your internet connection and try again."
+            self.preload_failed.emit(error_message)
+            return False
+        finally:
+            # Clean up all temporary files
+            for part_path in downloaded_parts:
+                if os.path.exists(part_path):
+                    try:
+                        os.remove(part_path)
+                    except OSError as e:
+                        print(f"Warning: Could not remove temporary file {part_path}. Error: {e}")
+            if os.path.exists(combined_archive_path):
+                try:
+                    os.remove(combined_archive_path)
+                except OSError as e:
+                    print(f"Warning: Could not remove combined archive {combined_archive_path}. Error: {e}")
+
 
     def run(self):
         """The entry point for the thread."""
+        
+        if not self.check_and_download_torch():
+            return  # Stop preloading on failure, cancellation, or if a restart is needed.
+
         self.progress_update.emit("Loading application settings...")
         
-        # --- Actually preload the recent projects data ---
         self.progress_update.emit("Finding recent projects...")
         projects_data = []
         try:
-            settings = QSettings("YourCompany", "MangaOCRTool")
+            settings = QSettings("Liiesl", "EasyScanlate")
             recent_projects = settings.value("recent_projects", [])
             recent_timestamps = settings.value("recent_timestamps", {})
             
-            # --- IMPROVED LOOP ---
             for path in recent_projects:
                 filename = os.path.basename(path)
-                # Update the splash screen BEFORE the potentially blocking call
                 self.progress_update.emit(f"Verifying: {filename}...")
                 
                 if os.path.exists(path):
@@ -154,14 +298,97 @@ class Preloader(QThread):
                     })
         except Exception as e:
             print(f"Could not preload recent projects: {e}")
-            # Continue with an empty list on error
 
         self.finished.emit(projects_data)
 
-
-# --- Global variables to hold instances ---
 splash = None
 home_window = None
+
+class UIManager(QObject):
+    """
+    Manages the transition between the splash screen and the download dialog.
+    """
+    def __init__(self, splash, preloader, parent=None):
+        super().__init__(parent)
+        self.splash = splash
+        self.preloader = preloader
+        self.download_dialog = None
+
+        self.preloader.progress_update.connect(self.route_progress_message)
+        self.preloader.download_complete.connect(self.handle_download_complete)
+    
+    def handle_download_complete(self):
+        """Shows a success message and tells the user to restart the app."""
+        if self.download_dialog:
+            self.download_dialog.accept()
+
+        if self.splash:
+            self.splash.close()
+
+        msg_box = QMessageBox()
+        msg_box.setIcon(QMessageBox.Information)
+        msg_box.setWindowTitle("Installation Successful")
+        msg_box.setText("The required libraries have been successfully installed.")
+        # Clear instructions for the user
+        msg_box.setInformativeText("Please close and re-open the application to continue.")
+        msg_box.setStandardButtons(QMessageBox.Ok)
+        msg_box.exec()
+
+        # Exit the application cleanly after the user clicks OK.
+        sys.exit(0)
+
+    def route_progress_message(self, message):
+        """
+        This slot determines whether to show a message on the splash screen
+        or to create and show the download dialog.
+        """
+        if "Preparing download..." in message and not self.download_dialog:
+            self.splash.hide()
+
+            msg_box = QMessageBox()
+            msg_box.setIcon(QMessageBox.Information)
+            msg_box.setWindowTitle("Download Required")
+            msg_box.setText("<h3>Additional Libraries Required</h3>")
+            msg_box.setInformativeText(
+                "To function correctly, this application needs to download the PyTorch library, which is over 1.8GB (4GB when unpacked) in size.<br><br>"
+                "This can take a significant amount of time depending on your internet connection. Please ensure you have a stable connection and enough free disk space before proceeding."
+            )
+            proceed_button = msg_box.addButton("Proceed", QMessageBox.YesRole)
+            cancel_button = msg_box.addButton("I'll do it later", QMessageBox.NoRole)
+            msg_box.setDefaultButton(proceed_button)
+            msg_box.exec()
+
+            if msg_box.clickedButton() == cancel_button:
+                sys.exit(0)
+
+            self.download_dialog = DownloadDialog()
+            
+            self.preloader.progress_update.disconnect(self.route_progress_message)
+            self.preloader.progress_update.connect(self.download_dialog.update_status)
+            self.preloader.download_progress.connect(self.download_dialog.update_progress)
+            
+            self.preloader.finished.connect(self.download_dialog.accept)
+            self.preloader.preload_failed.connect(self.download_dialog.reject)
+
+            result = self.download_dialog.exec()
+
+            if result == QDialog.Rejected:
+                self.preloader.cancel()
+                self.preloader.wait()
+                sys.exit(0)
+
+            self.preloader.progress_update.connect(self.route_progress_message)
+        else:
+            self.splash.showMessage(message)
+
+# Handler for critical startup failures
+def on_preload_failed(error_message):
+    """Shows a critical error message box and terminates the application."""
+    global splash
+    if splash:
+        splash.close()
+    QMessageBox.critical(None, "Application Startup Error", error_message)
+    sys.exit(1)
 
 def on_preload_finished(projects_data):
     """
@@ -172,79 +399,102 @@ def on_preload_finished(projects_data):
     global home_window, splash, preloader
     print("[ENTRY] Preloading finished. Handling window creation.")
 
-    preloader.progress_update.emit("Importing necessary packages...")
-    # --- Import Home from the correct module ---
+    splash.showMessage("Loading main window...")
+    
     from app.ui.window.home_window import Home
     
-    # Only create Home window instance if it doesn't exist
     if home_window is None:
-        # Pass the preloader's progress signal to the Home window constructor.
-        # Now the Home window can also send messages to the splash screen.
         home_window = Home(progress_signal=preloader.progress_update)
         
-        preloader.progress_update.emit("Populating recent projects...")
-        # --- Populate the home window with the preloaded data ---
+        splash.showMessage("Populating recent projects...")
         home_window.populate_recent_projects(projects_data)
         print("[ENTRY] Home window instance created and populated.")
 
-    # Check for a project file in command-line arguments.
     project_to_open = None
     if len(sys.argv) > 1 and sys.argv[1].lower().endswith('.mmtl'):
         path = sys.argv[1]
         if os.path.exists(path):
             project_to_open = path
         else:
-            # We need a parent for the message box. The invisible home_window is perfect.
             QMessageBox.critical(home_window, "Error", f"The project file could not be found:\n{path}")
 
-    # --- THIS IS THE IMPROVED LOGIC ---
     if project_to_open:
         print("[ENTRY] Project file provided. Skipping Home window.")
-        # Immediately close the splash screen. We use .close() instead of .finish()
-        # because we are not transferring control to a visible main window yet.
         splash.close()
-
-        # Now, call the method that creates and shows the LoadingDialog.
-        # Because the dialog is modal (exec_()), this call will block until
-        # the project is loaded or fails, preventing the script from exiting early.
         home_window.launch_main_app(project_to_open)
     else:
         print("[ENTRY] No project file. Showing Home window.")
-        # Show the fully prepared Home window.
         home_window.show()
-
-        # Gracefully close the splash screen, transferring focus to the Home window.
         splash.finish(home_window)
 
     print("[ENTRY] Initial launch sequence complete.")
 
 
 if __name__ == '__main__':
-    # The dependency check is now at the top of the file, so if we get here,
-    # we can assume PySide6 is installed.
+    if sys.platform == 'win32':
+        NEEDS_DOWNLOAD = False
+        try:
+            import torch
+        except ImportError:
+            NEEDS_DOWNLOAD = True
+
+        if NEEDS_DOWNLOAD:
+            try:
+                is_currently_admin = ctypes.windll.shell32.IsUserAnAdmin()
+            except Exception:
+                is_currently_admin = False
+
+            if not is_currently_admin:
+                app = QApplication(sys.argv)
+                
+                msg_box = QMessageBox()
+                msg_box.setIcon(QMessageBox.Warning)
+                msg_box.setWindowTitle("Administrator Privileges Required")
+                msg_box.setText("To download and install required libraries, this application needs to be run with administrator privileges.")
+                msg_box.setInformativeText("Do you want to automatically restart the application as an administrator?")
+                
+                restart_button = msg_box.addButton("Restart as Admin", QMessageBox.YesRole)
+                cancel_button = msg_box.addButton("Cancel", QMessageBox.NoRole)
+                msg_box.setDefaultButton(restart_button)
+                msg_box.exec()
+
+                if msg_box.clickedButton() == restart_button:
+                    try:
+                        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
+                    except Exception as e:
+                        error_msg = QMessageBox()
+                        error_msg.setIcon(QMessageBox.Critical)
+                        error_msg.setWindowTitle("Relaunch Failed")
+                        error_msg.setText(f"Failed to restart with administrator privileges:\n{e}")
+                        error_msg.exec()
+                        sys.exit(1)
+                
+                sys.exit(0)
+
     app = QApplication(sys.argv)
     
-    # Check if application is already running (optional)
-    app.setApplicationName("ManhwaOCR")
+    app.setApplicationName("EasyScanlate")
     app.setApplicationVersion("1.0")
 
-    # --- Create and configure the splash screen pixmap ---
     pixmap = QPixmap(500, 250)
     pixmap.fill(QColor(45, 45, 45))
     painter = QPainter(pixmap)
     painter.setPen(QColor(220, 220, 220))
     font = QFont("Segoe UI", 24, QFont.Bold)
     painter.setFont(font)
-    painter.drawText(pixmap.rect().adjusted(0, -20, 0, -20), Qt.AlignCenter, "ManhwaOCR")
+    painter.drawText(pixmap.rect().adjusted(0, -20, 0, -20), Qt.AlignCenter, "EasyScanlate")
     painter.end()
 
-    # --- Show splash and start preloader ---
     splash = CustomSplashScreen(pixmap)
     splash.show()
 
     preloader = Preloader()
-    preloader.progress_update.connect(splash.showMessage)
+    
+    ui_manager = UIManager(splash, preloader)
+
     preloader.finished.connect(on_preload_finished)
+    preloader.preload_failed.connect(on_preload_failed)
+    
     preloader.start()
 
     sys.exit(app.exec())

@@ -1,6 +1,5 @@
 /downloaded_images/
 /test/
-changelog.md
 **/__pycache__/
 translated_manhwa.zip
 generate-ascii-tree.py
@@ -18,3 +17,6 @@ test.py
 pyqt5
 docs-site-guide.md
 initmodels.py
+retry-update.bat
+test_torch
+minimal_module

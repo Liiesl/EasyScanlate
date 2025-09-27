@@ -4,7 +4,7 @@ from PySide6.QtGui import QCursor
 import qtawesome
 
 # MODIFIED: Import MenuBar and the new TitleBarState enum
-from app.ui.widgets import MenuBar, TitleBarState
+from app.ui.widgets.menu_bar import MenuBar, TitleBarState
 
 class CustomTitleBar(QWidget):
     def __init__(self, parent):

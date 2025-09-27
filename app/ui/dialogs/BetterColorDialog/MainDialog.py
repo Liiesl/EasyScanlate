@@ -29,7 +29,7 @@ class CustomColorDialog(QDialog):
              self._initial_color = QColor(255, 255, 255) # Ensure valid start
         self._current_color = QColor(self._initial_color)
         self._updating_controls = False
-        self._settings = QSettings("YourCompany", "MangaOCRTool")
+        self._settings = QSettings("Liiesl", "EasyScanlate")
         self._eyedropper_helper = None
 
         self.setWindowTitle("Select Color")

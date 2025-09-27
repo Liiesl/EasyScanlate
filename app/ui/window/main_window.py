@@ -7,7 +7,9 @@ from PySide6.QtGui import QPixmap, QKeySequence, QAction, QColor
 import qtawesome as qta
 from app.utils.file_io import export_ocr_results, import_translation_file, export_rendered_images
 from app.ui.components import ResizableImageLabel, CustomScrollArea, ResultsWidget, TextBoxStylePanel, FindReplaceWidget
-from app.ui.widgets import CustomProgressBar, MenuBar, ImportExportMenu, SaveMenu, ActionMenu
+from app.ui.widgets.menu_bar import MenuBar
+from app.ui.widgets.progress_bar import CustomProgressBar
+from app.ui.widgets.menus import SaveMenu, ActionMenu, ImportExportMenu
 from app.handlers import BatchOCRHandler, ManualOCRHandler, StitchHandler, SplitHandler
 from app.core import ProjectModel
 from app.ui.dialogs import SettingsDialog
@@ -19,9 +21,9 @@ import easyocr, os, gc, json, traceback
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Manhwa OCR Tool")
+        self.setWindowTitle("Easy Scanlate")
         self.setGeometry(100, 100, 1200, 600)
-        self.settings = QSettings("YourCompany", "MangaOCRTool")
+        self.settings = QSettings("Liiesl", "EasyScanlate")
         self._load_filter_settings()
         
         # The model is the single source of truth for project data.
@@ -542,7 +544,7 @@ class MainWindow(QMainWindow):
             lang_code = self.language_map.get(self.model.original_language, 'ko')
             use_gpu = self.settings.value("use_gpu", "true").lower() == "true"
             print(f"Initializing EasyOCR reader for {context}: Lang='{lang_code}', GPU={use_gpu}")
-            self.reader = easyocr.Reader([lang_code], gpu=use_gpu, model_storage_directory='.EasyOCR/model')
+            self.reader = easyocr.Reader([lang_code], gpu=use_gpu, model_storage_directory='OCR/model')
             print("EasyOCR reader initialized successfully.")
             return True
         except Exception as e:

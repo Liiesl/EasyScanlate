@@ -126,7 +126,7 @@ def launch_project(self, mmtl_path):
         self.launch_main_app(mmtl_path)
     elif hasattr(self, 'main_window'):
         # Called from MenuBar class
-        from app.ui.window.main_window import LoadingDialog, ProjectLoaderThread
+        from app.ui.window.home_window import LoadingDialog, ProjectLoaderThread
         
         # Show loading dialog
         loading_dialog = LoadingDialog(self)
@@ -137,7 +137,7 @@ def launch_project(self, mmtl_path):
         
         def handle_project_loaded(mmtl_path, temp_dir):
             try:
-                from app.ui.window import MainWindow
+                from app.ui.window.main_window import MainWindow
                 
                 # Update recent projects if we're in the MenuBar class
                 if hasattr(self, 'main_window'):
