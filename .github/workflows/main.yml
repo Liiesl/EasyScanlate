@@ -36,6 +36,7 @@ jobs:
         with:
           script-name: main.py 
           mode: standalone
+          windows-console-mode: disable
           include-data-dir: |
             OCR/model=OCR/model
             assets=assets
