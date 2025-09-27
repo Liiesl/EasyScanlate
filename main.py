@@ -8,8 +8,12 @@ import urllib.request
 import json
 import py7zr # <--- ADDED for .7z support
 import tempfile # <--- MODIFIED: Added to handle temporary file downloads
+# --- NEW: Import shutil for the file combining step ---
+import shutil
 # --- NEW IMPORT for Windows administrator check ---
 import ctypes
+# --- NEW IMPORTS for retry logic ---
+import time
 
 
 # --- Dependency Checking ---
@@ -155,9 +159,8 @@ class Preloader(QThread):
 
     def check_and_download_torch(self):
         """
-        Checks if PyTorch ('torch') is installed. If not, downloads and extracts it
-        from a specified GitHub release before the main app starts.
-        Returns True on success or if already present, False on critical failure.
+        Checks for PyTorch. If not found, downloads, COMBINES, and extracts it.
+        Handles multi-part, pausable, and resumable downloads.
         """
         try:
             import torch
@@ -166,73 +169,132 @@ class Preloader(QThread):
         except ImportError:
             self.progress_update.emit("PyTorch not found. Preparing download...")
 
-        # --- ACTION REQUIRED: Configure your GitHub repository details here ---
-        GH_OWNER = "Liiesl"      # Your GitHub username
-        GH_REPO = "EasyScanlate"              # Your repository name
-        ASSET_NAME = "torch_libs.7z"          # <--- MODIFIED to use .7z
-        
+        GH_OWNER = "Liiesl"
+        GH_REPO = "EasyScanlate"
+        ASSET_NAME_BASE = "torch_libs.7z"
+        COMBINED_ARCHIVE_NAME = "torch_libs_combined.7z" # --- NEW ---
+        MAX_RETRIES = 3
+
         if GH_OWNER == "YourGitHubUsername":
-            error_msg = "Initial setup required: Please configure GitHub repository details in main.py inside the 'check_and_download_torch' function before compiling."
-            self.progress_update.emit("ERROR: GitHub details not configured.")
+            error_msg = "Initial setup required: Please configure GitHub repository details in main.py."
             self.preload_failed.emit(error_msg)
             return False
-            
-        archive_path = os.path.join(tempfile.gettempdir(), ASSET_NAME)
-            
+
+        download_dir = os.path.join(tempfile.gettempdir(), "easyscanlate_torch_libs")
+        os.makedirs(download_dir, exist_ok=True)
+        downloaded_parts = []
+        combined_archive_path = os.path.join(download_dir, COMBINED_ARCHIVE_NAME) # --- NEW ---
+
         try:
             api_url = f"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}/releases/latest"
             self.progress_update.emit("Connecting to GitHub...")
             with urllib.request.urlopen(api_url) as response:
-                if response.status != 200: raise Exception(f"GitHub API returned status {response.status}")
+                if response.status != 200:
+                    raise Exception(f"GitHub API returned status {response.status}")
                 release_data = json.loads(response.read().decode())
+
+            assets = sorted([asset for asset in release_data.get("assets", []) if asset["name"].startswith(ASSET_NAME_BASE)], key=lambda x: x['name'])
+            if not assets:
+                raise Exception(f"No assets matching '{ASSET_NAME_BASE}.*' found in the latest release.")
+
+            total_download_size = sum(asset['size'] for asset in assets)
+            total_bytes_downloaded = 0
+
+            # Calculate already downloaded size for resume progress
+            for asset in assets:
+                local_path = os.path.join(download_dir, asset['name'])
+                if os.path.exists(local_path):
+                    total_bytes_downloaded += os.path.getsize(local_path)
+
+            for asset in assets:
+                if self._is_cancelled:
+                    self.progress_update.emit("Download cancelled.")
+                    return False
+
+                asset_name = asset['name']
+                download_url = asset['browser_download_url']
+                asset_size = asset['size']
+                local_path = os.path.join(download_dir, asset_name)
+                downloaded_parts.append(local_path)
+
+                current_size = 0
+                if os.path.exists(local_path):
+                    current_size = os.path.getsize(local_path)
+
+                if current_size >= asset_size:
+                    self.progress_update.emit(f"Part '{asset_name}' already downloaded.")
+                    continue
+
+                self.progress_update.emit(f"Downloading part '{asset_name}'...")
+
+                for attempt in range(MAX_RETRIES):
+                    if self._is_cancelled:
+                        return False
+                    try:
+                        req = urllib.request.Request(download_url)
+                        req.add_header('Range', f'bytes={current_size}-')
+                        
+                        with urllib.request.urlopen(req) as response:
+                            if response.status not in [200, 206]:
+                                raise Exception(f"Download failed for {asset_name}. Status: {response.status}")
+                            
+                            with open(local_path, 'ab') as f:
+                                while chunk := response.read(8192):
+                                    if self._is_cancelled:
+                                        self.progress_update.emit("Download cancelled during part download.")
+                                        return False
+                                    
+                                    f.write(chunk)
+                                    total_bytes_downloaded += len(chunk)
+                                    percent = (total_bytes_downloaded / total_download_size) * 100
+                                    self.progress_update.emit(f"Downloading... {int(percent)}%")
+                                    self.download_progress.emit(int(percent))
+                        
+                        break
+                    
+                    except Exception as e:
+                        if attempt < MAX_RETRIES - 1:
+                            self.progress_update.emit(f"Download of '{asset_name}' failed (Attempt {attempt + 1}). Retrying in 5 seconds... Error: {e}")
+                            time.sleep(5)
+                        else:
+                            raise Exception(f"Failed to download '{asset_name}' after {MAX_RETRIES} attempts.") from e
+
+            if self._is_cancelled: return False
+
+            # --- NEW: Combine the downloaded parts before extraction ---
+            self.progress_update.emit("Combining downloaded parts...")
+            with open(combined_archive_path, 'wb') as combined_file:
+                for part_path in downloaded_parts:
+                    with open(part_path, 'rb') as part_file:
+                        shutil.copyfileobj(part_file, combined_file)
             
-            download_url = next((asset["browser_download_url"] for asset in release_data.get("assets", []) if asset["name"] == ASSET_NAME), None)
-            if not download_url: raise Exception(f"Asset '{ASSET_NAME}' not found in the latest release.")
-
-            self.progress_update.emit(f"Downloading '{ASSET_NAME}'...")
-
-            with urllib.request.urlopen(download_url) as response:
-                if response.status != 200: raise Exception(f"Download failed. Status: {response.status}")
-                total_size = int(response.getheader('Content-Length', 0))
-                bytes_downloaded = 0
-                chunk_size = 8192
-                with open(archive_path, 'wb') as f:
-                    while chunk := response.read(chunk_size):
-                        if self._is_cancelled:
-                            self.progress_update.emit("Download cancelled.")
-                            return False
-
-                        f.write(chunk)
-                        bytes_downloaded += len(chunk)
-                        if total_size > 0:
-                            percent = (bytes_downloaded / total_size) * 100
-                            self.progress_update.emit(f"Downloading... {int(percent)}%")
-                            self.download_progress.emit(int(percent))
-            
-            if self._is_cancelled:
-                self.progress_update.emit("Operation cancelled before extraction.")
-                return False
-
-            self.progress_update.emit("Download complete. Extracting files... This may take a few minutes...")
-            with py7zr.SevenZipFile(archive_path, mode='r') as z:
+            self.progress_update.emit("Extracting... This may take several minutes.")
+            # --- MODIFIED: Extract from the combined file ---
+            with py7zr.SevenZipFile(combined_archive_path, mode='r') as z:
                 z.extractall()
             
             self.progress_update.emit("Extraction complete.")
-
-            # --- MODIFIED: Emit the download complete signal. The main thread will handle the user prompt. ---
             self.download_complete.emit()
-            
-            # Return False to stop the rest of the preloader task in this run.
-            # The app will exit, and on the next run, this function will return True.
             return False
 
         except Exception as e:
-            error_message = f"Failed to download required libraries.\n\nError: {e}\n\nPlease check your internet connection and try again. If the issue persists, the asset may be missing from the GitHub release."
+            error_message = f"Failed to download required libraries.\n\nError: {e}\n\nPlease check your internet connection and try again."
             self.preload_failed.emit(error_message)
             return False
         finally:
-            if os.path.exists(archive_path):
-                os.remove(archive_path)
+            # --- MODIFIED: Clean up all temporary files ---
+            for part_path in downloaded_parts:
+                if os.path.exists(part_path):
+                    try:
+                        os.remove(part_path)
+                    except OSError as e:
+                        print(f"Warning: Could not remove temporary file {part_path}. Error: {e}")
+            if os.path.exists(combined_archive_path):
+                try:
+                    os.remove(combined_archive_path)
+                except OSError as e:
+                    print(f"Warning: Could not remove combined archive {combined_archive_path}. Error: {e}")
+
 
     def run(self):
         """The entry point for the thread."""

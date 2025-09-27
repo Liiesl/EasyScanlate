@@ -50,20 +50,20 @@ jobs:
           file-version: "1.0.0.0"
           product-version: "1.0.0.0"
 
-      # 5. Create a 7z archive of the PyTorch libraries with best compression
-      - name: Zip PyTorch Libraries with 7-Zip
+      # 5. Create a split 7z archive of the PyTorch libraries
+      - name: Zip and Split PyTorch Libraries with 7-Zip
         run: |
           cd build/main.dist
-          7z a -t7z -mx=9 -mf=off ..\..\torch_libs.7z torch
+          7z a -t7z -mx=9 -mf=off -v300m ..\..\torch_libs.7z torch
           cd ..\..
         shell: pwsh
 
-      # Upload PyTorch 7z as a workflow artifact
-      - name: Upload PyTorch Libraries as Artifact
+      # Upload PyTorch 7z parts as a workflow artifact
+      - name: Upload PyTorch Library Parts as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: torch_libs.7z
-          path: torch_libs.7z
+          name: torch_libs_parts
+          path: torch_libs.7z.*
 
       # Zip the entire build output (excluding torch) for debugging
       - name: Zip Full Build Output (Without PyTorch)
@@ -89,7 +89,6 @@ jobs:
         shell: pwsh
 
       - name: Compile NSIS installer
-        # The /DLATEST_TAG is no longer needed as the URL is removed from the script
         run: makensis dev\installer\installer.nsi
 
       - name: Move Installer to Root Directory
@@ -112,9 +111,9 @@ jobs:
           draft: true 
           preserve_order: true
           body_path: changelog.md
-          # Upload both files to the release page
+          # Upload both the installer and all the library parts to the release
           files: |
             EasyScanlate-Installer.exe
-            torch_libs.7z
+            torch_libs.7z.*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
