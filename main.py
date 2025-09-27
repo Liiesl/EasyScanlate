@@ -1,41 +1,21 @@
 # main.py
 # Application entry point with a splash screen for a smooth startup.
 
-import sys
-import os
-# --- NEW IMPORTS for downloader and 7z extraction ---
-import urllib.request
-import json
-import py7zr # <--- ADDED for .7z support
-import tempfile # <--- MODIFIED: Added to handle temporary file downloads
-# --- NEW: Import shutil for the file combining step ---
-import shutil
-# --- NEW IMPORT for Windows administrator check ---
-import ctypes
-# --- NEW IMPORTS for retry logic ---
-import time
-
+import sys, os, urllib.request, json, py7zr, tempfile, shutil, ctypes, time
 
 # --- Dependency Checking ---
-
-# Nuitka provides the __nuitka_version__ attribute during compilation.
-# We check if it's NOT defined, meaning we are running as a normal script.
+# Check if we are running as a normal script.
 IS_RUNNING_AS_SCRIPT = "__nuitka_version__" not in locals()
 
 try:
     from PySide6.QtWidgets import QApplication, QSplashScreen, QMessageBox, QDialog
     from PySide6.QtCore import Qt, QThread, Signal, QSettings, QDateTime, QObject
     from PySide6.QtGui import QPixmap, QPainter, QFont, QColor
-    # --- NEW: Import the download dialog ---
     from app.ui.window.download_dialog import DownloadDialog
 except ImportError:
     # This entire block will only be executed if running as a script,
-    # as Nuitka will bundle PySide6, preventing this error.
     if IS_RUNNING_AS_SCRIPT:
         try:
-            # If this import succeeds, it means the user has PyQt5.
-            # We need to inform them to install PySide6.
-            # We will use PyQt5 components to show a more robust and helpful error message.
             from PyQt5.QtWidgets import QApplication, QMessageBox #type: ignore
             from PyQt5.QtCore import Qt #type: ignore
 
@@ -51,28 +31,25 @@ except ImportError:
                 "To resolve this, please uninstall PyQt5 and then install PySide6."
             )
             
-            # --- NEW: Make the informative text selectable by the user ---
+            # Make the informative text selectable by the user
             msg_box.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-            # --- NEW: Place the commands in a collapsible "Details" section ---
-            # This text is naturally copyable.
+            # Place the commands in a collapsible "Details" section
             commands = "pip uninstall PyQt5\npip install pyside6"
             msg_box.setDetailedText(
                 "Run the following commands in your terminal or command prompt:\n\n" + commands
             )
-            
-            # --- NEW: Add a custom button to copy the commands to the clipboard ---
+
+            # Add a custom button to copy the commands to the clipboard
             copy_button = msg_box.addButton("Copy Commands", QMessageBox.ActionRole)
             msg_box.setDefaultButton(QMessageBox.Ok)
 
             msg_box.exec() # Show the dialog and wait for user interaction
 
-            # If the user clicked our custom "Copy" button, copy the commands
             if msg_box.clickedButton() == copy_button:
                 try:
                     clipboard = QApplication.clipboard()
                     clipboard.setText(commands)
-                    # Optional: Show a confirmation message
                     confirm_msg = QMessageBox()
                     confirm_msg.setIcon(QMessageBox.Information)
                     confirm_msg.setText("Commands copied to clipboard!")
@@ -133,7 +110,6 @@ def get_relative_time(timestamp_str):
     years = seconds // 31536000
     return f"{years} year{'s' if years > 1 else ''} ago"
 
-# main.py
 
 class Preloader(QThread):
     """
@@ -141,12 +117,9 @@ class Preloader(QThread):
     This now includes loading the recent projects list.
     """
     finished = Signal(list)  # Signal will emit the list of loaded project data
-    progress_update = Signal(str)
-    # --- NEW: Signal for the download progress bar ---
-    download_progress = Signal(int)
-    # --- NEW: Signal for handling critical preload failures ---
-    preload_failed = Signal(str)
-    # --- MODIFIED: Signal to indicate the download is complete ---
+    progress_update = Signal(str) 
+    download_progress = Signal(int) # download progress bar
+    preload_failed = Signal(str) # critical preload failures
     download_complete = Signal()
 
     def __init__(self, parent=None):
@@ -261,7 +234,7 @@ class Preloader(QThread):
 
             if self._is_cancelled: return False
 
-            # --- NEW: Combine the downloaded parts before extraction ---
+            # Combine the downloaded parts before extraction
             self.progress_update.emit("Combining downloaded parts...")
             with open(combined_archive_path, 'wb') as combined_file:
                 for part_path in downloaded_parts:
@@ -269,7 +242,7 @@ class Preloader(QThread):
                         shutil.copyfileobj(part_file, combined_file)
             
             self.progress_update.emit("Extracting... This may take several minutes.")
-            # --- MODIFIED: Extract from the combined file ---
+            # Extract from the combined file
             with py7zr.SevenZipFile(combined_archive_path, mode='r') as z:
                 z.extractall()
             
@@ -282,7 +255,7 @@ class Preloader(QThread):
             self.preload_failed.emit(error_message)
             return False
         finally:
-            # --- MODIFIED: Clean up all temporary files ---
+            # Clean up all temporary files
             for part_path in downloaded_parts:
                 if os.path.exists(part_path):
                     try:
@@ -328,13 +301,13 @@ class Preloader(QThread):
 
         self.finished.emit(projects_data)
 
-
-# --- Global variables to hold instances ---
 splash = None
 home_window = None
 
-# --- NEW: UI Manager to handle switching between splash and download dialog ---
 class UIManager(QObject):
+    """
+    Manages the transition between the splash screen and the download dialog.
+    """
     def __init__(self, splash, preloader, parent=None):
         super().__init__(parent)
         self.splash = splash
@@ -342,10 +315,8 @@ class UIManager(QObject):
         self.download_dialog = None
 
         self.preloader.progress_update.connect(self.route_progress_message)
-        # --- MODIFIED: Connect to the new download_complete signal ---
         self.preloader.download_complete.connect(self.handle_download_complete)
     
-    # --- MODIFIED: Renamed from handle_restart_required to handle_download_complete ---
     def handle_download_complete(self):
         """Shows a success message and tells the user to restart the app."""
         if self.download_dialog:
@@ -358,7 +329,7 @@ class UIManager(QObject):
         msg_box.setIcon(QMessageBox.Information)
         msg_box.setWindowTitle("Installation Successful")
         msg_box.setText("The required libraries have been successfully installed.")
-        # --- MODIFIED: Clear instructions for the user ---
+        # Clear instructions for the user
         msg_box.setInformativeText("Please close and re-open the application to continue.")
         msg_box.setStandardButtons(QMessageBox.Ok)
         msg_box.exec()
@@ -410,7 +381,7 @@ class UIManager(QObject):
         else:
             self.splash.showMessage(message)
 
-# --- NEW: Handler for critical startup failures ---
+# Handler for critical startup failures
 def on_preload_failed(error_message):
     """Shows a critical error message box and terminates the application."""
     global splash
