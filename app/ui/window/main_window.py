@@ -10,7 +10,7 @@ from app.ui.components import ResizableImageLabel, CustomScrollArea, ResultsWidg
 from app.ui.widgets.menu_bar import MenuBar
 from app.ui.widgets.progress_bar import CustomProgressBar
 from app.ui.widgets.menus import SaveMenu, ActionMenu, ImportExportMenu
-from app.handlers import BatchOCRHandler, ManualOCRHandler, StitchHandler, SplitHandler, ContextFillHandler
+from app.handlers import BatchOCRHandler, ManualOCRHandler, StitchHandler, SplitHandler
 from app.core import ProjectModel
 from app.ui.dialogs import SettingsDialog
 from app.ui.window.translation_window import TranslationWindow
@@ -47,7 +47,6 @@ class MainWindow(QMainWindow):
         }
 
         self._is_handling_selection = False # Flag to prevent signal loops
-        self._text_is_visible = True # State for showing/hiding text boxes
 
         self.init_ui()
         # Connect actions that depend on widgets created in init_ui
@@ -56,14 +55,10 @@ class MainWindow(QMainWindow):
         self.manual_ocr_handler = ManualOCRHandler(self)
         self.stitch_handler = StitchHandler(self)
         self.split_handler = SplitHandler(self)
-        self.context_fill_handler = ContextFillHandler(self)
-        
-        # --- MODIFICATION START ---
-        # Centralize UI position updates for all handlers.
-        # This ensures floating widgets stay in place during both resize and scroll events.
-        self.scroll_area.resized.connect(self.update_handler_ui_positions)
-        self.scroll_area.verticalScrollBar().valueChanged.connect(self.update_handler_ui_positions)
-        # --- MODIFICATION END ---
+        # Connect stitch handler UI positioning ---
+        self.scroll_area.resized.connect(lambda: self.stitch_handler._update_widget_position() if self.stitch_handler.is_active else None)
+        # Connect split handler UI positioning ---
+        self.scroll_area.resized.connect(lambda: self.split_handler._update_widget_position() if self.split_handler.is_active else None)
 
         self.scroll_content = QWidget()
         self.reader = None
@@ -200,6 +195,8 @@ class MainWindow(QMainWindow):
         right_panel.addWidget(self.right_content_splitter, 1)
         self.style_panel_size = None
 
+        # --- FIX ENDS HERE ---
+
         bottom_controls_layout = QHBoxLayout()
         self.btn_translate = QPushButton(qta.icon('fa5s.language', color='white'), "AI Translation")
         self.btn_translate.clicked.connect(self.start_translation)
@@ -275,17 +272,9 @@ class MainWindow(QMainWindow):
         menu.move(menu_pos)
         menu.show()
     
-    def toggle_text_visibility(self):
-        """Toggles the visibility of all text boxes in all image labels."""
-        self._text_is_visible = not self._text_is_visible
-        for i in range(self.scroll_layout.count()):
-            widget = self.scroll_layout.itemAt(i).widget()
-            if isinstance(widget, ResizableImageLabel):
-                widget.set_text_visibility(self._text_is_visible)
-        
-    def start_context_fill(self):
-        """Starts the context fill (inpainting) process via its handler."""
-        self.context_fill_handler.start_mode()
+    def hide_text(self):
+        # Placeholder for future implementation
+        return
     
     # --- NEW: Method to start image splitting ---
     def split_images(self):
@@ -295,15 +284,6 @@ class MainWindow(QMainWindow):
     def stitch_images(self):
         """Starts the image stitching process via its handler."""
         self.stitch_handler.start_stitching_mode()
-
-    def update_handler_ui_positions(self):
-        """Updates the position of any active handler UI overlays."""
-        if self.stitch_handler.is_active:
-            self.stitch_handler._update_widget_position()
-        if self.split_handler.is_active:
-            self.split_handler._update_widget_position()
-        if self.context_fill_handler.is_active:
-            self.context_fill_handler._update_widget_position()
 
     def update_profile_selector(self):
         """Syncs the profile dropdown with the profiles from the model."""
@@ -369,8 +349,6 @@ class MainWindow(QMainWindow):
             self.stitch_handler.cancel_stitching_mode()
         if self.split_handler.is_active:
             self.split_handler.cancel_splitting_mode()
-        if self.context_fill_handler.is_active:
-            self.context_fill_handler.cancel_mode()
 
         image_paths = self.model.image_paths
         
@@ -387,14 +365,10 @@ class MainWindow(QMainWindow):
                  pixmap = QPixmap(image_path)
                  if pixmap.isNull(): continue
                  filename = os.path.basename(image_path)
-                 # --- MODIFICATION START ---
-                 # Pass the main window instance 'self' to the ResizableImageLabel constructor.
-                 label = ResizableImageLabel(pixmap, filename, self)
-                 # --- MODIFICATION END ---
+                 label = ResizableImageLabel(pixmap, filename)
                  label.textBoxDeleted.connect(self.delete_row)
                  label.textBoxSelected.connect(self.handle_text_box_selected)
-                 # The manual_area_selected signal is now dynamically connected/disconnected
-                 # inside the ResizableImageLabel itself.
+                 label.manual_area_selected.connect(self.manual_ocr_handler.handle_area_selected)
                  self.scroll_layout.addWidget(label)
             except Exception as e:
                  print(f"Error creating ResizableImageLabel for {image_path}: {e}")
