@@ -7,7 +7,7 @@
 !define APP_NAME "EasyScanlate"
 !define APP_PUBLISHER "Liie"
 !define APP_EXE "main.exe"
-!$10.1.0" ; Use a consistent versioning scheme
+!define APP_VERSION "0.1.0" ; Use a consistent versioning scheme
 
 ; --- Registry & Path Definitions ---
 !define REG_UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
