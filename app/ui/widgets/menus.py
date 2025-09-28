@@ -1,3 +1,5 @@
+# app/ui/widgets/menus.py
+
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton
 from PySide6.QtCore import Qt
 import qtawesome as qta
@@ -76,46 +78,39 @@ class SaveMenu(QWidget):
 
 class ActionMenu(QWidget):
     """
-    A custom popup menu for various image/text actions.
+    A custom popup menu for various image/text actions. It is now fully
+    independent of MainWindow and operates by calling methods on the scroll_area.
     """
-    def __init__(self, main_window):
-        """ The menu now takes the main_window instance to call its methods. """
-        super().__init__(main_window)
-        self.main_window = main_window
+    def __init__(self, scroll_area):
+        """ The menu takes the scroll_area instance to call its handler methods. """
+        super().__init__(scroll_area)
+        self.scroll_area = scroll_area
         
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Popup)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_DeleteOnClose)
 
-        # --- Styling ---
         self.setStyleSheet(MENU_STYLES)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(1)
 
-        # Action Buttons
+        # Action Buttons - These now call methods on handlers owned by the scroll_area
         btn_hide_text = QPushButton(qta.icon('fa5s.eye-slash', color='white'), " Show/Hide Text")
-        btn_hide_text.clicked.connect(lambda: (self.main_window.toggle_text_visibility(), self.close()))
+        btn_hide_text.clicked.connect(lambda: (self.scroll_area.toggle_text_visibility(), self.close()))
         layout.addWidget(btn_hide_text)
         
-        # --- NEW: Context Fill Button ---
         btn_context_fill = QPushButton(qta.icon('fa5s.fill-drip', color='white'), " Context Fill")
-        btn_context_fill.clicked.connect(lambda: (self.main_window.start_context_fill(), self.close()))
+        btn_context_fill.clicked.connect(lambda: (self.scroll_area.context_fill_handler.start_mode(), self.close()))
         layout.addWidget(btn_context_fill)
 
         btn_split_images = QPushButton(qta.icon('fa5s.object-ungroup', color='white'), " Split Images")
-        btn_split_images.clicked.connect(lambda: (self.main_window.split_images(), self.close()))
+        btn_split_images.clicked.connect(lambda: (self.scroll_area.split_handler.start_splitting_mode(), self.close()))
         layout.addWidget(btn_split_images)
         
         btn_stitch_images = QPushButton(qta.icon('fa5s.object-group', color='white'), " Stitch Images")
-        btn_stitch_images.clicked.connect(lambda: (self.main_window.stitch_images(), self.close()))
+        btn_stitch_images.clicked.connect(lambda: (self.scroll_area.stitch_handler.start_stitching_mode(), self.close()))
         layout.addWidget(btn_stitch_images)
-
-        # Placeholders
-        btn_hide_text.setEnabled(True)
-        btn_context_fill.setEnabled(True) # --- NEW ---
-        btn_split_images.setEnabled(True)
-        btn_stitch_images.setEnabled(True)
 
         self.setFixedSize(self.sizeHint())

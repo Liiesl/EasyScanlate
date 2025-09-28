@@ -1,7 +1,7 @@
 # main.py
 # Application entry point with a splash screen for a smooth startup.
 
-import sys, os, urllib.request, json, py7zr, tempfile, shutil, ctypes, time
+import sys, os, urllib.request, json, py7zr, tempfile, shutil, ctypes, time, importlib.util
 
 # --- Dependency Checking ---
 # Check if we are running as a normal script.
@@ -135,11 +135,10 @@ class Preloader(QThread):
         Checks for PyTorch. If not found, downloads, COMBINES, and extracts it.
         Handles multi-part, pausable, and resumable downloads.
         """
-        try:
-            import torch
+        if importlib.util.find_spec("torch") is not None:
             self.progress_update.emit("PyTorch libraries found.")
             return True
-        except ImportError:
+        else:
             self.progress_update.emit("PyTorch not found. Preparing download...")
 
         GH_OWNER = "Liiesl"
@@ -432,11 +431,8 @@ def on_preload_finished(projects_data):
 
 if __name__ == '__main__':
     if sys.platform == 'win32':
-        NEEDS_DOWNLOAD = False
-        try:
-            import torch
-        except ImportError:
-            NEEDS_DOWNLOAD = True
+        # Use a faster check that doesn't import the whole library
+        NEEDS_DOWNLOAD = importlib.util.find_spec("torch") is None
 
         if NEEDS_DOWNLOAD:
             try:

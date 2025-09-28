@@ -10,7 +10,7 @@ from app.ui.components import ResizableImageLabel, CustomScrollArea, ResultsWidg
 from app.ui.widgets.menu_bar import MenuBar
 from app.ui.widgets.progress_bar import CustomProgressBar
 from app.ui.widgets.menus import SaveMenu, ActionMenu, ImportExportMenu
-from app.handlers import BatchOCRHandler, ManualOCRHandler, StitchHandler, SplitHandler, ContextFillHandler
+from app.handlers import BatchOCRHandler # Only batch handler is needed here
 from app.core import ProjectModel
 from app.ui.dialogs import SettingsDialog
 from app.ui.window.translation_window import TranslationWindow
@@ -26,7 +26,6 @@ class MainWindow(QMainWindow):
         self.settings = QSettings("Liiesl", "EasyScanlate")
         self._load_filter_settings()
         
-        # The model is the single source of truth for project data.
         self.model = ProjectModel()
         self.model.project_loaded.connect(self.on_project_loaded)
         self.model.project_load_failed.connect(self.on_project_load_failed)
@@ -34,36 +33,16 @@ class MainWindow(QMainWindow):
         self.model.profiles_updated.connect(self.update_profile_selector)
 
         self.combine_action = QAction("Combine Rows", self)
-        # Connection is deferred until after results_widget is created
         self.find_action = QAction("Find/Replace", self)
         self.find_action.triggered.connect(self.toggle_find_widget)
         self.addAction(self.find_action)
         self.update_shortcut()
 
-        self.language_map = {
-            "Korean": "ko",
-            "Chinese": "ch_sim",
-            "Japanese": "ja",
-        }
-
-        self._is_handling_selection = False # Flag to prevent signal loops
-        self._text_is_visible = True # State for showing/hiding text boxes
+        self.language_map = { "Korean": "ko", "Chinese": "ch_sim", "Japanese": "ja" }
+        self._is_handling_selection = False
 
         self.init_ui()
-        # Connect actions that depend on widgets created in init_ui
         self.combine_action.triggered.connect(self.results_widget.combine_selected_rows)
-
-        self.manual_ocr_handler = ManualOCRHandler(self)
-        self.stitch_handler = StitchHandler(self)
-        self.split_handler = SplitHandler(self)
-        self.context_fill_handler = ContextFillHandler(self)
-        
-        # --- MODIFICATION START ---
-        # Centralize UI position updates for all handlers.
-        # This ensures floating widgets stay in place during both resize and scroll events.
-        self.scroll_area.resized.connect(self.update_handler_ui_positions)
-        self.scroll_area.verticalScrollBar().valueChanged.connect(self.update_handler_ui_positions)
-        # --- MODIFICATION END ---
 
         self.scroll_content = QWidget()
         self.reader = None
@@ -75,7 +54,6 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'style_panel'):
              self.style_panel.style_changed.connect(self.update_text_box_style)
         
-        # --- MODIFIED: State is now managed by a single handler instance ---
         self.batch_handler = None 
 
     def _load_filter_settings(self):
@@ -89,17 +67,15 @@ class MainWindow(QMainWindow):
         self.menuBar = MenuBar(self)
         self.setMenuBar(self.menuBar)
         main_widget = QWidget()
+        main_widget.setObjectName("CentralWidget") # <-- ADD THIS LINE
         main_layout = QHBoxLayout()
         self.colors = COLORS
         self.setStyleSheet(MAIN_STYLESHEET)
-        # --- NEW: Call to initialize profile selector UI ---
         self.update_profile_selector()
 
-        # Left Panel
         left_panel = QVBoxLayout()
         left_panel.setSpacing(20)
 
-        #--- Settings and Progress Bar Layout ---
         settings_layout = QHBoxLayout()
         self.btn_settings = QPushButton(qta.icon('fa5s.cog', color='white'), "")
         self.btn_settings.setFixedSize(50, 50)
@@ -108,20 +84,15 @@ class MainWindow(QMainWindow):
 
         self.ocr_progress = CustomProgressBar()
         self.ocr_progress.setFixedHeight(20)
-        settings_layout.addWidget(self.ocr_progress, 1) # Add stretch factor to fill space
-
+        settings_layout.addWidget(self.ocr_progress, 1)
         left_panel.addLayout(settings_layout)
 
-        self.scroll_area = CustomScrollArea(self)
+        # CustomScrollArea is now the owner of the action handlers.
+        self.scroll_area = CustomScrollArea(main_window=self)
         self.scroll_area.save_requested.connect(
             lambda button: self._show_menu(SaveMenu, button, 'top right')
         )
-        self.scroll_area.action_menu_requested.connect(
-            lambda button: self._show_menu(ActionMenu, button, 'top left')
-        )
-        # Connection for stitch handler UI positioning ---
-        self.scroll_area.resized.connect(lambda: self.stitch_handler._update_widget_position() if self.stitch_handler.is_active else None)
-
+        
         self.scroll_content = QWidget()
         self.scroll_content.setStyleSheet("background-color: transparent;")
         self.scroll_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -152,9 +123,11 @@ class MainWindow(QMainWindow):
         self.btn_manual_ocr = QPushButton(qta.icon('fa5s.crop-alt', color='white'), "Manual OCR")
         self.btn_manual_ocr.setFixedWidth(160)
         self.btn_manual_ocr.setCheckable(True)
-
+        # Connect to the handler owned by the scroll_area
+        self.btn_manual_ocr.toggled.connect(self.scroll_area.manual_ocr_handler.toggle_mode)
         self.btn_manual_ocr.setEnabled(False)
         button_layout.addWidget(self.btn_manual_ocr)
+        
         file_button_layout = QHBoxLayout()
         file_button_layout.setAlignment(Qt.AlignRight)
         file_button_layout.setSpacing(20)
@@ -162,7 +135,6 @@ class MainWindow(QMainWindow):
         self.profile_selector = QComboBox(self)
         self.profile_selector.setFixedWidth(220)
         self.profile_selector.setToolTip("Switch between different text profiles (e.g., Original, User Edits, Translations).")
-        # --- CORRECTED LINE ---
         self.profile_selector.activated.connect(self.on_profile_selected)
         file_button_layout.addWidget(self.profile_selector)
 
@@ -176,24 +148,18 @@ class MainWindow(QMainWindow):
         button_layout.addLayout(file_button_layout)
         right_panel.addLayout(button_layout)
 
-        # --- FIX STARTS HERE ---
-        # The creation of FindReplaceWidget is moved to after ResultsWidget is created.
-
         self.right_content_splitter = QSplitter(Qt.Horizontal)
         self.style_panel = TextBoxStylePanel(default_style=DEFAULT_TEXT_STYLE)
         self.style_panel.hide()
         self.right_content_splitter.addWidget(self.style_panel)
 
-        # 1. Create ResultsWidget first, as FindReplaceWidget depends on it.
         self.results_widget = ResultsWidget(self, self.combine_action, self.find_action)
         self.results_widget.rowSelected.connect(self.on_result_row_selected)
 
-        # 2. Now it is safe to create FindReplaceWidget.
         self.find_replace_widget = FindReplaceWidget(self)
-        right_panel.addWidget(self.find_replace_widget) # Add it to the layout above the splitter
+        right_panel.addWidget(self.find_replace_widget)
         self.find_replace_widget.hide()
 
-        # 3. Add the now-created results_widget to the splitter.
         self.right_content_splitter.addWidget(self.results_widget)
         self.right_content_splitter.setStretchFactor(0, 0)
         self.right_content_splitter.setStretchFactor(1, 1)
@@ -228,97 +194,39 @@ class MainWindow(QMainWindow):
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
 
-    # --- NEW METHOD TO HANDLE THE SIGNAL ---
     def on_profile_selected(self, index):
-        """
-        Slot to handle the QComboBox's activated(int) signal.
-        It retrieves the text of the selected item and calls the appropriate method.
-        """
         profile_name = self.profile_selector.itemText(index)
         if profile_name:
             self.switch_active_profile(profile_name)
 
     def _show_menu(self, menu_class, button, position):
-        """ Creates, positions, and shows a popup menu.
-        Args:
-            menu_class: The class of the menu widget to create (e.g., SaveMenu).
-            button: The button widget that triggered the menu.
-            position: A string like 'top left', 'top right', 'bottom left', 'bottom right'
-                      which determines where the menu is placed relative to the button. """
+        """ Creates, positions, and shows a popup menu. """
         menu = menu_class(self)
         menu_size = menu.sizeHint()
-
-        # Get button's global corner positions
         button_top_left = button.mapToGlobal(button.rect().topLeft())
         button_top_right = button.mapToGlobal(button.rect().topRight())
         button_bottom_left = button.mapToGlobal(button.rect().bottomLeft())
         button_bottom_right = button.mapToGlobal(button.rect().bottomRight())
-
         menu_pos = QPoint()
-
-        # Calculate the menu's top-left position based on the desired alignment
-        if position == 'bottom left':
-            # Align menu's top-left to button's bottom-left
-            menu_pos = button_bottom_left
-        elif position == 'bottom right':
-            # Align menu's top-right to button's bottom-right
-            menu_pos = QPoint(button_bottom_right.x() - menu_size.width(), button_bottom_right.y())
-        elif position == 'top left':
-            # Align menu's bottom-left to button's top-left
-            menu_pos = QPoint(button_top_left.x(), button_top_left.y() - menu_size.height())
-        elif position == 'top right':
-            # Align menu's bottom-right to button's top-right
-            menu_pos = QPoint(button_top_right.x() - menu_size.width(), button_top_right.y() - menu_size.height())
-        else: # Default to bottom left as a fallback
-            menu_pos = button_bottom_left
-
+        if position == 'bottom left': menu_pos = button_bottom_left
+        elif position == 'bottom right': menu_pos = QPoint(button_bottom_right.x() - menu_size.width(), button_bottom_right.y())
+        elif position == 'top left': menu_pos = QPoint(button_top_left.x(), button_top_left.y() - menu_size.height())
+        elif position == 'top right': menu_pos = QPoint(button_top_right.x() - menu_size.width(), button_top_right.y() - menu_size.height())
+        else: menu_pos = button_bottom_left
         menu.move(menu_pos)
         menu.show()
-    
-    def toggle_text_visibility(self):
-        """Toggles the visibility of all text boxes in all image labels."""
-        self._text_is_visible = not self._text_is_visible
-        for i in range(self.scroll_layout.count()):
-            widget = self.scroll_layout.itemAt(i).widget()
-            if isinstance(widget, ResizableImageLabel):
-                widget.set_text_visibility(self._text_is_visible)
-        
-    def start_context_fill(self):
-        """Starts the context fill (inpainting) process via its handler."""
-        self.context_fill_handler.start_mode()
-    
-    # --- NEW: Method to start image splitting ---
-    def split_images(self):
-        """Starts the image splitting process via its handler."""
-        self.split_handler.start_splitting_mode()
-
-    def stitch_images(self):
-        """Starts the image stitching process via its handler."""
-        self.stitch_handler.start_stitching_mode()
-
-    def update_handler_ui_positions(self):
-        """Updates the position of any active handler UI overlays."""
-        if self.stitch_handler.is_active:
-            self.stitch_handler._update_widget_position()
-        if self.split_handler.is_active:
-            self.split_handler._update_widget_position()
-        if self.context_fill_handler.is_active:
-            self.context_fill_handler._update_widget_position()
 
     def update_profile_selector(self):
         """Syncs the profile dropdown with the profiles from the model."""
         if not hasattr(self, 'profile_selector'): return
         self.profile_selector.blockSignals(True)
         self.profile_selector.clear()
-
         profiles_list = sorted([p for p in self.model.profiles.keys() if p != "Original"])
         profiles_list.insert(0, "Original")
         self.profile_selector.addItems(profiles_list)
-
         if self.model.active_profile_name in self.model.profiles:
             index = self.profile_selector.findText(self.model.active_profile_name)
             if index != -1: self.profile_selector.setCurrentIndex(index)
-
         self.profile_selector.blockSignals(False)
 
     def switch_active_profile(self, profile_name):
@@ -326,8 +234,7 @@ class MainWindow(QMainWindow):
         if profile_name and profile_name in self.model.profiles and profile_name != self.model.active_profile_name:
             print(f"Switching to active profile: {profile_name}")
             self.model.active_profile_name = profile_name
-            # An update is needed to show the text from the new profile
-            self.on_model_updated(None) # None = full refresh
+            self.on_model_updated(None)
 
     def show_settings_dialog(self):
         dialog = SettingsDialog(self)
@@ -348,32 +255,19 @@ class MainWindow(QMainWindow):
         print(f"Find shortcut set to: {shortcut}")
 
     def process_mmtl(self, mmtl_path, temp_dir):
-        """ DELEGATED: Asks the model to load the project. """
         self.model.load_project(mmtl_path, temp_dir)
 
     def on_project_load_failed(self, error_msg):
-        """ SLOT: Handles the project_load_failed signal from the model. """
         QMessageBox.critical(self, "Project Load Error", error_msg)
         self.close()
 
     def on_project_loaded(self):
-        """
-        SLOT: Handles the project_loaded signal from the model.
-        Populates the UI with the newly loaded data.
-        """
+        """ Populates the UI after the model has loaded a project. """
         self._clear_layout(self.scroll_layout)
-        if self.manual_ocr_handler.is_active:
-            self.manual_ocr_handler.cancel_mode()
-        # --- NEW: Cancel stitch/split modes on new project load ---
-        if self.stitch_handler.is_active:
-            self.stitch_handler.cancel_stitching_mode()
-        if self.split_handler.is_active:
-            self.split_handler.cancel_splitting_mode()
-        if self.context_fill_handler.is_active:
-            self.context_fill_handler.cancel_mode()
+        # Deactivate any lingering modes via the scroll_area
+        self.scroll_area.cancel_active_modes()
 
         image_paths = self.model.image_paths
-        
         self.setWindowTitle(f"{self.model.project_name} | ManhwaOCR")
         self.btn_process.setEnabled(bool(image_paths))
         self.btn_manual_ocr.setEnabled(bool(image_paths))
@@ -387,21 +281,18 @@ class MainWindow(QMainWindow):
                  pixmap = QPixmap(image_path)
                  if pixmap.isNull(): continue
                  filename = os.path.basename(image_path)
-                 # --- MODIFICATION START ---
-                 # Pass the main window instance 'self' to the ResizableImageLabel constructor.
                  label = ResizableImageLabel(pixmap, filename, self)
-                 # --- MODIFICATION END ---
                  label.textBoxDeleted.connect(self.delete_row)
                  label.textBoxSelected.connect(self.handle_text_box_selected)
-                 # The manual_area_selected signal is now dynamically connected/disconnected
-                 # inside the ResizableImageLabel itself.
+                 # Connect the manual selection signal to the correct handler
+                 label.manual_area_selected.connect(self.scroll_area.manual_ocr_handler.handle_area_selected)
+                 label.manual_area_selected.connect(self.scroll_area.context_fill_handler.handle_area_selected)
                  self.scroll_layout.addWidget(label)
             except Exception as e:
                  print(f"Error creating ResizableImageLabel for {image_path}: {e}")
 
-        # Trigger final UI updates
         self.update_profile_selector()
-        self.on_model_updated(None) # None signifies a full refresh
+        self.on_model_updated(None)
         print(f"Project '{self.model.project_name}' loaded and UI populated.")
     
     def on_model_updated(self, affected_filenames):
@@ -638,7 +529,7 @@ class MainWindow(QMainWindow):
         if self.batch_handler:
             QMessageBox.warning(self, "Warning", "OCR is already running.")
             return
-        if self.manual_ocr_handler.is_active:
+        if self.scroll_area.manual_ocr_handler.is_active:
             QMessageBox.warning(self, "Warning", "Cannot start standard OCR while in Manual OCR mode.")
             return
 
@@ -831,7 +722,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No Data", "There are no OCR results to translate.")
             return
             
-        model_name = self.settings.value("gemini_model", "gemini-2.5-flash-lite")
+        model_name = self.settings.value("gemini_model", "gemini-1.5-flash-latest")
 
         dialog = TranslationWindow(
             api_key, model_name, self.model.ocr_results, list(self.model.profiles.keys()), self

@@ -11,11 +11,9 @@ class ResizableImageLabel(QGraphicsView):
     textBoxSelected = Signal(object, object, bool)
     manual_area_selected = Signal(QRectF, object)
     stitching_selection_changed = Signal(object, bool)
-    # NEW: Signal to report a click's location during split mode
     split_indicator_requested = Signal(object, int)
 
 
-    # --- MODIFICATION START ---
     def __init__(self, pixmap, filename, main_window):
         """
         The constructor now accepts a reference to the main_window to avoid
@@ -23,7 +21,6 @@ class ResizableImageLabel(QGraphicsView):
         """
         super().__init__()
         self.main_window = main_window # Store the reference
-        # --- MODIFICATION END ---
         self.setScene(QGraphicsScene())
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -38,11 +35,10 @@ class ResizableImageLabel(QGraphicsView):
         self.text_boxes = []
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.original_text_entries = {}
-        # --- NEW: Store persistent selection visuals ---
         self.selection_visuals = []
 
         self._is_manual_select_active = False
-        self._is_selection_active = False
+        self._is_selection_active = False # This flag is likely obsolete now
         self._rubber_band = None
         self._rubber_band_origin = QPoint()
 
@@ -58,25 +54,19 @@ class ResizableImageLabel(QGraphicsView):
         self.selection_overlay.hide()
         self.scene().addItem(self.selection_overlay)
         
-        # Splitting state management
         self._is_split_selection_active = False
         self._is_selected_for_splitting = False
         self.split_visuals = [] # List of dicts: [{'line': item, 'handle': item}]
         self._is_dragging_split_line = False
-        self._dragged_item = None # The specific visual dict being dragged
+        self._dragged_item = None
 
     def apply_translation(self, main_window, text_entries_by_row, default_style):
-        """
-        Applies text and styles to the image.
-        It is now profile-aware by using main_window.get_display_text().
-        """
         processed_default_style = self._ensure_gradient_defaults_for_ril(default_style)
         current_entries = {rn: entry for rn, entry in text_entries_by_row.items()
                            if not entry.get('is_deleted', False)}
         existing_boxes = {tb.row_number: tb for tb in self.text_boxes}
         rows_to_remove_from_list = []
 
-        # Update or remove existing text boxes
         for row_number, text_box in list(existing_boxes.items()):
             if row_number not in current_entries:
                 text_box.cleanup()
@@ -91,7 +81,6 @@ class ResizableImageLabel(QGraphicsView):
 
         self.text_boxes = [tb for tb in self.text_boxes if tb.row_number not in rows_to_remove_from_list]
 
-        # Add new text boxes
         existing_rows_after_removal = {tb.row_number for tb in self.text_boxes}
         for row_number, entry in current_entries.items():
             if row_number not in existing_rows_after_removal:
@@ -120,34 +109,37 @@ class ResizableImageLabel(QGraphicsView):
 
         QTimer.singleShot(0, self.update_view_transform)
     
-    # --- MODIFICATION: This method now handles complex QPainterPath objects ---
-    def draw_selections(self, paths):
-        """Draws multiple persistent selection shapes (paths) on the scene."""
+    def draw_selections(self, paths_or_rects):
         self.clear_selection_visuals()
-        selection_brush = QBrush(QColor(255, 80, 80, 120)) # Semi-transparent red
+        selection_brush = QBrush(QColor(255, 80, 80, 120))
         selection_pen = QPen(QColor(255, 0, 0), 1)
-        for path in paths:
-            # Use QGraphicsPathItem to render the complex shape
+        for item_to_draw in paths_or_rects:
+            path = QPainterPath()
+            if isinstance(item_to_draw, QRectF):
+                path.addRect(item_to_draw)
+            elif isinstance(item_to_draw, QPainterPath):
+                path = item_to_draw
+            else:
+                continue
+
             item = QGraphicsPathItem(path)
             item.setBrush(selection_brush)
             item.setPen(selection_pen)
-            item.setZValue(1100) # Ensure it's above selection overlay
+            item.setZValue(1100)
             self.scene().addItem(item)
             self.selection_visuals.append(item)
 
     def clear_selection_visuals(self):
-        """Removes all persistent selection rectangles from the scene."""
         for item in self.selection_visuals:
-            self.scene().removeItem(item)
+            if item.scene():
+                self.scene().removeItem(item)
         self.selection_visuals.clear()
         
     def set_text_visibility(self, visible):
-        """Sets the visibility of all text boxes on this label."""
         for text_box in self.text_boxes:
             text_box.setVisible(visible)
 
     def enable_stitching_selection(self, enabled):
-        """Activates or deactivates the click-to-select mode for stitching."""
         self._is_stitching_mode_active = enabled
         if enabled:
             self.setCursor(Qt.PointingHandCursor)
@@ -157,7 +149,6 @@ class ResizableImageLabel(QGraphicsView):
                 self.setCursor(Qt.ArrowCursor)
 
     def _set_selected_for_stitching(self, selected):
-        """Internal helper to manage the selection state and visuals."""
         if self._is_selected_for_stitching == selected: return
         self._is_selected_for_stitching = selected
         if self._is_selected_for_stitching:
@@ -168,40 +159,36 @@ class ResizableImageLabel(QGraphicsView):
         self.stitching_selection_changed.emit(self, self._is_selected_for_stitching)
 
     def enable_splitting_selection(self, enabled):
-        """Activates/deactivates split mode for this label."""
         self._is_split_selection_active = enabled
         if enabled:
             self.setCursor(Qt.PointingHandCursor)
         else:
-            self.set_selected_for_splitting(False) # Clean up visuals
+            self.set_selected_for_splitting(False)
             if not self._is_stitching_mode_active:
                 self.setCursor(Qt.ArrowCursor)
 
     def set_selected_for_splitting(self, selected):
-        """Sets the visual state when selected/deselected as the split target."""
         if self._is_selected_for_splitting == selected: return
         self._is_selected_for_splitting = selected
         
         if self._is_selected_for_splitting:
-            # Use a different color overlay to distinguish from stitching
-            self.selection_overlay.setBrush(QColor(220, 20, 60, 100)) # Crimson, semi-transparent
+            self.selection_overlay.setBrush(QColor(220, 20, 60, 100))
             self.selection_overlay.setRect(self.scene().sceneRect())
             self.selection_overlay.show()
-            self.setCursor(Qt.CrossCursor) # Cursor to indicate adding points
+            self.setCursor(Qt.CrossCursor)
         else:
             self.selection_overlay.hide()
-            self.draw_split_lines([]) # Clear visual lines on deselect
+            self.draw_split_lines([])
             if self._is_split_selection_active:
                 self.setCursor(Qt.PointingHandCursor)
         
     def draw_split_lines(self, y_coords):
-        """Draws or clears draggable horizontal lines at given Y coordinates."""
         for visual in self.split_visuals:
-            self.scene().removeItem(visual['line'])
-            self.scene().removeItem(visual['handle'])
+            if visual['line'].scene(): self.scene().removeItem(visual['line'])
+            if visual['handle'].scene(): self.scene().removeItem(visual['handle'])
         self.split_visuals.clear()
         
-        line_pen = QPen(QColor(0, 120, 215), 3, Qt.SolidLine) # Blue, solid
+        line_pen = QPen(QColor(0, 120, 215), 3, Qt.SolidLine)
         handle_pen = QPen(QColor("white"), 1)
         handle_brush = QBrush(QColor(0, 120, 215))
         handle_size = 16
@@ -221,40 +208,28 @@ class ResizableImageLabel(QGraphicsView):
             
             self.split_visuals.append({'line': line, 'handle': handle})
 
-    # --- MODIFICATION START ---
+    # --- REFACTORED METHOD START ---
     def set_manual_selection_enabled(self, enabled):
         """
-        Enables or disables manual selection mode (for OCR or Context Fill) and
-        dynamically connects the selection signal to the correct active handler
-        using the stored main_window reference.
+        Enables or disables the visual components for manual area selection.
+        This method is now generic and has no knowledge of specific handlers.
         """
         self._is_manual_select_active = enabled
         if enabled:
-            # Use the direct reference to the main window to find the active handler.
-            if self.main_window.manual_ocr_handler.is_active:
-                self.manual_area_selected.connect(self.main_window.manual_ocr_handler.handle_area_selected)
-            elif self.main_window.context_fill_handler.is_active:
-                self.manual_area_selected.connect(self.main_window.context_fill_handler.handle_area_selected)
-
-            if not self._is_selection_active:
-                self.setCursor(Qt.CrossCursor)
+            # Set the cursor to indicate that drawing a selection is possible.
+            self.setCursor(Qt.CrossCursor)
         else:
-            # Disconnect all slots from the signal to prevent dangling connections.
-            try:
-                self.manual_area_selected.disconnect()
-            except (TypeError, RuntimeError):
-                pass  # It's okay if it was already disconnected.
-            
+            # Reset the cursor to the default arrow, unless another mode
+            # that uses a special cursor is active.
             if not self._is_stitching_mode_active and not self._is_split_selection_active:
                 self.setCursor(Qt.ArrowCursor)
-    # --- MODIFICATION END ---
+    # --- REFACTORED METHOD END ---
 
     def mousePressEvent(self, event):
         if event.button() != Qt.LeftButton:
             super().mousePressEvent(event)
             return
 
-        # Check for split line drag first if this label is selected for splitting
         if self._is_selected_for_splitting:
             pos_in_scene = self.mapToScene(event.pos())
             item_under_cursor = self.scene().itemAt(pos_in_scene, self.transform())
@@ -267,19 +242,16 @@ class ResizableImageLabel(QGraphicsView):
                     event.accept()
                     return
 
-        # Mode 1: Stitching
         if self._is_stitching_mode_active:
             self._set_selected_for_stitching(not self._is_selected_for_stitching)
             event.accept(); return
 
-        # Mode 2: Splitting - A click simply reports its position to the handler
         if self._is_split_selection_active:
             pos_in_scene = self.mapToScene(event.pos())
             self.split_indicator_requested.emit(self, int(pos_in_scene.y()))
             event.accept(); return
 
-        # Mode 3: Manual OCR Selection
-        if self._is_manual_select_active and not self._is_selection_active:
+        if self._is_manual_select_active:
             self._rubber_band_origin = event.pos()
             if not self._rubber_band:
                 self._rubber_band = QRubberBand(QRubberBand.Rectangle, self)
@@ -290,7 +262,6 @@ class ResizableImageLabel(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
-        # Finalize split line dragging
         if self._is_dragging_split_line and event.button() == Qt.LeftButton:
             self._is_dragging_split_line = False
             self._dragged_item = None
@@ -304,8 +275,7 @@ class ResizableImageLabel(QGraphicsView):
             self._rubber_band_origin = QPoint()
             if final_rect_viewport.width() > 4 and final_rect_viewport.height() > 4:
                 rect_scene = self.mapToScene(final_rect_viewport).boundingRect()
-                # --- MODIFICATION: The handler now manages selection state.
-                # Do not set _is_selection_active or change cursor here.
+                # The connected handler will now receive this signal.
                 self.manual_area_selected.emit(rect_scene, self)
             else:
                  self._rubber_band.hide()
@@ -314,17 +284,14 @@ class ResizableImageLabel(QGraphicsView):
             super().mouseReleaseEvent(event)
 
     def mouseMoveEvent(self, event):
-        # Handle split line dragging
         if self._is_dragging_split_line and self._dragged_item:
             new_y = self.mapToScene(event.pos()).y()
             new_y = max(0, min(new_y, self.original_pixmap.height()))
             
-            # Update visuals in real-time for smooth feedback
             self._dragged_item['line'].setLine(0, new_y, self.original_pixmap.width(), new_y)
             handle_rect = self._dragged_item['handle'].rect()
             self._dragged_item['handle'].setRect(handle_rect.x(), new_y - handle_rect.height() / 2, handle_rect.width(), handle_rect.height())
             
-            # Notify handler of the new position to update the model
             self.split_indicator_requested.emit(self, int(new_y))
             event.accept()
             return
@@ -335,12 +302,9 @@ class ResizableImageLabel(QGraphicsView):
         else:
             super().mouseMoveEvent(event)
 
-    # --- MODIFIED: Renamed for clarity ---
     def clear_rubber_band(self):
         """Hides the temporary rubber band used for drawing a selection."""
         if self._rubber_band: self._rubber_band.hide()
-        # Reset cursor if mode is still active
-        self.set_manual_selection_enabled(self._is_manual_select_active)
 
     def hasHeightForWidth(self):
         return True
@@ -356,7 +320,6 @@ class ResizableImageLabel(QGraphicsView):
         QTimer.singleShot(0, self.update_view_transform)
         
     def update_pixmap(self, new_pixmap: QPixmap):
-        """Updates the label's pixmap and redraws the view."""
         self.original_pixmap = new_pixmap
         self.current_pixmap = new_pixmap
         
@@ -365,7 +328,6 @@ class ResizableImageLabel(QGraphicsView):
         
         self.scene().setSceneRect(0, 0, self.original_pixmap.width(), self.original_pixmap.height())
         
-        # Trigger a resize and transform update to reflect the new pixmap
         self.updateGeometry()
         QTimer.singleShot(0, self.update_view_transform)
 
@@ -419,7 +381,6 @@ class ResizableImageLabel(QGraphicsView):
             if text_box.isSelected(): text_box.setSelected(False)
     
     def select_text_box(self, row_number_to_select):
-        """Finds and selects a specific text box, deselecting others."""
         box_to_select = None
         for tb in self.text_boxes:
             if tb.row_number == row_number_to_select:
@@ -471,16 +432,14 @@ class ResizableImageLabel(QGraphicsView):
             self.manual_area_selected.disconnect()
             self.stitching_selection_changed.disconnect()
             self.split_indicator_requested.disconnect()
-        except TypeError: pass
-        except RuntimeError: pass
+        except (TypeError, RuntimeError): pass
         if self.scene():
             for tb in self.text_boxes[:]: tb.cleanup()
             self.text_boxes = []
-            # --- MODIFICATION: Cleanup new visual items ---
             self.clear_selection_visuals()
             for visual in self.split_visuals:
-                self.scene().removeItem(visual['line'])
-                self.scene().removeItem(visual['handle'])
+                if visual['line'].scene(): self.scene().removeItem(visual['line'])
+                if visual['handle'].scene(): self.scene().removeItem(visual['handle'])
             self.split_visuals = []
             self.scene().clear()
         self.setScene(None)
