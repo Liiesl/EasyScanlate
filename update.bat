@@ -75,33 +75,37 @@ if /i "!MERGE_MAIN!"=="y" (
 )
 echo.
 
-:: ============================
-:: 4. Update Installer Version
-:: ============================
+:: =================================================
+:: 4. Update Installer Version, Commit, and Push
+:: =================================================
 echo --- Step 4: Updating Installer Version ---
 set "VERSION_WITHOUT_V=%CHOSEN_TAG:v=%"
-set "TEMP_FILE=%INSTALLER_FILE%.tmp"
 
 echo Updating '%INSTALLER_FILE%' to version %VERSION_WITHOUT_V%...
 
-(for /f "tokens=* delims=" %%a in (%INSTALLER_FILE%) do (
-    set "line=%%a"
-    echo !line! | findstr /b /c:"!define APP_VERSION" >nul
-    if !errorlevel! equ 0 (
-        echo !define APP_VERSION "!VERSION_WITHOUT_V!"
-    ) else (
-        echo !line!
-    )
-)) > "%TEMP_FILE%"
+powershell -Command "(Get-Content '%INSTALLER_FILE%') -replace '(!define APP_VERSION \"").*(\"")', '${1}%VERSION_WITHOUT_V%${2}' | Set-Content '%INSTALLER_FILE%'"
 
-move /y "%TEMP_FILE%" "%INSTALLER_FILE%"
+if !errorlevel! neq 0 (
+    echo ERROR: Failed to update the installer version.
+    goto :eof
+)
+
 echo Installer version updated successfully.
 echo.
 
-:: Commit the version change
+:: Commit and push the version change
+echo Committing and pushing the version update...
 git add "%INSTALLER_FILE%"
 git commit -m "chore: Update installer version to %CHOSEN_TAG%"
+
+git push origin %STABLE_BRANCH%
+if !errorlevel! neq 0 (
+    echo ERROR: Failed to push the commit to the remote repository.
+    goto :eof
+)
+echo Push successful.
 echo.
+
 
 :: ============================
 :: 5. Create and Push Git Tag
