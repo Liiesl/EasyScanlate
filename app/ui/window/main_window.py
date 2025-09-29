@@ -10,7 +10,7 @@ from app.ui.components import ResizableImageLabel, CustomScrollArea, ResultsWidg
 from app.ui.widgets.menu_bar import MenuBar
 from app.ui.widgets.progress_bar import CustomProgressBar
 from app.ui.widgets.menus import Menu
-from app.handlers import BatchOCRHandler # Only batch handler is needed here
+from app.handlers import BatchOCRHandler, SelectionManager
 from app.core import ProjectModel
 from app.ui.dialogs import SettingsDialog
 from app.ui.window.translation_window import TranslationWindow
@@ -32,6 +32,9 @@ class MainWindow(QMainWindow):
         self.model.model_updated.connect(self.on_model_updated)
         self.model.profiles_updated.connect(self.update_profile_selector)
 
+        self.selection_manager = SelectionManager(self.model, self)
+        self.selection_manager.selection_changed.connect(self.on_selection_changed)
+
         self.combine_action = QAction("Combine Rows", self)
         self.find_action = QAction("Find/Replace", self)
         self.find_action.triggered.connect(self.toggle_find_widget)
@@ -39,7 +42,6 @@ class MainWindow(QMainWindow):
         self.update_shortcut()
 
         self.language_map = { "Korean": "ko", "Chinese": "ch_sim", "Japanese": "ja" }
-        self._is_handling_selection = False
 
         self.init_ui()
         self.combine_action.triggered.connect(self.results_widget.combine_selected_rows)
@@ -47,10 +49,7 @@ class MainWindow(QMainWindow):
         self.scroll_content = QWidget()
         self.reader = None
         self.ocr_processor = None
-
-        self.current_selected_row = None
-        self.current_selected_image_label = None
-        self.selected_text_box_item = None
+        
         if hasattr(self, 'style_panel'):
              self.style_panel.style_changed.connect(self.update_text_box_style)
         
@@ -67,7 +66,7 @@ class MainWindow(QMainWindow):
         self.menuBar = MenuBar(self)
         self.setMenuBar(self.menuBar)
         main_widget = QWidget()
-        main_widget.setObjectName("CentralWidget") # <-- ADD THIS LINE
+        main_widget.setObjectName("CentralWidget")
         main_layout = QHBoxLayout()
         self.colors = COLORS
         self.setStyleSheet(MAIN_STYLESHEET)
@@ -136,7 +135,6 @@ class MainWindow(QMainWindow):
         self.btn_import_export_menu = QPushButton(qta.icon('fa5s.bars', color='white'), "")
         self.btn_import_export_menu.setFixedWidth(60)
         self.btn_import_export_menu.setToolTip("Open Import/Export Menu")
-        # --- MODIFIED: Connect to the new handler method ---
         self.btn_import_export_menu.clicked.connect(self.show_import_export_menu)
         file_button_layout.addWidget(self.btn_import_export_menu)
         button_layout.addLayout(file_button_layout)
@@ -147,8 +145,7 @@ class MainWindow(QMainWindow):
         self.style_panel.hide()
         self.right_content_splitter.addWidget(self.style_panel)
 
-        self.results_widget = ResultsWidget(self, self.combine_action, self.find_action)
-        self.results_widget.rowSelected.connect(self.on_result_row_selected)
+        self.results_widget = ResultsWidget(self, self.combine_action, self.find_action, self.selection_manager)
 
         self.find_replace_widget = FindReplaceWidget(self)
         right_panel.addWidget(self.find_replace_widget)
@@ -193,7 +190,6 @@ class MainWindow(QMainWindow):
         if profile_name:
             self.switch_active_profile(profile_name)
 
-    # --- NEW: Method to create and show the Import/Export menu ---
     def show_import_export_menu(self):
         """Creates, populates, and shows the Import/Export menu."""
         menu = Menu(self)
@@ -256,7 +252,6 @@ class MainWindow(QMainWindow):
     def on_project_loaded(self):
         """ Populates the UI after the model has loaded a project. """
         self._clear_layout(self.scroll_layout)
-        # Deactivate any lingering modes via the scroll_area
         self.scroll_area.cancel_active_modes()
 
         image_paths = self.model.image_paths
@@ -273,36 +268,28 @@ class MainWindow(QMainWindow):
                  pixmap = QPixmap(image_path)
                  if pixmap.isNull(): continue
                  filename = os.path.basename(image_path)
-                 label = ResizableImageLabel(pixmap, filename, self)
+                 label = ResizableImageLabel(pixmap, filename, self, self.selection_manager)
                  label.textBoxDeleted.connect(self.delete_row)
-                 label.textBoxSelected.connect(self.handle_text_box_selected)
-                 # --- NEW: Connect the signal for deleting inpaint records ---
+
                  label.inpaintRecordDeleted.connect(self.handle_inpaint_record_deleted)
-                 # Connect the manual selection signal to the correct handler
                  label.manual_area_selected.connect(self.scroll_area.manual_ocr_handler.handle_area_selected)
-                 # --- MODIFIED: Connect to context fill handler here, not in the handler itself ---
                  label.manual_area_selected.connect(self.scroll_area.context_fill_handler.handle_area_selected)
                  self.scroll_layout.addWidget(label)
             except Exception as e:
                  print(f"Error creating ResizableImageLabel for {image_path}: {e}")
         
-        # --- NEW: Apply non-destructive inpaints after labels are created ---
         self._apply_inpaints()
 
         self.update_profile_selector()
-        self.on_model_updated(None) # This populates text boxes
+        self.on_model_updated(None)
         print(f"Project '{self.model.project_name}' loaded and UI populated.")
     
-    # --- NEW: Slot to handle the deletion request from the label ---
     def handle_inpaint_record_deleted(self, record_id):
         """Delegates the inpaint record deletion request to the model."""
         self.model.remove_inpaint_record(record_id)
-        # The model will emit model_updated, which will trigger a UI refresh automatically.
     
-    # --- NEW: Method to apply inpaint patches ---
     def _apply_inpaints(self):
         """Iterates through inpaint data and applies patches to the correct image labels."""
-        # Create a quick lookup map for efficiency
         labels_by_filename = {
             widget.filename: widget
             for i in range(self.scroll_layout.count())
@@ -317,7 +304,7 @@ class MainWindow(QMainWindow):
                 patch_path = os.path.join(inpaint_dir, record['patch_filename'])
                 if os.path.exists(patch_path):
                     patch_pixmap = QPixmap(patch_path)
-                    coords = record['coordinates']  # Expected format: [x, y, w, h]
+                    coords = record['coordinates']
                     if not patch_pixmap.isNull():
                         target_label.apply_inpaint_patch(patch_pixmap, QRectF(coords[0], coords[1], coords[2], coords[3]))
                     else:
@@ -327,15 +314,13 @@ class MainWindow(QMainWindow):
 
     def on_model_updated(self, affected_filenames):
         """ SLOT: Handles the model_updated signal. Refreshes all relevant views. """
-        # --- NEW: Re-apply inpaints if an image was affected, in case of a revert ---
         if affected_filenames:
             for filename in affected_filenames:
                 for i in range(self.scroll_layout.count()):
                     widget = self.scroll_layout.itemAt(i).widget()
                     if isinstance(widget, ResizableImageLabel) and widget.filename == filename:
-                        # Revert to original first to clear old patches, then re-apply all current ones.
                         widget.revert_to_original()
-                        self._apply_inpaints() # This is slightly inefficient but ensures correctness
+                        self._apply_inpaints()
                         break
 
         self.update_all_views(affected_filenames)
@@ -344,107 +329,16 @@ class MainWindow(QMainWindow):
         """ DELEGATED: Asks the model for the correct text to display. """
         return self.model.get_display_text(result)
 
-    def on_result_row_selected(self, row_number):
-        if self._is_handling_selection:
-            return
-
-        self._is_handling_selection = True
-        try:
-            target_result, _ = self.model._find_result_by_row_number(row_number)
-            if not target_result:
-                return
-
-            filename = target_result.get('filename')
-            if not filename:
-                return
-            
-            target_image_label = None
-            # Find the image widget corresponding to the result's filename
-            for i in range(self.scroll_layout.count()):
-                widget = self.scroll_layout.itemAt(i).widget()
-                if isinstance(widget, ResizableImageLabel):
-                    if widget.filename == filename:
-                        target_image_label = widget
-                        # SCROLLING LOGIC IS MOVED to after the text box is selected.
-                    else:
-                        # Deselect boxes on all other images
-                        widget.deselect_all_text_boxes()
-
-            if target_image_label:
-                # Tell the found image widget to select the correct text box.
-                # This now returns the QGraphicsItem for the text box.
-                selected_box_item = target_image_label.select_text_box(row_number)
-                if selected_box_item:
-                    # 1. Get coordinates and dimensions
-                    scroll_viewport = self.scroll_area.viewport()
-                    viewport_height = scroll_viewport.height()
-                    current_scroll_y = self.scroll_area.verticalScrollBar().value()
-                    image_label_y_in_scroll = target_image_label.y()
-                    # Scene coordinates of the text box
-                    box_rect_scene = selected_box_item.sceneBoundingRect()
-                    # Scale factor from the QGraphicsView transform
-                    scale = target_image_label.transform().m11()
-                    # Box position relative to the top of the image label, scaled
-                    box_top_in_image = box_rect_scene.top() * scale
-                    box_bottom_in_image = box_rect_scene.bottom() * scale
-                    box_center_y_in_image = box_rect_scene.center().y() * scale
-                    # Box absolute position in the entire scrollable area content
-                    box_global_top = image_label_y_in_scroll + box_top_in_image
-                    box_global_bottom = image_label_y_in_scroll + box_bottom_in_image
-
-                    # 2. Check if the text box is fully visible in the viewport
-                    is_visible = (box_global_top >= current_scroll_y) and \
-                                 (box_global_bottom <= current_scroll_y + viewport_height)
-                    
-                    if not is_visible:
-                        # 3. Calculate new scroll position to center the box
-                        target_scroll_y = image_label_y_in_scroll + box_center_y_in_image - (viewport_height / 2)
-                        
-                        # 4. Clamp the value to be within scrollbar's valid range and scroll
-                        scrollbar = self.scroll_area.verticalScrollBar()
-                        clamped_scroll_y = max(scrollbar.minimum(), min(int(target_scroll_y), scrollbar.maximum()))
-                        scrollbar.setValue(clamped_scroll_y)
-
-        finally:
-            self._is_handling_selection = False
-
-    def handle_text_box_selected(self, row_number, image_label, selected):
-        if self._is_handling_selection:
-            return
-        
-        self._is_handling_selection = True
-        try:
-            if selected:
-                self.current_selected_row = row_number
-                self.current_selected_image_label = image_label
-                self.selected_text_box_item = None
-                for tb in image_label.get_text_boxes():
-                    if tb.row_number == row_number:
-                        self.selected_text_box_item = tb
-                        break
-
-                if self.selected_text_box_item:
-                    current_style = self.get_style_for_row(row_number)
-                    self.style_panel.update_style_panel(current_style)
-                    self.style_panel.show()
-                else:
-                    print(f"ERROR: Could not find TextBoxItem for row {row_number} in label {image_label.filename}")
-                    self.style_panel.clear_and_hide()
-
-                for i in range(self.scroll_layout.count()):
-                    widget = self.scroll_layout.itemAt(i).widget()
-                    if isinstance(widget, ResizableImageLabel) and widget != image_label:
-                        widget.deselect_all_text_boxes()
-                self.results_widget.scroll_to_row(row_number)
-
-            else:
-                if row_number == self.current_selected_row and image_label == self.current_selected_image_label:
-                    self.current_selected_row = None
-                    self.current_selected_image_label = None
-                    self.selected_text_box_item = None
-                    self.style_panel.clear_and_hide()
-        finally:
-            self._is_handling_selection = False
+    def on_selection_changed(self, row_number, source):
+        """
+        Updates the style panel based on the currently selected row.
+        """
+        if row_number is not None:
+            current_style = self.get_style_for_row(row_number)
+            self.style_panel.update_style_panel(current_style)
+            self.style_panel.show()
+        else:
+            self.style_panel.clear_and_hide()
 
     def get_style_for_row(self, row_number):
         style = {}
@@ -464,14 +358,33 @@ class MainWindow(QMainWindow):
                      style[k] = v
         return style
 
+    def find_textbox_item(self, row_number):
+        """Finds and returns the TextBoxItem widget for a given row number."""
+        target_result, _ = self.model._find_result_by_row_number(row_number)
+        if not target_result: return None
+        filename = target_result.get('filename')
+        if not filename: return None
+
+        for i in range(self.scroll_layout.count()):
+            widget = self.scroll_layout.itemAt(i).widget()
+            if isinstance(widget, ResizableImageLabel) and widget.filename == filename:
+                for tb in widget.get_text_boxes():
+                    # Need to handle float vs int comparison carefully
+                    try:
+                        if float(tb.row_number) == float(row_number):
+                            return tb
+                    except (ValueError, TypeError):
+                        if str(tb.row_number) == str(row_number):
+                            return tb
+        return None
+
     def update_text_box_style(self, new_style_dict):
-        if not self.selected_text_box_item:
+        row_number = self.selection_manager.get_current_selection()
+        if row_number is None:
             print("Style changed but no text box selected.")
             return
 
-        row_number = self.selected_text_box_item.row_number
         target_result, _ = self.model._find_result_by_row_number(row_number)
-
         if not target_result:
             print(f"Error: Could not find result for row {row_number} to apply style.")
             return
@@ -482,15 +395,18 @@ class MainWindow(QMainWindow):
         
         style_diff = get_style_diff(new_style_dict, DEFAULT_TEXT_STYLE)
 
-        # The model doesn't need to be updated here unless styling is part of the save data
         if style_diff:
             target_result['custom_style'] = style_diff
-            print(f"Stored custom style diff for row {row_number}: {style_diff}")
         elif 'custom_style' in target_result:
             del target_result['custom_style']
-            print(f"Removed custom style for row {row_number} (back to default).")
 
-        self.selected_text_box_item.apply_styles(new_style_dict)
+        # Find the UI item and apply style visually
+        target_item = self.find_textbox_item(row_number)
+        if target_item:
+            target_item.apply_styles(new_style_dict)
+        else:
+            print(f"Warning: Could not find visual text box for row {row_number} to apply style.")
+
 
     def _initialize_ocr_reader(self, context="OCR"):
         """Initializes the EasyOCR reader if it doesn't exist."""
@@ -498,7 +414,6 @@ class MainWindow(QMainWindow):
             print("EasyOCR reader already initialized.")
             return True
         try:
-            # Get language from the model
             lang_code = self.language_map.get(self.model.original_language, 'ko')
             use_gpu = self.settings.value("use_gpu", "true").lower() == "true"
             print(f"Initializing EasyOCR reader for {context}: Lang='{lang_code}', GPU={use_gpu}")
@@ -518,7 +433,6 @@ class MainWindow(QMainWindow):
             return False
 
     def _find_result_by_row_number(self, row_number_to_find):
-        """ DELEGATED: Asks the model to find the result. """
         return self.model._find_result_by_row_number(row_number_to_find)
 
     def _clear_layout(self, layout):
@@ -533,44 +447,29 @@ class MainWindow(QMainWindow):
         Refreshes all views that depend on the model's data, including the
         results table and the text boxes rendered on the images.
         """
-        # 1. Update the results table on the right panel.
         self.results_widget.update_views()
-
-        # 2. Update the text boxes on the images in the left panel.
-        # Group all relevant results from the model by filename for efficient lookup.
         grouped_results = {}
         for result in self.model.ocr_results:
             filename = result.get('filename')
             if filename:
-                # If a filter is active, skip files not in the list.
                 if affected_filenames and filename not in affected_filenames:
                     continue
                 if filename not in grouped_results:
                     grouped_results[filename] = {}
                 grouped_results[filename][result.get('row_number')] = result
 
-        # 3. Iterate through the image widgets and update their displayed text.
         for i in range(self.scroll_layout.count()):
             widget = self.scroll_layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
                 image_filename = widget.filename
-                # Only update widgets that are affected.
                 if not affected_filenames or image_filename in affected_filenames:
-                    # Get the pre-grouped results for this image; defaults to empty dict.
                     results_for_this_image = grouped_results.get(image_filename, {})
-                    
-                    # --- NEW: Get inpaint records for this image and update the label ---
                     records_for_this_image = [
                         r for r in self.model.inpaint_data if r.get('target_image') == image_filename
                     ]
                     widget.update_inpaint_data(records_for_this_image)
-                    # --- End new section ---
-                    
-                    # Tell the image widget to redraw its text boxes using the provided data.
-                    # Note: 'apply_translation' is a legacy name; it redraws text boxes.
                     widget.apply_translation(self, results_for_this_image, DEFAULT_TEXT_STYLE)
 
-    # --- METHOD MODIFIED (Simplified) ---
     def start_ocr(self):
         if not self.model.image_paths:
             QMessageBox.warning(self, "Warning", "No images loaded to process.")
@@ -582,7 +481,6 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Warning", "Cannot start standard OCR while in Manual OCR mode.")
             return
 
-        print("Starting standard OCR process...")
         if not self._initialize_ocr_reader("Standard OCR"):
             return
 
@@ -599,28 +497,23 @@ class MainWindow(QMainWindow):
             "batch_size": int(self.settings.value("ocr_batch_size", 8)), "decoder": self.settings.value("ocr_decoder", "beamsearch"),
             "adjust_contrast": float(self.settings.value("ocr_adjust_contrast", 0.5)), "resize_threshold": int(self.settings.value("ocr_resize_threshold", 1024)),
         }
-        
-        # --- MODIFIED: Pass the progress bar widget directly to the handler ---
         self.batch_handler = BatchOCRHandler(
             image_paths=self.model.image_paths, 
             reader=self.reader, 
             settings=ocr_settings, 
             starting_row_number=self.model.next_global_row_number,
             model=self.model,
-            progress_bar=self.ocr_progress # Pass the reference here
+            progress_bar=self.ocr_progress
         )
-
         self.batch_handler.batch_finished.connect(self.on_batch_finished)
         self.batch_handler.error_occurred.connect(self.on_batch_error)
         self.batch_handler.processing_stopped.connect(self.on_batch_stopped)
-        
         self.batch_handler.start_processing()
+
     def on_image_processed(self, new_results):
         """ DELEGATED: Adds new OCR results to the model. """
-        # The model will emit a signal, and on_model_updated will handle the UI refresh.
         self.model.add_new_ocr_results(new_results)
 
-    # --- METHOD MODIFIED (Simplified) ---
     def on_batch_finished(self, next_row_number):
         """Handles the successful completion of the entire batch."""
         print("MainWindow: Batch finished.")
@@ -628,7 +521,6 @@ class MainWindow(QMainWindow):
         self.cleanup_ocr_session()
         QMessageBox.information(self, "Finished", "OCR processing completed for all images.")
     
-    # ... (rest of the file is the same) ...
     def on_batch_error(self, message):
         """Handles a critical error during the batch process."""
         print(f"MainWindow: Batch error received: {message}")
@@ -641,7 +533,6 @@ class MainWindow(QMainWindow):
         self.cleanup_ocr_session()
         QMessageBox.information(self, "Stopped", "OCR processing was stopped.")
 
-    # --- METHOD MODIFIED (Centralized Cleanup) ---
     def cleanup_ocr_session(self):
         """Resets UI and state after an OCR run (success, error, or stop)."""
         self.btn_stop_ocr.setVisible(False)
@@ -649,7 +540,7 @@ class MainWindow(QMainWindow):
         self.btn_process.setEnabled(bool(self.model.image_paths))
         self.ocr_progress.reset()
         if self.batch_handler:
-            self.batch_handler.deleteLater() # Ensure proper cleanup of the QObject
+            self.batch_handler.deleteLater()
             self.batch_handler = None
         gc.collect()
         
@@ -664,61 +555,34 @@ class MainWindow(QMainWindow):
             self.cleanup_ocr_session()
 
     def update_image_text_box(self, row_number, new_text):
-        """Finds a specific TextBoxItem by its row number and updates its text directly."""
-        target_result, _ = self.model._find_result_by_row_number(row_number)
-        if not target_result: return
-
-        filename = target_result.get('filename')
-        if not filename: return
-
-        for i in range(self.scroll_layout.count()):
-            widget = self.scroll_layout.itemAt(i).widget()
-            if isinstance(widget, ResizableImageLabel) and widget.filename == filename:
-                for tb in widget.get_text_boxes():
-                    if tb.row_number == row_number:
-                        if tb.text_item and tb.text_item.toPlainText() != new_text:
-                            tb.text_item.setPlainText(new_text)
-                            tb.adjust_font_size()
-                        return # Found and updated, so we can exit
+        target_item = self.find_textbox_item(row_number)
+        if target_item:
+            if target_item.text_item and target_item.text_item.toPlainText() != new_text:
+                target_item.text_item.setPlainText(new_text)
+                target_item.adjust_font_size()
 
     def update_ocr_text(self, row_number, new_text):
-        """
-        DELEGATED: Asks the model to update the text, and manually updates the
-        image view to prevent a destructive full UI refresh that interrupts editing.
-        """
-        # Disconnect the main model update signal to prevent the ResultsWidget
-        # from being rebuilt, which would cancel the user's text editing.
         try:
             self.model.model_updated.disconnect(self.on_model_updated)
         except TypeError:
-            # This is fine, it just means the signal was not connected.
             pass
 
         try:
-            # Update the model's data store.
             if self.model.active_profile_name == "Original":
                  QMessageBox.information(self, "Edit Profile Created",
                                          f"First edit detected. A new profile 'User Edit 1' has been created and set as active. "
                                          "Your original OCR text is preserved.")
             self.model.update_text(row_number, new_text)
-
-            # Manually and directly update the text on the corresponding image label's text box.
-            # This fulfills the request for an immediate visual update without a slow global refresh.
             self.update_image_text_box(row_number, new_text)
-
         finally:
-            # Always reconnect the signal to ensure that other operations (like deleting,
-            # combining, or loading) still trigger a full UI refresh when needed.
             self.model.model_updated.connect(self.on_model_updated)
 
     def combine_rows_in_model(self, first_row_number, combined_text, min_confidence, rows_to_delete):
-        """ DELEGATED: Asks the model to combine rows. """
         if self.model.active_profile_name == "Original":
              QMessageBox.information(self, "Edit Profile Created",
                                      f"First combination edit detected. A new profile 'User Edit 1' has been created and set as active.")
         
         message, success = self.model.combine_rows(first_row_number, combined_text, min_confidence, rows_to_delete)
-
         if success:
             if self.find_replace_widget.isVisible():
                 self.find_replace_widget.find_text()
@@ -727,15 +591,10 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", message)
     
     def toggle_advanced_mode(self, state):
-        if state:
-            self.results_widget.right_content_stack.setCurrentIndex(1)
-        else:
-            self.results_widget.right_content_stack.setCurrentIndex(0)
+        self.results_widget.right_content_stack.setCurrentIndex(1 if state else 0)
         self.results_widget.update_views()
 
     def delete_row(self, row_number_to_delete):
-        """ DELEGATED: Asks the model to delete a row after confirming with the user. """
-        # Confirmation logic stays in the UI layer
         show_warning = self.settings.value("show_delete_warning", "true") == "true"
         proceed = True
         if show_warning:
@@ -751,29 +610,21 @@ class MainWindow(QMainWindow):
             proceed = response == QMessageBox.Yes
         if not proceed: return
 
-        # Delegate to model
+        if self.selection_manager.get_current_selection() == row_number_to_delete:
+            self.selection_manager.deselect(self)
+
         self.model.delete_row(row_number_to_delete)
-        
-        # UI-specific cleanup
         if self.find_replace_widget.isVisible(): self.find_replace_widget.find_text()
-        if row_number_to_delete == self.current_selected_row:
-            self.current_selected_row = None
-            self.current_selected_image_label = None
-            self.selected_text_box_item = None
-            self.style_panel.clear_and_hide()
 
     def start_translation(self):
         api_key = self.settings.value("gemini_api_key", "")
         if not api_key:
             QMessageBox.critical(self, "API Key Missing", "Please set your Gemini API key in Settings.")
             return
-
         if not self.model.ocr_results:
             QMessageBox.warning(self, "No Data", "There are no OCR results to translate.")
             return
-            
         model_name = self.settings.value("gemini_model", "gemini-1.5-flash-latest")
-
         dialog = TranslationWindow(
             api_key, model_name, self.model.ocr_results, list(self.model.profiles.keys()), self
         )
@@ -781,7 +632,6 @@ class MainWindow(QMainWindow):
         dialog.exec_()
 
     def handle_translation_completed(self, profile_name, translated_data):
-        """ DELEGATED: Asks the model to add the new profile and data. """
         try:
             self.model.add_profile(profile_name, translated_data)
             QMessageBox.information(self, "Success", 
@@ -791,16 +641,12 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
 
     def import_translation(self):
-        """ DELEGATED: Uses a helper to get content, then asks the model to add it. """
         profile_name = "Imported Translation"
         try:
-            # import_translation_file now needs to return content instead of directly acting on the window
-            content = import_translation_file(self) # Assuming this is modified to return content
+            content = import_translation_file(self)
             if content:
-                 # We can use the same import logic as the AI translation
                  translation_data = json.loads(content)
                  self.model.add_profile(profile_name, translation_data)
-                 # The model signals will trigger the necessary UI updates
         except Exception as e:
             QMessageBox.critical(self, "Import Error", f"Failed to import and apply translation file: {str(e)}")
 
@@ -812,14 +658,10 @@ class MainWindow(QMainWindow):
     def export_manhwa(self):
         export_rendered_images(self)
 
-    # --- NEW: Wrapper method for the menu to call ---
     def export_ocr_results(self):
-        """Wrapper method that calls the utility function for exporting OCR results."""
-        # The utility function needs the main window instance to access the data model.
         export_ocr_results(self)
 
     def save_project(self):
-        """ DELEGATED: Asks the model to save the project. """
         result_message = self.model.save_project()
         if "successfully" in result_message:
             QMessageBox.information(self, "Saved", result_message)
@@ -827,16 +669,13 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Save Error", result_message)
 
     def closeEvent(self, event):
-        # This now reads from self.model
         if hasattr(self.model, 'temp_dir') and self.model.temp_dir and os.path.exists(self.model.temp_dir):
             try:
                 import shutil
-                print(f"Cleaning up temporary directory: {self.model.temp_dir}")
                 shutil.rmtree(self.model.temp_dir)
             except Exception as e:
                 print(f"Warning: Could not remove temporary directory {self.model.temp_dir}: {e}")
         if self.ocr_processor and self.ocr_processor.isRunning():
-            print("Stopping OCR processor on close...")
             self.ocr_processor.stop_requested = True
             self.ocr_processor.wait(500)
             if self.ocr_processor.isRunning():

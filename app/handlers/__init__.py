@@ -3,3 +3,4 @@ from app.handlers.ocr_batch_handler import BatchOCRHandler
 from app.handlers.stitch_handler import StitchHandler
 from app.handlers.split_handler import SplitHandler
 from app.handlers.context_fill_handler import ContextFillHandler
+from app.handlers.selection_manager import SelectionManager

@@ -8,21 +8,21 @@ from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QPainterPath
 from app.ui.components.image_area.textbox import TextBoxItem
 
 class ResizableImageLabel(QGraphicsView):
-    # Signals
+    # --- MODIFIED: textBoxSelected is no longer needed ---
     textBoxDeleted = Signal(object)
-    textBoxSelected = Signal(object, object, bool)
     manual_area_selected = Signal(QRectF, object)
     stitching_selection_changed = Signal(object, bool)
     split_indicator_requested = Signal(object, int)
     inpaintRecordDeleted = Signal(str)
 
-    def __init__(self, pixmap, filename, main_window):
-        """
-        The constructor now accepts a reference to the main_window to avoid
-        fragile parent traversal.
-        """
+    # --- MODIFIED: __init__ now accepts a selection_manager ---
+    def __init__(self, pixmap, filename, main_window, selection_manager):
         super().__init__()
         self.main_window = main_window 
+        self.selection_manager = selection_manager
+        # --- NEW: Connect to the selection manager's signal ---
+        self.selection_manager.selection_changed.connect(self.on_external_selection_changed)
+
         self.setScene(QGraphicsScene())
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -44,7 +44,6 @@ class ResizableImageLabel(QGraphicsView):
 
         self.inpaint_records = []
         self.inpaint_visuals = []
-        # --- NEW: Add state variable to track edit mode ---
         self._is_inpaint_edit_mode = False
 
         self._is_manual_select_active = False
@@ -69,13 +68,12 @@ class ResizableImageLabel(QGraphicsView):
         self._is_dragging_split_line = False
         self._dragged_item = None
 
+    # ... (code from update_inpaint_data to apply_translation is unchanged) ...
     def update_inpaint_data(self, records):
-        """Receives inpaint records for this label and draws their visual borders."""
         self.inpaint_records = records
         self._draw_inpaint_borders()
 
     def _draw_inpaint_borders(self):
-        """Clears and redraws the selectable borders for inpaint patches."""
         for item in self.inpaint_visuals:
             if item.scene():
                 self.scene().removeItem(item)
@@ -96,17 +94,15 @@ class ResizableImageLabel(QGraphicsView):
             item.setZValue(1200) 
             item.setData(0, record.get('id')) 
             
-            # --- MODIFIED: Set visibility and selectability based on the current mode ---
             item.setFlag(QGraphicsItem.ItemIsSelectable, self._is_inpaint_edit_mode)
             item.setVisible(self._is_inpaint_edit_mode)
             
             self.scene().addItem(item)
             self.inpaint_visuals.append(item)
 
-    # --- MODIFIED: This method is now the single source of truth for the visual state ---
     def set_inpaint_edit_mode(self, enabled):
         """Shows or hides the inpaint patch borders and updates internal state."""
-        self._is_inpaint_edit_mode = enabled # Set the state first
+        self._is_inpaint_edit_mode = enabled
         for item in self.inpaint_visuals:
             item.setVisible(enabled)
             item.setFlag(QGraphicsItem.ItemIsSelectable, enabled)
@@ -120,7 +116,6 @@ class ResizableImageLabel(QGraphicsView):
 
             ids_to_delete = []
             for item in selected_items:
-                # Check if this item is one of our inpaint visuals
                 if item in self.inpaint_visuals:
                     record_id = item.data(0)
                     if record_id:
@@ -128,14 +123,12 @@ class ResizableImageLabel(QGraphicsView):
             
             if ids_to_delete:
                 for record_id in ids_to_delete:
-                    print(f"Requesting deletion of inpaint record: {record_id}")
                     self.inpaintRecordDeleted.emit(record_id)
                 event.accept()
                 return
 
         super().keyPressEvent(event)
 
-    # --- NEW: Method to apply an inpaint patch ---
     def apply_inpaint_patch(self, patch_pixmap: QPixmap, coordinates: QRectF):
         """
         Draws an inpaint patch onto the label's current base pixmap.
@@ -143,10 +136,8 @@ class ResizableImageLabel(QGraphicsView):
         painter = QPainter(self.original_pixmap)
         painter.drawPixmap(coordinates.topLeft(), patch_pixmap)
         painter.end()
-        # Update the displayed pixmap with the newly patched version
         self.pixmap_item.setPixmap(self.original_pixmap)
 
-    # --- NEW: Method to revert all in-memory patches ---
     def revert_to_original(self):
         """Reverts the displayed pixmap to the pristine original from the file."""
         self.original_pixmap = self._true_original_pixmap.copy()
@@ -199,7 +190,6 @@ class ResizableImageLabel(QGraphicsView):
                 text_box.signals.selectedChanged.connect(self.on_text_box_selected)
                 self.scene().addItem(text_box)
                 self.text_boxes.append(text_box)
-
         QTimer.singleShot(0, self.update_view_transform)
     
     def draw_selections(self, paths_or_rects):
@@ -301,22 +291,16 @@ class ResizableImageLabel(QGraphicsView):
             
             self.split_visuals.append({'line': line, 'handle': handle})
 
-    # --- REFACTORED METHOD START ---
     def set_manual_selection_enabled(self, enabled):
         """
         Enables or disables the visual components for manual area selection.
-        This method is now generic and has no knowledge of specific handlers.
         """
         self._is_manual_select_active = enabled
         if enabled:
-            # Set the cursor to indicate that drawing a selection is possible.
             self.setCursor(Qt.CrossCursor)
         else:
-            # Reset the cursor to the default arrow, unless another mode
-            # that uses a special cursor is active.
             if not self._is_stitching_mode_active and not self._is_split_selection_active:
                 self.setCursor(Qt.ArrowCursor)
-    # --- REFACTORED METHOD END ---
 
     def mousePressEvent(self, event):
         if event.button() != Qt.LeftButton:
@@ -368,7 +352,6 @@ class ResizableImageLabel(QGraphicsView):
             self._rubber_band_origin = QPoint()
             if final_rect_viewport.width() > 4 and final_rect_viewport.height() > 4:
                 rect_scene = self.mapToScene(final_rect_viewport).boundingRect()
-                # The connected handler will now receive this signal.
                 self.manual_area_selected.emit(rect_scene, self)
             else:
                  self._rubber_band.hide()
@@ -413,7 +396,6 @@ class ResizableImageLabel(QGraphicsView):
         QTimer.singleShot(0, self.update_view_transform)
         
     def update_pixmap(self, new_pixmap: QPixmap):
-        # This method is for destructive updates like splitting/stitching
         self._true_original_pixmap = new_pixmap
         self.original_pixmap = new_pixmap.copy()
         self.current_pixmap = self.original_pixmap
@@ -462,18 +444,69 @@ class ResizableImageLabel(QGraphicsView):
                      combined[key] = value
         return combined
 
+    # --- MODIFIED: This now reports to the selection manager ---
     def on_text_box_selected(self, selected, row_number):
         if selected:
+            # Tell the manager about the new selection
+            self.selection_manager.select(row_number, self)
+            # Locally deselect other boxes on this image
             for tb in self.text_boxes:
-                 if tb.row_number != row_number:
-                     if tb.isSelected(): tb.setSelected(False)
-            self.textBoxSelected.emit(row_number, self, selected)
+                 if tb.row_number != row_number and tb.isSelected():
+                     tb.setSelected(False)
         else:
-            self.textBoxSelected.emit(row_number, self, selected)
+            # If the currently selected box is deselected, clear the global selection
+            if self.selection_manager.get_current_selection() == row_number:
+                self.selection_manager.deselect(self)
+    
+    # --- NEW: Slot to handle external selection changes ---
+    def on_external_selection_changed(self, row_number, source):
+        # Ignore signals from self to prevent loops
+        if source is self:
+            return
+
+        # If selection is cleared, deselect everything on this image
+        if row_number is None:
+            self.deselect_all_text_boxes()
+            return
+            
+        # Check if the selected row belongs to this image
+        target_result, _ = self.main_window.model._find_result_by_row_number(row_number)
+        if target_result and target_result.get('filename') == self.filename:
+            selected_item = self.select_text_box(row_number)
+            if selected_item:
+                self._scroll_to_box(selected_item)
+        else:
+            # The selection is for a different image, so deselect all boxes here
+            self.deselect_all_text_boxes()
+    
+    # --- NEW: Method to scroll the scroll area to a specific text box ---
+    def _scroll_to_box(self, selected_box_item):
+        scroll_area = self.main_window.scroll_area
+        scroll_viewport = scroll_area.viewport()
+        viewport_height = scroll_viewport.height()
+        current_scroll_y = scroll_area.verticalScrollBar().value()
+        image_label_y_in_scroll = self.y()
+        
+        box_rect_scene = selected_box_item.sceneBoundingRect()
+        scale = self.transform().m11()
+        
+        box_center_y_in_image = box_rect_scene.center().y() * scale
+        box_global_top = image_label_y_in_scroll + (box_rect_scene.top() * scale)
+        box_global_bottom = image_label_y_in_scroll + (box_rect_scene.bottom() * scale)
+
+        is_visible = (box_global_top >= current_scroll_y) and \
+                     (box_global_bottom <= current_scroll_y + viewport_height)
+        
+        if not is_visible:
+            target_scroll_y = image_label_y_in_scroll + box_center_y_in_image - (viewport_height / 2)
+            scrollbar = scroll_area.verticalScrollBar()
+            clamped_scroll_y = max(scrollbar.minimum(), min(int(target_scroll_y), scrollbar.maximum()))
+            scrollbar.setValue(clamped_scroll_y)
 
     def deselect_all_text_boxes(self):
         for text_box in self.text_boxes:
-            if text_box.isSelected(): text_box.setSelected(False)
+            if text_box.isSelected():
+                text_box.setSelected(False)
     
     def select_text_box(self, row_number_to_select):
         box_to_select = None
@@ -518,26 +551,23 @@ class ResizableImageLabel(QGraphicsView):
                 if index_to_remove != -1:
                     del self.text_boxes[index_to_remove]
             except ValueError: pass
-        else: pass
 
     def cleanup(self):
         try:
             self.textBoxDeleted.disconnect()
-            self.textBoxSelected.disconnect()
+            self.selection_manager.selection_changed.disconnect(self.on_external_selection_changed)
             self.manual_area_selected.disconnect()
             self.stitching_selection_changed.disconnect()
             self.split_indicator_requested.disconnect()
-            self.inpaintRecordDeleted.disconnect() # <-- ADD THIS
+            self.inpaintRecordDeleted.disconnect()
         except (TypeError, RuntimeError): pass
         if self.scene():
             for tb in self.text_boxes[:]: tb.cleanup()
             self.text_boxes = []
             self.clear_selection_visuals()
-            # --- NEW: Cleanup inpaint visuals ---
             for item in self.inpaint_visuals:
                 if item.scene(): self.scene().removeItem(item)
             self.inpaint_visuals = []
-            # --- End new cleanup ---
             for visual in self.split_visuals:
                 if visual['line'].scene(): self.scene().removeItem(visual['line'])
                 if visual['handle'].scene(): self.scene().removeItem(visual['handle'])

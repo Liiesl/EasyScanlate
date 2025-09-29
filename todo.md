@@ -7,6 +7,7 @@
 
   #### fixes
   - fix long loading time on startup (torch import)
+  - fix stitched img not saved as stitched
 
   #### modification
   - 
@@ -33,9 +34,7 @@
     - 
 
   #### fixes
-  - add stroke on typography
   - fix skew/free transform
-  - fix stitched img not saved as stitched
   - fix find and replace bugs :
     - roman character not working for some reason if there are other profile in other type of character (non roman)
     - profile creation/switching crashes the app when on find
