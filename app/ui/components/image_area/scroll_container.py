@@ -5,7 +5,8 @@ from PySide6.QtCore import Signal, QPoint
 import qtawesome as qta
 from assets import IV_BUTTON_STYLES
 from app.handlers import StitchHandler, SplitHandler, ContextFillHandler, ManualOCRHandler
-from app.ui.widgets.menus import ActionMenu
+# --- MODIFIED: Import the generic Menu class ---
+from app.ui.widgets.menus import Menu
 from app.ui.components import ResizableImageLabel
     
 class CustomScrollArea(QScrollArea):
@@ -13,7 +14,7 @@ class CustomScrollArea(QScrollArea):
     A custom QScrollArea that now owns and manages all action handlers,
     making them independent of the main window.
     """
-    save_requested = Signal(QWidget)
+    # --- MODIFIED: Signal no longer needed as the menu is handled locally. ---
     resized = Signal()
 
     def __init__(self, main_window, parent=None):
@@ -68,7 +69,8 @@ class CustomScrollArea(QScrollArea):
         # Save Menu Button
         btn_save_menu = QPushButton(qta.icon('fa5s.save', color='white'), "Save")
         btn_save_menu.setFixedSize(120, 50)
-        btn_save_menu.clicked.connect(lambda: self.save_requested.emit(btn_save_menu))
+        # --- MODIFIED: Connect directly to a local method instead of emitting a signal ---
+        btn_save_menu.clicked.connect(self._show_save_menu)
         btn_save_menu.setStyleSheet(IV_BUTTON_STYLES)
         layout.addWidget(btn_save_menu)
 
@@ -79,19 +81,65 @@ class CustomScrollArea(QScrollArea):
         btn_scroll_bottom.setStyleSheet(IV_BUTTON_STYLES)
         layout.addWidget(btn_scroll_bottom)
 
+    # --- METHOD MODIFIED (Refactored to use the new Menu class) ---
     def _show_action_menu(self):
-        """ Creates, positions, and shows the ActionMenu. """
-        button = self.sender()
-        # ActionMenu now only needs a reference to this scroll_area
-        menu = ActionMenu(self)
-        menu_size = menu.sizeHint()
-        button_top_left = button.mapToGlobal(button.rect().topLeft())
-        menu_pos = QPoint(button_top_left.x(), button_top_left.y() - menu_size.height())
-        menu.move(menu_pos)
-        menu.show()
+        """ Creates, populates, and shows the Action Menu using the generic Menu class. """
+        trigger_button = self.sender()
+        if not isinstance(trigger_button, QWidget):
+            return
+
+        menu = Menu(self)
+
+        # Create and add action buttons to the menu
+        btn_hide_text = QPushButton(qta.icon('fa5s.eye-slash', color='white'), " Show/Hide Text")
+        btn_hide_text.clicked.connect(self.toggle_text_visibility)
+        menu.addButton(btn_hide_text)
+        
+        btn_context_fill = QPushButton(qta.icon('fa5s.fill-drip', color='white'), " Context Fill")
+        btn_context_fill.clicked.connect(self.context_fill_handler.start_mode)
+        menu.addButton(btn_context_fill)
+
+        # --- NEW: Add the Edit Context Fill button ---
+        btn_edit_context_fill = QPushButton(qta.icon('fa5s.paint-brush', color='white'), " Edit Context Fill")
+        btn_edit_context_fill.clicked.connect(self.context_fill_handler.toggle_edit_mode)
+        menu.addButton(btn_edit_context_fill)
+
+        btn_split_images = QPushButton(qta.icon('fa5s.object-ungroup', color='white'), " Split Images")
+        btn_split_images.clicked.connect(self.split_handler.start_splitting_mode)
+        menu.addButton(btn_split_images)
+        
+        btn_stitch_images = QPushButton(qta.icon('fa5s.object-group', color='white'), " Stitch Images")
+        btn_stitch_images.clicked.connect(self.stitch_handler.start_stitching_mode)
+        menu.addButton(btn_stitch_images)
+
+        # Position the menu above the button that triggered it
+        menu.set_position_and_show(trigger_button, 'top left')
     
+    # --- NEW: Method to create and show the Save menu, similar to the action menu ---
+    def _show_save_menu(self):
+        """Creates, populates, and shows the Save menu."""
+        trigger_button = self.sender()
+        if not isinstance(trigger_button, QWidget):
+            return
+
+        menu = Menu(self)
+        
+        btn_save_project = QPushButton(qta.icon('fa5s.save', color='white'), " Save Project (.mmtl)")
+        btn_save_project.clicked.connect(self.main_window.save_project)
+        menu.addButton(btn_save_project)
+
+        btn_save_images = QPushButton(qta.icon('fa5s.images', color='white'), " Save Rendered Images")
+        btn_save_images.clicked.connect(self.main_window.export_manhwa)
+        menu.addButton(btn_save_images)
+
+        menu.set_position_and_show(trigger_button, 'top right')
+
     def cancel_active_modes(self, exclude_handler=None):
         """Deactivates any currently running action handler mode."""
+        # --- NEW: Ensure edit mode is cancelled too ---
+        if self.context_fill_handler.is_edit_mode_active and self.context_fill_handler is not exclude_handler:
+            self.context_fill_handler._disable_edit_mode()
+        # --- End new section ---
         for handler in self.action_handlers:
             if handler is not exclude_handler and handler.is_active:
                 # Assuming all handlers have a consistent cancellation method name

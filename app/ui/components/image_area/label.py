@@ -1,6 +1,8 @@
 # app/ui/components/image_area/label.py
 
-from PySide6.QtWidgets import QGraphicsScene, QSizePolicy, QGraphicsRectItem, QGraphicsView, QRubberBand, QGraphicsLineItem, QGraphicsEllipseItem, QGraphicsPathItem
+from PySide6.QtWidgets import (QGraphicsScene, QSizePolicy, QGraphicsRectItem, QGraphicsView, 
+                             QRubberBand, QGraphicsLineItem, QGraphicsEllipseItem, 
+                             QGraphicsPathItem, QGraphicsItem)
 from PySide6.QtCore import Qt, Signal, QRectF, QPoint, QRect, QSize, QTimer
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QPainterPath
 from app.ui.components.image_area.textbox import TextBoxItem
@@ -12,7 +14,7 @@ class ResizableImageLabel(QGraphicsView):
     manual_area_selected = Signal(QRectF, object)
     stitching_selection_changed = Signal(object, bool)
     split_indicator_requested = Signal(object, int)
-
+    inpaintRecordDeleted = Signal(str)
 
     def __init__(self, pixmap, filename, main_window):
         """
@@ -20,14 +22,17 @@ class ResizableImageLabel(QGraphicsView):
         fragile parent traversal.
         """
         super().__init__()
-        self.main_window = main_window # Store the reference
+        self.main_window = main_window 
         self.setScene(QGraphicsScene())
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self.original_pixmap = pixmap
-        self.current_pixmap = pixmap
+        
+        self._true_original_pixmap = pixmap
+        self.original_pixmap = pixmap.copy()
+        self.current_pixmap = self.original_pixmap 
+        
         self.filename = filename
         self.pixmap_item = self.scene().addPixmap(self.current_pixmap)
         self.scene().setSceneRect(0, 0, self.original_pixmap.width(), self.original_pixmap.height())
@@ -37,8 +42,12 @@ class ResizableImageLabel(QGraphicsView):
         self.original_text_entries = {}
         self.selection_visuals = []
 
+        self.inpaint_records = []
+        self.inpaint_visuals = []
+        # --- NEW: Add state variable to track edit mode ---
+        self._is_inpaint_edit_mode = False
+
         self._is_manual_select_active = False
-        self._is_selection_active = False # This flag is likely obsolete now
         self._rubber_band = None
         self._rubber_band_origin = QPoint()
 
@@ -48,7 +57,7 @@ class ResizableImageLabel(QGraphicsView):
         self._is_selected_for_stitching = False
 
         self.selection_overlay = QGraphicsRectItem()
-        self.selection_overlay.setBrush(QColor(70, 130, 180, 100)) # SteelBlue, semi-transparent
+        self.selection_overlay.setBrush(QColor(70, 130, 180, 100))
         self.selection_overlay.setPen(QPen(Qt.NoPen))
         self.selection_overlay.setZValue(1000)
         self.selection_overlay.hide()
@@ -56,9 +65,93 @@ class ResizableImageLabel(QGraphicsView):
         
         self._is_split_selection_active = False
         self._is_selected_for_splitting = False
-        self.split_visuals = [] # List of dicts: [{'line': item, 'handle': item}]
+        self.split_visuals = [] 
         self._is_dragging_split_line = False
         self._dragged_item = None
+
+    def update_inpaint_data(self, records):
+        """Receives inpaint records for this label and draws their visual borders."""
+        self.inpaint_records = records
+        self._draw_inpaint_borders()
+
+    def _draw_inpaint_borders(self):
+        """Clears and redraws the selectable borders for inpaint patches."""
+        for item in self.inpaint_visuals:
+            if item.scene():
+                self.scene().removeItem(item)
+        self.inpaint_visuals.clear()
+
+        pen = QPen(QColor(255, 165, 0), 2, Qt.DashLine) 
+        pen.setCosmetic(True)
+        brush = QBrush(QColor(255, 165, 0, 40))
+
+        for record in self.inpaint_records:
+            coords = record.get('coordinates')
+            if not coords: continue
+            
+            rect = QRectF(coords[0], coords[1], coords[2], coords[3])
+            item = QGraphicsRectItem(rect)
+            item.setPen(pen)
+            item.setBrush(brush)
+            item.setZValue(1200) 
+            item.setData(0, record.get('id')) 
+            
+            # --- MODIFIED: Set visibility and selectability based on the current mode ---
+            item.setFlag(QGraphicsItem.ItemIsSelectable, self._is_inpaint_edit_mode)
+            item.setVisible(self._is_inpaint_edit_mode)
+            
+            self.scene().addItem(item)
+            self.inpaint_visuals.append(item)
+
+    # --- MODIFIED: This method is now the single source of truth for the visual state ---
+    def set_inpaint_edit_mode(self, enabled):
+        """Shows or hides the inpaint patch borders and updates internal state."""
+        self._is_inpaint_edit_mode = enabled # Set the state first
+        for item in self.inpaint_visuals:
+            item.setVisible(enabled)
+            item.setFlag(QGraphicsItem.ItemIsSelectable, enabled)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            selected_items = self.scene().selectedItems()
+            if not selected_items:
+                super().keyPressEvent(event)
+                return
+
+            ids_to_delete = []
+            for item in selected_items:
+                # Check if this item is one of our inpaint visuals
+                if item in self.inpaint_visuals:
+                    record_id = item.data(0)
+                    if record_id:
+                        ids_to_delete.append(record_id)
+            
+            if ids_to_delete:
+                for record_id in ids_to_delete:
+                    print(f"Requesting deletion of inpaint record: {record_id}")
+                    self.inpaintRecordDeleted.emit(record_id)
+                event.accept()
+                return
+
+        super().keyPressEvent(event)
+
+    # --- NEW: Method to apply an inpaint patch ---
+    def apply_inpaint_patch(self, patch_pixmap: QPixmap, coordinates: QRectF):
+        """
+        Draws an inpaint patch onto the label's current base pixmap.
+        """
+        painter = QPainter(self.original_pixmap)
+        painter.drawPixmap(coordinates.topLeft(), patch_pixmap)
+        painter.end()
+        # Update the displayed pixmap with the newly patched version
+        self.pixmap_item.setPixmap(self.original_pixmap)
+
+    # --- NEW: Method to revert all in-memory patches ---
+    def revert_to_original(self):
+        """Reverts the displayed pixmap to the pristine original from the file."""
+        self.original_pixmap = self._true_original_pixmap.copy()
+        self.current_pixmap = self.original_pixmap
+        self.pixmap_item.setPixmap(self.original_pixmap)
 
     def apply_translation(self, main_window, text_entries_by_row, default_style):
         processed_default_style = self._ensure_gradient_defaults_for_ril(default_style)
@@ -320,8 +413,10 @@ class ResizableImageLabel(QGraphicsView):
         QTimer.singleShot(0, self.update_view_transform)
         
     def update_pixmap(self, new_pixmap: QPixmap):
-        self.original_pixmap = new_pixmap
-        self.current_pixmap = new_pixmap
+        # This method is for destructive updates like splitting/stitching
+        self._true_original_pixmap = new_pixmap
+        self.original_pixmap = new_pixmap.copy()
+        self.current_pixmap = self.original_pixmap
         
         if self.pixmap_item:
             self.pixmap_item.setPixmap(self.current_pixmap)
@@ -432,11 +527,17 @@ class ResizableImageLabel(QGraphicsView):
             self.manual_area_selected.disconnect()
             self.stitching_selection_changed.disconnect()
             self.split_indicator_requested.disconnect()
+            self.inpaintRecordDeleted.disconnect() # <-- ADD THIS
         except (TypeError, RuntimeError): pass
         if self.scene():
             for tb in self.text_boxes[:]: tb.cleanup()
             self.text_boxes = []
             self.clear_selection_visuals()
+            # --- NEW: Cleanup inpaint visuals ---
+            for item in self.inpaint_visuals:
+                if item.scene(): self.scene().removeItem(item)
+            self.inpaint_visuals = []
+            # --- End new cleanup ---
             for visual in self.split_visuals:
                 if visual['line'].scene(): self.scene().removeItem(visual['line'])
                 if visual['handle'].scene(): self.scene().removeItem(visual['handle'])

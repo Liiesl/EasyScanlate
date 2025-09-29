@@ -14,7 +14,7 @@
 ## currently in progress
   - add inpainting.
     - [X] inpainting base logic (initiation, lifecycle, etc.)
-    - [ ] inpainting restore
+    - [X] inpainting restore
     - [ ] advanced inpaint
       - [ ] free form selection (pen tools/draw)
       - [ ] switch on/off from selection
@@ -28,6 +28,9 @@
   - add mica effect
   - add manual textbox insertion
   - implement watermarking
+  - textbox styles
+    - add stroke to typography
+    - 
 
   #### fixes
   - add stroke on typography
@@ -52,3 +55,4 @@
   - profile improvement:
       - manual creation, deletion, rename
       - two pane view
+  - make it possible to edit straight from textbox

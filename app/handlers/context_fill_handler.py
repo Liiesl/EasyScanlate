@@ -2,15 +2,15 @@
 
 import traceback
 import sys
-import io
+import io, os
 import cv2
 import numpy as np
 from PIL import Image
-import os
+import uuid
 
 from PySide6.QtWidgets import QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
 from PySide6.QtGui import QImage, QPixmap, QPainterPath
-from PySide6.QtCore import QBuffer
+from PySide6.QtCore import QBuffer, QRectF
 from app.ui.components import ResizableImageLabel
 from assets import MANUALOCR_STYLES
 
@@ -20,6 +20,7 @@ class ContextFillHandler:
         self.scroll_area = scroll_area
         self.model = model
         self.is_active = False
+        self.is_edit_mode_active = False # <-- NEW: State for edit mode
         self.active_label = None
         self.selection_paths = []
 
@@ -72,8 +73,50 @@ class ContextFillHandler:
                                 "Click and drag on an image to select an area to inpaint. "
                                 "You can make multiple selections on the same image.")
 
+    # --- NEW: Method to toggle the new edit mode ---
+    def toggle_edit_mode(self):
+        if self.is_edit_mode_active:
+            self._disable_edit_mode()
+        else:
+            self._enable_edit_mode()
+
+    def _enable_edit_mode(self):
+        if self.is_edit_mode_active: return
+        self.scroll_area.cancel_active_modes(exclude_handler=self)
+        self.is_edit_mode_active = True
+        print("Enabling Context Fill Edit Mode.")
+
+        layout = self.scroll_area.widget().layout()
+        if not layout: return
+
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
+            if isinstance(widget, ResizableImageLabel):
+                widget.set_text_visibility(False)
+                widget.set_inpaint_edit_mode(True)
+        
+        QMessageBox.information(self.scroll_area, "Edit Context Fill Mode",
+                                "Inpaint areas are highlighted. Click on a highlight to select it, then press Delete or Backspace to remove it.")
+
+    def _disable_edit_mode(self):
+        if not self.is_edit_mode_active: return
+        self.is_edit_mode_active = False
+        print("Disabling Context Fill Edit Mode.")
+
+        layout = self.scroll_area.widget().layout()
+        if not layout: return
+
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
+            if isinstance(widget, ResizableImageLabel):
+                # Restore text visibility to its previous state
+                widget.set_text_visibility(self.scroll_area._text_is_visible)
+                widget.set_inpaint_edit_mode(False)
+
     def cancel_mode(self):
         """Cancels the context fill mode and resets the UI."""
+        if self.is_edit_mode_active: # <-- ADD: Ensure we exit edit mode if active
+            self._disable_edit_mode()
         if not self.is_active: return
         print("Cancelling Context Fill mode...")
         self.is_active = False
@@ -109,16 +152,13 @@ class ContextFillHandler:
             widget = layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
                 widget.set_manual_selection_enabled(enabled)
-                # --- LOGIC MOVED HERE ---
                 if enabled:
-                    # Connect this handler's slot to the label's signal
                     widget.manual_area_selected.connect(self.handle_area_selected)
                 else:
-                    # Disconnect to prevent calls when inactive
                     try:
                         widget.manual_area_selected.disconnect(self.handle_area_selected)
                     except (TypeError, RuntimeError):
-                        pass # Signal was not connected, which is fine.
+                        pass
 
     def handle_area_selected(self, new_rect_scene, label_widget):
         """Callback to handle a new selection, merging it into a unified shape."""
@@ -140,16 +180,12 @@ class ContextFillHandler:
         new_path = QPainterPath()
         new_path.addRect(new_rect_scene)
         remaining_paths = []
-        # Iterate through existing paths to find intersections
         for existing_path in self.selection_paths:
             if existing_path.intersects(new_path):
-                # If they intersect, merge them into a single unified path
                 new_path = new_path.united(existing_path)
             else:
-                # If they don't intersect, keep the existing path as is
                 remaining_paths.append(existing_path)
         
-        # Add the newly created or merged path to the list
         remaining_paths.append(new_path)
         self.selection_paths = remaining_paths
         self.active_label.draw_selections(self.selection_paths)
@@ -168,15 +204,19 @@ class ContextFillHandler:
         overlay.raise_()
 
     def process_inpainting(self):
-        """Crops all selected areas, runs inpainting, and updates the image."""
+        """
+        Performs inpainting non-destructively by saving only the patched area
+        and its metadata to the project model.
+        """
         if not self.selection_paths or not self.active_label:
             QMessageBox.warning(self.scroll_area, "Error", "No area selected.")
             self.reset_selection()
             return
 
-        print(f"Processing inpainting for {self.active_label.filename}")
+        print(f"Processing non-destructive inpainting for {self.active_label.filename}")
 
         try:
+            # 1. Get the original image and create a mask
             pixmap = self.active_label.original_pixmap
             buffer = QBuffer(); buffer.open(QBuffer.ReadWrite); pixmap.save(buffer, "PNG")
             pil_img = Image.open(io.BytesIO(buffer.data())).convert('RGB')
@@ -190,25 +230,44 @@ class ContextFillHandler:
                 if points.size > 0:
                     cv2.fillPoly(mask, [points], 255)
 
+            # 2. Perform inpainting on the full image
             inpainted_image_cv = cv2.inpaint(image_cv, mask, 3, cv2.INPAINT_TELEA)
 
-            inpainted_image_np = cv2.cvtColor(inpainted_image_cv, cv2.COLOR_BGR2RGB)
-            h, w, ch = inpainted_image_np.shape
-            q_image = QImage(inpainted_image_np.data, w, h, ch * w, QImage.Format_RGB888)
-            new_pixmap = QPixmap.fromImage(q_image)
+            # --- START OF FIX ---
+            # 3. Get the bounding box of all selections by uniting them iteratively
+            combined_path = QPainterPath()
+            for path in self.selection_paths:
+                combined_path = combined_path.united(path)
+            bounding_rect = combined_path.boundingRect().toRect()
+            # --- END OF FIX ---
+            
+            x, y, w, h = bounding_rect.x(), bounding_rect.y(), bounding_rect.width(), bounding_rect.height()
 
-            self.active_label.update_pixmap(new_pixmap)
+            # 4. Crop the patch from the inpainted result
+            patch_cv = inpainted_image_cv[y:y+h, x:x+w]
+            patch_rgb = cv2.cvtColor(patch_cv, cv2.COLOR_BGR2RGB)
             
-            full_path = next((p for p in self.model.image_paths if os.path.basename(p) == self.active_label.filename), None)
+            # 5. Convert patch to QPixmap
+            patch_h, patch_w, ch = patch_rgb.shape
+            q_image = QImage(patch_rgb.data, patch_w, patch_h, ch * patch_w, QImage.Format_RGB888)
+            patch_pixmap = QPixmap.fromImage(q_image)
+
+            # 6. Create metadata record and delegate to model
+            patch_filename = f"{os.path.splitext(self.active_label.filename)[0]}_{uuid.uuid4().hex[:8]}.png"
+            record = {
+                "id": str(uuid.uuid4()),
+                "patch_filename": patch_filename,
+                "target_image": self.active_label.filename,
+                "coordinates": [x, y, w, h] # [x, y, width, height]
+            }
             
-            if full_path:
-                if not new_pixmap.save(full_path):
-                     raise IOError(f"Failed to save inpainted image to {full_path}")
-                print(f"Successfully saved inpainted image to {full_path}")
+            success, error_msg = self.model.add_inpaint_record(record, patch_pixmap)
+
+            if success:
+                QMessageBox.information(self.scroll_area, "Success", "Context fill applied successfully.")
             else:
-                QMessageBox.critical(self.scroll_area, "File Error", "Could not find file path. Changes will not be saved.")
+                raise Exception(error_msg)
 
-            QMessageBox.information(self.scroll_area, "Success", "Context fill applied successfully.")
             self.reset_selection()
 
         except Exception as e:

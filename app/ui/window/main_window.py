@@ -2,14 +2,14 @@
 
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSizePolicy, QCheckBox, QPushButton,
                              QMessageBox, QSplitter, QComboBox)
-from PySide6.QtCore import Qt, QSettings, QPoint
+from PySide6.QtCore import Qt, QSettings, QPoint, QRectF
 from PySide6.QtGui import QPixmap, QKeySequence, QAction, QColor
 import qtawesome as qta
 from app.utils.file_io import export_ocr_results, import_translation_file, export_rendered_images
 from app.ui.components import ResizableImageLabel, CustomScrollArea, ResultsWidget, TextBoxStylePanel, FindReplaceWidget
 from app.ui.widgets.menu_bar import MenuBar
 from app.ui.widgets.progress_bar import CustomProgressBar
-from app.ui.widgets.menus import SaveMenu, ActionMenu, ImportExportMenu
+from app.ui.widgets.menus import Menu
 from app.handlers import BatchOCRHandler # Only batch handler is needed here
 from app.core import ProjectModel
 from app.ui.dialogs import SettingsDialog
@@ -87,11 +87,7 @@ class MainWindow(QMainWindow):
         settings_layout.addWidget(self.ocr_progress, 1)
         left_panel.addLayout(settings_layout)
 
-        # CustomScrollArea is now the owner of the action handlers.
         self.scroll_area = CustomScrollArea(main_window=self)
-        self.scroll_area.save_requested.connect(
-            lambda button: self._show_menu(SaveMenu, button, 'top right')
-        )
         
         self.scroll_content = QWidget()
         self.scroll_content.setStyleSheet("background-color: transparent;")
@@ -123,7 +119,6 @@ class MainWindow(QMainWindow):
         self.btn_manual_ocr = QPushButton(qta.icon('fa5s.crop-alt', color='white'), "Manual OCR")
         self.btn_manual_ocr.setFixedWidth(160)
         self.btn_manual_ocr.setCheckable(True)
-        # Connect to the handler owned by the scroll_area
         self.btn_manual_ocr.toggled.connect(self.scroll_area.manual_ocr_handler.toggle_mode)
         self.btn_manual_ocr.setEnabled(False)
         button_layout.addWidget(self.btn_manual_ocr)
@@ -141,9 +136,8 @@ class MainWindow(QMainWindow):
         self.btn_import_export_menu = QPushButton(qta.icon('fa5s.bars', color='white'), "")
         self.btn_import_export_menu.setFixedWidth(60)
         self.btn_import_export_menu.setToolTip("Open Import/Export Menu")
-        self.btn_import_export_menu.clicked.connect(
-            lambda: self._show_menu(ImportExportMenu, self.btn_import_export_menu, 'bottom right')
-        )
+        # --- MODIFIED: Connect to the new handler method ---
+        self.btn_import_export_menu.clicked.connect(self.show_import_export_menu)
         file_button_layout.addWidget(self.btn_import_export_menu)
         button_layout.addLayout(file_button_layout)
         right_panel.addLayout(button_layout)
@@ -199,22 +193,20 @@ class MainWindow(QMainWindow):
         if profile_name:
             self.switch_active_profile(profile_name)
 
-    def _show_menu(self, menu_class, button, position):
-        """ Creates, positions, and shows a popup menu. """
-        menu = menu_class(self)
-        menu_size = menu.sizeHint()
-        button_top_left = button.mapToGlobal(button.rect().topLeft())
-        button_top_right = button.mapToGlobal(button.rect().topRight())
-        button_bottom_left = button.mapToGlobal(button.rect().bottomLeft())
-        button_bottom_right = button.mapToGlobal(button.rect().bottomRight())
-        menu_pos = QPoint()
-        if position == 'bottom left': menu_pos = button_bottom_left
-        elif position == 'bottom right': menu_pos = QPoint(button_bottom_right.x() - menu_size.width(), button_bottom_right.y())
-        elif position == 'top left': menu_pos = QPoint(button_top_left.x(), button_top_left.y() - menu_size.height())
-        elif position == 'top right': menu_pos = QPoint(button_top_right.x() - menu_size.width(), button_top_right.y() - menu_size.height())
-        else: menu_pos = button_bottom_left
-        menu.move(menu_pos)
-        menu.show()
+    # --- NEW: Method to create and show the Import/Export menu ---
+    def show_import_export_menu(self):
+        """Creates, populates, and shows the Import/Export menu."""
+        menu = Menu(self)
+        
+        btn_import = QPushButton(qta.icon('fa5s.file-import', color='white'), " Import Translation")
+        btn_import.clicked.connect(self.import_translation)
+        menu.addButton(btn_import)
+
+        btn_export = QPushButton(qta.icon('fa5s.file-export', color='white'), " Export OCR Results")
+        btn_export.clicked.connect(self.export_ocr_results)
+        menu.addButton(btn_export)
+
+        menu.set_position_and_show(self.btn_import_export_menu, 'bottom right')
 
     def update_profile_selector(self):
         """Syncs the profile dropdown with the profiles from the model."""
@@ -284,19 +276,68 @@ class MainWindow(QMainWindow):
                  label = ResizableImageLabel(pixmap, filename, self)
                  label.textBoxDeleted.connect(self.delete_row)
                  label.textBoxSelected.connect(self.handle_text_box_selected)
+                 # --- NEW: Connect the signal for deleting inpaint records ---
+                 label.inpaintRecordDeleted.connect(self.handle_inpaint_record_deleted)
                  # Connect the manual selection signal to the correct handler
                  label.manual_area_selected.connect(self.scroll_area.manual_ocr_handler.handle_area_selected)
+                 # --- MODIFIED: Connect to context fill handler here, not in the handler itself ---
                  label.manual_area_selected.connect(self.scroll_area.context_fill_handler.handle_area_selected)
                  self.scroll_layout.addWidget(label)
             except Exception as e:
                  print(f"Error creating ResizableImageLabel for {image_path}: {e}")
+        
+        # --- NEW: Apply non-destructive inpaints after labels are created ---
+        self._apply_inpaints()
 
         self.update_profile_selector()
-        self.on_model_updated(None)
+        self.on_model_updated(None) # This populates text boxes
         print(f"Project '{self.model.project_name}' loaded and UI populated.")
     
+    # --- NEW: Slot to handle the deletion request from the label ---
+    def handle_inpaint_record_deleted(self, record_id):
+        """Delegates the inpaint record deletion request to the model."""
+        self.model.remove_inpaint_record(record_id)
+        # The model will emit model_updated, which will trigger a UI refresh automatically.
+    
+    # --- NEW: Method to apply inpaint patches ---
+    def _apply_inpaints(self):
+        """Iterates through inpaint data and applies patches to the correct image labels."""
+        # Create a quick lookup map for efficiency
+        labels_by_filename = {
+            widget.filename: widget
+            for i in range(self.scroll_layout.count())
+            if isinstance((widget := self.scroll_layout.itemAt(i).widget()), ResizableImageLabel)
+        }
+        
+        inpaint_dir = os.path.join(self.model.temp_dir, 'inpaint')
+
+        for record in self.model.inpaint_data:
+            target_label = labels_by_filename.get(record['target_image'])
+            if target_label:
+                patch_path = os.path.join(inpaint_dir, record['patch_filename'])
+                if os.path.exists(patch_path):
+                    patch_pixmap = QPixmap(patch_path)
+                    coords = record['coordinates']  # Expected format: [x, y, w, h]
+                    if not patch_pixmap.isNull():
+                        target_label.apply_inpaint_patch(patch_pixmap, QRectF(coords[0], coords[1], coords[2], coords[3]))
+                    else:
+                        print(f"Warning: Could not load patch pixmap from {patch_path}")
+                else:
+                    print(f"Warning: Inpaint patch file not found: {patch_path}")
+
     def on_model_updated(self, affected_filenames):
         """ SLOT: Handles the model_updated signal. Refreshes all relevant views. """
+        # --- NEW: Re-apply inpaints if an image was affected, in case of a revert ---
+        if affected_filenames:
+            for filename in affected_filenames:
+                for i in range(self.scroll_layout.count()):
+                    widget = self.scroll_layout.itemAt(i).widget()
+                    if isinstance(widget, ResizableImageLabel) and widget.filename == filename:
+                        # Revert to original first to clear old patches, then re-apply all current ones.
+                        widget.revert_to_original()
+                        self._apply_inpaints() # This is slightly inefficient but ensures correctness
+                        break
+
         self.update_all_views(affected_filenames)
 
     def get_display_text(self, result):
@@ -517,6 +558,14 @@ class MainWindow(QMainWindow):
                 if not affected_filenames or image_filename in affected_filenames:
                     # Get the pre-grouped results for this image; defaults to empty dict.
                     results_for_this_image = grouped_results.get(image_filename, {})
+                    
+                    # --- NEW: Get inpaint records for this image and update the label ---
+                    records_for_this_image = [
+                        r for r in self.model.inpaint_data if r.get('target_image') == image_filename
+                    ]
+                    widget.update_inpaint_data(records_for_this_image)
+                    # --- End new section ---
+                    
                     # Tell the image widget to redraw its text boxes using the provided data.
                     # Note: 'apply_translation' is a legacy name; it redraws text boxes.
                     widget.apply_translation(self, results_for_this_image, DEFAULT_TEXT_STYLE)
