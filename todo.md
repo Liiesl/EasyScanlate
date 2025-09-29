@@ -42,7 +42,12 @@
   - implement titlebar to all apps
   - save edited state of textboxitem
   - dynamic link between import export ocr and translation
-  - make translations into non blocking window
+  - change how translation Work
+    - make translations into non blocking window
+      - or integrate it into main window
+      - easier retranslate workflow
+    - change translation format to xml
+    - characters, places, and lore name dictionaries
   - hide textboximage button
   - profile improvement:
       - manual creation, deletion, rename

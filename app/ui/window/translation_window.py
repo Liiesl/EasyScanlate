@@ -7,6 +7,7 @@ import qtawesome as qta
 from app.core.translations import TranslationThread, _get_text_for_profile_static, generate_for_translate_content, generate_retranslate_content, import_translation_file_content
 
 from app.ui.dialogs import GEMINI_MODELS_WITH_INFO
+from assets import ADVANCED_CHECK_STYLES
 
 # Style constants for row highlighting
 SELECTED_STYLE = "QFrame { background-color: #385675; border: 1px solid #78909c; border-radius: 4px; }"
@@ -326,6 +327,7 @@ class TranslationWindow(QDialog):
 
         # "Select All" checkbox in the header row
         self.select_all_checkbox = QCheckBox()
+        self.select_all_checkbox.setStyleSheet(ADVANCED_CHECK_STYLES)
         self.select_all_checkbox.setTristate(True)
         self.select_all_checkbox.setToolTip("Select/Deselect All Rows")
         self.select_all_checkbox.stateChanged.connect(self._on_select_all_changed)
@@ -361,6 +363,7 @@ class TranslationWindow(QDialog):
 
             # Col 1: CheckBox
             checkbox = QCheckBox()
+            checkbox.setStyleSheet(ADVANCED_CHECK_STYLES)
             checkbox.setChecked(True) # Default to checked
             checkbox.stateChanged.connect(lambda state, k=row_key: self._on_checkbox_state_changed(k))
             self.row_widgets[row_key]['checkbox'] = checkbox

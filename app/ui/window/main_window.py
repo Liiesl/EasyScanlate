@@ -695,6 +695,7 @@ class MainWindow(QMainWindow):
             msg.setInformativeText("Mark this entry for deletion? It will be hidden and excluded from exports.")
             msg.setStyleSheet(DELETE_ROW_STYLES)
             dont_show_cb = QCheckBox("Remember choice", msg); msg.setCheckBox(dont_show_cb)
+            dont_show_cb.setStyleSheet(ADVANCED_CHECK_STYLES)
             msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No); msg.setDefaultButton(QMessageBox.No)
             response = msg.exec_()
             if dont_show_cb.isChecked(): self.settings.setValue("show_delete_warning", "false")

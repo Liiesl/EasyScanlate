@@ -2,6 +2,7 @@ from PySide6.QtWidgets import (QDialog, QDoubleSpinBox, QVBoxLayout, QFormLayout
                              QComboBox, QSpinBox, QDialogButtonBox, QTabWidget,
                              QWidget, QLineEdit, QKeySequenceEdit, QCheckBox) # Added QLabel
 from PySide6.QtGui import QKeySequence
+from assets import ADVANCED_CHECK_STYLES
 
 GEMINI_MODELS_WITH_INFO = [
     ("gemini-2.5-flash", "500 req/day (free tier)"),
@@ -30,6 +31,7 @@ class SettingsDialog(QDialog):
         general_layout = QFormLayout()
 
         self.show_delete_warning_check = QCheckBox()
+        self.show_delete_warning_check.setStyleSheet(ADVANCED_CHECK_STYLES)
         self.show_delete_warning_check.setChecked(
             self.settings.value("show_delete_warning", "true") == "true"
         )
@@ -37,6 +39,7 @@ class SettingsDialog(QDialog):
 
         # --- Add GPU Setting ---
         self.use_gpu_check = QCheckBox()
+        self.use_gpu_check.setStyleSheet(ADVANCED_CHECK_STYLES)
         self.use_gpu_check.setChecked(
             self.settings.value("use_gpu", "true").lower() == "true" # Default to True
         )
