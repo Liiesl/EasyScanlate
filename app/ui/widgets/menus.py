@@ -2,7 +2,55 @@
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton
 from PySide6.QtCore import Qt, QPoint
+from PySide6.QtGui import QIcon
 from assets import MENU_STYLES
+
+class ToggleButton(QPushButton):
+    """
+    A custom QPushButton that acts as a toggle switch with 'on' and 'off' states.
+    It can have different text and icons for each state.
+    """
+    def __init__(self, off_text: str, on_text: str, off_icon: QIcon = None, on_icon: QIcon = None, parent=None):
+        """
+        Initializes the toggle button.
+
+        Args:
+            off_text: The text to display when the button is in the 'off' state.
+            on_text: The text to display when the button is in the 'on' state.
+            off_icon: The icon for the 'off' state.
+            on_icon: The icon for the 'on' state.
+            parent: The parent widget.
+        """
+        super().__init__(off_text, parent)
+        self.setCheckable(True)
+
+        self._off_text = off_text
+        self._on_text = on_text
+        self._off_icon = off_icon
+        self._on_icon = on_icon or off_icon # Use off_icon if on_icon is not provided
+
+        self.toggled.connect(self._update_state)
+        # Set initial state
+        self._update_state(self.isChecked())
+
+    def _update_state(self, checked: bool):
+        """Internal slot to update the text, icon, and 'state' property for QSS styling."""
+        if checked:
+            self.setText(self._on_text)
+            self.setIcon(self._on_icon)
+            self.setProperty("state", "on")
+        else:
+            self.setText(self._off_text)
+            self.setIcon(self._off_icon)
+            self.setProperty("state", "off")
+        
+        # Force a style re-evaluation
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def setState(self, is_on: bool):
+        """Programmatically sets the button's toggled state."""
+        self.setChecked(is_on)
 
 class Menu(QWidget):
     """

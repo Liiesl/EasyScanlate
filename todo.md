@@ -5,6 +5,7 @@
   #### addition
   - implement hide text
   - add ocr override dialog confirmation
+  - add custom state aware button class
 
   #### fixes
   - fix long loading time on startup (torch import)
@@ -26,7 +27,7 @@
       - [ ] switch on/off from selection
       - [ ] undo/redo
     - [ ] auto inpaint option
-    - [ ] hide inpaints
+    - [X] hide inpaints
     - known bugs caused by this
       - 
 
