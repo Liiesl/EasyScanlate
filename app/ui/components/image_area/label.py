@@ -90,7 +90,7 @@ class ResizableImageLabel(QGraphicsView):
             item = QGraphicsRectItem(rect)
             item.setPen(pen)
             item.setBrush(brush)
-            item.setZValue(1200) 
+            item.setZValue(1) 
             item.setData(0, record.get('id')) 
             
             item.setFlag(QGraphicsItem.ItemIsSelectable, self._is_inpaint_edit_mode)
