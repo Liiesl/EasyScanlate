@@ -26,7 +26,7 @@
       - [ ] free form selection (pen tools/draw)
       - [ ] switch on/off from selection
       - [ ] undo/redo
-    - [ ] auto inpaint option
+    - [X] auto inpaint option
     - [X] hide inpaints
     - known bugs caused by this
       - 

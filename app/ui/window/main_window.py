@@ -504,6 +504,7 @@ class MainWindow(QMainWindow):
             "min_confidence": self.min_confidence, "distance_threshold": self.distance_threshold,
             "batch_size": int(self.settings.value("ocr_batch_size", 8)), "decoder": self.settings.value("ocr_decoder", "beamsearch"),
             "adjust_contrast": float(self.settings.value("ocr_adjust_contrast", 0.5)), "resize_threshold": int(self.settings.value("ocr_resize_threshold", 1024)),
+            "auto_context_fill": self.settings.value("auto_context_fill", "false").lower() == "true"
         }
         self.batch_handler = BatchOCRHandler(
             image_paths=self.model.image_paths, 
@@ -516,6 +517,7 @@ class MainWindow(QMainWindow):
         self.batch_handler.batch_finished.connect(self.on_batch_finished)
         self.batch_handler.error_occurred.connect(self.on_batch_error)
         self.batch_handler.processing_stopped.connect(self.on_batch_stopped)
+        self.batch_handler.auto_inpaint_requested.connect(self.on_auto_inpaint_requested)
         self.batch_handler.start_processing()
 
     def on_image_processed(self, new_results):
@@ -562,6 +564,20 @@ class MainWindow(QMainWindow):
             # If no handler, but UI is stuck, reset it
             self.cleanup_ocr_session()
 
+    def on_auto_inpaint_requested(self, filename, bounding_boxes):
+        """
+        SLOT: Handles the request from BatchOCRHandler to perform automatic inpainting.
+        """
+        target_label = None
+        for i in range(self.scroll_layout.count()):
+            widget = self.scroll_layout.itemAt(i).widget()
+            if isinstance(widget, ResizableImageLabel) and widget.filename == filename:
+                target_label = widget
+                break
+        
+        if target_label:
+            self.scroll_area.context_fill_handler.perform_auto_inpainting(target_label, bounding_boxes)
+ 
     def update_image_text_box(self, row_number, new_text):
         target_item = self.find_textbox_item(row_number)
         if target_item:
@@ -684,10 +700,12 @@ class MainWindow(QMainWindow):
         if hasattr(self.model, 'temp_dir') and self.model.temp_dir and os.path.exists(self.model.temp_dir):
             try:
                 import shutil
+                print(f"Cleaning up temporary directory: {self.model.temp_dir}")
                 shutil.rmtree(self.model.temp_dir)
             except Exception as e:
                 print(f"Warning: Could not remove temporary directory {self.model.temp_dir}: {e}")
         if self.ocr_processor and self.ocr_processor.isRunning():
+            print("Stopping OCR processor on close...")
             self.ocr_processor.stop_requested = True
             self.ocr_processor.wait(500)
             if self.ocr_processor.isRunning():

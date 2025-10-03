@@ -47,6 +47,14 @@ class SettingsDialog(QDialog):
         general_layout.addRow("Use GPU for OCR (if available):", self.use_gpu_check)
         # --- End GPU Setting ---
 
+        self.auto_context_fill_check = QCheckBox()
+        self.auto_context_fill_check.setStyleSheet(ADVANCED_CHECK_STYLES)
+        self.auto_context_fill_check.setChecked(
+            self.settings.value("auto_context_fill", "false") == "true"
+        )
+        self.auto_context_fill_check.setToolTip("Automatically inpaint the background behind detected text during Batch OCR.\nThis can improve text rendering but may slow down processing.")
+        general_layout.addRow("Auto Context Fill Background on Batch OCR:", self.auto_context_fill_check)
+
         general_tab.setLayout(general_layout)
         self.tab_widget.addTab(general_tab, "General")
 
@@ -202,7 +210,8 @@ class SettingsDialog(QDialog):
             "true" if self.show_delete_warning_check.isChecked() else "false")
         self.settings.setValue("use_gpu",
             "true" if self.use_gpu_check.isChecked() else "false")
-
+        self.settings.setValue("auto_context_fill",
+            "true" if self.auto_context_fill_check.isChecked() else "false")
         # Save OCR Processing settings
         self.settings.setValue("min_text_height", self.min_text_spin.value())
         self.settings.setValue("max_text_height", self.max_text_spin.value())

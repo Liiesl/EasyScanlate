@@ -9,8 +9,8 @@ from PIL import Image
 import uuid
 
 from PySide6.QtWidgets import QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
-from PySide6.QtGui import QImage, QPixmap, QPainterPath
-from PySide6.QtCore import QBuffer, QRectF
+from PySide6.QtGui import QImage, QPixmap, QPainterPath, QPolygonF
+from PySide6.QtCore import QBuffer, QRectF, QPointF
 from app.ui.components import ResizableImageLabel
 from assets import MANUALOCR_STYLES
 
@@ -214,62 +214,88 @@ class ContextFillHandler:
             return
 
         print(f"Processing non-destructive inpainting for {self.active_label.filename}")
+        self._perform_inpainting_logic(self.active_label, self.selection_paths, show_dialogs=True)
+        self.reset_selection()
 
+    def perform_auto_inpainting(self, target_label, bounding_boxes):
+        """
+        Performs inpainting based on a list of bounding boxes from OCR.
+        This is a non-interactive, programmatic version of process_inpainting.
+        """
+        if not target_label or not bounding_boxes:
+            return
+
+        paths = []
+        for box in bounding_boxes:
+            path = QPainterPath()
+            try:
+                poly = QPolygonF([QPointF(p[0], p[1]) for p in box])
+                path.addPolygon(poly)
+                paths.append(path)
+            except (TypeError, IndexError):
+                continue
+
+        if not paths:
+            return
+
+        self._perform_inpainting_logic(target_label, paths, show_dialogs=False)
+
+    def _perform_inpainting_logic(self, target_label, paths, show_dialogs=True):
+        """
+        Shared logic for both manual and automatic inpainting.
+        """
         try:
-            # 1. Get the original image and create a mask
-            pixmap = self.active_label.original_pixmap
-            buffer = QBuffer(); buffer.open(QBuffer.ReadWrite); pixmap.save(buffer, "PNG")
+            pixmap = target_label.original_pixmap
+            buffer = QBuffer()
+            buffer.open(QBuffer.ReadWrite)
+            pixmap.save(buffer, "PNG")
             pil_img = Image.open(io.BytesIO(buffer.data())).convert('RGB')
             image_np = np.array(pil_img)
             image_cv = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
             
             mask = np.zeros(image_cv.shape[:2], dtype=np.uint8)
-            for path in self.selection_paths:
+            for path in paths:
                 polygon = path.toFillPolygon().toPolygon()
                 points = np.array([[p.x(), p.y()] for p in polygon], dtype=np.int32)
                 if points.size > 0:
                     cv2.fillPoly(mask, [points], 255)
 
-            # 2. Perform inpainting on the full image
             inpainted_image_cv = cv2.inpaint(image_cv, mask, 3, cv2.INPAINT_TELEA)
 
-            # 3. Get the bounding box of all selections
             combined_path = QPainterPath()
-            for path in self.selection_paths:
+            for path in paths:
                 combined_path = combined_path.united(path)
             bounding_rect = combined_path.boundingRect().toRect()
             
             x, y, w, h = bounding_rect.x(), bounding_rect.y(), bounding_rect.width(), bounding_rect.height()
+            if w <= 0 or h <= 0:
+                return
 
-            # 4. Crop the patch from the inpainted result
             patch_cv = inpainted_image_cv[y:y+h, x:x+w]
             patch_rgb = cv2.cvtColor(patch_cv, cv2.COLOR_BGR2RGB)
             
-            # 5. Convert patch to QPixmap
             patch_h, patch_w, ch = patch_rgb.shape
             q_image = QImage(patch_rgb.data, patch_w, patch_h, ch * patch_w, QImage.Format_RGB888)
             patch_pixmap = QPixmap.fromImage(q_image)
 
-            # 6. Create metadata record and delegate to model
-            patch_filename = f"{os.path.splitext(self.active_label.filename)[0]}_{uuid.uuid4().hex[:8]}.png"
+            patch_filename = f"{os.path.splitext(target_label.filename)[0]}_{uuid.uuid4().hex[:8]}.png"
             record = {
                 "id": str(uuid.uuid4()),
                 "patch_filename": patch_filename,
-                "target_image": self.active_label.filename,
-                "coordinates": [x, y, w, h] # [x, y, width, height]
+                "target_image": target_label.filename,
+                "coordinates": [x, y, w, h]
             }
             
             success, error_msg = self.model.add_inpaint_record(record, patch_pixmap)
 
             if success:
-                QMessageBox.information(self.scroll_area, "Success", "Context fill applied successfully.")
+                if show_dialogs:
+                    QMessageBox.information(self.scroll_area, "Success", "Context fill applied successfully.")
             else:
                 raise Exception(error_msg)
-
-            self.reset_selection()
 
         except Exception as e:
             print(f"Error during inpainting: {e}")
             traceback.print_exc(file=sys.stdout)
-            QMessageBox.critical(self.scroll_area, "Inpainting Error", f"An unexpected error occurred: {str(e)}")
-            self.reset_selection()
+            if show_dialogs:
+                QMessageBox.critical(self.scroll_area, "Inpainting Error", f"An unexpected error occurred: {str(e)}")

@@ -94,7 +94,13 @@ class CustomScrollArea(QScrollArea):
             off_icon=qta.icon('fa5s.eye', color='white'),
             on_icon=qta.icon('fa5s.eye-slash', color='white')
         )
-        btn_hide_text.setState(self._text_is_visible)
+        
+        # If edit mode is active, text is forced off. Reflect this in the button state and disable it.
+        is_edit_mode = self.context_fill_handler.is_edit_mode_active
+        is_text_currently_visible = self._text_is_visible and not is_edit_mode
+        btn_hide_text.setState(is_text_currently_visible)
+        btn_hide_text.setEnabled(not is_edit_mode)
+        
         btn_hide_text.clicked.connect(self.toggle_text_visibility)
         menu.addButton(btn_hide_text, close_on_click=False)
         
