@@ -480,6 +480,14 @@ class MainWindow(QMainWindow):
         if self.scroll_area.manual_ocr_handler.is_active:
             QMessageBox.warning(self, "Warning", "Cannot start standard OCR while in Manual OCR mode.")
             return
+        
+        has_existing_results = any(not res.get('is_manual', False) for res in self.model.ocr_results)
+        if has_existing_results:
+            reply = QMessageBox.question(self, 'Confirm Overwrite',
+                                         "This will overwrite all existing OCR data (except for manual entries). Do you want to continue?",
+                                         QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.No:
+                return
 
         if not self._initialize_ocr_reader("Standard OCR"):
             return
@@ -598,13 +606,17 @@ class MainWindow(QMainWindow):
         show_warning = self.settings.value("show_delete_warning", "true") == "true"
         proceed = True
         if show_warning:
-            msg = QMessageBox(self); msg.setIcon(QMessageBox.Warning)
-            msg.setWindowTitle("Confirm Deletion Marking"); msg.setText("<b>Mark for Deletion Warning</b>")
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Warning)
+            msg.setWindowTitle("Confirm Deletion Marking")
+            msg.setText("<b>Mark for Deletion Warning</b>")
             msg.setInformativeText("Mark this entry for deletion? It will be hidden and excluded from exports.")
             msg.setStyleSheet(DELETE_ROW_STYLES)
-            dont_show_cb = QCheckBox("Remember choice", msg); msg.setCheckBox(dont_show_cb)
+            dont_show_cb = QCheckBox("Remember choice", msg)
+            msg.setCheckBox(dont_show_cb)
             dont_show_cb.setStyleSheet(ADVANCED_CHECK_STYLES)
-            msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No); msg.setDefaultButton(QMessageBox.No)
+            msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No) 
+            msg.setDefaultButton(QMessageBox.No)
             response = msg.exec_()
             if dont_show_cb.isChecked(): self.settings.setValue("show_delete_warning", "false")
             proceed = response == QMessageBox.Yes
