@@ -29,12 +29,11 @@ class ResizableImageLabel(QGraphicsView):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         
-        self._true_original_pixmap = pixmap
-        self.original_pixmap = pixmap.copy()
-        self.current_pixmap = self.original_pixmap 
+        self.original_pixmap = pixmap
         
         self.filename = filename
-        self.pixmap_item = self.scene().addPixmap(self.current_pixmap)
+        self.pixmap_item = self.scene().addPixmap(self.original_pixmap)
+        self.pixmap_item.setZValue(0) # Base image is at the bottom
         self.scene().setSceneRect(0, 0, self.original_pixmap.width(), self.original_pixmap.height())
         self.setInteractive(True)
         self.text_boxes = []
@@ -44,6 +43,7 @@ class ResizableImageLabel(QGraphicsView):
 
         self.inpaint_records = []
         self.inpaint_visuals = []
+        self.inpaint_patch_items = [] 
         self._is_inpaint_edit_mode = False
 
         self._is_manual_select_active = False
@@ -68,7 +68,6 @@ class ResizableImageLabel(QGraphicsView):
         self._is_dragging_split_line = False
         self._dragged_item = None
 
-    # ... (code from update_inpaint_data to apply_translation is unchanged) ...
     def update_inpaint_data(self, records):
         self.inpaint_records = records
         self._draw_inpaint_borders()
@@ -107,6 +106,10 @@ class ResizableImageLabel(QGraphicsView):
             item.setVisible(enabled)
             item.setFlag(QGraphicsItem.ItemIsSelectable, enabled)
 
+    def set_inpaints_applied(self, applied: bool):
+        for item in self.inpaint_patch_items:
+            item.setVisible(applied)
+
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             selected_items = self.scene().selectedItems()
@@ -130,19 +133,17 @@ class ResizableImageLabel(QGraphicsView):
         super().keyPressEvent(event)
 
     def apply_inpaint_patch(self, patch_pixmap: QPixmap, coordinates: QRectF):
-        """
-        Draws an inpaint patch onto the label's current base pixmap.
-        """
-        painter = QPainter(self.original_pixmap)
-        painter.drawPixmap(coordinates.topLeft(), patch_pixmap)
-        painter.end()
-        self.pixmap_item.setPixmap(self.original_pixmap)
+        patch_item = self.scene().addPixmap(patch_pixmap)
+        patch_item.setPos(coordinates.topLeft())
+        # --- Z-Value 1: Above base image, below text boxes ---
+        patch_item.setZValue(1)
+        self.inpaint_patch_items.append(patch_item)
 
     def revert_to_original(self):
-        """Reverts the displayed pixmap to the pristine original from the file."""
-        self.original_pixmap = self._true_original_pixmap.copy()
-        self.current_pixmap = self.original_pixmap
-        self.pixmap_item.setPixmap(self.original_pixmap)
+        for item in self.inpaint_patch_items:
+            if item.scene():
+                self.scene().removeItem(item)
+        self.inpaint_patch_items.clear()
 
     def apply_translation(self, main_window, text_entries_by_row, default_style):
         processed_default_style = self._ensure_gradient_defaults_for_ril(default_style)
@@ -186,6 +187,7 @@ class ResizableImageLabel(QGraphicsView):
                                          display_text,
                                          initial_style=combined_style)
 
+                text_box.setZValue(2) # On top of inpaint patches
                 text_box.signals.rowDeleted.connect(self.handle_text_box_deleted)
                 text_box.signals.selectedChanged.connect(self.on_text_box_selected)
                 self.scene().addItem(text_box)
@@ -398,10 +400,8 @@ class ResizableImageLabel(QGraphicsView):
     def update_pixmap(self, new_pixmap: QPixmap):
         self._true_original_pixmap = new_pixmap
         self.original_pixmap = new_pixmap.copy()
-        self.current_pixmap = self.original_pixmap
         
-        if self.pixmap_item:
-            self.pixmap_item.setPixmap(self.current_pixmap)
+        self._update_displayed_pixmap()
         
         self.scene().setSceneRect(0, 0, self.original_pixmap.width(), self.original_pixmap.height())
         
@@ -565,6 +565,11 @@ class ResizableImageLabel(QGraphicsView):
             for tb in self.text_boxes[:]: tb.cleanup()
             self.text_boxes = []
             self.clear_selection_visuals()
+            
+            for item in self.inpaint_patch_items:
+                if item.scene(): self.scene().removeItem(item)
+            self.inpaint_patch_items = []
+            
             for item in self.inpaint_visuals:
                 if item.scene(): self.scene().removeItem(item)
             self.inpaint_visuals = []

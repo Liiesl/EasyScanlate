@@ -14,7 +14,6 @@ class CustomScrollArea(QScrollArea):
     A custom QScrollArea that now owns and manages all action handlers,
     making them independent of the main window.
     """
-    # --- MODIFIED: Signal no longer needed as the menu is handled locally. ---
     resized = Signal()
 
     def __init__(self, main_window, parent=None):
@@ -25,6 +24,7 @@ class CustomScrollArea(QScrollArea):
         self.model = main_window.model
         self.overlay_widget = None
         self._text_is_visible = True
+        self._inpainting_is_visible = True
         
         # Instantiate all handlers, breaking the MainWindow dependency
         self.manual_ocr_handler = ManualOCRHandler(self, self.model)
@@ -69,7 +69,6 @@ class CustomScrollArea(QScrollArea):
         # Save Menu Button
         btn_save_menu = QPushButton(qta.icon('fa5s.save', color='white'), "Save")
         btn_save_menu.setFixedSize(120, 50)
-        # --- MODIFIED: Connect directly to a local method instead of emitting a signal ---
         btn_save_menu.clicked.connect(self._show_save_menu)
         btn_save_menu.setStyleSheet(IV_BUTTON_STYLES)
         layout.addWidget(btn_save_menu)
@@ -81,7 +80,6 @@ class CustomScrollArea(QScrollArea):
         btn_scroll_bottom.setStyleSheet(IV_BUTTON_STYLES)
         layout.addWidget(btn_scroll_bottom)
 
-    # --- METHOD MODIFIED (Refactored to use the new Menu class) ---
     def _show_action_menu(self):
         """ Creates, populates, and shows the Action Menu using the generic Menu class. """
         trigger_button = self.sender()
@@ -95,6 +93,10 @@ class CustomScrollArea(QScrollArea):
         btn_hide_text.clicked.connect(self.toggle_text_visibility)
         menu.addButton(btn_hide_text)
         
+        btn_hide_inpainting = QPushButton(qta.icon('fa5s.eraser', color='white'), " Show/Hide Context Fills")
+        btn_hide_inpainting.clicked.connect(self.toggle_inpainting_visibility)
+        menu.addButton(btn_hide_inpainting)
+
         btn_context_fill = QPushButton(qta.icon('fa5s.fill-drip', color='white'), " Context Fill")
         btn_context_fill.clicked.connect(self.context_fill_handler.start_mode)
         menu.addButton(btn_context_fill)
@@ -115,7 +117,6 @@ class CustomScrollArea(QScrollArea):
         # Position the menu above the button that triggered it
         menu.set_position_and_show(trigger_button, 'top left')
     
-    # --- NEW: Method to create and show the Save menu, similar to the action menu ---
     def _show_save_menu(self):
         """Creates, populates, and shows the Save menu."""
         trigger_button = self.sender()
@@ -142,7 +143,6 @@ class CustomScrollArea(QScrollArea):
         # --- End new section ---
         for handler in self.action_handlers:
             if handler is not exclude_handler and handler.is_active:
-                # Assuming all handlers have a consistent cancellation method name
                 if hasattr(handler, 'cancel_mode'):
                     handler.cancel_mode()
                 elif hasattr(handler, 'cancel_stitching_mode'):
@@ -157,6 +157,14 @@ class CustomScrollArea(QScrollArea):
             widget = self.main_window.scroll_layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
                 widget.set_text_visibility(self._text_is_visible)
+
+    def toggle_inpainting_visibility(self):
+        """ Toggles whether the inpainting patches are applied to the images. """
+        self._inpainting_is_visible = not self._inpainting_is_visible
+        for i in range(self.main_window.scroll_layout.count()):
+            widget = self.main_window.scroll_layout.itemAt(i).widget()
+            if isinstance(widget, ResizableImageLabel):
+                widget.set_inpaints_applied(self._inpainting_is_visible)
 
     def update_handler_ui_positions(self):
         """ Updates the position of any active handler UI overlays. """

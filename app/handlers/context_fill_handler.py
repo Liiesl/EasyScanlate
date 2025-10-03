@@ -233,13 +233,11 @@ class ContextFillHandler:
             # 2. Perform inpainting on the full image
             inpainted_image_cv = cv2.inpaint(image_cv, mask, 3, cv2.INPAINT_TELEA)
 
-            # --- START OF FIX ---
-            # 3. Get the bounding box of all selections by uniting them iteratively
+            # 3. Get the bounding box of all selections
             combined_path = QPainterPath()
             for path in self.selection_paths:
                 combined_path = combined_path.united(path)
             bounding_rect = combined_path.boundingRect().toRect()
-            # --- END OF FIX ---
             
             x, y, w, h = bounding_rect.x(), bounding_rect.y(), bounding_rect.width(), bounding_rect.height()
 

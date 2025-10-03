@@ -1,9 +1,10 @@
 # what i need
 
-## done (milestone 0.1.2 release)
+## done (milestone 0.2.0 release)
 
   #### addition
   - implement hide text
+  - add ocr override dialog confirmation
 
   #### fixes
   - fix long loading time on startup (torch import)
@@ -24,7 +25,8 @@
       - [ ] free form selection (pen tools/draw)
       - [ ] switch on/off from selection
       - [ ] undo/redo
-    - [ ] add auto inpaint option
+    - [ ] auto inpaint option
+    - [ ] hide inpaints
     - known bugs caused by this
       - 
 
@@ -36,6 +38,8 @@
   - implement watermarking
   - textbox styles
     - add stroke to typography
+  - add link to github issues for when there is crash
+    - add issue template
     - 
 
   #### fixes
