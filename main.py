@@ -282,6 +282,27 @@ class Preloader(QThread):
             settings = QSettings("Liiesl", "EasyScanlate")
             recent_projects = settings.value("recent_projects", [])
             recent_timestamps = settings.value("recent_timestamps", {})
+
+            # --- START: Added logic to limit recent projects ---
+            MAX_RECENT_PROJECTS = 6
+            if len(recent_projects) > MAX_RECENT_PROJECTS:
+                self.progress_update.emit("Cleaning up old project entries...")
+                # Get the list of projects to remove (the oldest ones)
+                projects_to_remove = recent_projects[MAX_RECENT_PROJECTS:]
+                # Trim the main list to the 6 most recent
+                recent_projects = recent_projects[:MAX_RECENT_PROJECTS]
+                
+                # Update the settings with the trimmed list
+                settings.setValue("recent_projects", recent_projects)
+                
+                # Remove the timestamps associated with the old projects
+                for path_to_remove in projects_to_remove:
+                    if path_to_remove in recent_timestamps:
+                        del recent_timestamps[path_to_remove]
+                
+                # Update the settings with the cleaned timestamps dictionary
+                settings.setValue("recent_timestamps", recent_timestamps)
+            # --- END: Added logic ---
             
             for path in recent_projects:
                 filename = os.path.basename(path)
