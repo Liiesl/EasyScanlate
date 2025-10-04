@@ -9,7 +9,8 @@ on:
       - 'v*.*.*'
 
 jobs:
-  # --- Stage 1: Parallel Builds ---
+  # --- Stage 1: Parallel Builds (jobs: build-main-app, build-minimal-module, build-updater) ---
+  # ... (These jobs remain unchanged) ...
 
   build-main-app:
     runs-on: windows-latest
@@ -45,7 +46,7 @@ jobs:
       - name: Zip Main Build Output
         run: |
           cd build/main.dist
-          7z a -t7z -mx=9 ..\..\main-app-build.7z *
+          7z a -t7z -mx=9 -mf=off ..\..\main-app-build.7z *
           cd ..\..
         shell: pwsh
 
@@ -90,7 +91,7 @@ jobs:
       - name: Zip Minimal Build Output
         run: |
           cd build/main.dist
-          7z a -t7z -mx=9 ..\..\minimal-module-build.7z *
+          7z a -t7z -mx=9 -mf=off ..\..\minimal-module-build.7z *
           cd ..\..
         shell: pwsh
 
@@ -141,7 +142,7 @@ jobs:
           path: build/Updater.exe # Path to the one-file executable
 
   # --- Stage 2: Parallel Jobs for Release Assets ---
-
+  
   create-installer:
     runs-on: windows-latest
     needs: [build-main-app, build-minimal-module, build-updater]
@@ -169,7 +170,7 @@ jobs:
       - name: Create Minimal Build and Dependency Archives
         run: |
           # Create an archive of the minimal build
-          7z a -t7z -mx=9 minimal-build.7z ./minimal-module-dist/*
+          7z a -t7z -mx=9 -mf=off minimal-build.7z ./minimal-module-dist/*
 
           # Get the list of files to exclude (i.e., files in the minimal build)
           $minimalFiles = Get-ChildItem -Path "minimal-module-dist" -Recurse | ForEach-Object { $_.Name }
@@ -177,7 +178,7 @@ jobs:
 
           # Create an archive of the extra dependencies by excluding minimal files
           cd main-app-dist
-          7z a -t7z -mx=9 ..\dependencies.7z * $excludeArgs
+          7z a -t7z -mx=9 -mf=off ..\dependencies.7z * $excludeArgs
           cd ..
         shell: pwsh
 
@@ -185,7 +186,7 @@ jobs:
         run: choco install nsis
 
       - name: Add NSIS to PATH
-        run: echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        run: echo "C:\Program Files (x88)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         shell: pwsh
 
       - name: Compile NSIS installer
@@ -210,6 +211,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies for script
+        run: pip install bsdiff4
+
       - name: Download Main App Build
         uses: actions/download-artifact@v4
         with:
@@ -219,64 +228,58 @@ jobs:
       - name: Unzip Main App Build
         run: 7z x main-app-build/main-app-build.7z -o"current-build"
 
-      - name: Generate Manifest for Current Build
-        id: generate_manifest
+      - name: Archive Current Main Executable
+        run: 7z a -t7z main-executable.7z ./current-build/main.exe
+
+      - name: Download previous manifest and executable
+        id: download_previous_assets
         run: |
-          cd current-build
-          find . -type f ! -path "./torch/*" -exec sha256sum {} + | awk '{print $1 "  " $2}' | sed 's|./||' > ../manifest.json
-          echo "Generated manifest.json"
-          cat ../manifest.json
-      
-      - name: Download previous manifest
-        id: download_manifest
-        run: |
-          if gh release download --pattern "manifest.json" -R Liiesl/EasyScanlate; then
-            echo "Previous manifest downloaded successfully."
-            echo "::set-output name=manifest_exists::true"
+          PREVIOUS_TAG="v0.1.2" # Hardcoded tag for testing
+          
+          gh release download $PREVIOUS_TAG --repo ${{ github.repository }} --pattern 'manifest.json' -O old_manifest.json || true
+          gh release download $PREVIOUS_TAG --repo ${{ github.repository }} --pattern 'main-executable.7z' -O old_main.7z || true
+          
+          if [ -f "old_manifest.json" ]; then
+            echo "manifest_path=old_manifest.json" >> $GITHUB_OUTPUT
           else
-            echo "No previous manifest found. A full package will be created."
-            echo "::set-output name=manifest_exists::false"
+            echo "manifest_path=" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ -f "old_main.7z" ]; then
+            7z x old_main.7z -o.
+            echo "executable_path=main.exe" >> $GITHUB_OUTPUT
+          else
+            echo "executable_path=" >> $GITHUB_OUTPUT
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create Update Package
+      - name: Create Update Package with Python Script
         id: create_package
         run: |
-          if [[ "${{ steps.download_manifest.outputs.manifest_exists }}" == "false" ]]; then
-            echo "No previous manifest. Creating a full update package."
-            cd current-build
-            zip -r ../update-package.zip . -x "torch/*"
-            echo "::set-output name=package_created::true"
-          else
-            echo "Previous manifest exists. Comparing for changes."
-            # The rest of your diff logic here...
-            # Make sure you are in the correct directory when running diff
-            # For example, if the manifest was downloaded to the root of the workspace:
-            diff --new-line-format="%L" --old-line-format="" --unchanged-line-format="" current-build/manifest.json manifest.json > added_or_changed.txt
-            diff --new-line-format="" --old-line-format="%L" --unchanged-line-format="" current-build/manifest.json manifest.json > removed.txt
-
-            if [ -s "added_or_changed.txt" ] || [ -s "removed.txt" ]; then
-              echo "Changes detected, creating update package."
-              awk '{print $2}' added_or_changed.txt | xargs -I {} zip ../update-package.zip -C current-build {}
-              echo "::set-output name=package_created::true"
-            else
-              echo "No file changes detected."
-              echo "::set-output name=package_created::false"
-            fi
+          ARGS=""
+          if [ -n "${{ steps.download_previous_assets.outputs.manifest_path }}" ]; then
+            ARGS="$ARGS --old-manifest ${{ steps.download_previous_assets.outputs.manifest_path }}"
           fi
-      
+          if [ -n "${{ steps.download_previous_assets.outputs.executable_path }}" ]; then
+            ARGS="$ARGS --old-executable ${{ steps.download_previous_assets.outputs.executable_path }}"
+          fi
+          
+          python dev/updater/create_update_package.py --build-dir current-build --main-executable-name main.exe $ARGS
+
       - name: Upload Update Package and New Manifest
+        if: steps.create_package.outputs.package_created == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: update-package-assets
           path: |
             manifest.json
             update-package.zip
-        if: steps.create_package.outputs.package_created == 'true'
+            *.patch
+            main-executable.7z
 
   # --- Stage 3: Create GitHub Release ---
-
+  
   create-release:
     runs-on: ubuntu-latest
     needs: [create-installer, create_update_package]
@@ -286,7 +289,7 @@ jobs:
     steps:
       - name: Check-out repository
         uses: actions/checkout@v4
-        
+
       # Create the destination directory first
       - name: Create Release Directory
         run: mkdir -p release-assets
@@ -295,15 +298,15 @@ jobs:
       - name: Download Installer Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: installer-assets  # <-- The unique name you gave it
-          path: release-assets/   # <-- The destination folder
+          name: installer-assets
+          path: release-assets/
 
       # Download the update package assets
       - name: Download Update Package Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: update-package-assets # <-- The other unique name
-          path: release-assets/        # <-- The SAME destination folder
+          name: update-package-assets
+          path: release-assets/
 
       - name: Create Draft GitHub Release
         id: create_release
