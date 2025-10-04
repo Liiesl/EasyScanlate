@@ -284,6 +284,9 @@ jobs:
       contents: write
 
     steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+        
       # Create the destination directory first
       - name: Create Release Directory
         run: mkdir -p release-assets
