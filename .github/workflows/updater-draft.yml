@@ -198,7 +198,7 @@ jobs:
       - name: Upload Installer and Archives as Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-assets
+          name: installer-assets
           path: |
             EasyScanlate-Installer.exe
             minimal-build.7z
@@ -269,7 +269,7 @@ jobs:
       - name: Upload Update Package and New Manifest
         uses: actions/upload-artifact@v4
         with:
-          name: release-assets
+          name: update-package-assets
           path: |
             manifest.json
             update-package.zip
@@ -284,11 +284,23 @@ jobs:
       contents: write
 
     steps:
-      - name: Download Release Assets
+      # Create the destination directory first
+      - name: Create Release Directory
+        run: mkdir -p release-assets
+
+      # Download the installer assets
+      - name: Download Installer Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: release-assets
-          path: release-assets
+          name: installer-assets  # <-- The unique name you gave it
+          path: release-assets/   # <-- The destination folder
+
+      # Download the update package assets
+      - name: Download Update Package Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: update-package-assets # <-- The other unique name
+          path: release-assets/        # <-- The SAME destination folder
 
       - name: Create Draft GitHub Release
         id: create_release
@@ -298,11 +310,6 @@ jobs:
           draft: true
           preserve_order: true
           body_path: changelog.md
-          files: |
-            release-assets/EasyScanlate-Installer.exe
-            release-assets/minimal-build.7z
-            release-assets/dependencies.7z
-            release-assets/manifest.json
-            release-assets/update-package.zip
+          files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
