@@ -135,19 +135,9 @@ echo.
 :: 5. Create and Push Git Tag
 :: ============================
 echo --- Step 5: Handling Git Tags ---
-if %IS_NEW_TAG%==true (
-    echo Creating and pushing new tag: %CHOSEN_TAG%
-    git tag %CHOSEN_TAG%
-    if !errorlevel! neq 0 (
-        echo ERROR: Failed to create new tag. It might already exist locally.
-        goto :eof
-    )
-    git push origin %CHOSEN_TAG%
-    if !errorlevel! neq 0 (
-        echo ERROR: Failed to push new tag to remote.
-        goto :eof
-    )
-) else (
+
+:: If re-tagging, delete the old local and remote tags first.
+if %IS_NEW_TAG%==false (
     echo Re-tagging with existing tag: %CHOSEN_TAG%
 
     echo 1. Deleting local tag...
@@ -156,26 +146,29 @@ if %IS_NEW_TAG%==true (
         echo WARNING: Could not delete local tag. It may not exist.
     )
 
-    echo 2. Pushing deletion to remote...
-    git push origin :refs/tags/%CHOSEN_TAG%
+    echo 2. Deleting remote tag...
+    git push origin --delete %CHOSEN_TAG%
     if !errorlevel! neq 0 (
         echo WARNING: Could not delete remote tag. It may not exist on the remote.
     )
-
-    echo 3. Creating new local tag...
-    git tag %CHOSEN_TAG%
-    if !errorlevel! neq 0 (
-        echo ERROR: Failed to re-create local tag.
-        goto :eof
-    )
-
-    echo 4. Pushing new tag to remote...
-    git push origin %CHOSEN_TAG%
-    if !errorlevel! neq 0 (
-        echo ERROR: Failed to push updated tag to remote.
-        goto :eof
-    )
 )
+
+:: Create the new tag locally. This happens for both new tags and re-tags.
+echo Creating new local tag: %CHOSEN_TAG%
+git tag %CHOSEN_TAG%
+if !errorlevel! neq 0 (
+    echo ERROR: Failed to create the tag '%CHOSEN_TAG%'.
+    goto :eof
+)
+
+:: Push all local tags that don't exist on the remote.
+echo Pushing tags to remote...
+git push --tags
+if !errorlevel! neq 0 (
+    echo ERROR: Failed to push tags to the remote repository.
+    goto :eof
+)
+
 echo.
 echo ======================================================
 echo Done! The workflow has been successfully prepared.
