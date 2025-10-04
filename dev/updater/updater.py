@@ -1,178 +1,122 @@
 # updater.py
-# A standalone application for checking and applying updates.
+# A standalone, elevated-privilege application for applying updates.
+# Expects 2 command-line arguments:
+# 1. Path to the temp directory with manifest.json and update-package.zip
+# 2. Path to the application's installation directory
 
 import sys
 import os
-import subprocess
-import urllib.request
 import json
-import py7zr
-import winreg # For reading the installed version from the registry
-from packaging.version import parse as parse_version
+import zipfile
+import shutil
+import subprocess
 
 from PySide6.QtWidgets import QApplication, QDialog, QVBoxLayout, QLabel, QProgressBar, QMessageBox
 from PySide6.QtCore import QThread, Signal, Qt
 
 # --- Configuration ---
-# These MUST match your main application and NSIS script
-GH_OWNER = "Liiesl"
-GH_REPO = "ManhwaOCR"
-APP_PUBLISHER = "YourCompany"
+# These are used for display and relaunching the app
 APP_NAME = "MangaOCRTool"
 MAIN_APP_EXE = "main.exe"
-INSTALLER_ASSET_NAME = "MangaOCRTool-Installer.exe"
-DEPS_ASSET_NAME = "dependency-dll.7z"
-
-# This registry key is written by the NSIS installer
-REG_UNINSTALL_KEY = f"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{APP_NAME}"
-
+EXCLUDE_FROM_DELETION = ("torch",) # Directories to never delete from
 
 class UpdateWorker(QThread):
-    """Handles the update logic in a background thread."""
+    """Handles the file operations for the update in a background thread."""
     progress_update = Signal(str)
     progress_percent = Signal(int)
     finished = Signal(bool, str) # Success (bool), Message (str)
 
-    def get_installed_version(self):
-        """Reads the application's version from the Windows Registry."""
-        try:
-            # NSIS installer writes to HKEY_LOCAL_MACHINE (HKLM)
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, REG_UNINSTALL_KEY, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY)
-            version, _ = winreg.QueryValueEx(key, "DisplayVersion")
-            winreg.CloseKey(key)
-            return str(version)
-        except FileNotFoundError:
-            self.progress_update.emit("Registry key not found. Is the app installed?")
-            return "0.0.0"
-        except Exception as e:
-            self.progress_update.emit(f"Error reading registry: {e}")
-            return "0.0.0"
+    def __init__(self, temp_dir, install_dir):
+        super().__init__()
+        self.temp_dir = temp_dir
+        self.install_dir = install_dir
+        self.manifest_path = os.path.join(self.temp_dir, "manifest.json")
+        self.zip_path = os.path.join(self.temp_dir, "update-package.zip")
 
     def run(self):
-        """Main update logic."""
-        self.progress_update.emit("Checking for updates...")
-        
-        # 1. Get installed version from registry
-        installed_version_str = self.get_installed_version()
-        if installed_version_str == "0.0.0":
-            self.finished.emit(False, "Could not determine installed version. Update cannot proceed.")
-            return
-            
-        self.progress_update.emit(f"Current version: {installed_version_str}")
-        installed_version = parse_version(installed_version_str)
-
-        # 2. Get latest version from GitHub
+        """Main update logic: extract, delete, copy."""
         try:
-            api_url = f"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}/releases/latest"
-            with urllib.request.urlopen(api_url) as response:
-                if response.status != 200:
-                    raise Exception(f"GitHub API Error: Status {response.status}")
-                release_data = json.loads(response.read().decode())
-            
-            latest_version_str = release_data.get("tag_name", "v0.0.0").lstrip('v')
-            self.progress_update.emit(f"Latest version available: {latest_version_str}")
-            latest_version = parse_version(latest_version_str)
-            
-            assets = release_data.get("assets", [])
-            installer_url = next((asset["browser_download_url"] for asset in assets if asset["name"] == INSTALLER_ASSET_NAME), None)
-            deps_url = next((asset["browser_download_url"] for asset in assets if asset["name"] == DEPS_ASSET_NAME), None)
+            if not os.path.exists(self.manifest_path):
+                raise FileNotFoundError("manifest.json not found in temp directory.")
+            if not os.path.exists(self.zip_path):
+                raise FileNotFoundError("update-package.zip not found in temp directory.")
+            if not os.path.isdir(self.install_dir):
+                raise FileNotFoundError(f"Installation directory not found: {self.install_dir}")
 
-            if not installer_url or not deps_url:
-                self.finished.emit(False, "Required update files not found in the latest release.")
-                return
-
-        except Exception as e:
-            self.finished.emit(False, f"Failed to check for updates: {e}")
-            return
-
-        # 3. Compare versions
-        if latest_version <= installed_version:
-            self.finished.emit(True, "You are already using the latest version!")
-            return
-
-        self.progress_update.emit("New version found. Starting download...")
-        
-        # 4. Download files
-        try:
-            # Determine install location from registry
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, REG_UNINSTALL_KEY, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY)
-            install_location, _ = winreg.QueryValueEx(key, "InstallLocation")
-            winreg.CloseKey(key)
-
-            temp_dir = os.path.join(os.environ["TEMP"], APP_NAME + "_Update")
-            os.makedirs(temp_dir, exist_ok=True)
+            # 1. Load the manifest
+            self.progress_update.emit("Reading update manifest...")
+            with open(self.manifest_path, 'r') as f:
+                manifest = json.load(f)
             
-            installer_path = os.path.join(temp_dir, INSTALLER_ASSET_NAME)
-            deps_path = os.path.join(temp_dir, DEPS_ASSET_NAME)
+            files_to_remove = manifest.get("_removed_files", [])
             
-            self.download_file(installer_url, installer_path)
-            self.download_file(deps_url, deps_path)
+            # 2. Delete removed files
+            if files_to_remove:
+                self.progress_update.emit(f"Removing {len(files_to_remove)} old files...")
+                for i, relative_path in enumerate(files_to_remove):
+                    file_to_delete = os.path.join(self.install_dir, relative_path)
+                    try:
+                        if os.path.exists(file_to_delete):
+                            os.remove(file_to_delete)
+                    except OSError as e:
+                        print(f"Could not remove {file_to_delete}: {e}") # Log error but continue
+                    self.progress_percent.emit(int((i + 1) / len(files_to_remove) * 50))
 
-        except Exception as e:
-            self.finished.emit(False, f"Download failed: {e}")
-            return
-            
-        # 5. Run the silent update
-        self.progress_update.emit("Download complete. Applying update...")
-        self.progress_percent.emit(0)
-        try:
-            # The /S flag makes the NSIS installer run silently.
-            # _?=$INSTDIR tells the uninstaller where the app is located,
-            # ensuring it correctly preserves the 'torch' directory.
-            command = [installer_path, '/S', f'_?={install_location}']
-            # We use Popen and wait to ensure the installer finishes before we proceed.
-            process = subprocess.Popen(command, shell=True)
-            process.wait()
+            # 3. Extract the update package
+            self.progress_update.emit("Extracting new files...")
+            extract_path = os.path.join(self.temp_dir, "extracted")
+            with zipfile.ZipFile(self.zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_path)
 
-            # 6. Extract dependencies
-            self.progress_update.emit("Extracting additional dependencies...")
-            with py7zr.SevenZipFile(deps_path, mode='r') as z:
-                z.extractall(path=install_location)
+            # 4. Copy new and updated files to the installation directory
+            self.progress_update.emit("Copying new files...")
+            new_files = os.listdir(extract_path)
+            total_files = len(new_files)
+            for i, filename in enumerate(new_files):
+                src_path = os.path.join(extract_path, filename)
+                dest_path = os.path.join(self.install_dir, filename)
+                
+                # Ensure parent directory exists
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                
+                # Use move for efficiency; it's a temp directory anyway
+                shutil.move(src_path, dest_path)
+                self.progress_percent.emit(50 + int((i + 1) / total_files * 50))
+
+            self.progress_update.emit("Update complete. Cleaning up...")
             
-            self.progress_update.emit("Update complete. Restarting application...")
+            # 5. Clean up the temp directory
+            shutil.rmtree(self.temp_dir, ignore_errors=True)
             
-            # 7. Relaunch main application
-            main_app_path = os.path.join(install_location, MAIN_APP_EXE)
-            subprocess.Popen([main_app_path])
+            self.progress_update.emit("Restarting application...")
+            
+            # 6. Relaunch main application
+            main_app_path = os.path.join(self.install_dir, MAIN_APP_EXE)
+            if os.path.exists(main_app_path):
+                subprocess.Popen([main_app_path])
             
             self.finished.emit(True, "Update successful!")
 
         except Exception as e:
             self.finished.emit(False, f"An error occurred during update: {e}")
 
-    def download_file(self, url, path):
-        """Downloads a file and updates the progress bar."""
-        self.progress_update.emit(f"Downloading {os.path.basename(path)}...")
-        with urllib.request.urlopen(url) as response:
-            total_size = int(response.getheader('Content-Length', 0))
-            bytes_downloaded = 0
-            chunk_size = 8192
-            with open(path, 'wb') as f:
-                while chunk := response.read(chunk_size):
-                    f.write(chunk)
-                    bytes_downloaded += len(chunk)
-                    if total_size > 0:
-                        percent = int((bytes_downloaded / total_size) * 100)
-                        self.progress_percent.emit(percent)
-        self.progress_percent.emit(100)
-
 
 class UpdaterWindow(QDialog):
-    def __init__(self):
+    def __init__(self, temp_dir, install_dir):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} Updater")
         self.setFixedSize(400, 150)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
 
         self.layout = QVBoxLayout(self)
-        self.status_label = QLabel("Initializing updater...")
+        self.status_label = QLabel("Applying update...")
         self.status_label.setAlignment(Qt.AlignCenter)
         self.progress_bar = QProgressBar()
         
         self.layout.addWidget(self.status_label)
         self.layout.addWidget(self.progress_bar)
 
-        self.worker = UpdateWorker()
+        self.worker = UpdateWorker(temp_dir, install_dir)
         self.worker.progress_update.connect(self.status_label.setText)
         self.worker.progress_percent.connect(self.progress_bar.setValue)
         self.worker.finished.connect(self.on_update_finished)
@@ -180,25 +124,25 @@ class UpdaterWindow(QDialog):
 
     def on_update_finished(self, success, message):
         """Called when the update process is complete."""
-        if "already using the latest version" in message:
-            QMessageBox.information(self, "No Updates", message)
-        elif success:
-            # The app will be restarted by the worker, so we just close.
-            pass
+        if success:
+            # The worker handles relaunching, so we just close.
+            QMessageBox.information(self, "Update Complete", message)
         else:
             QMessageBox.critical(self, "Update Failed", message)
         
         self.close()
 
 if __name__ == '__main__':
-    # Nuitka will bundle PySide6, so this error handling is for script-based runs.
-    try:
-        from PySide6.QtWidgets import QApplication
-    except ImportError:
-        print("CRITICAL ERROR: PySide6 is required to run the updater.")
+    if len(sys.argv) != 3:
+        print("CRITICAL ERROR: This updater requires two arguments:")
+        print("1. The temporary directory containing update files.")
+        print("2. The target installation directory.")
         sys.exit(1)
+
+    temp_directory = sys.argv[1]
+    install_directory = sys.argv[2]
         
     app = QApplication(sys.argv)
-    window = UpdaterWindow()
+    window = UpdaterWindow(temp_directory, install_directory)
     window.show()
     sys.exit(app.exec())

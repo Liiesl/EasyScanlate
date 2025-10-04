@@ -87,7 +87,7 @@ Section "Main Application" SecApp
   
   DetailPrint "Installing application files (excluding PyTorch)..."
   ; Package everything EXCEPT the torch directory, which is handled separately.
-  File /r /x torch "..\..\build\main.dist\*"
+  File /r /x torch "..\..\build\main-app-dist\*"
 
   ; --- Create Uninstaller and Write Registry Keys ---
   WriteUninstaller "$INSTDIR\uninstall.exe"

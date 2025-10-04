@@ -100,7 +100,6 @@ jobs:
           name: minimal-module-build
           path: minimal-module-build.7z
 
-  # --- New Parallel Job: Build Updater as One-File ---
   build-updater:
     runs-on: windows-latest
     steps:
@@ -141,14 +140,13 @@ jobs:
           name: updater-build
           path: build/Updater.exe # Path to the one-file executable
 
-  # --- Stage 2: Installer Creation ---
+  # --- Stage 2: Parallel Jobs for Release Assets ---
 
   create-installer:
     runs-on: windows-latest
-    needs: [build-main-app, build-minimal-module, build-updater] # Depends on all 3 parallel builds
+    needs: [build-main-app, build-minimal-module, build-updater]
     permissions:
       contents: write
-
     steps:
       - name: Check-out repository
         uses: actions/checkout@v4
@@ -167,7 +165,7 @@ jobs:
       - name: Move Updater into Main App Directory
         run: Move-Item -Path build-artifacts/updater-build/Updater.exe -Destination main-app-dist/
         shell: pwsh
-
+      
       - name: Create Minimal Build and Dependency Archives
         run: |
           # Create an archive of the minimal build
@@ -204,13 +202,75 @@ jobs:
           path: |
             MangaOCRTool-Installer.exe
             minimal-build.7z
-            dependencies.z7
+            dependencies.7z
+
+  create_update_package:
+    runs-on: ubuntu-latest
+    needs: build-main-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Main App Build
+        uses: actions/download-artifact@v4
+        with:
+          name: main-app-build
+          path: main-app-build
+
+      - name: Unzip Main App Build
+        run: 7z x main-app-build/main-app-build.7z -o"current-build"
+
+      - name: Generate Manifest for Current Build
+        id: generate_manifest
+        run: |
+          cd current-build
+          find . -type f ! -path "./torch/*" -exec sha256sum {} + | awk '{print $1 "  " $2}' | sed 's|./||' > ../manifest.json
+          echo "Generated manifest.json"
+          cat ../manifest.json
+      
+      - name: Get Previous Release Manifest
+        id: get_previous_manifest
+        run: |
+          gh release download --pattern "manifest.json" -R ${{ github.repository }} || echo "No previous manifest found. Creating a full package."
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Compare Manifests and Create Update Package
+        id: create_package
+        run: |
+          if [ ! -f "manifest.json" ]; then
+            echo "No previous manifest. Creating a full update package."
+            cd current-build
+            zip -r ../update-package.zip . -x "torch/*"
+            echo "::set-output name=package_created::true"
+          else
+            # Simple comparison logic, can be improved with a more robust script
+            diff --new-line-format="%L" --old-line-format="" --unchanged-line-format="" manifest.json ../manifest.json > added_or_changed.txt
+            diff --new-line-format="" --old-line-format="%L" --unchanged-line-format="" manifest.json ../manifest.json > removed.txt
+            
+            if [ -s "added_or_changed.txt" ] || [ -s "removed.txt" ]; then
+              echo "Changes detected, creating update package."
+              awk '{print $2}' added_or_changed.txt | xargs -I {} zip ../update-package.zip -C current-build {}
+              echo "::set-output name=package_created::true"
+            else
+              echo "No file changes detected."
+              echo "::set-output name=package_created::false"
+            fi
+          fi
+      
+      - name: Upload Update Package and New Manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            manifest.json
+            update-package.zip
+        if: steps.create_package.outputs.package_created == 'true'
 
   # --- Stage 3: Create GitHub Release ---
 
   create-release:
     runs-on: ubuntu-latest
-    needs: create-installer
+    needs: [create-installer, create_update_package]
     permissions:
       contents: write
 
@@ -233,5 +293,7 @@ jobs:
             release-assets/MangaOCRTool-Installer.exe
             release-assets/minimal-build.7z
             release-assets/dependencies.7z
+            release-assets/manifest.json
+            release-assets/update-package.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
