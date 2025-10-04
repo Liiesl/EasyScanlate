@@ -7,6 +7,7 @@ import qtawesome as qta
 from app.core.translations import TranslationThread, _get_text_for_profile_static, generate_for_translate_content, generate_retranslate_content, import_translation_file_content
 
 from app.ui.dialogs import GEMINI_MODELS_WITH_INFO
+from assets import ADVANCED_CHECK_STYLES
 
 # Style constants for row highlighting
 SELECTED_STYLE = "QFrame { background-color: #385675; border: 1px solid #78909c; border-radius: 4px; }"
@@ -326,6 +327,7 @@ class TranslationWindow(QDialog):
 
         # "Select All" checkbox in the header row
         self.select_all_checkbox = QCheckBox()
+        self.select_all_checkbox.setStyleSheet(ADVANCED_CHECK_STYLES)
         self.select_all_checkbox.setTristate(True)
         self.select_all_checkbox.setToolTip("Select/Deselect All Rows")
         self.select_all_checkbox.stateChanged.connect(self._on_select_all_changed)
@@ -361,6 +363,7 @@ class TranslationWindow(QDialog):
 
             # Col 1: CheckBox
             checkbox = QCheckBox()
+            checkbox.setStyleSheet(ADVANCED_CHECK_STYLES)
             checkbox.setChecked(True) # Default to checked
             checkbox.stateChanged.connect(lambda state, k=row_key: self._on_checkbox_state_changed(k))
             self.row_widgets[row_key]['checkbox'] = checkbox
@@ -665,7 +668,8 @@ class TranslationWindow(QDialog):
         if all_selected:
             # Full translation logic
             content_to_translate = generate_for_translate_content(self.ocr_results, source_profile)
-            if not content_to_translate.strip() or '<!-- file:' not in content_to_translate:
+            # UPDATED CHECK: Look for the new XML root tag.
+            if not content_to_translate.strip() or '<translations>' not in content_to_translate:
                 QMessageBox.warning(self, "No Content", "There is no text content to translate from the selected source profile.")
                 return
         else:
@@ -673,12 +677,12 @@ class TranslationWindow(QDialog):
             selected_items = [key for key, widgets in self.row_widgets.items() if widgets['checkbox'].isChecked()]
 
             if not selected_items:
-                # This case is unlikely if the button icon is 'retranslate', but is a good safeguard.
                 QMessageBox.information(self, "No Selection", "Something went wrong. No rows are selected for re-translation.")
                 return
 
             content_to_translate = generate_retranslate_content(self.ocr_results, source_profile, selected_items)
-            if not content_to_translate.strip() or '<!-- file:' not in content_to_translate:
+            # FIXED: Check for the correct root tag '<re-translation>' for this logic path.
+            if not content_to_translate.strip() or '<re-translation>' not in content_to_translate:
                 QMessageBox.warning(self, "Error", "Could not generate content for retranslation from the selected rows.")
                 return
             

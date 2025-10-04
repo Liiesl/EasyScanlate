@@ -1,7 +1,10 @@
 # translations.py
 import re
+import traceback
 from google import genai
 from PySide6.QtCore import QThread, Signal
+from xml.sax.saxutils import escape, unescape
+import xml.etree.ElementTree as ET
 
 class TranslationThread(QThread):
     """
@@ -45,8 +48,10 @@ class TranslationThread(QThread):
             if self._is_running:
                 self.translation_finished.emit(full_response_text)
                 
-        except Exception as e:
-            self.translation_failed.emit(f"Gemini API Error: {str(e)}")
+        except Exception:
+            error_details = traceback.format_exc()
+            print(f"Gemini API Error:\n{error_details}") # Print full traceback to console
+            self.translation_failed.emit(f"Gemini API Error:\n\n{error_details}")
 
     def stop(self):
         self._is_running = False
@@ -60,12 +65,11 @@ def _get_text_for_profile_static(result, profile_name):
     return result.get('text', '')
 
 def generate_for_translate_content(ocr_results, source_profile_name):
-# ... (This function is unchanged)
     """
-    Generates Markdown content in for-translate format from OCR results,
+    Generates XML-like content for translation from OCR results,
     using text from the specified source profile.
     """
-    content = "<!-- type: for-translate -->\n\n"
+    content = "<translations>\n"
     grouped_results = {}
 
     visible_results = [res for res in ocr_results if not res.get('is_deleted', False)]
@@ -82,28 +86,27 @@ def generate_for_translate_content(ocr_results, source_profile_name):
             grouped_results[filename] = []
         grouped_results[filename].append((text, row_number))
 
-    for idx, (filename, texts_with_rows) in enumerate(grouped_results.items()):
-        if idx > 0: content += "\n\n"
-        content += f"<!-- file: {filename} -->\n\n"
-
+    for filename, texts_with_rows in grouped_results.items():
+        content += f"<{escape(filename)}>\n"
         sorted_texts_with_rows = sorted(texts_with_rows, key=lambda x: float(x[1]))
         for text, row_number in sorted_texts_with_rows:
-            content += f"{text}\n"
-            content += f"-/{str(row_number)}\\-\n\n"
+            content += f"<{str(row_number)}>{escape(text)}</{str(row_number)}>\n"
+        content += f"</{escape(filename)}>\n"
 
-    return content.rstrip() + "\n"
+    return content + "</translations>\n"
 
 def generate_retranslate_content(ocr_results, source_profile_name, selected_items, context_size=3):
-# ... (This function is unchanged)
     """
-    Generates Markdown content for re-translation in a structured format.
-    For each selected item, it includes context from surrounding text within
-    [CONTEXT] blocks and the text to be translated in a [TRANSLATE] block.
-    'selected_items' is a list of (filename, row_number_str) tuples.
+    Generates XML-like content for re-translation based on selected items.
+    Groups selected rows by proximity into <re-translation> blocks and wraps
+    them in their parent filename tags.
     """
-    content = "<!-- type: for-translate -->\n\n"
+    if not selected_items:
+        return ""
+
+    content = ""
     
-    # Filter out deleted results and group all results by filename for quick lookup
+    # Organize all valid results by filename
     all_results_by_file = {}
     for res in ocr_results:
         if not res.get('is_deleted', False):
@@ -112,128 +115,135 @@ def generate_retranslate_content(ocr_results, source_profile_name, selected_item
                 all_results_by_file[filename] = []
             all_results_by_file[filename].append(res)
     
-    # Sort results within each file by row number
+    # Sort results in each file by row number
     for filename in all_results_by_file:
         all_results_by_file[filename].sort(key=lambda x: float(x.get('row_number', 0)))
 
-    # Group the selected items by filename to process them in batches
+    # Organize selected items by filename
     selected_by_file = {}
     for filename, row_number_str in selected_items:
         if filename not in selected_by_file:
             selected_by_file[filename] = []
         selected_by_file[filename].append(row_number_str)
 
-    # Build the content string
-    for file_idx, (filename, selected_rows) in enumerate(selected_by_file.items()):
-        if file_idx > 0:
-            content += "\n\n"
-        content += f"<!-- file: {filename} -->\n\n"
-        
+    # Process selections for each file
+    for filename, selected_rows_str in selected_by_file.items():
         file_results = all_results_by_file.get(filename, [])
         if not file_results:
             continue
 
-        for row_number_str in selected_rows:
-            target_idx = -1
-            for i, res in enumerate(file_results):
-                if str(res.get('row_number')) == row_number_str:
-                    target_idx = i
-                    break
+        # Map row numbers to their index in the sorted list for efficient lookup
+        row_num_to_idx = {str(res.get('row_number')): i for i, res in enumerate(file_results)}
+        
+        selected_indices = sorted([row_num_to_idx[r] for r in selected_rows_str if r in row_num_to_idx])
+        
+        if not selected_indices:
+            continue
+
+        content += f"<{escape(filename)}>\n"
             
-            if target_idx == -1:
-                continue
-
-            start_idx = max(0, target_idx - context_size)
-            end_idx = min(len(file_results), target_idx + context_size + 1)
-            context_slice = file_results[start_idx:end_idx]
-            
-            context_before, text_to_retranslate, context_after = [], "", []
-            target_row_float = float(file_results[target_idx].get('row_number', -1))
-
-            for res in context_slice:
-                text = _get_text_for_profile_static(res, source_profile_name)
-                res_row_float = float(res.get('row_number', 0))
-
-                if res_row_float < target_row_float:
-                    context_before.append(text)
-                elif res_row_float == target_row_float:
-                    text_to_retranslate = text
+        # Group selected indices by proximity (overlapping context)
+        groups = []
+        if selected_indices:
+            current_group = [selected_indices[0]]
+            for i in range(1, len(selected_indices)):
+                prev_idx = current_group[-1]
+                current_idx = selected_indices[i]
+                
+                if (current_idx - context_size) <= (prev_idx + context_size):
+                    current_group.append(current_idx)
                 else:
-                    context_after.append(text)
+                    groups.append(current_group)
+                    current_group = [current_idx]
+            groups.append(current_group)
 
-            # Assemble the block using the new [CONTEXT] and [TRANSLATE] tags
-            block_parts = []
-            if context_before:
-                block_parts.append(f"[CONTEXT]\n" + "\n".join(context_before) + "\n[/CONTEXT]")
+        # Generate XML for each group
+        for group in groups:
+            content += "<re-translation>\n"
             
-            block_parts.append(f"[TRANSLATE]\n{text_to_retranslate}\n[/TRANSLATE]")
-
-            if context_after:
-                block_parts.append(f"[CONTEXT]\n" + "\n".join(context_after) + "\n[/CONTEXT]")
-
-            final_block = "\n".join(block_parts)
+            min_idx_in_range = max(0, group[0] - context_size)
+            max_idx_in_range = min(len(file_results) - 1, group[-1] + context_size)
             
-            content += f"{final_block}\n-/{row_number_str}\\-\n\n"
-            
-    return content.rstrip() + "\n"
+            selected_indices_in_group = set(group)
 
+            for idx in range(min_idx_in_range, max_idx_in_range + 1):
+                result = file_results[idx]
+                text = _get_text_for_profile_static(result, source_profile_name)
+                row_number = str(result.get('row_number'))
+
+                if idx in selected_indices_in_group:
+                    content += f"<{row_number}>{escape(text)}</{row_number}>\n"
+                else:
+                    content += f"<context>{escape(text)}</context>\n"
+
+            content += "</re-translation>\n"
+        
+        content += f"</{escape(filename)}>\n"
+            
+    return content
 
 def import_translation_file_content(content):
-# ... (This function is unchanged)
-    """ Parses translated content and returns a dictionary.
-    This function is robust and can handle two formats:
-    1. Simple format for initial translation (text followed by delimiter).
-    2. Structured format for re-translation (containing [TRANSLATE] tags).
-    Returns: {filename: {row_number_str: translated_text}} """
-    if '<!-- type: for-translate -->' not in content:
-        raise ValueError("Unsupported MD format - missing type comment.")
+    """
+    Parses translated XML-like content robustly and returns a dictionary.
+    Handles malformed data such as missing closing tags, the optional
+    presence of <translate> tags, and row data that appears outside
+    of a file tag (assigning it to the most recently seen filename).
+    Handles both integer and decimal row number tags.
 
+    Returns: {filename: {row_number_str: translated_text}}
+    """
     translations = {}
-    current_file = None
-    buffer_text = ""
     
-    lines = content.split('\n')
-    i = 0
-    while i < len(lines):
-        line = lines[i] # Keep original line with whitespace for the buffer
+    # Regex for file tags (general, non-closing tag)
+    file_tag_pattern = re.compile(r'<(?P<name>[^/][^>]+)>')
+    # Regex specifically for row tags, now including decimals.
+    row_tag_pattern = re.compile(r'<(?P<rownum>\d+(\.\d+)?)>')
+    
+    # Regex for content extraction, tolerant of missing closing tags.
+    translate_pattern = re.compile(r'<translate>(.*?)(?:</translate>)?', re.DOTALL | re.IGNORECASE)
 
-        stripped_line = line.strip()
+    current_filename = None
 
-        if stripped_line.startswith('<!-- file:') and stripped_line.endswith('-->'):
-            current_file = stripped_line[10:-3].strip()
-            if current_file not in translations:
-                translations[current_file] = {}
-            i += 1
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
             continue
 
-        elif stripped_line.startswith('-/') and stripped_line.endswith('\\-') and current_file:
-            row_number_str = stripped_line[2:-2].strip()
+        row_match = row_tag_pattern.match(line)
+
+        # Priority 1: Check if the line starts with a numeric/decimal row tag.
+        if row_match and current_filename:
+            row_number = row_match.group('rownum')
             
-            if buffer_text:
-                translated_text = ""
-                # Check for the structured re-translate format first
-                match = re.search(r'\[TRANSLATE\](.*?)\[/TRANSLATE\]', buffer_text, re.DOTALL)
-                
-                if match:
-                    # If found, extract only the text within the [TRANSLATE] block
-                    translated_text = match.group(1).strip()
-                else:
-                    # Otherwise, fall back to the simple format (the whole buffer is the translation)
-                    translated_text = buffer_text.strip()
-                
-                translations[current_file][row_number_str] = translated_text
-                buffer_text = ""
-
-            i += 1
-            continue
-
-        elif current_file is not None:
-            # Accumulate lines into the buffer for the current file block
-            if buffer_text:
-                buffer_text += "\n" + line
+            # Extract content from within the row tag.
+            content_start = row_match.end()
+            closing_tag = f'</{row_number}>'
+            content_end = line.rfind(closing_tag)
+            
+            line_content = line[content_start:content_end] if content_end != -1 else line[content_start:]
+            
+            # Within the row content, check for a <translate> tag.
+            text_inside_translate = translate_pattern.search(line_content)
+            if text_inside_translate:
+                translated_text = text_inside_translate.group(1)
             else:
-                buffer_text = line
-        
-        i += 1
+                # If no <translate> tag, use the entire content of the row tag.
+                translated_text = line_content
+            
+            # Unescape and clean up the final text.
+            final_text = unescape(translated_text).strip()
+            if final_text:
+                translations[current_filename][row_number] = final_text
+            continue # Move to the next line
 
+        file_match = file_tag_pattern.match(line)
+        # Priority 2: If it's not a row tag, check if it's a new file tag.
+        if file_match:
+            potential_filename = file_match.group('name')
+            # Exclude known structural tags from being considered filenames.
+            if potential_filename.lower() not in ['translations', 'translate', 'context', 're-translation']:
+                current_filename = unescape(potential_filename)
+                if current_filename not in translations:
+                    translations[current_filename] = {}
+    
     return translations

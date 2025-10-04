@@ -14,6 +14,7 @@ class BatchOCRHandler(QObject):
     batch_finished = Signal(int)
     error_occurred = Signal(str)
     processing_stopped = Signal()
+    auto_inpaint_requested = Signal(str, list)
 
     # --- MODIFIED: Constructor now accepts the ProjectModel and the progress bar ---
     def __init__(self, image_paths, reader, settings, starting_row_number, model: ProjectModel, progress_bar: CustomProgressBar):
@@ -65,6 +66,7 @@ class BatchOCRHandler(QObject):
         image_path = self.image_paths[self.current_image_index]
         print(f"Batch Handler: Creating thread for image {self.current_image_index + 1}/{len(self.image_paths)}: {os.path.basename(image_path)}")
 
+        # --- MODIFIED: Explicitly use the 'image_path' argument ---
         self.ocr_thread = OCRProcessor(
             image_path=image_path,
             reader=self.reader,
@@ -74,6 +76,7 @@ class BatchOCRHandler(QObject):
         self.ocr_thread.ocr_progress.connect(self._handle_image_progress)
         self.ocr_thread.ocr_finished.connect(self._handle_image_results)
         self.ocr_thread.error_occurred.connect(self._handle_image_error)
+        self.ocr_thread.auto_inpaint_requested.connect(self.auto_inpaint_requested)
         self.ocr_thread.start()
     # --- MODIFIED: This method now directly updates the progress bar ---
     def _handle_image_progress(self, progress):
@@ -95,7 +98,7 @@ class BatchOCRHandler(QObject):
 
         current_image_path = self.image_paths[self.current_image_index]
         filename = os.path.basename(current_image_path)
-        
+
         newly_numbered_results = []
         if processed_results:
             try:

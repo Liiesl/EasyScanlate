@@ -1,46 +1,57 @@
+# app/handlers/manual_ocr_handler.py
+
 import traceback
 import sys
 import io
-import math
 import numpy as np
 from PIL import Image
 
 from PySide6.QtWidgets import QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
-from PySide6.QtCore import QPoint, QBuffer
-from app.utils.data_processing import group_and_merge_text
+from PySide6.QtCore import QBuffer, Signal, QObject
 from app.ui.components import ResizableImageLabel
 from assets import MANUALOCR_STYLES
+from app.core.ocr_processor import OCRProcessor
 
-class ManualOCRHandler:
-    """Handles all logic for the Manual OCR feature."""
-    def __init__(self, main_window):
-        self.main_window = main_window
+class ManualOCRHandler(QObject):
+    """Handles all logic for the Manual OCR feature, independent of MainWindow."""
+    reader_initialization_requested = Signal()
+    
+    def __init__(self, scroll_area, model):
+        super().__init__()
+        self.scroll_area = scroll_area
+        self.model = model
         self.is_active = False
         self.active_label = None
         self.selected_rect_scene = None
+        # --- NEW: Add state for the async processor ---
+        self.ocr_thread = None
+        self.crop_offset = None
 
         self._setup_ui()
 
-        # Connect signal to the main toggle button in MainWindow
-        self.main_window.btn_manual_ocr.clicked.connect(self.toggle_mode)
-
     def _setup_ui(self):
-        """Creates the overlay widget that appears after selecting an area."""
-        self.overlay_widget = QWidget(self.main_window)
+        """Creates the overlay widget, parented to the scroll_area."""
+        self.overlay_widget = QWidget(self.scroll_area)
         self.overlay_widget.setObjectName("ManualOCROverlay")
         self.overlay_widget.setStyleSheet(MANUALOCR_STYLES)
         overlay_layout = QVBoxLayout(self.overlay_widget)
         overlay_layout.setContentsMargins(5, 5, 5, 5)
-        overlay_layout.addWidget(QLabel("Selected Area:"))
+        # --- MODIFIED: More descriptive initial text ---
+        self.status_label = QLabel("Draw a box on an image to begin.")
+        overlay_layout.addWidget(self.status_label)
         overlay_buttons = QHBoxLayout()
         
         self.btn_ocr_manual_area = QPushButton("OCR This Part")
         self.btn_ocr_manual_area.clicked.connect(self.process_selected_area)
+        # --- MODIFIED: Disabled by default ---
+        self.btn_ocr_manual_area.setEnabled(False)
         overlay_buttons.addWidget(self.btn_ocr_manual_area)
         
         self.btn_reset_manual_selection = QPushButton("Reset Selection")
         self.btn_reset_manual_selection.setObjectName("ResetButton")
         self.btn_reset_manual_selection.clicked.connect(self.reset_selection)
+        # --- MODIFIED: Disabled by default ---
+        self.btn_reset_manual_selection.setEnabled(False)
         overlay_buttons.addWidget(self.btn_reset_manual_selection)
         
         self.btn_cancel_manual_ocr = QPushButton("Cancel Manual OCR")
@@ -53,45 +64,50 @@ class ManualOCRHandler:
         self.overlay_widget.hide()
 
     def toggle_mode(self, checked):
-        """Activates or deactivates the manual OCR mode."""
+        """Public method called by MainWindow to activate or deactivate the mode."""
         if checked:
+            self.scroll_area.cancel_active_modes(exclude_handler=self)
             self.is_active = True
-            self.main_window.btn_manual_ocr.setText("Cancel Manual OCR")
-            self.main_window.btn_process.setEnabled(False)
+            
+            if not self.scroll_area.main_window.reader:
+                print("ManualOCRHandler: Reader not found, requesting initialization...")
+                self.reader_initialization_requested.emit()
 
-            # Initialize EasyOCR reader if needed (shared instance)
-            if self.main_window.reader is None:
-                if not self.main_window._initialize_ocr_reader("Manual OCR"):
-                    self.cancel_mode()
-                    return
+            if not self.scroll_area.main_window.reader:
+                print("ManualOCRHandler: Reader initialization failed.")
+                self.cancel_mode() 
+                return
 
-            if self.main_window.ocr_processor and self.main_window.ocr_processor.isRunning():
-                print("Stopping ongoing standard OCR process to enter manual mode...")
-                self.main_window.stop_ocr()
-
-            self.main_window.btn_stop_ocr.setVisible(False)
+            print("ManualOCRHandler: Reader is ready. Activating mode.")
             self._clear_selection_state()
             self._set_selection_enabled_on_all(True)
-            QMessageBox.information(self.main_window, "Manual OCR Mode",
+
+            # --- MODIFIED: Show persistent overlay when mode starts ---
+            self._update_widget_position()
+            self.overlay_widget.show()
+            self.overlay_widget.raise_()
+            
+            QMessageBox.information(self.scroll_area, "Manual OCR Mode",
                                     "Click and drag on an image to select an area for OCR.")
         else:
-            self.cancel_mode()
-
-    def _clear_selection_state(self):
-        """Hides the overlay and clears any graphical selection indicators."""
-        self.overlay_widget.hide()
-        self._clear_active_selection_graphics()
-        self.active_label = None
-        self.selected_rect_scene = None
+            if self.is_active:
+                self.cancel_mode()
 
     def cancel_mode(self):
         """Cancels the manual OCR mode and resets the UI."""
+        if not self.is_active: return
         print("Cancelling Manual OCR mode...")
         self.is_active = False
-        if self.main_window.btn_manual_ocr.isChecked():
-            self.main_window.btn_manual_ocr.setChecked(False)
-        self.main_window.btn_manual_ocr.setText("Manual OCR")
-        self.main_window.btn_process.setEnabled(bool(self.main_window.model.image_paths))
+        # --- MODIFIED: Explicitly hide the overlay on cancel ---
+        self.overlay_widget.hide()
+
+        if self.ocr_thread and self.ocr_thread.isRunning():
+            self.ocr_thread.stop_requested = True
+        
+        main_window_button = self.scroll_area.main_window.btn_manual_ocr
+        if main_window_button.isChecked():
+            main_window_button.setChecked(False)
+
         self._clear_selection_state()
         self._set_selection_enabled_on_all(False)
         print("Manual OCR mode cancelled.")
@@ -102,227 +118,209 @@ class ManualOCRHandler:
         if self.is_active:
              self._set_selection_enabled_on_all(True)
              print("Selection reset. Ready for new selection.")
-        else:
-             print("Selection reset (mode was also exited).")
+        # --- MODIFIED: Reset buttons to disabled state and update label ---
+        self.btn_ocr_manual_area.setEnabled(False)
+        self.btn_reset_manual_selection.setEnabled(False)
+        self.status_label.setText("Draw a box on an image to begin.")
+
+
+    def _clear_selection_state(self):
+        """Hides the overlay and clears any graphical selection indicators."""
+        # --- MODIFIED: Do not hide the overlay here; it's persistent ---
+        if self.active_label:
+            self.active_label.clear_selection_visuals()
+        self.active_label = None
+        self.selected_rect_scene = None
+        self.crop_offset = None
+        self.ocr_thread = None
 
     def _set_selection_enabled_on_all(self, enabled):
-        """Enables or disables the selection rubber band on all image labels."""
-        for i in range(self.main_window.scroll_layout.count()):
-            widget = self.main_window.scroll_layout.itemAt(i).widget()
+        """Enables or disables selection on all labels and manages signal connections."""
+        layout = self.scroll_area.widget().layout()
+        if not layout: return
+        
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
                 widget.set_manual_selection_enabled(enabled)
+                if enabled:
+                    widget.manual_area_selected.connect(self.handle_area_selected)
+                else:
+                    try:
+                        widget.manual_area_selected.disconnect(self.handle_area_selected)
+                    except (TypeError, RuntimeError):
+                        pass
 
-    def _clear_active_selection_graphics(self):
-        """Tells the active label to remove its selection rectangle."""
-        if self.active_label:
-             self.active_label.clear_active_selection()
-        else:
-            # Fallback if active label is not set for some reason
-            for i in range(self.main_window.scroll_layout.count()):
-                widget = self.main_window.scroll_layout.itemAt(i).widget()
-                if isinstance(widget, ResizableImageLabel):
-                    widget.clear_active_selection()
-
+    # ... (handle_area_selected and _update_widget_position are unchanged) ...
     def handle_area_selected(self, rect_scene, label_widget):
         """Callback for when a user finishes drawing a selection on an image."""
-        if not self.is_active:
-            print("DEBUG: handle_area_selected called but manual_ocr_mode is False. Ignoring.")
-            label_widget.clear_active_selection()
-            return
-
+        if not self.is_active: return
+        label_widget.clear_rubber_band()
+        
         print(f"Handling completed manual selection from {label_widget.filename}")
         self.selected_rect_scene = rect_scene
         self.active_label = label_widget
-        self._set_selection_enabled_on_all(False)  # Disable starting new ones
+        self._set_selection_enabled_on_all(False)
+        
+        label_widget.draw_selections([rect_scene])
 
-        try:
-            # Position and show the control overlay
-            label_pos_in_viewport = label_widget.mapTo(self.main_window.scroll_area.viewport(), QPoint(0, 0))
-            global_pos = self.main_window.scroll_area.viewport().mapToGlobal(label_pos_in_viewport)
-            main_window_pos = self.main_window.mapFromGlobal(global_pos)
-            overlay = self.overlay_widget
-            overlay_x = main_window_pos.x() + (label_widget.width() - overlay.width()) // 2
-            overlay_y = main_window_pos.y() + label_widget.height() + 5
-            overlay_x = max(0, min(overlay_x, self.main_window.width() - overlay.width()))
-            overlay_y = max(0, min(overlay_y, self.main_window.height() - overlay.height()))
-            overlay.move(overlay_x, overlay_y)
-            overlay.show()
-            overlay.raise_()
-            print(f"Manual OCR overlay shown for selection on {label_widget.filename}")
-        except Exception as e:
-            print(f"Error positioning/showing manual OCR overlay: {e}")
-            traceback.print_exc(file=sys.stdout)
-            self.reset_selection()
+        # --- MODIFIED: Enable buttons and update status instead of showing the widget ---
+        self.status_label.setText("Area selected. Ready to OCR.")
+        self.btn_ocr_manual_area.setEnabled(True)
+        self.btn_reset_manual_selection.setEnabled(True)
 
+    def _update_widget_position(self):
+        """Positions the overlay widget at the top-center of the visible scroll area."""
+        if not self.is_active: return
+        viewport = self.scroll_area.viewport()
+        overlay = self.overlay_widget
+        overlay_x = (viewport.width() - overlay.width()) // 2
+        overlay_y = 10 
+        overlay.move(overlay_x, overlay_y)
+
+    # --- REWRITTEN: This method now uses OCRProcessor ---
     def process_selected_area(self):
-        """Crops the selected area, runs OCR, and adds the results."""
-        if not self.selected_rect_scene or not self.active_label or not self.main_window.reader:
-            QMessageBox.warning(self.main_window, "Error", "No area selected, active label lost, or OCR reader not ready.")
+        """Crops the selected area, runs OCR using the OCRProcessor thread, and adds results."""
+        main_window = self.scroll_area.main_window
+        if not self.selected_rect_scene or not self.active_label or not main_window.reader:
+            QMessageBox.warning(self.scroll_area, "Error", "Missing selection, image, or OCR reader.")
             self.reset_selection()
+            return
+        
+        if self.ocr_thread and self.ocr_thread.isRunning():
+            QMessageBox.warning(self.scroll_area, "Busy", "Already processing an area.")
             return
 
         print(f"Processing manual OCR for selection on {self.active_label.filename}")
-        self.overlay_widget.hide()
+        self.btn_ocr_manual_area.setEnabled(False)
+        self.btn_reset_manual_selection.setEnabled(False)
+        self.status_label.setText("Processing OCR...")
 
         try:
-            # 1. Get the Crop
             crop_rect = self.selected_rect_scene.toRect()
-            if crop_rect.width() <= 0 or crop_rect.height() <= 0:
-                QMessageBox.warning(self.main_window, "Error", "Invalid selection area.")
-                self.reset_selection(); return
-
             pixmap = self.active_label.original_pixmap
             bounded_crop_rect = crop_rect.intersected(pixmap.rect())
-            if bounded_crop_rect.width() <= 0 or bounded_crop_rect.height() <= 0:
-                 QMessageBox.warning(self.main_window, "Error", "Selection area is outside image bounds.")
+            if bounded_crop_rect.width() <= 1 or bounded_crop_rect.height() <= 1:
+                 QMessageBox.warning(self.scroll_area, "Error", "Selection area is invalid or outside image bounds.")
                  self.reset_selection(); return
 
+            self.crop_offset = (bounded_crop_rect.left(), bounded_crop_rect.top())
+            
             cropped_pixmap = pixmap.copy(bounded_crop_rect)
-            buffer = QBuffer()
-            buffer.open(QBuffer.ReadWrite); cropped_pixmap.save(buffer, "PNG")
-            pil_image = Image.open(io.BytesIO(buffer.data())).convert('L')
-            img_np = np.array(pil_image)
+            buffer = QBuffer(); buffer.open(QBuffer.ReadWrite); cropped_pixmap.save(buffer, "PNG")
+            pil_image = Image.open(io.BytesIO(buffer.data()))
 
-            # 2. Run OCR on the Cropped Area
-            print(f"Running manual OCR on cropped area: {bounded_crop_rect}")
-            settings = self.main_window.settings
-            batch_size = int(settings.value("ocr_batch_size", 1))
-            decoder = settings.value("ocr_decoder", "beamsearch")
-            adjust_contrast = float(settings.value("ocr_adjust_contrast", 0.5))
+            settings = main_window.settings
+            ocr_settings = {
+                "min_text_height": int(settings.value("min_text_height", 40)),
+                "max_text_height": int(settings.value("max_text_height", 100)),
+                "min_confidence": float(settings.value("min_confidence", 0.2)),
+                "distance_threshold": int(settings.value("distance_threshold", 100)),
+                "batch_size": int(settings.value("ocr_batch_size", 8)),
+                "decoder": settings.value("ocr_decoder", "beamsearch"),
+                "adjust_contrast": float(settings.value("ocr_adjust_contrast", 0.5)),
+                "resize_threshold": int(settings.value("ocr_resize_threshold", 1024)),
+                "auto_context_fill": False
+            }
 
-            raw_results_relative = self.main_window.reader.readtext(
-                img_np, batch_size=batch_size, adjust_contrast=adjust_contrast,
-                decoder=decoder, detail=1
+            # --- MODIFIED: Use the ** operator to unpack the settings dictionary ---
+            self.ocr_thread = OCRProcessor(
+                reader=main_window.reader,
+                image_data=pil_image,
+                **ocr_settings
             )
-            print(f"Manual OCR raw results (relative coords): {raw_results_relative}")
-
-            if not raw_results_relative:
-                 QMessageBox.information(self.main_window, "Info", "No text found in the selected area.")
-                 self.reset_selection(); return
-
-            # 3. Pre-filter RAW results BEFORE Merging
-            temp_results_for_merge = []
-            self.main_window._load_filter_settings()
-            min_h, max_h = self.main_window.min_text_height, self.main_window.max_text_height
-            min_conf = self.main_window.min_confidence
-            print(f"Pre-filtering {len(raw_results_relative)} raw manual results (MinH={min_h}, MaxH={max_h}, MinConf={min_conf})...")
-
-            for (coord_rel, text, confidence) in raw_results_relative:
-                raw_height = 0
-                if coord_rel:
-                     try:
-                         y_coords_rel = [p[1] for p in coord_rel]
-                         raw_height = max(y_coords_rel) - min(y_coords_rel) if y_coords_rel else 0
-                     except (ValueError, IndexError, TypeError) as coord_err:
-                          print(f"Warning: Error calculating raw height for coords {coord_rel}. Error: {coord_err}")
-                          raw_height = 0
-
-                if (min_h <= raw_height <= max_h and confidence >= min_conf):
-                    temp_results_for_merge.append({
-                        'coordinates': coord_rel, 'text': text, 'confidence': confidence,
-                        'filename': "manual_crop", # Placeholder
-                    })
-                else:
-                    exclusion_reasons = []
-                    if not (min_h <= raw_height <= max_h):
-                         exclusion_reasons.append(f"height {raw_height:.1f}px (bounds: {min_h}-{max_h})")
-                    if confidence < min_conf:
-                        exclusion_reasons.append(f"low confidence ({confidence:.2f} < {min_conf})")
-                    if exclusion_reasons:
-                         print(f"Excluded RAW manual block ({', '.join(exclusion_reasons)}): '{text[:50]}...'")
-
-            if not temp_results_for_merge:
-                QMessageBox.information(self.main_window, "Info", "No text found in the selected area passed the initial filters.")
-                self.reset_selection(); return
-
-            # 4. Merge the PRE-FILTERED Results
-            merged_results_relative = group_and_merge_text(
-                temp_results_for_merge,
-                distance_threshold=self.main_window.distance_threshold
-            )
-            print(f"Internal merge of pre-filtered results produced {len(merged_results_relative)} final block(s).")
-
-            # 5. Process Final MERGED Blocks
-            filename_actual = self.active_label.filename
-            any_change_made = False
-            offset_x, offset_y = bounded_crop_rect.left(), bounded_crop_rect.top()
-
-            for merged_result in merged_results_relative:
-                coords_relative = merged_result['coordinates']
-                if not coords_relative: continue
-
-                coords_absolute = [[int(p[0] + offset_x), int(p[1] + offset_y)] for p in coords_relative]
-                try:
-                    new_row_number = self._calculate_row_number(coords_absolute, filename_actual)
-                except Exception as e:
-                     print(f"Error calculating row number for manual block '{merged_result['text'][:20]}...': {e}. Skipping.")
-                     continue
-
-                final_result = {
-                    'coordinates': coords_absolute, 'text': merged_result['text'],
-                    'confidence': merged_result['confidence'], 'filename': filename_actual,
-                    'is_manual': True, 'row_number': new_row_number
-                }
-                self.main_window.model.ocr_results.append(final_result)
-                any_change_made = True
-                print(f"Added final MERGED manual block: Row {new_row_number}, Text: '{merged_result['text'][:20]}...'")
-
-            # 6. Sort Results & Update UI
-            if any_change_made:
-                 self.main_window.model._sort_ocr_results()
-                 self.main_window.update_all_views(affected_filenames=[filename_actual])
-                 QMessageBox.information(self.main_window, "Success", f"Added {len(merged_results_relative)} text block(s) from manual selection.")
-
-            # 7. Reset state for new selection
-            self.reset_selection()
+            
+            self.ocr_thread.ocr_finished.connect(self._handle_manual_ocr_results)
+            self.ocr_thread.error_occurred.connect(self._handle_manual_ocr_error)
+            self.ocr_thread.start()
 
         except Exception as e:
-            print(f"Error during manual OCR processing: {e}")
+            print(f"Error preparing manual OCR processing: {e}")
             traceback.print_exc(file=sys.stdout)
-            QMessageBox.critical(self.main_window, "Manual OCR Error", f"An unexpected error occurred: {str(e)}")
+            QMessageBox.critical(self.scroll_area, "Manual OCR Error", f"An unexpected error occurred: {str(e)}")
             self.reset_selection()
 
-    def _calculate_row_number(self, coordinates, filename):
-        """Calculates a new fractional row number for manually added text."""
-        if not coordinates: return 0.0
+    # --- NEW: Slot to handle results from the processor thread ---
+    def _handle_manual_ocr_results(self, processed_results):
+        """
+        Receives results, calculates a floating-point row number based on vertical
+        position, and adds the new results to the model.
+        """
+        if not processed_results:
+            QMessageBox.information(self.scroll_area, "Info", "No text was found in the selected area after filtering.")
+            self.reset_selection()
+            return
+
         try:
-            sort_key_y = min(p[1] for p in coordinates)
+            # Sort new results vertically to process them in order
+            processed_results.sort(key=lambda r: min(p[1] for p in r.get('coordinates', [[0, float('inf')]])))
         except (ValueError, TypeError, IndexError) as e:
-            print(f"Error calculating sort key Y: {e}"); return float('inf')
+            print(f"Warning: Could not sort manual OCR results: {e}. Using processor order.")
 
-        preceding_result = None
-        for res in self.main_window.model.ocr_results:
-            if res.get('is_deleted', False): continue
-            res_filename, res_coords = res.get('filename', ''), res.get('coordinates')
-            res_row_number_raw = res.get('row_number')
-            if res_row_number_raw is None or res_coords is None: continue
+        filename_actual = self.active_label.filename
+        offset_x, offset_y = self.crop_offset
+        
+        # Determine the absolute Y position of the new selection's top edge
+        # We use the first result in the sorted list as the reference point
+        if processed_results and 'coordinates' in processed_results[0]:
+            new_selection_top_y = offset_y + min(p[1] for p in processed_results[0]['coordinates'])
+        else: # Fallback if coordinates are somehow missing
+            new_selection_top_y = offset_y
 
-            try: res_sort_key_y = min(p[1] for p in res_coords)
-            except: continue
+        # --- Find the row number of the text box immediately preceding the new selection ---
+        anchor_row_number = 0.0
+        # Get all existing results for this specific image
+        image_results = [res for res in self.model.ocr_results if res.get('filename') == filename_actual]
 
-            if res_filename < filename or (res_filename == filename and res_sort_key_y < sort_key_y):
-                preceding_result = res
-            else:
-                break
+        for res in image_results:
+            # Check if the existing box is vertically above the new selection
+            res_top_y = min(p[1] for p in res.get('coordinates', [[0,0]]))
+            if res_top_y < new_selection_top_y:
+                # Of all boxes above, find the one with the largest row number
+                current_row = float(res.get('row_number', 0))
+                if current_row > anchor_row_number:
+                    anchor_row_number = current_row
 
-        base_row_number = 0
-        if preceding_result:
-            try:
-                base_row_number = math.floor(float(preceding_result.get('row_number', 0.0)))
-            except (ValueError, TypeError): pass
+        final_results_for_model = []
+        
+        # Get a set of all existing row numbers for quick collision checks
+        all_existing_rows = {float(res.get('row_number', 0)) for res in self.model.ocr_results}
+        
+        increment = 0.1
+        for res in processed_results:
+            new_row_number = anchor_row_number + increment
+            
+            # Ensure the new row number is unique, incrementing if it collides
+            while new_row_number in all_existing_rows:
+                increment += 0.01 # Use smaller increments to find a free spot
+                new_row_number = anchor_row_number + increment
+            
+            all_existing_rows.add(new_row_number) # Add to the set for the next loop
 
-        max_sub_index_for_base = 0
-        for res in self.main_window.model.ocr_results:
-             current_row_num_raw = res.get('row_number')
-             if current_row_num_raw is None: continue
-             try:
-                 current_row_num_float = float(current_row_num_raw)
-                 if math.floor(current_row_num_float) == base_row_number:
-                      epsilon = 1e-9
-                      sub_index = int((current_row_num_float - base_row_number) * 10 + epsilon)
-                      if sub_index > 0:
-                           max_sub_index_for_base = max(max_sub_index_for_base, sub_index)
-             except (ValueError, TypeError): pass
+            # Convert the relative coordinates from the crop to absolute coordinates on the image
+            coords_abs = [[int(p[0] + offset_x), int(p[1] + offset_y)] for p in res['coordinates']]
+            
+            final_results_for_model.append({
+                'row_number': round(new_row_number, 4), # Round to prevent long floats
+                'coordinates': coords_abs,
+                'text': res['text'],
+                'confidence': res['confidence'],
+                'filename': filename_actual,
+                'is_manual': True,
+                'translations': {}
+            })
+            
+            increment += 0.1 # Prepare for the next potential result in the same selection
 
-        new_sub_index = max_sub_index_for_base + 1
-        return float(base_row_number) + (float(new_sub_index) / 10.0)
+        # --- IMPORTANT: We DO NOT touch self.model.next_global_row_number here ---
+
+        if final_results_for_model:
+            self.model.add_new_ocr_results(final_results_for_model)
+            QMessageBox.information(self.scroll_area, "Success", f"Added {len(final_results_for_model)} new text block(s).")
+        
+        self.reset_selection()
+
+    def _handle_manual_ocr_error(self, error_message):
+        """Handles a critical error from the OCR processor thread."""
+        QMessageBox.critical(self.scroll_area, "Manual OCR Error", f"An unexpected error occurred during processing:\n{error_message}")
+        self.reset_selection()
