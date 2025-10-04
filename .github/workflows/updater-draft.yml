@@ -156,12 +156,6 @@ jobs:
         with:
           path: build-artifacts
 
-      - name: Display Runner Directory Structure
-        run: |
-          echo "Scanning the entire runner directory..."
-          dir C:\ /s
-        shell: pwsh
-
       - name: Extract Build Artifacts
         run: |
           7z x build-artifacts/main-app-build/main-app-build.7z -o"main-app-dist"
@@ -172,6 +166,12 @@ jobs:
         run: Move-Item -Path build-artifacts/updater-build/Updater.exe -Destination main-app-dist/
         shell: pwsh
       
+      - name: Display final directory structure for installer
+        run: |
+          echo "Scanning the runner's working directory..."
+          dir -Recurse
+        shell: pwsh
+
       - name: Create Minimal Build and Dependency Archives
         run: |
           # Create an archive of the minimal build
