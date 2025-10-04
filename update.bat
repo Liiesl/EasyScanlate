@@ -76,36 +76,60 @@ if /i "!MERGE_MAIN!"=="y" (
 echo.
 
 :: =================================================
-:: 4. Update Installer Version, Commit, and Push
+:: 4. Verify and Update Installer Version
 :: =================================================
-echo --- Step 4: Updating Installer Version ---
+echo --- Step 4: Verifying and Updating Installer Version ---
 set "VERSION_WITHOUT_V=%CHOSEN_TAG:v=%"
 
-echo Updating '%INSTALLER_FILE%' to version %VERSION_WITHOUT_V%...
+:: Extract the current version from the installer file
+echo Checking current installer version...
+set "CURRENT_INSTALLER_VERSION="
+for /f "tokens=3" %%v in ('findstr /r /c:"^!define APP_VERSION" "%INSTALLER_FILE%"') do (
+    set "CURRENT_INSTALLER_VERSION=%%~v"
+)
 
-powershell -Command "(Get-Content '%INSTALLER_FILE%') -replace '(!define APP_VERSION \"").*(\"")', '${1}%VERSION_WITHOUT_V%${2}' | Set-Content '%INSTALLER_FILE%'"
-
-if !errorlevel! neq 0 (
-    echo ERROR: Failed to update the installer version.
+if not defined CURRENT_INSTALLER_VERSION (
+    echo ERROR: Could not find APP_VERSION in '%INSTALLER_FILE%'.
     goto :eof
 )
 
-echo Installer version updated successfully.
+echo Current installer version is %CURRENT_INSTALLER_VERSION%.
+echo Target version is %VERSION_WITHOUT_V%.
 echo.
 
-:: Commit and push the version change
-echo Committing and pushing the version update...
-git add "%INSTALLER_FILE%"
-git commit -m "chore: Update installer version to %CHOSEN_TAG%"
+:: Check if the version already matches
+if "%CURRENT_INSTALLER_VERSION%"=="%VERSION_WITHOUT_V%" (
+    echo The installer version is already correct. This might be a retry.
+    set /p PROCEED_ANYWAY="Do you want to proceed with re-tagging and pushing? (y/n): "
+    if /i not "!PROCEED_ANYWAY!"=="y" (
+        echo Operation canceled by user.
+        goto :eof
+    )
+    echo Proceeding with the update process...
+) else (
+    echo Updating '%INSTALLER_FILE%' to version %VERSION_WITHOUT_V%...
+    powershell -Command "(Get-Content '%INSTALLER_FILE%') -replace '(!define APP_VERSION \"").*(\"")', '${1}%VERSION_WITHOUT_V%${2}' | Set-Content '%INSTALLER_FILE%'"
 
-git push origin %STABLE_BRANCH%
-if !errorlevel! neq 0 (
-    echo ERROR: Failed to push the commit to the remote repository.
-    goto :eof
+    if !errorlevel! neq 0 (
+        echo ERROR: Failed to update the installer version.
+        goto :eof
+    )
+    echo Installer version updated successfully.
+    echo.
+
+    :: Commit and push the version change
+    echo Committing and pushing the version update...
+    git add "%INSTALLER_FILE%"
+    git commit -m "chore: Update installer version to %CHOSEN_TAG%"
+
+    git push origin %STABLE_BRANCH%
+    if !errorlevel! neq 0 (
+        echo ERROR: Failed to push the commit to the remote repository.
+        goto :eof
+    )
+    echo Push successful.
 )
-echo Push successful.
 echo.
-
 
 :: ============================
 :: 5. Create and Push Git Tag
@@ -125,26 +149,26 @@ if %IS_NEW_TAG%==true (
     )
 ) else (
     echo Re-tagging with existing tag: %CHOSEN_TAG%
-    
+
     echo 1. Deleting local tag...
     git tag -d %CHOSEN_TAG%
     if !errorlevel! neq 0 (
         echo WARNING: Could not delete local tag. It may not exist.
     )
-    
+
     echo 2. Pushing deletion to remote...
     git push origin :refs/tags/%CHOSEN_TAG%
     if !errorlevel! neq 0 (
         echo WARNING: Could not delete remote tag. It may not exist on the remote.
     )
-    
+
     echo 3. Creating new local tag...
     git tag %CHOSEN_TAG%
     if !errorlevel! neq 0 (
         echo ERROR: Failed to re-create local tag.
         goto :eof
     )
-    
+
     echo 4. Pushing new tag to remote...
     git push origin %CHOSEN_TAG%
     if !errorlevel! neq 0 (
