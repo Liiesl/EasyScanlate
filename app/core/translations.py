@@ -25,7 +25,12 @@ class TranslationThread(QThread):
     def run(self):
         try:
             client = genai.Client(api_key=self.api_key)
+            client = genai.Client(api_key=self.api_key)
             
+            response_stream = client.models.generate_content_stream(
+                model=self.model_name,
+                contents=self.full_prompt,
+            )
             response_stream = client.models.generate_content_stream(
                 model=self.model_name,
                 contents=self.full_prompt,
