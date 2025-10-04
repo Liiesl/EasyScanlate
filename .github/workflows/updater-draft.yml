@@ -39,8 +39,8 @@ jobs:
           company-name: "YourCompany"
           product-name: "MangaOCRTool"
           file-description: "ManhwaOCR"
-          file-version: "1.0.0.0"
-          product-version: "1.0.0.0"
+          file-version: "0.1.2"
+          product-version: "0.1.2"
 
       - name: Zip Main Build Output
         run: |
@@ -84,8 +84,8 @@ jobs:
           company-name: "YourCompany"
           product-name: "MangaOCRTool"
           file-description: "ManhwaOCR"
-          file-version: "0.0.1"
-          product-version: "0.0.1"
+          file-version: "0.1.2"
+          product-version: "0.1.2"
 
       - name: Zip Minimal Build Output
         run: |
@@ -126,6 +126,8 @@ jobs:
           company-name: "YourCompany"
           product-name: "MangaOCRTool Updater"
           file-description: "Application Updater"
+          file-version: "0.1.2"
+          product-version: "0.1.2"
 
       - name: List Build Output
         run: |
