@@ -681,8 +681,8 @@ class TranslationWindow(QDialog):
                 return
 
             content_to_translate = generate_retranslate_content(self.ocr_results, source_profile, selected_items)
-            # UPDATED CHECK: Look for the new XML root tag here as well.
-            if not content_to_translate.strip() or '<translations>' not in content_to_translate:
+            # FIXED: Check for the correct root tag '<re-translation>' for this logic path.
+            if not content_to_translate.strip() or '<re-translation>' not in content_to_translate:
                 QMessageBox.warning(self, "Error", "Could not generate content for retranslation from the selected rows.")
                 return
             
