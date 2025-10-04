@@ -100,11 +100,50 @@ jobs:
           name: minimal-module-build
           path: minimal-module-build.7z
 
+  # --- New Parallel Job: Build Updater as One-File ---
+  build-updater:
+    runs-on: windows-latest
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r not_so_minimal_module.txt # Assuming updater needs same deps
+
+      - name: Build Updater Executable with Nuitka
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          script-name: dev/updater/updater.py
+          mode: onefile
+          mingw64: true
+          company-name: "YourCompany"
+          product-name: "MangaOCRTool Updater"
+          file-description: "Application Updater"
+
+      - name: List Build Output
+        run: |
+          echo "Listing contents of the build directory:"
+          dir build
+        shell: pwsh
+
+      - name: Upload Updater Executable as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-build
+          path: build/Updater.exe # Path to the one-file executable
+
   # --- Stage 2: Installer Creation ---
 
   create-installer:
     runs-on: windows-latest
-    needs: [build-main-app, build-minimal-module]
+    needs: [build-main-app, build-minimal-module, build-updater] # Depends on all 3 parallel builds
     permissions:
       contents: write
 
@@ -121,6 +160,10 @@ jobs:
         run: |
           7z x build-artifacts/main-app-build/main-app-build.7z -o"main-app-dist"
           7z x build-artifacts/minimal-module-build/minimal-module-build.7z -o"minimal-module-dist"
+        shell: pwsh
+
+      - name: Move Updater into Main App Directory
+        run: Move-Item -Path build-artifacts/updater-build/Updater.exe -Destination main-app-dist/
         shell: pwsh
 
       - name: Create Minimal Build and Dependency Archives
@@ -146,12 +189,12 @@ jobs:
         shell: pwsh
 
       - name: Compile NSIS installer
-        run: makensis dev\installer\installer.nsi
+        run: makensis dev/installer/installer.nsi
 
       - name: Move Installer to Root Directory
         run: Move-Item -Path dev/installer/MangaOCRTool-Installer.exe -Destination .
         shell: pwsh
-        
+
       - name: Upload Installer and Archives as Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -159,7 +202,7 @@ jobs:
           path: |
             MangaOCRTool-Installer.exe
             minimal-build.7z
-            dependencies.7z
+            dependencies.z7
 
   # --- Stage 3: Create GitHub Release ---
 
