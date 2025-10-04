@@ -192,7 +192,7 @@ jobs:
         run: makensis dev/installer/installer.nsi
 
       - name: Move Installer to Root Directory
-        run: Move-Item -Path dev/installer/MangaOCRTool-Installer.exe -Destination .
+        run: Move-Item -Path dev/installer/EasyScanlate-Installer.exe -Destination .
         shell: pwsh
 
       - name: Upload Installer and Archives as Artifacts
@@ -200,7 +200,7 @@ jobs:
         with:
           name: release-assets
           path: |
-            MangaOCRTool-Installer.exe
+            EasyScanlate-Installer.exe
             minimal-build.7z
             dependencies.7z
 
@@ -299,7 +299,7 @@ jobs:
           preserve_order: true
           body_path: changelog.md
           files: |
-            release-assets/MangaOCRTool-Installer.exe
+            release-assets/EasyScanlate-Installer.exe
             release-assets/minimal-build.7z
             release-assets/dependencies.7z
             release-assets/manifest.json
