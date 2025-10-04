@@ -39,20 +39,28 @@
     - 
 
   #### fixes
-  - add stroke on typography
   - fix skew/free transform
-  - fix stitched img not saved as stitched
   - fix find and replace bugs :
-    - roman character not working for some reason if there are other profile in other type of character
+    - roman character not working for some reason if there are other profile in other type of character (non roman)
     - profile creation/switching crashes the app when on find
+  - fix import/export plaintext ocr/translation data
 
   #### modification
   - rework how gradient work
   - implement titlebar to all apps
   - save edited state of textboxitem
-  - dynamic link between import export ocr and translation 
-  - make translations into non blocking window
+  - dynamic link between import export ocr and translation
+  - change how translation Work
+    - make translations into non blocking window
+      - or integrate it into main window
+      - easier retranslate workflow
+    - characters, places, and lore name dictionaries
   - hide textboximage button
   - profile improvement:
       - manual creation, deletion, rename
       - two pane view
+  - make it possible to edit straight from textbox
+  - advanced inpaint
+    - free form selection (pen tools/draw)
+    - switch on/off from selection
+    - undo/redo
