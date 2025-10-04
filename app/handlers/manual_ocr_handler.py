@@ -36,17 +36,22 @@ class ManualOCRHandler(QObject):
         self.overlay_widget.setStyleSheet(MANUALOCR_STYLES)
         overlay_layout = QVBoxLayout(self.overlay_widget)
         overlay_layout.setContentsMargins(5, 5, 5, 5)
-        self.status_label = QLabel("Selected Area:") # Give it a name to update text
+        # --- MODIFIED: More descriptive initial text ---
+        self.status_label = QLabel("Draw a box on an image to begin.")
         overlay_layout.addWidget(self.status_label)
         overlay_buttons = QHBoxLayout()
         
         self.btn_ocr_manual_area = QPushButton("OCR This Part")
         self.btn_ocr_manual_area.clicked.connect(self.process_selected_area)
+        # --- MODIFIED: Disabled by default ---
+        self.btn_ocr_manual_area.setEnabled(False)
         overlay_buttons.addWidget(self.btn_ocr_manual_area)
         
         self.btn_reset_manual_selection = QPushButton("Reset Selection")
         self.btn_reset_manual_selection.setObjectName("ResetButton")
         self.btn_reset_manual_selection.clicked.connect(self.reset_selection)
+        # --- MODIFIED: Disabled by default ---
+        self.btn_reset_manual_selection.setEnabled(False)
         overlay_buttons.addWidget(self.btn_reset_manual_selection)
         
         self.btn_cancel_manual_ocr = QPushButton("Cancel Manual OCR")
@@ -76,6 +81,12 @@ class ManualOCRHandler(QObject):
             print("ManualOCRHandler: Reader is ready. Activating mode.")
             self._clear_selection_state()
             self._set_selection_enabled_on_all(True)
+
+            # --- MODIFIED: Show persistent overlay when mode starts ---
+            self._update_widget_position()
+            self.overlay_widget.show()
+            self.overlay_widget.raise_()
+            
             QMessageBox.information(self.scroll_area, "Manual OCR Mode",
                                     "Click and drag on an image to select an area for OCR.")
         else:
@@ -87,6 +98,8 @@ class ManualOCRHandler(QObject):
         if not self.is_active: return
         print("Cancelling Manual OCR mode...")
         self.is_active = False
+        # --- MODIFIED: Explicitly hide the overlay on cancel ---
+        self.overlay_widget.hide()
 
         if self.ocr_thread and self.ocr_thread.isRunning():
             self.ocr_thread.stop_requested = True
@@ -105,15 +118,15 @@ class ManualOCRHandler(QObject):
         if self.is_active:
              self._set_selection_enabled_on_all(True)
              print("Selection reset. Ready for new selection.")
-        # Re-enable buttons
-        self.btn_ocr_manual_area.setEnabled(True)
-        self.btn_reset_manual_selection.setEnabled(True)
-        self.status_label.setText("Selected Area:")
+        # --- MODIFIED: Reset buttons to disabled state and update label ---
+        self.btn_ocr_manual_area.setEnabled(False)
+        self.btn_reset_manual_selection.setEnabled(False)
+        self.status_label.setText("Draw a box on an image to begin.")
 
 
     def _clear_selection_state(self):
         """Hides the overlay and clears any graphical selection indicators."""
-        self.overlay_widget.hide()
+        # --- MODIFIED: Do not hide the overlay here; it's persistent ---
         if self.active_label:
             self.active_label.clear_selection_visuals()
         self.active_label = None
@@ -151,9 +164,10 @@ class ManualOCRHandler(QObject):
         
         label_widget.draw_selections([rect_scene])
 
-        self._update_widget_position()
-        self.overlay_widget.show()
-        self.overlay_widget.raise_()
+        # --- MODIFIED: Enable buttons and update status instead of showing the widget ---
+        self.status_label.setText("Area selected. Ready to OCR.")
+        self.btn_ocr_manual_area.setEnabled(True)
+        self.btn_reset_manual_selection.setEnabled(True)
 
     def _update_widget_position(self):
         """Positions the overlay widget at the top-center of the visible scroll area."""
@@ -310,5 +324,3 @@ class ManualOCRHandler(QObject):
         """Handles a critical error from the OCR processor thread."""
         QMessageBox.critical(self.scroll_area, "Manual OCR Error", f"An unexpected error occurred during processing:\n{error_message}")
         self.reset_selection()
-
-    # ... (rest of the file is unchanged) ...```
