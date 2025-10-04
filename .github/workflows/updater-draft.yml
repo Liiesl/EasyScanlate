@@ -9,30 +9,25 @@ on:
       - 'v*.*.*'
 
 jobs:
-  build-and-release-windows:
-    runs-on: windows-latest
-    permissions:
-      contents: write
+  # --- Stage 1: Parallel Builds ---
 
+  build-main-app:
+    runs-on: windows-latest
     steps:
-      # 1. Get the code from repository
       - name: Check-out repository
         uses: actions/checkout@v4
 
-      # 2. Set up a Python environment
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      # 3. Install project's dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
           pip install -r requirements.txt
 
-      # 4. Run Nuitka build
       - name: Build Executable with Nuitka
         uses: Nuitka/Nuitka-Action@main
         with:
@@ -48,95 +43,105 @@ jobs:
           file-version: "1.0.0.0"
           product-version: "1.0.0.0"
 
-      # 5. Create a 7z archive of the PyTorch libraries with best compression
-      - name: Zip PyTorch Libraries with 7-Zip
+      - name: Zip Main Build Output
         run: |
           cd build/main.dist
-          7z a -t7z -mx=9 ..\..\pytorch-libs.7z torch
+          7z a -t7z -mx=9 ..\..\main-app-build.7z *
           cd ..\..
         shell: pwsh
 
-      # Upload PyTorch 7z as a workflow artifact
-      - name: Upload PyTorch Libraries as Artifact
+      - name: Upload Main Build as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pytorch-libs
-          path: pytorch-libs.7z
+          name: main-app-build
+          path: main-app-build.7z
 
-      # Create a file with the list of dependencies to exclude/include
-      - name: Create Dependency Exclusion List
+  build-minimal-module:
+    runs-on: windows-latest
+    steps:
+      - name: Check-out minimal_module branch
+        uses: actions/checkout@v4
+        with:
+          ref: minimal-module
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install minimal dependencies
         run: |
-          @"
-          OCR
-          PIL
-          bidi
-          certifi
-          charset_normalizer
-          cv2
-          markupsafe
-          numpy
-          numpy.libs
-          pyclipper
-          pydantic_core
-          scipy
-          scipy.libs
-          shapely
-          shapely.libs
-          skimage
-          torchaudio
-          torchvision
-          websockets
-          yaml
-          zstandard
-          _elementtree.pyd
-          _sqlite3.pyd
-          _uuid.pyd
-          _zoneinfo.pyd
-          asmjit.dll
-          cudart64_12.dll
-          fbgemm.dll
-          jpeg8.dll
-          libsharpyuv.dll
-          libwebp.dll
-          nvjpeg64_12.dll
-          sqlite3.dll
-          "@ | Set-Content -Path "dependency-list.txt"
-        shell: pwsh
+          python -m pip install --upgrade pip
+          pip install -r minimal_module_requirements.txt
 
-      # Create a 7z archive of the dependency DLLs and folders
-      - name: Zip Dependency DLLs with 7-Zip
+      - name: Build Executable with Nuitka
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          script-name: main.py
+          mode: standalone
+          mingw64: true
+          enable-plugins: pyside6
+          windows-icon-from-ico: assets/app_icon.ico
+          company-name: "YourCompany"
+          product-name: "MangaOCRTool"
+          file-description: "ManhwaOCR"
+          file-version: "0.0.1"
+          product-version: "0.0.1"
+
+      - name: Zip Minimal Build Output
         run: |
           cd build/main.dist
-          7z a -t7z -mx=9 ..\..\dependency-dll.7z @..\..\dependency-list.txt
+          7z a -t7z -mx=9 ..\..\minimal-module-build.7z *
           cd ..\..
         shell: pwsh
 
-      # Upload Dependency DLLs as a workflow artifact
-      - name: Upload Dependency DLLs as Artifact
+      - name: Upload Minimal Build as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dependency-dll
-          path: dependency-dll.7z
+          name: minimal-module-build
+          path: minimal-module-build.7z
 
-      # Zip the main build output (excluding torch AND the new dependencies)
-      - name: Zip Main Build Output (Without Dependencies)
+  # --- Stage 2: Installer Creation ---
+
+  create-installer:
+    runs-on: windows-latest
+    needs: [build-main-app, build-minimal-module]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: build-artifacts
+
+      - name: Extract Build Artifacts
         run: |
-          cd build/main.dist
-          7z a -t7z -mx=9 ..\..\build-output.7z * -xr!torch -x@..\..\dependency-list.txt
-          cd ..\..
+          7z x build-artifacts/main-app-build/main-app-build.7z -o"main-app-dist"
+          7z x build-artifacts/minimal-module-build/minimal-module-build.7z -o"minimal-module-dist"
         shell: pwsh
 
-      # Upload the zipped build output as an artifact
-      - name: Upload Full Build Output as Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: full-build-output
-          path: build-output.7z
+      - name: Create Minimal Build and Dependency Archives
+        run: |
+          # Create an archive of the minimal build
+          7z a -t7z -mx=9 minimal-build.7z ./minimal-module-dist/*
 
-      # Compile the NSIS installer
+          # Get the list of files to exclude (i.e., files in the minimal build)
+          $minimalFiles = Get-ChildItem -Path "minimal-module-dist" -Recurse | ForEach-Object { $_.Name }
+          $excludeArgs = $minimalFiles | ForEach-Object { "-xr!$_" }
+
+          # Create an archive of the extra dependencies by excluding minimal files
+          cd main-app-dist
+          7z a -t7z -mx=9 ..\dependencies.7z * $excludeArgs
+          cd ..
+        shell: pwsh
+
       - name: Install NSIS
         run: choco install nsis
-      
+
       - name: Add NSIS to PATH
         run: echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         shell: pwsh
@@ -147,15 +152,31 @@ jobs:
       - name: Move Installer to Root Directory
         run: Move-Item -Path dev/installer/MangaOCRTool-Installer.exe -Destination .
         shell: pwsh
-
-      # 6. Upload Installer as a workflow artifact
-      - name: Upload Installer as Artifact
+        
+      - name: Upload Installer and Archives as Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installer
-          path: MangaOCRTool-Installer.exe
+          name: release-assets
+          path: |
+            MangaOCRTool-Installer.exe
+            minimal-build.7z
+            dependencies.7z
 
-      # 7. Create a DRAFT GitHub Release
+  # --- Stage 3: Create GitHub Release ---
+
+  create-release:
+    runs-on: ubuntu-latest
+    needs: create-installer
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Release Assets
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets
+
       - name: Create Draft GitHub Release
         id: create_release
         uses: softprops/action-gh-release@v2
@@ -164,10 +185,9 @@ jobs:
           draft: true
           preserve_order: true
           body_path: changelog.md
-          # Upload all three files to the release page
           files: |
-            MangaOCRTool-Installer.exe
-            pytorch-libs.7z
-            dependency-dll.7z
+            release-assets/MangaOCRTool-Installer.exe
+            release-assets/minimal-build.7z
+            release-assets/dependencies.7z
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
