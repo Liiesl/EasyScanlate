@@ -9,7 +9,7 @@ from PIL import Image
 import uuid
 
 from PySide6.QtWidgets import QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
-from PySide6.QtGui import QImage, QPixmap, QPainterPath, QPolygonF
+from PySide6.QtGui import QImage, QPixmap, QPainterPath, QPolygonF, QPainter
 from PySide6.QtCore import QBuffer, QRectF, QPointF
 from app.ui.components import ResizableImageLabel
 from assets import MANUALOCR_STYLES
@@ -20,12 +20,13 @@ class ContextFillHandler:
         self.scroll_area = scroll_area
         self.model = model
         self.is_active = False
-        self.is_edit_mode_active = False # <-- NEW: State for edit mode
+        self.is_edit_mode_active = False
         self.active_label = None
         self.selection_paths = []
 
         self._setup_ui()
 
+    # ... (All methods up to _perform_inpainting_logic remain unchanged) ...
     def _setup_ui(self):
         """Creates the overlay widget, parented to the scroll_area."""
         self.overlay_widget = QWidget(self.scroll_area)
@@ -73,7 +74,6 @@ class ContextFillHandler:
                                 "Click and drag on an image to select an area to inpaint. "
                                 "You can make multiple selections on the same image.")
 
-    # --- NEW: Method to toggle the new edit mode ---
     def toggle_edit_mode(self):
         if self.is_edit_mode_active:
             self._disable_edit_mode()
@@ -109,13 +109,12 @@ class ContextFillHandler:
         for i in range(layout.count()):
             widget = layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
-                # Restore text visibility to its previous state
                 widget.set_text_visibility(self.scroll_area._text_is_visible)
                 widget.set_inpaint_edit_mode(False)
 
     def cancel_mode(self):
         """Cancels the context fill mode and resets the UI."""
-        if self.is_edit_mode_active: # <-- ADD: Ensure we exit edit mode if active
+        if self.is_edit_mode_active:
             self._disable_edit_mode()
         if not self.is_active: return
         print("Cancelling Context Fill mode...")
@@ -239,20 +238,63 @@ class ContextFillHandler:
             return
 
         self._perform_inpainting_logic(target_label, paths, show_dialogs=False)
-
+        
     def _perform_inpainting_logic(self, target_label, paths, show_dialogs=True):
         """
-        Shared logic for both manual and automatic inpainting.
+        Shared logic for inpainting. Now uses a proximity check to decide which
+        existing patches to temporarily merge before the operation.
         """
         try:
-            pixmap = target_label.original_pixmap
+            # 1. Prepare a temporary base pixmap
+            temp_base_pixmap = target_label.original_pixmap.copy()
+
+            # 2. Combine new selection paths and define proximity area
+            new_selection_path = QPainterPath()
+            for path in paths:
+                new_selection_path = new_selection_path.united(path)
+
+            # Define a proximity margin in pixels. This is how far around the
+            # new selection we will look for existing patches.
+            PROXIMITY_MARGIN = 20 
+
+            # Get the bounding box of the new selection and expand it
+            selection_bounds = new_selection_path.boundingRect()
+            proximity_rect = selection_bounds.adjusted(
+                -PROXIMITY_MARGIN, -PROXIMITY_MARGIN,
+                PROXIMITY_MARGIN, PROXIMITY_MARGIN
+            )
+
+            # 3. Detect and merge patches within the proximity area
+            all_records = self.model.get_inpaint_records_for_image(target_label.filename)
+            proximal_records = []
+            for record in all_records:
+                coords = record.get('coordinates', [])
+                if len(coords) == 4:
+                    existing_rect = QRectF(coords[0], coords[1], coords[2], coords[3])
+                    # --- MODIFIED: Check for intersection with the expanded proximity rectangle ---
+                    if proximity_rect.intersects(existing_rect):
+                        proximal_records.append(record)
+            
+            if proximal_records:
+                print(f"Found {len(proximal_records)} proximal patches. Merging them into the base for this operation.")
+                painter = QPainter(temp_base_pixmap)
+                for record in proximal_records:
+                    patch_pixmap = self.model.get_inpaint_patch_pixmap(record["patch_filename"])
+                    if patch_pixmap:
+                        coords = record['coordinates']
+                        target_point = QPointF(coords[0], coords[1])
+                        painter.drawPixmap(target_point, patch_pixmap)
+                painter.end()
+
+            # 4. Convert the (potentially merged) pixmap to an OpenCV image
             buffer = QBuffer()
             buffer.open(QBuffer.ReadWrite)
-            pixmap.save(buffer, "PNG")
+            temp_base_pixmap.save(buffer, "PNG")
             pil_img = Image.open(io.BytesIO(buffer.data())).convert('RGB')
             image_np = np.array(pil_img)
             image_cv = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
             
+            # 5. Create the mask from the new selection paths
             mask = np.zeros(image_cv.shape[:2], dtype=np.uint8)
             for path in paths:
                 polygon = path.toFillPolygon().toPolygon()
@@ -260,16 +302,13 @@ class ContextFillHandler:
                 if points.size > 0:
                     cv2.fillPoly(mask, [points], 255)
 
+            # 6. Perform the inpainting
             inpainted_image_cv = cv2.inpaint(image_cv, mask, 3, cv2.INPAINT_TELEA)
 
-            combined_path = QPainterPath()
-            for path in paths:
-                combined_path = combined_path.united(path)
-            bounding_rect = combined_path.boundingRect().toRect()
-            
+            # 7. Extract the newly inpainted area (the patch)
+            bounding_rect = new_selection_path.boundingRect().toRect()
             x, y, w, h = bounding_rect.x(), bounding_rect.y(), bounding_rect.width(), bounding_rect.height()
-            if w <= 0 or h <= 0:
-                return
+            if w <= 0 or h <= 0: return
 
             patch_cv = inpainted_image_cv[y:y+h, x:x+w]
             patch_rgb = cv2.cvtColor(patch_cv, cv2.COLOR_BGR2RGB)
@@ -278,6 +317,7 @@ class ContextFillHandler:
             q_image = QImage(patch_rgb.data, patch_w, patch_h, ch * patch_w, QImage.Format_RGB888)
             patch_pixmap = QPixmap.fromImage(q_image)
 
+            # 8. Save the new patch and its record to the model
             patch_filename = f"{os.path.splitext(target_label.filename)[0]}_{uuid.uuid4().hex[:8]}.png"
             record = {
                 "id": str(uuid.uuid4()),

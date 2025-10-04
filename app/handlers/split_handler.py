@@ -137,6 +137,7 @@ class SplitHandler(QObject):
             new_image_data.append({'filename': new_filename, 'pixmap': pixmap, 'path': new_filepath})
 
         # Update the data model before touching the UI
+        self.model.redistribute_inpaint_for_split(source_filename, new_image_data, self.split_points)
         self.model.redistribute_ocr_for_split(source_filename, new_image_data, self.split_points)
 
         # Update UI
@@ -153,9 +154,8 @@ class SplitHandler(QObject):
 
         for i, data in enumerate(new_image_data):
             # Pass the main_window reference from the scroll_area for signals that still need it
-            new_label = ResizableImageLabel(data['pixmap'], data['filename'], self.scroll_area.main_window)
+            new_label = ResizableImageLabel(data['pixmap'], data['filename'], self.scroll_area.main_window, self.scroll_area.main_window.selection_manager)
             new_label.textBoxDeleted.connect(self.scroll_area.main_window.delete_row)
-            new_label.textBoxSelected.connect(self.scroll_area.main_window.handle_text_box_selected)
             # Connect to handlers owned by the scroll_area
             new_label.manual_area_selected.connect(self.scroll_area.manual_ocr_handler.handle_area_selected)
             new_label.manual_area_selected.connect(self.scroll_area.context_fill_handler.handle_area_selected)

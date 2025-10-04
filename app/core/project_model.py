@@ -97,7 +97,7 @@ class ProjectModel(QObject):
         max_row_num = -1
         loaded_profiles = {"Original"}
         
-        with open(path, 'r', encoding='utf--8') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             loaded_data = json.load(f)
 
         self.ocr_results = []
@@ -170,7 +170,6 @@ class ProjectModel(QObject):
              traceback.print_exc()
              return f"Failed to save project: {e}"
 
-    # --- NEW: Method to add an inpaint record and save its patch ---
     def add_inpaint_record(self, record: dict, patch_pixmap: QPixmap):
         """
         Adds a new inpaint record to the model and saves the patch image.
@@ -198,7 +197,7 @@ class ProjectModel(QObject):
             print(error_msg)
             traceback.print_exc()
             return False, error_msg
-    # --- NEW: Method to remove an inpaint record and its patch file ---
+            
     def remove_inpaint_record(self, record_id: str):
         """
         Finds an inpaint record by its ID, deletes its associated patch file,
@@ -238,6 +237,116 @@ class ProjectModel(QObject):
             print(error_msg)
             traceback.print_exc()
             return False, error_msg
+
+    # --- NEW: Method to get all inpaint records for a specific image ---
+    def get_inpaint_records_for_image(self, filename: str) -> list[dict]:
+        """
+        Retrieves all inpaint records associated with a specific image filename.
+        """
+        if not filename:
+            return []
+        return [record for record in self.inpaint_data if record.get('target_image') == filename]
+
+    # --- NEW: Method to load a specific inpaint patch as a QPixmap ---
+    def get_inpaint_patch_pixmap(self, patch_filename: str) -> QPixmap | None:
+        """
+        Loads an inpaint patch image file into a QPixmap.
+        """
+        if not patch_filename or not self.temp_dir:
+            return None
+        
+        patch_path = os.path.join(self.temp_dir, 'inpaint', patch_filename)
+        
+        if os.path.exists(patch_path):
+            return QPixmap(patch_path)
+        else:
+            print(f"Warning: Inpaint patch pixmap not found at {patch_path}")
+            return None
+
+    def redistribute_ocr_for_split(self, source_filename: str, new_image_data: list[dict], split_y_coords: list[int]):
+        """
+        Reassigns OCR results from a source image to newly created split images.
+        """
+        y_starts = [0] + split_y_coords
+        source_path_to_remove = next((p for p in self.image_paths if os.path.basename(p) == source_filename), None)
+
+        affected_filenames = {source_filename}
+        for result in self.ocr_results:
+            if result.get('filename') == source_filename:
+                try:
+                    coords = result.get('coordinates', [])
+                    if not coords: continue
+                    
+                    top_y = min(p[1] for p in coords)
+                    segment_index = -1
+                    for i in range(len(y_starts)):
+                        start_boundary = y_starts[i]
+                        end_boundary = y_starts[i+1] if i + 1 < len(y_starts) else float('inf')
+                        
+                        if start_boundary <= top_y < end_boundary:
+                            segment_index = i
+                            break
+                    
+                    if segment_index != -1:
+                        new_data = new_image_data[segment_index]
+                        new_filename = new_data['filename']
+                        y_offset = y_starts[segment_index]
+                        
+                        result['filename'] = new_filename
+                        result['coordinates'] = [[p[0], p[1] - y_offset] for p in coords]
+                        affected_filenames.add(new_filename)
+                    else:
+                        print(f"Warning: Could not place OCR result (row {result.get('row_number')}) into a split segment.")
+
+                except Exception as e:
+                    print(f"Error processing result for split: {e} - Result: {result}")
+        
+        if source_path_to_remove and source_path_to_remove in self.image_paths:
+            self.image_paths.remove(source_path_to_remove)
+        
+        for data in new_image_data:
+            self.image_paths.append(data['path'])
+
+    def redistribute_inpaint_for_split(self, source_filename: str, new_image_data: list[dict], split_y_coords: list[int]):
+        """
+        Reassigns inpaint records from a source image to newly created split images.
+        """
+        y_starts = [0] + sorted(split_y_coords)
+        
+        for record in self.inpaint_data:
+            if record.get('target_image') == source_filename:
+                try:
+                    coords = record.get('coordinates', [])
+                    if not coords or len(coords) != 4: continue
+                    
+                    record_y = coords[1]
+                    segment_index = -1
+                    
+                    for i in range(len(y_starts)):
+                        start_boundary = y_starts[i]
+                        end_boundary = y_starts[i+1] if i + 1 < len(y_starts) else float('inf')
+                        
+                        if start_boundary <= record_y < end_boundary:
+                            segment_index = i
+                            break
+                    
+                    if segment_index != -1:
+                        new_data = new_image_data[segment_index]
+                        new_filename = new_data['filename']
+                        y_offset = y_starts[segment_index]
+                        
+                        record['target_image'] = new_filename
+                        record['coordinates'][1] -= y_offset
+                    else:
+                        print(f"Warning: Could not place inpaint record (id {record.get('id')}) into a split segment.")
+
+                except Exception as e:
+                    print(f"Error processing inpaint record for split: {e} - Record: {record}")
+
+    def sort_and_notify(self):
+        """Sorts all OCR results and emits the model_updated signal for a full refresh."""
+        self._sort_ocr_results()
+        self.model_updated.emit([])
 
     def _find_result_by_row_number(self, row_number_to_find):
         """Internal helper to find an OCR result and its index by its row number."""

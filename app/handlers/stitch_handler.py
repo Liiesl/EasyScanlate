@@ -142,6 +142,14 @@ class StitchHandler(QObject):
                         if coords:
                              result['coordinates'] = [[p[0], p[1] + height_offset] for p in coords]
 
+            for record in self.model.inpaint_data:
+                if record.get('target_image') == current_filename:
+                    record['target_image'] = new_filename
+                    if height_offset > 0:
+                        coords = record.get('coordinates', [])
+                        if coords and len(coords) == 4:
+                            record['coordinates'][1] += height_offset
+
         filenames_to_remove = [label.filename for label in labels_to_stitch[1:]]
         for filename in filenames_to_remove:
             full_path_to_remove = os.path.join(images_dir, filename)
@@ -166,9 +174,8 @@ class StitchHandler(QObject):
             label.cleanup()
             label.deleteLater()
             
-        new_label = ResizableImageLabel(combined_pixmap, new_filename, self.scroll_area.main_window)
+        new_label = ResizableImageLabel(combined_pixmap, new_filename, self.scroll_area.main_window, self.scroll_area.main_window.selection_manager)
         new_label.textBoxDeleted.connect(self.scroll_area.main_window.delete_row)
-        new_label.textBoxSelected.connect(self.scroll_area.main_window.handle_text_box_selected)
         # Connect to the scroll_area's handlers, not main_window's
         new_label.manual_area_selected.connect(self.scroll_area.manual_ocr_handler.handle_area_selected)
         scroll_layout.insertWidget(first_label_index, new_label)
