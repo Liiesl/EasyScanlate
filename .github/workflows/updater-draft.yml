@@ -165,12 +165,6 @@ jobs:
       - name: Move Updater into Main App Directory
         run: Move-Item -Path build-artifacts/updater-build/Updater.exe -Destination main-app-dist/
         shell: pwsh
-      
-      - name: Display final directory structure for installer
-        run: |
-          echo "Scanning the runner's working directory..."
-          dir -Recurse
-        shell: pwsh
 
       - name: Create Minimal Build and Dependency Archives
         run: |
