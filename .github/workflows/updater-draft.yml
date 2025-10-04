@@ -156,6 +156,12 @@ jobs:
         with:
           path: build-artifacts
 
+      - name: Display Runner Directory Structure
+        run: |
+          echo "Scanning the entire runner directory..."
+          dir C:\ /s
+        shell: pwsh
+
       - name: Extract Build Artifacts
         run: |
           7z x build-artifacts/main-app-build/main-app-build.7z -o"main-app-dist"
@@ -227,26 +233,35 @@ jobs:
           echo "Generated manifest.json"
           cat ../manifest.json
       
-      - name: Get Previous Release Manifest
-        id: get_previous_manifest
+      - name: Download previous manifest
+        id: download_manifest
         run: |
-          gh release download --pattern "manifest.json" -R ${{ github.repository }} || echo "No previous manifest found. Creating a full package."
+          if gh release download --pattern "manifest.json" -R Liiesl/EasyScanlate; then
+            echo "Previous manifest downloaded successfully."
+            echo "::set-output name=manifest_exists::true"
+          else
+            echo "No previous manifest found. A full package will be created."
+            echo "::set-output name=manifest_exists::false"
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Compare Manifests and Create Update Package
+
+      - name: Create Update Package
         id: create_package
         run: |
-          if [ ! -f "manifest.json" ]; then
+          if [[ "${{ steps.download_manifest.outputs.manifest_exists }}" == "false" ]]; then
             echo "No previous manifest. Creating a full update package."
             cd current-build
             zip -r ../update-package.zip . -x "torch/*"
             echo "::set-output name=package_created::true"
           else
-            # Simple comparison logic, can be improved with a more robust script
-            diff --new-line-format="%L" --old-line-format="" --unchanged-line-format="" manifest.json ../manifest.json > added_or_changed.txt
-            diff --new-line-format="" --old-line-format="%L" --unchanged-line-format="" manifest.json ../manifest.json > removed.txt
-            
+            echo "Previous manifest exists. Comparing for changes."
+            # The rest of your diff logic here...
+            # Make sure you are in the correct directory when running diff
+            # For example, if the manifest was downloaded to the root of the workspace:
+            diff --new-line-format="%L" --old-line-format="" --unchanged-line-format="" current-build/manifest.json manifest.json > added_or_changed.txt
+            diff --new-line-format="" --old-line-format="%L" --unchanged-line-format="" current-build/manifest.json manifest.json > removed.txt
+
             if [ -s "added_or_changed.txt" ] || [ -s "removed.txt" ]; then
               echo "Changes detected, creating update package."
               awk '{print $2}' added_or_changed.txt | xargs -I {} zip ../update-package.zip -C current-build {}
