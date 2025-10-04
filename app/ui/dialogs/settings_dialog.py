@@ -2,13 +2,14 @@ from PySide6.QtWidgets import (QDialog, QDoubleSpinBox, QVBoxLayout, QFormLayout
                              QComboBox, QSpinBox, QDialogButtonBox, QTabWidget,
                              QWidget, QLineEdit, QKeySequenceEdit, QCheckBox) # Added QLabel
 from PySide6.QtGui import QKeySequence
+from assets import ADVANCED_CHECK_STYLES
 
 GEMINI_MODELS_WITH_INFO = [
-    ("gemini-2.5-flash", "500 req/day (free tier)"),
+    ("gemini-2.5-flash", "250 req/day (free tier)"),
     ("gemini-2.5-pro", "100 req/day (free tier)"),
-    ("gemini-2.5-flash-lite", "500 req/day (free tier)"),
-    ("gemini-2.0-flash", "1500 req/day (free tier)"),
-    ("gemini-2.0-flash-lite", "1500 req/day (free tier)"),
+    ("gemini-2.5-flash-lite", "1000 req/day (free tier)"),
+    ("gemini-2.0-flash", "200 req/day (free tier)"),
+    ("gemini-2.0-flash-lite", "200 req/day (free tier)"),
     ("gemma-3-27b-it", "14400 req/day"),
     ("gemma-3n-e4b-it", "14400 req/day"),
 ]
@@ -30,6 +31,7 @@ class SettingsDialog(QDialog):
         general_layout = QFormLayout()
 
         self.show_delete_warning_check = QCheckBox()
+        self.show_delete_warning_check.setStyleSheet(ADVANCED_CHECK_STYLES)
         self.show_delete_warning_check.setChecked(
             self.settings.value("show_delete_warning", "true") == "true"
         )
@@ -37,12 +39,21 @@ class SettingsDialog(QDialog):
 
         # --- Add GPU Setting ---
         self.use_gpu_check = QCheckBox()
+        self.use_gpu_check.setStyleSheet(ADVANCED_CHECK_STYLES)
         self.use_gpu_check.setChecked(
             self.settings.value("use_gpu", "true").lower() == "true" # Default to True
         )
         self.use_gpu_check.setToolTip("Requires compatible NVIDIA GPU and CUDA drivers. Restart may be needed.")
         general_layout.addRow("Use GPU for OCR (if available):", self.use_gpu_check)
         # --- End GPU Setting ---
+
+        self.auto_context_fill_check = QCheckBox()
+        self.auto_context_fill_check.setStyleSheet(ADVANCED_CHECK_STYLES)
+        self.auto_context_fill_check.setChecked(
+            self.settings.value("auto_context_fill", "false") == "true"
+        )
+        self.auto_context_fill_check.setToolTip("Automatically inpaint the background behind detected text during Batch OCR.\nThis can improve text rendering but may slow down processing.")
+        general_layout.addRow("Auto Context Fill Background on Batch OCR:", self.auto_context_fill_check)
 
         general_tab.setLayout(general_layout)
         self.tab_widget.addTab(general_tab, "General")
@@ -199,7 +210,8 @@ class SettingsDialog(QDialog):
             "true" if self.show_delete_warning_check.isChecked() else "false")
         self.settings.setValue("use_gpu",
             "true" if self.use_gpu_check.isChecked() else "false")
-
+        self.settings.setValue("auto_context_fill",
+            "true" if self.auto_context_fill_check.isChecked() else "false")
         # Save OCR Processing settings
         self.settings.setValue("min_text_height", self.min_text_spin.value())
         self.settings.setValue("max_text_height", self.max_text_spin.value())

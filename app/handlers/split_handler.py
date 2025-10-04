@@ -2,18 +2,19 @@
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QMessageBox
 from PySide6.QtCore import QObject, Qt, QRectF
-from PySide6.QtGui import QPixmap, QPainter, QPen, QColor
+from PySide6.QtGui import QPixmap
 from app.ui.components import ResizableImageLabel
 import qtawesome as qta
 import os
 
 class SplitHandler(QObject):
     """
-    Manages the UI and logic for splitting a single image into multiple images.
+    Manages the UI and logic for splitting an image. Does not depend on MainWindow.
     """
-    def __init__(self, main_window):
-        super().__init__()
-        self.main_window = main_window
+    def __init__(self, scroll_area, model):
+        super().__init__(scroll_area)
+        self.scroll_area = scroll_area
+        self.model = model
         self.is_active = False
         self.selected_label = None
         self.split_points = [] # Will only ever contain 0 or 1 item
@@ -22,12 +23,12 @@ class SplitHandler(QObject):
 
     def _setup_ui(self):
         """Creates the widget that appears during splitting mode."""
-        self.split_widget = QWidget(self.main_window.scroll_area)
+        self.split_widget = QWidget(self.scroll_area)
         self.split_widget.setObjectName("SplitWidget")
         self.split_widget.setStyleSheet("""
             #SplitWidget {
-                background-color: rgba(30, 30, 30, 0.95);
-                border-radius: 10px; border: 1px solid #555;
+                background-color: rgba(30, 30, 30, 0.95); border-radius: 10px;
+                border: 1px solid #555;
             }
             QPushButton {
                 background-color: #007ACC; color: white; border: none;
@@ -67,10 +68,7 @@ class SplitHandler(QObject):
     def start_splitting_mode(self):
         """Enters the image splitting mode."""
         if self.is_active: return
-        if self.main_window.manual_ocr_handler.is_active:
-             QMessageBox.warning(self.main_window, "Mode Conflict", "Cannot start splitting while in Manual OCR mode.")
-             return
-
+        self.scroll_area.cancel_active_modes(exclude_handler=self)
         self.is_active = True
         self.selected_label = None
         self.split_points = []
@@ -83,22 +81,16 @@ class SplitHandler(QObject):
 
         for widget in self._get_image_labels():
             widget.enable_splitting_selection(True)
-            # Connect to the new signal that indicates a click anywhere
             widget.split_indicator_requested.connect(self._handle_indicator_placement)
 
     def _handle_indicator_placement(self, clicked_label, y_pos):
         """Moves the split indicator to the clicked position."""
-        # If an indicator was on a different image, tell that image it's no longer selected.
         if self.selected_label and self.selected_label != clicked_label:
             self.selected_label.set_selected_for_splitting(False)
 
-        # Update the state to the newly clicked label and position
         self.selected_label = clicked_label
         self.split_points = [y_pos]
-
-        # Tell the new label it's selected (to show the overlay)
         self.selected_label.set_selected_for_splitting(True)
-        # And draw the split line at the new position
         self.selected_label.draw_split_lines(self.split_points)
 
         self._update_info_label()
@@ -107,158 +99,82 @@ class SplitHandler(QObject):
     def confirm_split(self):
         """Slices the image and redistributes OCR data."""
         if not self.selected_label or not self.split_points:
-            QMessageBox.warning(self.main_window, "Input Error", "Please click on an image to place a split indicator.")
+            QMessageBox.warning(self.scroll_area, "Input Error", "Please place a split indicator.")
             return
 
         print("--- Starting Image Splitting Process ---")
         
-        # 1. Prepare Data
         source_label = self.selected_label
         source_pixmap = source_label.original_pixmap
         source_filename = source_label.filename
-        images_dir = os.path.join(self.main_window.model.temp_dir, 'images')
+        images_dir = os.path.join(self.model.temp_dir, 'images')
         basename, ext = os.path.splitext(source_filename)
 
-        # 2. Generate unique filenames to avoid conflicts with existing split images
         def generate_unique_filename(base_name, extension, existing_files):
-            """Generate a unique filename by checking against existing files."""
             counter = 1
             while True:
                 candidate = f"{base_name}_split_{counter}{extension}"
-                if candidate not in existing_files:
-                    return candidate
+                if candidate not in existing_files: return candidate
                 counter += 1
 
-        # Get list of existing files to avoid naming conflicts
-        existing_files = set()
-        try:
-            existing_files = set(os.listdir(images_dir))
-        except OSError:
-            pass
-        
-        # Also check current image paths in model
-        for path in self.main_window.model.image_paths:
+        existing_files = set(os.listdir(images_dir)) if os.path.exists(images_dir) else set()
+        for path in self.model.image_paths:
             existing_files.add(os.path.basename(path))
 
-        # 3. Slice the Pixmap
         split_boundaries = [0] + self.split_points + [source_pixmap.height()]
-        new_pixmaps = []
-        for i in range(len(split_boundaries) - 1):
-            y_start, y_end = split_boundaries[i], split_boundaries[i+1]
-            rect = QRectF(0, y_start, source_pixmap.width(), y_end - y_start).toRect()
-            new_pixmaps.append(source_pixmap.copy(rect))
+        new_pixmaps = [source_pixmap.copy(QRectF(0, y_start, source_pixmap.width(), y_end - y_start).toRect())
+                       for y_start, y_end in zip(split_boundaries, split_boundaries[1:])]
 
-        # 4. Save New Images and Generate New Data with unique filenames
         new_image_data = []
-        for i, pixmap in enumerate(new_pixmaps):
-            # Generate unique filename for each split part
+        for pixmap in new_pixmaps:
             new_filename = generate_unique_filename(basename, ext, existing_files)
-            existing_files.add(new_filename)  # Add to set to avoid duplicates in this batch
-            
+            existing_files.add(new_filename)
             new_filepath = os.path.join(images_dir, new_filename)
             if not pixmap.save(new_filepath):
-                QMessageBox.critical(self.main_window, "Save Error", f"Failed to save split image to {new_filepath}.")
+                QMessageBox.critical(self.scroll_area, "Save Error", f"Failed to save {new_filepath}.")
                 self.cancel_splitting_mode()
                 return
-            new_image_data.append({
-                'filename': new_filename, 
-                'pixmap': pixmap, 
-                'path': new_filepath,
-                'y_start': split_boundaries[i],
-                'y_end': split_boundaries[i+1]
-            })
-        print(f"Split image into {len(new_image_data)} new files: {[data['filename'] for data in new_image_data]}")
+            new_image_data.append({'filename': new_filename, 'pixmap': pixmap, 'path': new_filepath})
 
-        # 5. Update OCR Data Model (FIXED LOGIC)
-        print("Updating OCR data model...")
-        
-        # Process each OCR result that belongs to the source image
-        for result in self.main_window.model.ocr_results:
-            if result.get('filename') == source_filename:
-                try:
-                    # Get the Y coordinate of this OCR result
-                    coords = result.get('coordinates', [])
-                    if not coords:
-                        print(f"Warning: OCR result has no coordinates, skipping: {result}")
-                        continue
-                    
-                    # Find the minimum Y coordinate of the coordinates
-                    box_y = min(p[1] for p in coords if len(p) >= 2)
-                    
-                    # Determine which split section this OCR result belongs to
-                    assigned = False
-                    for data in new_image_data:
-                        if data['y_start'] <= box_y < data['y_end']:
-                            # Update filename to the correct split part
-                            result['filename'] = data['filename']
-                            
-                            # Adjust coordinates relative to the new image
-                            y_offset = data['y_start']
-                            if y_offset > 0:
-                                result['coordinates'] = [[p[0], p[1] - y_offset] for p in coords]
-                            
-                            assigned = True
-                            print(f"Assigned OCR result at Y={box_y} to {data['filename']} (offset: {y_offset})")
-                            break
-                    
-                    if not assigned:
-                        print(f"Warning: Could not assign OCR result at Y={box_y} to any split section")
-                        
-                except (TypeError, ValueError, IndexError) as e:
-                    print(f"Warning: Skipping an OCR result for '{source_filename}' due to malformed data: {e}")
-                    continue
+        # Update the data model before touching the UI
+        self.model.redistribute_inpaint_for_split(source_filename, new_image_data, self.split_points)
+        self.model.redistribute_ocr_for_split(source_filename, new_image_data, self.split_points)
 
-        # 6. Clean up old file and model's image path list
-        source_path_in_model = next((p for p in self.main_window.model.image_paths if os.path.basename(p) == source_filename), None)
-        if source_path_in_model:
-            index = self.main_window.model.image_paths.index(source_path_in_model)
-            self.main_window.model.image_paths.pop(index)
-            for i, data in enumerate(new_image_data):
-                self.main_window.model.image_paths.insert(index + i, data['path'])
-            try:
-                os.remove(source_path_in_model)
-                print(f"Deleted original file: {source_path_in_model}")
-            except Exception as e:
-                print(f"Warning: Could not delete old image file {source_path_in_model}. Error: {e}")
-
-        # 7. Update UI
-        print("Updating UI with new split images...")
+        # Update UI
+        scroll_layout = self.scroll_area.widget().layout()
         source_label_index = self._get_widget_index(source_label)
         if source_label_index == -1:
-            QMessageBox.critical(self.main_window, "UI Error", "Could not find original image in layout.")
+            QMessageBox.critical(self.scroll_area, "UI Error", "Could not find original image in layout.")
             self.cancel_splitting_mode()
             return
 
-        self.main_window.scroll_layout.removeWidget(source_label)
+        scroll_layout.removeWidget(source_label)
         source_label.cleanup()
         source_label.deleteLater()
 
         for i, data in enumerate(new_image_data):
-            new_label = ResizableImageLabel(data['pixmap'], data['filename'])
-            new_label.textBoxDeleted.connect(self.main_window.delete_row)
-            new_label.textBoxSelected.connect(self.main_window.handle_text_box_selected)
-            new_label.manual_area_selected.connect(self.main_window.manual_ocr_handler.handle_area_selected)
-            self.main_window.scroll_layout.insertWidget(source_label_index + i, new_label)
+            # Pass the main_window reference from the scroll_area for signals that still need it
+            new_label = ResizableImageLabel(data['pixmap'], data['filename'], self.scroll_area.main_window, self.scroll_area.main_window.selection_manager)
+            new_label.textBoxDeleted.connect(self.scroll_area.main_window.delete_row)
+            # Connect to handlers owned by the scroll_area
+            new_label.manual_area_selected.connect(self.scroll_area.manual_ocr_handler.handle_area_selected)
+            new_label.manual_area_selected.connect(self.scroll_area.context_fill_handler.handle_area_selected)
+            scroll_layout.insertWidget(source_label_index + i, new_label)
 
-        # 8. Finalize
-        self.main_window.model._sort_ocr_results()
-        self.main_window.update_all_views()
-        QMessageBox.information(self.main_window, "Split Successful", f"Image successfully split into {len(new_pixmaps)} parts.")
+        self.model.sort_and_notify()
+        QMessageBox.information(self.scroll_area, "Split Successful", f"Image split into {len(new_pixmaps)} parts.")
         self.cancel_splitting_mode()
 
     def cancel_splitting_mode(self):
         """Exits splitting mode and cleans up."""
         if not self.is_active: return
         
-        try:
-            if self.selected_label:
-                self.selected_label.set_selected_for_splitting(False)
-        except RuntimeError:
-            print("Info: selected_label was already deleted when attempting to exit split mode.")
+        if self.selected_label:
+            try: self.selected_label.set_selected_for_splitting(False)
+            except RuntimeError: pass
         
         for widget in self._get_image_labels():
-            try:
-                widget.split_indicator_requested.disconnect(self._handle_indicator_placement)
+            try: widget.split_indicator_requested.disconnect(self._handle_indicator_placement)
             except (TypeError, RuntimeError): pass
             widget.enable_splitting_selection(False)
         
@@ -280,7 +196,7 @@ class SplitHandler(QObject):
     def _update_widget_position(self):
         """Positions the control widget at the top-center of the scroll area."""
         if not self.split_widget.isVisible(): return
-        scroll_area_width = self.main_window.scroll_area.viewport().width()
+        scroll_area_width = self.scroll_area.viewport().width()
         x = (scroll_area_width - self.split_widget.width()) / 2
         y = 10
         self.split_widget.move(int(x), int(y))
@@ -299,17 +215,19 @@ class SplitHandler(QObject):
                                     f"Click to move the indicator. (1 split / {num_pieces} pieces)")
 
     def _get_image_labels(self):
-        """Helper to get all ResizableImageLabel widgets from the scroll layout."""
         labels = []
-        for i in range(self.main_window.scroll_layout.count()):
-            widget = self.main_window.scroll_layout.itemAt(i).widget()
+        layout = self.scroll_area.widget().layout()
+        if not layout: return []
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
                 labels.append(widget)
         return labels
 
     def _get_widget_index(self, widget_to_find):
-        """Helper to find the index of a widget in the scroll layout."""
-        for i in range(self.main_window.scroll_layout.count()):
-            if self.main_window.scroll_layout.itemAt(i).widget() == widget_to_find:
+        layout = self.scroll_area.widget().layout()
+        if not layout: return -1
+        for i in range(layout.count()):
+            if layout.itemAt(i).widget() == widget_to_find:
                 return i
         return -1

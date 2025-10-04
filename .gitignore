@@ -3,8 +3,8 @@
 **/__pycache__/
 translated_manhwa.zip
 generate-ascii-tree.py
-/launcher/mmtl_launcher.exe
-/launcher/launcher.exe
+mmtl_launcher.exe
+launcher.exe
 nuitka.bash
 *.build
 *.dist
@@ -20,3 +20,4 @@ initmodels.py
 retry-update.bat
 test_torch
 minimal_module
+*temp*
