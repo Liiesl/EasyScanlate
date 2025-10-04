@@ -18,6 +18,7 @@
   - make menu button to be layout class
   - make further ocr to override old ocr
   - change translation format to xml like
+  - make manual ocr overlay presistent
 
 ## currently in progress
   - 
