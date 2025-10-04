@@ -668,7 +668,8 @@ class TranslationWindow(QDialog):
         if all_selected:
             # Full translation logic
             content_to_translate = generate_for_translate_content(self.ocr_results, source_profile)
-            if not content_to_translate.strip() or '<!-- file:' not in content_to_translate:
+            # UPDATED CHECK: Look for the new XML root tag.
+            if not content_to_translate.strip() or '<translations>' not in content_to_translate:
                 QMessageBox.warning(self, "No Content", "There is no text content to translate from the selected source profile.")
                 return
         else:
@@ -676,12 +677,12 @@ class TranslationWindow(QDialog):
             selected_items = [key for key, widgets in self.row_widgets.items() if widgets['checkbox'].isChecked()]
 
             if not selected_items:
-                # This case is unlikely if the button icon is 'retranslate', but is a good safeguard.
                 QMessageBox.information(self, "No Selection", "Something went wrong. No rows are selected for re-translation.")
                 return
 
             content_to_translate = generate_retranslate_content(self.ocr_results, source_profile, selected_items)
-            if not content_to_translate.strip() or '<!-- file:' not in content_to_translate:
+            # UPDATED CHECK: Look for the new XML root tag here as well.
+            if not content_to_translate.strip() or '<translations>' not in content_to_translate:
                 QMessageBox.warning(self, "Error", "Could not generate content for retranslation from the selected rows.")
                 return
             

@@ -3,6 +3,7 @@
 ## done (milestone 0.2.0 release)
 
   #### addition
+  - add context fill.
   - implement hide text
   - add ocr override dialog confirmation
   - add custom state aware button class
@@ -16,20 +17,10 @@
   - make app sync to be on its own manager
   - make menu button to be layout class
   - make further ocr to override old ocr
-  - 
+  - change translation format to xml like
 
 ## currently in progress
-  - add inpainting.
-    - [X] inpainting base logic (initiation, lifecycle, etc.)
-    - [X] inpainting restore
-    - [ ] advanced inpaint
-      - [ ] free form selection (pen tools/draw)
-      - [ ] switch on/off from selection
-      - [ ] undo/redo
-    - [X] auto inpaint option
-    - [X] hide inpaints
-    - known bugs caused by this
-      - 
+  - 
 
 ## not yet started
 
@@ -39,6 +30,9 @@
   - implement watermarking
   - textbox styles
     - add stroke to typography
+    - add directional blur to typography
+    - add drop shadow to both
+    - add 
   - add link to github issues for when there is crash
     - add issue template
     - 
@@ -59,10 +53,13 @@
     - make translations into non blocking window
       - or integrate it into main window
       - easier retranslate workflow
-    - change translation format to xml
     - characters, places, and lore name dictionaries
   - hide textboximage button
   - profile improvement:
       - manual creation, deletion, rename
       - two pane view
   - make it possible to edit straight from textbox
+  - advanced inpaint
+    - free form selection (pen tools/draw)
+    - switch on/off from selection
+    - undo/redo

@@ -2,6 +2,8 @@
 import re
 from google import genai
 from PySide6.QtCore import QThread, Signal
+from xml.sax.saxutils import escape, unescape
+import xml.etree.ElementTree as ET
 
 class TranslationThread(QThread):
     """
@@ -60,12 +62,11 @@ def _get_text_for_profile_static(result, profile_name):
     return result.get('text', '')
 
 def generate_for_translate_content(ocr_results, source_profile_name):
-# ... (This function is unchanged)
     """
-    Generates Markdown content in for-translate format from OCR results,
+    Generates XML-like content for translation from OCR results,
     using text from the specified source profile.
     """
-    content = "<!-- type: for-translate -->\n\n"
+    content = "<translations>\n"
     grouped_results = {}
 
     visible_results = [res for res in ocr_results if not res.get('is_deleted', False)]
@@ -82,28 +83,23 @@ def generate_for_translate_content(ocr_results, source_profile_name):
             grouped_results[filename] = []
         grouped_results[filename].append((text, row_number))
 
-    for idx, (filename, texts_with_rows) in enumerate(grouped_results.items()):
-        if idx > 0: content += "\n\n"
-        content += f"<!-- file: {filename} -->\n\n"
-
+    for filename, texts_with_rows in grouped_results.items():
+        content += f"<{escape(filename)}>\n"
         sorted_texts_with_rows = sorted(texts_with_rows, key=lambda x: float(x[1]))
         for text, row_number in sorted_texts_with_rows:
-            content += f"{text}\n"
-            content += f"-/{str(row_number)}\\-\n\n"
+            content += f"<{str(row_number)}>{escape(text)}</{str(row_number)}>\n"
+        content += f"</{escape(filename)}>\n"
 
-    return content.rstrip() + "\n"
+    return content + "</translations>\n"
 
 def generate_retranslate_content(ocr_results, source_profile_name, selected_items, context_size=3):
-# ... (This function is unchanged)
     """
-    Generates Markdown content for re-translation in a structured format.
-    For each selected item, it includes context from surrounding text within
-    [CONTEXT] blocks and the text to be translated in a [TRANSLATE] block.
-    'selected_items' is a list of (filename, row_number_str) tuples.
+    Generates XML-like content for re-translation.
+    For each selected item, it includes context and the text to be translated
+    within <context> and <translate> tags respectively.
     """
-    content = "<!-- type: for-translate -->\n\n"
+    content = "<translations>\n"
     
-    # Filter out deleted results and group all results by filename for quick lookup
     all_results_by_file = {}
     for res in ocr_results:
         if not res.get('is_deleted', False):
@@ -112,22 +108,17 @@ def generate_retranslate_content(ocr_results, source_profile_name, selected_item
                 all_results_by_file[filename] = []
             all_results_by_file[filename].append(res)
     
-    # Sort results within each file by row number
     for filename in all_results_by_file:
         all_results_by_file[filename].sort(key=lambda x: float(x.get('row_number', 0)))
 
-    # Group the selected items by filename to process them in batches
     selected_by_file = {}
     for filename, row_number_str in selected_items:
         if filename not in selected_by_file:
             selected_by_file[filename] = []
         selected_by_file[filename].append(row_number_str)
 
-    # Build the content string
-    for file_idx, (filename, selected_rows) in enumerate(selected_by_file.items()):
-        if file_idx > 0:
-            content += "\n\n"
-        content += f"<!-- file: {filename} -->\n\n"
+    for filename, selected_rows in selected_by_file.items():
+        content += f"<{escape(filename)}>\n"
         
         file_results = all_results_by_file.get(filename, [])
         if not file_results:
@@ -161,79 +152,91 @@ def generate_retranslate_content(ocr_results, source_profile_name, selected_item
                 else:
                     context_after.append(text)
 
-            # Assemble the block using the new [CONTEXT] and [TRANSLATE] tags
-            block_parts = []
+            # Assemble the block using <context> and <translate> tags
+            block = f"<{row_number_str}>\n"
             if context_before:
-                block_parts.append(f"[CONTEXT]\n" + "\n".join(context_before) + "\n[/CONTEXT]")
+                block += f"<context>{escape(chr(10).join(context_before))}</context>\n"
             
-            block_parts.append(f"[TRANSLATE]\n{text_to_retranslate}\n[/TRANSLATE]")
+            block += f"<translate>{escape(text_to_retranslate)}</translate>\n"
 
             if context_after:
-                block_parts.append(f"[CONTEXT]\n" + "\n".join(context_after) + "\n[/CONTEXT]")
-
-            final_block = "\n".join(block_parts)
+                block += f"<context>{escape(chr(10).join(context_after))}</context>\n"
             
-            content += f"{final_block}\n-/{row_number_str}\\-\n\n"
+            block += f"</{row_number_str}>\n"
+            content += block
             
-    return content.rstrip() + "\n"
+        content += f"</{escape(filename)}>\n"
+            
+    return content + "</translations>\n"
 
 
 def import_translation_file_content(content):
-# ... (This function is unchanged)
-    """ Parses translated content and returns a dictionary.
-    This function is robust and can handle two formats:
-    1. Simple format for initial translation (text followed by delimiter).
-    2. Structured format for re-translation (containing [TRANSLATE] tags).
-    Returns: {filename: {row_number_str: translated_text}} """
-    if '<!-- type: for-translate -->' not in content:
-        raise ValueError("Unsupported MD format - missing type comment.")
+    """
+    Parses translated XML-like content robustly and returns a dictionary.
+    Handles malformed data such as missing closing tags, the optional
+    presence of <translate> tags, and row data that appears outside
+    of a file tag (assigning it to the most recently seen filename).
 
+    Returns: {filename: {row_number_str: translated_text}}
+    """
     translations = {}
-    current_file = None
-    buffer_text = ""
     
-    lines = content.split('\n')
-    i = 0
-    while i < len(lines):
-        line = lines[i] # Keep original line with whitespace for the buffer
+    # Regex to identify start tags. Heuristics are used to differentiate
+    # file tags from row tags.
+    file_tag_pattern = re.compile(r'<(?P<name>[^/][^>]+)>')
+    row_tag_pattern = re.compile(r'<(?P<rownum>\d+)>')
+    
+    # Regex for content extraction, tolerant of missing closing tags.
+    translate_pattern = re.compile(r'<translate>(.*?)(?:</translate>)?', re.DOTALL | re.IGNORECASE)
 
-        stripped_line = line.strip()
+    current_filename = None
 
-        if stripped_line.startswith('<!-- file:') and stripped_line.endswith('-->'):
-            current_file = stripped_line[10:-3].strip()
-            if current_file not in translations:
-                translations[current_file] = {}
-            i += 1
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
             continue
 
-        elif stripped_line.startswith('-/') and stripped_line.endswith('\\-') and current_file:
-            row_number_str = stripped_line[2:-2].strip()
-            
-            if buffer_text:
-                translated_text = ""
-                # Check for the structured re-translate format first
-                match = re.search(r'\[TRANSLATE\](.*?)\[/TRANSLATE\]', buffer_text, re.DOTALL)
-                
-                if match:
-                    # If found, extract only the text within the [TRANSLATE] block
-                    translated_text = match.group(1).strip()
-                else:
-                    # Otherwise, fall back to the simple format (the whole buffer is the translation)
-                    translated_text = buffer_text.strip()
-                
-                translations[current_file][row_number_str] = translated_text
-                buffer_text = ""
+        row_match = row_tag_pattern.match(line)
+        file_match = file_tag_pattern.match(line)
 
-            i += 1
-            continue
-
-        elif current_file is not None:
-            # Accumulate lines into the buffer for the current file block
-            if buffer_text:
-                buffer_text += "\n" + line
-            else:
-                buffer_text = line
+        # Check for a new file tag. A tag is considered a file tag if it's
+        # not a purely numeric tag (a row tag).
+        if file_match and not file_match.group('name').isdigit():
+            potential_filename = file_match.group('name')
+            if potential_filename.lower() not in ['translations', 'translate', 'context']:
+                current_filename = unescape(potential_filename)
+                if current_filename not in translations:
+                    translations[current_filename] = {}
+                continue
         
-        i += 1
-
+        # Check for a row tag. This check is independent of the file tag check
+        # to allow rows to be associated with the last known file.
+        if row_match and current_filename:
+            row_number = row_match.group('rownum')
+            
+            # Extract content from the row tag.
+            # Start after the opening tag.
+            content_start = row_match.end()
+            # End before the closing tag, if it exists.
+            closing_tag = f'</{row_number}>'
+            content_end = line.rfind(closing_tag)
+            
+            if content_end != -1:
+                line_content = line[content_start:content_end]
+            else:
+                line_content = line[content_start:]
+            
+            # Within the row content, check for a <translate> tag.
+            text_inside_translate = translate_pattern.search(line_content)
+            if text_inside_translate:
+                translated_text = text_inside_translate.group(1)
+            else:
+                # If no <translate> tag, use the entire content of the row tag.
+                translated_text = line_content
+            
+            # Unescape and clean up the final text.
+            final_text = unescape(translated_text).strip()
+            if final_text:
+                translations[current_filename][row_number] = final_text
+    
     return translations
