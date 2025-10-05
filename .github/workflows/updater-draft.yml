@@ -9,8 +9,6 @@ on:
       - 'v*.*.*'
 
 jobs:
-  # --- Stage 1: Parallel Builds (jobs: build-main-app, build-minimal-module, build-updater) ---
-  # ... (These jobs remain unchanged) ...
 
   build-main-app:
     runs-on: windows-latest
@@ -165,8 +163,10 @@ jobs:
           7z x build-artifacts/minimal-module-build/minimal-module-build.7z -o"minimal-module-dist"
         shell: pwsh
 
-      - name: Move Updater into Main App Directory
-        run: Move-Item -Path build-artifacts/updater-build/Updater.exe -Destination main-app-dist/
+      - name: Create updater subdirectory and move Updater.exe
+        run: |
+          New-Item -Path "main-app-dist/updater" -ItemType Directory
+          Move-Item -Path "build-artifacts/updater-build/Updater.exe" -Destination "main-app-dist/updater/"
         shell: pwsh
 
       - name: Create Minimal Build and Dependency Archives
@@ -188,7 +188,7 @@ jobs:
         run: choco install nsis
 
       - name: Add NSIS to PATH
-        run: echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        run: echo "C:\Program Files (x88)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         shell: pwsh
 
       - name: Compile NSIS installer
@@ -210,6 +210,8 @@ jobs:
   create_update_package:
     runs-on: ubuntu-latest
     needs: build-main-app
+    outputs:
+      package_created: ${{ steps.create_package.outputs.package_created }}
     steps:
       - uses: actions/checkout@v4
 
@@ -230,58 +232,36 @@ jobs:
       - name: Unzip Main App Build
         run: 7z x main-app-build/main-app-build.7z -o"current-build"
 
+      # IMPORTANT: Archive the executable with its version tag in the name
+      # This allows the script to fetch specific old versions later.
       - name: Archive Current Main Executable
-        run: 7z a -t7z main-executable.7z ./current-build/main.exe
-
-      - name: Download previous manifest and executable
-        id: download_previous_assets
         run: |
-          PREVIOUS_TAG="v0.1.2" # Hardcoded tag for testing
-          
-          gh release download $PREVIOUS_TAG --repo ${{ github.repository }} --pattern 'manifest.json' -O old_manifest.json || true
-          gh release download $PREVIOUS_TAG --repo ${{ github.repository }} --pattern 'main-executable.7z' -O old_main.7z || true
-          
-          if [ -f "old_manifest.json" ]; then
-            echo "manifest_path=old_manifest.json" >> $GITHUB_OUTPUT
-          else
-            echo "manifest_path=" >> $GITHUB_OUTPUT
-          fi
-          
-          if [ -f "old_main.7z" ]; then
-            7z x old_main.7z -o.
-            echo "executable_path=main.exe" >> $GITHUB_OUTPUT
-          else
-            echo "executable_path=" >> $GITHUB_OUTPUT
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+          7z a -t7z main-executable-${{ github.ref_name }}.7z ./current-build/main.exe
+        
       - name: Create Update Package with Python Script
         id: create_package
         run: |
-          ARGS=""
-          if [ -n "${{ steps.download_previous_assets.outputs.manifest_path }}" ]; then
-            ARGS="$ARGS --old-manifest ${{ steps.download_previous_assets.outputs.manifest_path }}"
-          fi
-          if [ -n "${{ steps.download_previous_assets.outputs.executable_path }}" ]; then
-            ARGS="$ARGS --old-executable ${{ steps.download_previous_assets.outputs.executable_path }}"
-          fi
-          
-          python dev/updater/create_update_package.py --build-dir current-build --main-executable-name main.exe $ARGS
+          python dev/updater/create_update_package.py \
+            --build-dir current-build \
+            --main-executable-name main.exe \
+            --new-version ${{ github.ref_name }} \
+            --repo ${{ github.repository }}
+        env:
+          # The script uses the gh CLI, which needs a token to access repository releases.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Update Package and New Manifest
+      - name: Upload Update Assets
         if: steps.create_package.outputs.package_created == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: update-package-assets
           path: |
             manifest.json
-            update-package.zip
+            update-*.zip
             *.patch
-            main-executable.7z
+            main-executable-${{ github.ref_name }}.7z # Upload the new version-specific executable# --- Stage 3: Create GitHub Release ---
 
   # --- Stage 3: Create GitHub Release ---
-  
   create-release:
     runs-on: ubuntu-latest
     needs: [create-installer, create_update_package]
@@ -303,8 +283,9 @@ jobs:
           name: installer-assets
           path: release-assets/
 
-      # Download the update package assets
+      # Download the update package assets if they were created
       - name: Download Update Package Artifacts
+        if: needs.create_update_package.outputs.package_created == 'true'
         uses: actions/download-artifact@v4
         with:
           name: update-package-assets
