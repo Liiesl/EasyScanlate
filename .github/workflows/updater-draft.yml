@@ -273,7 +273,7 @@ jobs:
           name: manifest-asset
           path: |
             manifest.json
-            main-executable-${{ github.ref_name }}.7z # Upload the new version-specific executable
+            main-executable-${{ github.ref_name }}.7z
 
   # --- Stage 3: Create GitHub Release ---
   create-release:
