@@ -266,13 +266,14 @@ jobs:
           path: |
             update-*.zip
             *.patch
-            main-executable-${{ github.ref_name }}.7z # Upload the new version-specific executable
 
       - name: Upload Manifest
         uses: actions/upload-artifact@v4
         with:
           name: manifest-asset
-          path: manifest.json
+          path: |
+            manifest.json
+            main-executable-${{ github.ref_name }}.7z # Upload the new version-specific executable
 
   # --- Stage 3: Create GitHub Release ---
   create-release:
