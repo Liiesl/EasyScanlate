@@ -264,10 +264,15 @@ jobs:
         with:
           name: update-package-assets
           path: |
-            manifest.json
             update-*.zip
             *.patch
-            main-executable-${{ github.ref_name }}.7z # Upload the new version-specific executable# --- Stage 3: Create GitHub Release ---
+            main-executable-${{ github.ref_name }}.7z # Upload the new version-specific executable
+
+      - name: Upload Manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-asset
+          path: manifest.json
 
   # --- Stage 3: Create GitHub Release ---
   create-release:
@@ -297,6 +302,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: update-package-assets
+          path: release-assets/
+
+      - name: Download Manifest Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: manifest-asset
           path: release-assets/
 
       - name: Create Draft GitHub Release
