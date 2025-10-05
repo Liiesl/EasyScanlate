@@ -13,6 +13,7 @@ from PySide6.QtCore import Qt, QSettings, QDateTime, QThread, Signal, QEvent
 from assets.styles import (HOME_STYLES, HOME_LEFT_LAYOUT_STYLES)
 from app.ui.window.chrome import CustomTitleBar, WindowResizer
 from app.ui.widgets.menu_bar import TitleBarState
+from app.ui.dialogs.settings_dialog import SettingsDialog
 
 
 class ProjectItemWidget(QFrame):
@@ -241,15 +242,18 @@ class Home(QMainWindow):
         self.btn_new = QPushButton("New Project")
         self.btn_import = QPushButton("Import from WFWF")
         self.btn_open = QPushButton("Open Project")
+        self.btn_settings = QPushButton("Settings")
         
         self.left_layout_layout.addWidget(self.btn_new)
         self.left_layout_layout.addWidget(self.btn_import)
         self.left_layout_layout.addWidget(self.btn_open)
+        self.left_layout_layout.addWidget(self.btn_settings)
         self.left_layout_layout.addStretch()
 
         self.btn_new.clicked.connect(self.new_project)
         self.btn_open.clicked.connect(self.open_project)
         self.btn_import.clicked.connect(self.import_from_wfwf)
+        self.btn_settings.clicked.connect(self.open_settings)
 
         self.left_layout = QWidget()
         self.left_layout.setLayout(self.left_layout_layout)
@@ -272,6 +276,10 @@ class Home(QMainWindow):
         self.content_layout_hbox.addWidget(self.content, 1)
         
         # REMOVED call to self.load_recent_projects()
+        
+    def open_settings(self):
+        settings_dialog = SettingsDialog(self)
+        settings_dialog.exec_()
 
     def populate_recent_projects(self, projects_data):
         """Populates the project list from preloaded data."""

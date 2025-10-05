@@ -163,6 +163,14 @@ jobs:
           7z x build-artifacts/minimal-module-build/minimal-module-build.7z -o"minimal-module-dist"
         shell: pwsh
 
+      - name: Create and move APPVERSION file
+        run: |
+          # Get the version from the tag, removing the 'v' prefix
+          $version = "${{ github.ref_name }}".Substring(1)
+          # Write the version string to the file
+          Set-Content -Path "main-app-dist/APPVERSION" -Value $version
+        shell: pwsh
+
       - name: Create updater subdirectory and move Updater.exe
         run: |
           New-Item -Path "main-app-dist/updater" -ItemType Directory

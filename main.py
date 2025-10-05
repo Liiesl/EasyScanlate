@@ -1,7 +1,7 @@
 # main.py
 # Application entry point with a splash screen for a smooth startup.
 
-import sys, os, urllib.request, json, tempfile, ctypes, time, importlib.util, py7zr
+import sys, os, urllib.request, json, shutil, ctypes, time, importlib.util, py7zr
 
 # --- Dependency Checking ---
 # Check if we are running as a normal script.
@@ -9,7 +9,8 @@ IS_RUNNING_AS_SCRIPT = "__nuitka_version__" not in locals()
 
 try:
     from PySide6.QtWidgets import QApplication, QSplashScreen, QMessageBox, QDialog
-    from PySide6.QtCore import Qt, QThread, Signal, QSettings, QDateTime, QObject
+    # MODIFIED: Added QStandardPaths and QProcess for the new updater logic
+    from PySide6.QtCore import Qt, QThread, Signal, QSettings, QDateTime, QObject, QStandardPaths, QProcess
     from PySide6.QtGui import QPixmap, QPainter, QFont, QColor
     from app.ui.window.download_dialog import DownloadDialog
 except ImportError:
@@ -109,14 +110,14 @@ def get_relative_time(timestamp_str):
     if months < 12: return f"{months} month{'s' if months > 1 else ''} ago"
     years = seconds // 31536000
     return f"{years} year{'s' if years > 1 else ''} ago"
-# ... (CustomSplashScreen and get_relative_time are the same)
 
 class Preloader(QThread):
     finished = Signal(list)
     progress_update = Signal(str)
     download_progress = Signal(int)
     preload_failed = Signal(str)
-    download_complete = Signal()
+    # --- MODIFIED --- The signal now carries the updater path (str) and arguments (list)
+    download_complete = Signal(str, list)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -125,91 +126,109 @@ class Preloader(QThread):
     def cancel(self):
         self._is_cancelled = True
         
-    # --- MODIFIED --- We repurpose the torch download logic for the update.
     def check_and_download_update(self):
         """
-        Checks for a new version. If found, prompts the user and downloads it.
-        Returns True to continue normal startup, False if an update is handled.
+        Checks for a new version. If found, it downloads all required packages
+        and then signals the main thread to launch the updater.
         """
         self.progress_update.emit("Checking for updates...")
-        TARGET_VERSION = "v0.1.3"
+        TARGET_VERSION = "v0.1.3" 
         GH_OWNER = "Liiesl"
         GH_REPO = "EasyScanlate"
 
         try:
+            # ... (Steps 1-7: Check, prompt, download manifest, download packages) ...
+            # This part of the logic remains unchanged.
             api_url = f"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}/releases/tags/{TARGET_VERSION}"
             with urllib.request.urlopen(api_url) as response:
                 if response.status != 200:
                     self.progress_update.emit(f"Update {TARGET_VERSION} not found. Starting normally.")
-                    return True # True means continue with normal startup
+                    return True
                 release_data = json.loads(response.read().decode())
 
-            manifest_url, package_url = None, None
+            manifest_url = None
             for asset in release_data.get("assets", []):
                 if asset['name'] == 'manifest.json':
                     manifest_url = asset['browser_download_url']
-                elif asset['name'] == 'update-package.zip':
-                    package_url = asset['browser_download_url']
-
-            if not manifest_url or not package_url:
-                self.progress_update.emit("Update package is incomplete. Starting normally.")
+                    break
+            
+            if not manifest_url:
+                self.progress_update.emit("Update manifest not found. Starting normally.")
                 return True
 
-            # --- KEY CHANGE ---
-            # Instead of showing a dialog here, we send a message.
-            # The UIManager will catch this and show the dialog on the main thread.
             self.progress_update.emit(f"Update available: {TARGET_VERSION}. Preparing download...")
             
-            # Now we proceed with the download logic, just like with Torch.
-            update_temp_dir = tempfile.mkdtemp(prefix="easyscanlate-update-")
+            update_temp_dir = os.path.join(QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation), "update_package")
+            if os.path.exists(update_temp_dir):
+                shutil.rmtree(update_temp_dir)
+            os.makedirs(update_temp_dir, exist_ok=True)
 
-            # 1. Download manifest
             manifest_path = os.path.join(update_temp_dir, "manifest.json")
             self.progress_update.emit("Downloading update manifest...")
             urllib.request.urlretrieve(manifest_url, manifest_path)
 
-            # 2. Download update package (with progress)
-            package_path = os.path.join(update_temp_dir, "update-package.zip")
-            self.progress_update.emit("Downloading update package...")
+            with open(manifest_path, 'r') as f:
+                manifest_data = json.load(f)
+            
+            packages_to_download = []
+            for to_version, packages in manifest_data.get("packages", {}).items():
+                if to_version == TARGET_VERSION:
+                    packages_to_download.extend(packages)
+            
+            if not packages_to_download:
+                self.preload_failed.emit(f"No update package found for version {TARGET_VERSION} in the manifest.")
+                return False
 
-            req = urllib.request.Request(package_url)
-            with urllib.request.urlopen(req) as response:
-                total_size = int(response.headers.get('Content-Length', 0))
-                bytes_downloaded = 0
-                with open(package_path, 'wb') as f:
-                    while chunk := response.read(8192):
-                        if self._is_cancelled:
-                            self.progress_update.emit("Download cancelled.")
-                            return False # Stop
-                        
-                        f.write(chunk)
-                        bytes_downloaded += len(chunk)
-                        if total_size > 0:
-                            percent = (bytes_downloaded / total_size) * 100
-                            self.progress_update.emit(f"Downloading update... {int(percent)}%")
-                            self.download_progress.emit(int(percent))
+            total_size = sum(pkg['size'] for pkg in packages_to_download)
+            total_bytes_downloaded = 0
 
-            # 3. Launch the updater
-            self.progress_update.emit("Download complete. Launching updater...")
+            for package in packages_to_download:
+                file_name = package['file']
+                package_url = f"https://github.com/{GH_OWNER}/{GH_REPO}/releases/download/{TARGET_VERSION}/{file_name}"
+                package_path = os.path.join(update_temp_dir, file_name)
+                self.progress_update.emit(f"Downloading {file_name}...")
+                
+                req = urllib.request.Request(package_url)
+                with urllib.request.urlopen(req) as response:
+                    bytes_downloaded_for_file = 0
+                    with open(package_path, 'wb') as f:
+                        while chunk := response.read(8192):
+                            if self._is_cancelled:
+                                self.progress_update.emit("Download cancelled.")
+                                shutil.rmtree(update_temp_dir, ignore_errors=True)
+                                return False
+                            
+                            f.write(chunk)
+                            bytes_downloaded_for_file += len(chunk)
+                            
+                            if total_size > 0:
+                                percent = ((total_bytes_downloaded + bytes_downloaded_for_file) / total_size) * 100
+                                self.progress_update.emit(f"Downloading update... {int(percent)}%")
+                                self.download_progress.emit(int(percent))
+                
+                total_bytes_downloaded += os.path.getsize(package_path)
+
+            # --- MODIFIED ---
+            # 8. PREPARE to launch the updater, but do not launch it here.
+            self.progress_update.emit("Download complete. Preparing to launch updater...")
             install_dir = os.path.dirname(os.path.abspath(sys.executable))
-            updater_exe = os.path.join(install_dir, "Updater.exe")
+            updater_exe = os.path.join(install_dir, "updater", "Updater.exe")
 
             if not os.path.exists(updater_exe):
                 self.preload_failed.emit(f"Updater application not found at:\n{updater_exe}")
                 return False
-
-            args = f'"{update_temp_dir}" "{install_dir}"'
-            ctypes.windll.shell32.ShellExecuteW(None, "runas", updater_exe, args, None, 1)
             
-            # Tell the main thread the process is complete so it can exit gracefully.
-            self.download_complete.emit()
+            args = [update_temp_dir, install_dir]
+            
+            # 9. Emit the signal with the necessary info for the main thread.
+            self.download_complete.emit(updater_exe, args)
             return False # False means we handled the update, so don't continue startup.
 
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 self.progress_update.emit(f"No new updates found. Starting normally.")
                 return True
-            self.progress_update.emit("Update check failed (network error). Starting normally.")
+            self.progress_update.emit(f"Update check failed (HTTP {e.code}). Starting normally.")
             return True
         except Exception as e:
             print(f"Update check failed: {e}")
@@ -218,14 +237,9 @@ class Preloader(QThread):
 
     def run(self):
         """The entry point for the thread."""
-        
-        # --- MODIFIED --- Run the update check first.
         if not self.check_and_download_update():
-            # If it returns False, it means an update was found and handled (or failed).
-            # The thread's job is done, so we stop here.
             return
 
-        # If we get here, no update was found, so proceed with normal startup.
         self.progress_update.emit("Finding recent projects...")
         projects_data = []
         try:
@@ -235,7 +249,6 @@ class Preloader(QThread):
 
             MAX_RECENT_PROJECTS = 6
             if len(recent_projects) > MAX_RECENT_PROJECTS:
-                # ... (rest of your project loading logic is unchanged)
                 self.progress_update.emit("Cleaning up old project entries...")
                 projects_to_remove = recent_projects[MAX_RECENT_PROJECTS:]
                 recent_projects = recent_projects[:MAX_RECENT_PROJECTS]
@@ -275,9 +288,9 @@ class UIManager(QObject):
         self.preloader.progress_update.connect(self.route_progress_message)
         self.preloader.download_complete.connect(self.handle_download_complete)
 
-    # --- MODIFIED --- This now tells the main app to exit after the updater is launched.
-    def handle_download_complete(self):
-        """Shows a message and exits the app to let the updater run."""
+    # --- MODIFIED --- This slot now receives the updater path and args.
+    def handle_download_complete(self, updater_exe, args):
+        """Shows a confirmation message, then launches the updater and exits."""
         if self.download_dialog:
             self.download_dialog.accept()
         if self.splash:
@@ -285,24 +298,29 @@ class UIManager(QObject):
 
         msg_box = QMessageBox()
         msg_box.setIcon(QMessageBox.Information)
-        msg_box.setWindowTitle("Update In Progress")
-        msg_box.setText("The updater has been launched.")
-        msg_box.setInformativeText("This application will now close to allow the update to proceed. The updater may request administrator permissions.")
+        msg_box.setWindowTitle("Update Ready")
+        msg_box.setText("The update has been downloaded.")
+        msg_box.setInformativeText("The application will now close and the updater will run. The updater may request administrator permissions.\n\nClick OK to proceed.")
         msg_box.setStandardButtons(QMessageBox.Ok)
+        
+        # This blocks until the user clicks OK.
         msg_box.exec()
-        sys.exit(0)
 
-    # --- MODIFIED --- This function now handles the update prompt.
+        # --- MODIFIED --- The updater is launched HERE, after the user clicks OK.
+        if not QProcess.startDetached(f'"{updater_exe}"', args):
+            QMessageBox.critical(None, "Updater Error", "Failed to launch the updater process.")
+            sys.exit(1) # Exit with an error code if launch fails
+        else:
+            sys.exit(0) # Exit gracefully
+
     def route_progress_message(self, message):
         """
         Determines whether to show a message on the splash screen
         or to create and show the download dialog for the update.
         """
-        # --- NEW --- This is the new trigger for the update dialog.
         if "Update available" in message and not self.download_dialog:
             self.splash.hide()
 
-            # This dialog is now created on the MAIN THREAD, which is safe.
             msg_box = QMessageBox()
             msg_box.setIcon(QMessageBox.Information)
             msg_box.setWindowTitle("Update Available")
@@ -317,15 +335,13 @@ class UIManager(QObject):
             msg_box.exec()
 
             if msg_box.clickedButton() == cancel_button:
-                # If user cancels, we exit the application gracefully.
+                self.preloader.cancel()
+                self.preloader.wait()
                 sys.exit(0)
 
-            # If user proceeds, we create the download dialog and let the
-            # Preloader thread continue with the download.
             self.download_dialog = DownloadDialog()
             self.download_dialog.setWindowTitle("Downloading Update")
             
-            # Re-route signals to the new dialog
             self.preloader.progress_update.disconnect(self.route_progress_message)
             self.preloader.progress_update.connect(self.download_dialog.update_status)
             self.preloader.download_progress.connect(self.download_dialog.update_progress)
@@ -334,17 +350,15 @@ class UIManager(QObject):
             
             result = self.download_dialog.exec()
 
-            if result == QDialog.Rejected: # User closed the download dialog
+            if result == QDialog.Rejected: 
                 self.preloader.cancel()
                 self.preloader.wait()
                 sys.exit(0)
             
-            # Reconnect for any future messages, just in case.
             self.preloader.progress_update.connect(self.route_progress_message)
         else:
             self.splash.showMessage(message)
 
-# ... (on_preload_failed and on_preload_finished are the same)
 def on_preload_failed(error_message):
     """Shows a critical error message box and terminates the application."""
     global splash
@@ -357,6 +371,7 @@ def on_preload_finished(projects_data):
     """
     This slot runs on the main thread. It creates the Home window instance,
     populates it with the preloaded data, and then decides whether to show
+
     it or immediately launch a project.
     """
     global home_window, splash, preloader
@@ -394,16 +409,12 @@ def on_preload_finished(projects_data):
 
 
 if __name__ == '__main__':
-    # --- MODIFIED --- Removed the admin check completely.
-    # The updater has its own UAC manifest and will handle elevation itself.
-    
     app = QApplication(sys.argv)
     
     app.setApplicationName("ManhwaOCR")
     app.setApplicationVersion("1.0")
 
     pixmap = QPixmap(500, 250)
-    # ... (rest of your main execution block is the same)
     pixmap.fill(QColor(45, 45, 45))
     painter = QPainter(pixmap)
     painter.setPen(QColor(220, 220, 220))
