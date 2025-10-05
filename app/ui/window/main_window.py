@@ -7,11 +7,9 @@ from PySide6.QtWidgets import (
     QWidget, 
     QVBoxLayout, 
     QLabel, 
-    QApplication,
-    QPushButton
+    QApplication
 )
 from PySide6.QtCore import Qt
-from app.core.translations import TranslationThread
 
 class MainWindow(QMainWindow):
     """
@@ -43,14 +41,10 @@ class MainWindow(QMainWindow):
         self.temp_dir_label = QLabel("Workspace: [N/A]")
         self.temp_dir_label.setStyleSheet("font-size: 14px; color: #AAAAAA;")
         self.temp_dir_label.setAlignment(Qt.AlignCenter)
-
-        self.translation_btn = QPushButton("Start Translation Thread")
-        self.translation_btn.clicked.connect(self.start_translation_thread)
         
         self.layout.addWidget(self.info_label)
         self.layout.addWidget(self.project_path_label)
         self.layout.addWidget(self.temp_dir_label)
-        self.layout.addWidget(self.translation_btn)
         self.layout.addStretch()
         
         # Basic styling to match the theme
@@ -63,14 +57,6 @@ class MainWindow(QMainWindow):
                 background-color: transparent;
             }
         """)
-
-    def start_translation_thread(self):
-        """
-        Start the translation thread to load translations.
-        """
-        self.translation_thread = TranslationThread()
-        self.translation_thread.start()
-        print("Mock MainWindow: Translation thread started.")
 
     def process_mmtl(self, mmtl_path, temp_dir):
         """
