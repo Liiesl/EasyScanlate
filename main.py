@@ -1,7 +1,7 @@
 # main.py
 # Application entry point with a splash screen for a smooth startup.
 
-import sys, os, urllib.request, json, tempfile, ctypes, time, importlib.util
+import sys, os, urllib.request, json, tempfile, ctypes, time, importlib.util, py7zr
 
 # --- Dependency Checking ---
 # Check if we are running as a normal script.

@@ -15,7 +15,7 @@ class CustomTitleBar(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
 
-        self.title = QLabel("ManhwaOCR")
+        self.title = QLabel("EasyScanlate")
         self.title.setFixedHeight(35)
         self.title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.title.setStyleSheet("""
