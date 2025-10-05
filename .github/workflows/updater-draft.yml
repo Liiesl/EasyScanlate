@@ -122,6 +122,7 @@ jobs:
         with:
           script-name: dev/updater/updater.py
           mode: onefile
+          enable-plugins: pyside6
           mingw64: true
           company-name: "YourCompany"
           product-name: "MangaOCRTool Updater"
