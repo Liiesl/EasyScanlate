@@ -130,6 +130,97 @@ class Preloader(QThread):
         """Public method to signal cancellation to the thread."""
         self._is_cancelled = True
 
+    def check_for_updates(self):
+        """Checks for a specific hardcoded update and launches the updater if found."""
+        self.progress_update.emit("Checking for updates...")
+        TARGET_VERSION = "v0.1.3"
+        GH_OWNER = "Liiesl"
+        GH_REPO = "EasyScanlate"
+
+        try:
+            api_url = f"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}/releases/tags/{TARGET_VERSION}"
+            
+            with urllib.request.urlopen(api_url) as response:
+                if response.status != 200:
+                    self.progress_update.emit(f"Update {TARGET_VERSION} not found. Starting normally.")
+                    return True # True means continue with normal startup
+
+                release_data = json.loads(response.read().decode())
+
+            manifest_url = None
+            package_url = None
+            for asset in release_data.get("assets", []):
+                if asset['name'] == 'manifest.json':
+                    manifest_url = asset['browser_download_url']
+                elif asset['name'] == 'update-package.zip':
+                    package_url = asset['browser_download_url']
+
+            if not manifest_url or not package_url:
+                self.progress_update.emit("Update package is incomplete. Starting normally.")
+                return True
+
+            # Use a QMessageBox on the main thread to ask the user.
+            # NOTE: This is technically not ideal from a thread, but works for a modal dialog.
+            msg_box = QMessageBox()
+            msg_box.setIcon(QMessageBox.Information)
+            msg_box.setWindowTitle("Update Available")
+            msg_box.setText(f"A new version ({TARGET_VERSION}) is available.")
+            msg_box.setInformativeText("Do you want to download and install it now?")
+            update_button = msg_box.addButton("Update Now", QMessageBox.YesRole)
+            later_button = msg_box.addButton("Later", QMessageBox.NoRole)
+            msg_box.exec()
+
+            if msg_box.clickedButton() == later_button:
+                self.progress_update.emit("Update deferred by user. Starting normally.")
+                return True
+
+            self.progress_update.emit(f"Downloading update {TARGET_VERSION}...")
+
+            update_temp_dir = tempfile.mkdtemp(prefix="easyscanlate-update-")
+
+            manifest_path = os.path.join(update_temp_dir, "manifest.json")
+            urllib.request.urlretrieve(manifest_url, manifest_path)
+            self.progress_update.emit("Downloaded manifest.json...")
+
+            package_path = os.path.join(update_temp_dir, "update-package.zip")
+            urllib.request.urlretrieve(package_url, package_path)
+            self.progress_update.emit("Downloaded update-package.zip...")
+            
+            self.progress_update.emit("Download complete. Launching updater...")
+
+            # Assumes Updater.exe is in the same directory as main.exe
+            install_dir = os.path.dirname(os.path.abspath(sys.executable))
+            updater_exe = os.path.join(install_dir, "Updater.exe")
+
+            if not os.path.exists(updater_exe):
+                self.preload_failed.emit(f"Updater application not found at:\n{updater_exe}")
+                return False # False means stop preloading.
+
+            args = f'"{update_temp_dir}" "{install_dir}"'
+            
+            try:
+                # Launch the updater. It has its own UAC manifest and will prompt for elevation.
+                ctypes.windll.shell32.ShellExecuteW(None, "runas", updater_exe, args, None, 1)
+                self.progress_update.emit("Updater has been launched. Closing main application...")
+                time.sleep(2) # Give the OS a moment to launch the new process
+                sys.exit(0) # Exit this application so the updater can work
+            except Exception as e:
+                self.preload_failed.emit(f"Failed to launch the updater application:\n{e}")
+                return False
+
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                self.progress_update.emit(f"Update version {TARGET_VERSION} not found. Starting normally.")
+                return True
+            else:
+                print(f"Update check (HTTPError): {e}")
+                self.progress_update.emit("Update check failed. Starting normally.")
+                return True
+        except Exception as e:
+            print(f"Update check failed: {e}")
+            self.progress_update.emit("Update check failed. Starting normally.")
+            return True
+
     def check_and_download_torch(self):
         """
         Checks for PyTorch. If not found, downloads, COMBINES, and extracts it.
@@ -271,9 +362,11 @@ class Preloader(QThread):
     def run(self):
         """The entry point for the thread."""
         
-        if not self.check_and_download_torch():
-            return  # Stop preloading on failure, cancellation, or if a restart is needed.
+        # This is now the first and only primary check for this test.
+        if not self.check_for_updates():
+            return
 
+        # All other checks (like for PyTorch) are effectively bypassed.
         self.progress_update.emit("Loading application settings...")
         
         self.progress_update.emit("Finding recent projects...")
@@ -451,43 +544,9 @@ def on_preload_finished(projects_data):
 
 
 if __name__ == '__main__':
-    if sys.platform == 'win32':
-        # Use a faster check that doesn't import the whole library
-        NEEDS_DOWNLOAD = importlib.util.find_spec("torch") is None
-
-        if NEEDS_DOWNLOAD:
-            try:
-                is_currently_admin = ctypes.windll.shell32.IsUserAnAdmin()
-            except Exception:
-                is_currently_admin = False
-
-            if not is_currently_admin:
-                app = QApplication(sys.argv)
-                
-                msg_box = QMessageBox()
-                msg_box.setIcon(QMessageBox.Warning)
-                msg_box.setWindowTitle("Administrator Privileges Required")
-                msg_box.setText("To download and install required libraries, this application needs to be run with administrator privileges.")
-                msg_box.setInformativeText("Do you want to automatically restart the application as an administrator?")
-                
-                restart_button = msg_box.addButton("Restart as Admin", QMessageBox.YesRole)
-                cancel_button = msg_box.addButton("Cancel", QMessageBox.NoRole)
-                msg_box.setDefaultButton(restart_button)
-                msg_box.exec()
-
-                if msg_box.clickedButton() == restart_button:
-                    try:
-                        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
-                    except Exception as e:
-                        error_msg = QMessageBox()
-                        error_msg.setIcon(QMessageBox.Critical)
-                        error_msg.setWindowTitle("Relaunch Failed")
-                        error_msg.setText(f"Failed to restart with administrator privileges:\n{e}")
-                        error_msg.exec()
-                        sys.exit(1)
-                
-                sys.exit(0)
-
+    # --- The admin and NEEDS_DOWNLOAD checks have been completely removed ---
+    # This is now the clean entry point.
+    
     app = QApplication(sys.argv)
     
     app.setApplicationName("EasyScanlate")
