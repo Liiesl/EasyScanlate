@@ -14,14 +14,14 @@ import hashlib
 
 # Attempt to import bsdiff4. Must be compiled with the executable.
 try:
-    import bsdiff4
+    import bsdiff4 # type: ignore
 except ImportError:
     print("CRITICAL: bsdiff4 module not found. Updater cannot proceed.")
     # In a GUI app, we might not see this print, but the worker will fail.
     bsdiff4 = None
 
 from PySide6.QtWidgets import QApplication, QDialog, QVBoxLayout, QLabel, QProgressBar, QMessageBox
-from PySide6.QtCore import QThread, Signal, Qt
+from PySide6.QtCore import QThread, Signal, Qt, QTimer
 
 # --- Configuration ---
 APP_NAME = "MangaOCRTool"
@@ -127,15 +127,15 @@ class UpdateWorker(QThread):
             self.finished.emit(False, f"An error occurred during update:\n{str(e)}")
 
     def _apply_patch(self, patch_info, manifest):
-        """Applies bsdiff patch to the main executable."""
+        """Applies bsdiff patch directly into the installation directory."""
         target_filename = patch_info["file"]  # e.g., "main.exe"
         patch_filename = patch_info["patch_file"]  # e.g., "main.exe.patch"
         expected_old_hash = patch_info["old_sha256"]
 
         old_file_path = os.path.join(self.install_dir, target_filename)
         patch_file_path = os.path.join(self.extract_path, patch_filename)
-        # Save the patched file into the extracted folder, replacing the .patch
-        patched_file_dest = os.path.join(self.extract_path, target_filename)
+        # Create the patched file with a .new extension for a safe, atomic replace
+        patched_file_dest_temp = os.path.join(self.install_dir, target_filename + ".new")
 
         # Validation
         if not os.path.exists(old_file_path):
@@ -152,21 +152,43 @@ class UpdateWorker(QThread):
                 f"Found hash: {current_old_hash[:8]}..."
             )
 
-        self.progress_update.emit("Patching binary...")
+        self.progress_update.emit("Patching binary in installation directory...")
         try:
-            bsdiff4.file_patch(old_file_path, patched_file_dest, patch_file_path)
+            bsdiff4.file_patch(old_file_path, patched_file_dest_temp, patch_file_path)
         except Exception as e:
+            # If patching fails, clean up the temporary .new file
+            if os.path.exists(patched_file_dest_temp):
+                os.remove(patched_file_dest_temp)
             raise Exception(f"Failed to apply binary patch: {e}")
 
         # Optional: Verify the *new* file against the manifest's file list
         expected_new_hash = manifest.get("files", {}).get(target_filename)
         if expected_new_hash:
              self.progress_update.emit("Verifying patched file...")
-             if get_sha256(patched_file_dest) != expected_new_hash:
+             if get_sha256(patched_file_dest_temp) != expected_new_hash:
+                 # Clean up the failed patched file before raising the error
+                 os.remove(patched_file_dest_temp)
                  raise Exception("Patched file integrity check failed.")
 
-        # Remove the patch file so it isn't copied to install dir
+        # Atomically replace the old file with the new, patched one
+        try:
+            # os.replace is atomic and will overwrite the destination
+            os.replace(patched_file_dest_temp, old_file_path)
+        except OSError as e:
+            # If the replace fails, clean up the .new file
+            if os.path.exists(patched_file_dest_temp):
+                os.remove(patched_file_dest_temp)
+            raise Exception(f"Could not replace the application executable: {e}")
+
+        # Remove the patch file so it isn't copied later
         os.remove(patch_file_path)
+
+        # Also remove the (likely unpatched) original from the extracted package
+        # to prevent _copy_new_files from overwriting our newly patched version.
+        unpatched_in_extract_path = os.path.join(self.extract_path, target_filename)
+        if os.path.exists(unpatched_in_extract_path):
+            os.remove(unpatched_in_extract_path)
+
 
     def _delete_old_files(self, files_to_remove):
         """Removes files listed in the manifest."""
@@ -289,9 +311,6 @@ if __name__ == '__main__':
         install_directory = sys.argv[2]
 
     app = QApplication(sys.argv)
-    
-    # Import QTimer here to ensure QApplication is initialized
-    from PySide6.QtCore import QTimer
     
     window = UpdaterWindow(temp_directory, install_directory)
     window.show()
