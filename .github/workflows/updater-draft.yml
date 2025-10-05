@@ -126,6 +126,7 @@ jobs:
           company-name: "YourCompany"
           product-name: "MangaOCRTool Updater"
           file-description: "Application Updater"
+          windows-uac-admin: on
           file-version: "0.1.2"
           product-version: "0.1.2"
 
