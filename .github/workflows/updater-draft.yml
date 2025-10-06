@@ -165,8 +165,8 @@ jobs:
 
       - name: Create and move APPVERSION file
         run: |
-          # Get the version from the tag, removing the 'v' prefix
-          $version = "${{ github.ref_name }}".Substring(1)
+          # Get the version from the tag name
+          $version = "${{ github.ref_name }}"
           # Write the version string to the file
           Set-Content -Path "main-app-dist/APPVERSION" -Value $version
         shell: pwsh
