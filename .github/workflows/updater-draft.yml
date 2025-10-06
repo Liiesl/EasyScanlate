@@ -86,6 +86,7 @@ jobs:
           file-description: "ManhwaOCR"
           file-version: "0.1.2"
           product-version: "0.1.2"
+          disable-cache: true
 
       - name: Zip Minimal Build Output
         run: |
@@ -126,9 +127,11 @@ jobs:
           company-name: "Liiesl"
           product-name: "EasyScanlate Updater"
           file-description: "Application Updater"
+          windows-icon-from-ico: assets/updater.ico
           windows-uac-admin: on
           file-version: "0.1.2"
           product-version: "0.1.2"
+          disable-cache: true
 
       - name: Upload Updater Executable as Artifact
         uses: actions/upload-artifact@v4
@@ -158,38 +161,69 @@ jobs:
           7z x build-artifacts/minimal-module-build/minimal-module-build.7z -o"minimal-module-dist"
         shell: pwsh
 
-      - name: Create and move APPVERSION file
+      - name: Create Archives for In-App Download
         run: |
-          $version = "${{ github.ref_name }}"
-          Set-Content -Path "main-app-dist/APPVERSION" -Value $version
-        shell: pwsh
-
-      - name: Create updater subdirectory and move Updater.exe
-        run: |
-          New-Item -Path "main-app-dist/updater" -ItemType Directory
-          Move-Item -Path "build-artifacts/updater-build/Updater.exe" -Destination "main-app-dist/updater/"
-        shell: pwsh
-
-      - name: Create Minimal, Dependency, and Torch Library Archives
-        run: |
-          # 1. Create a single archive of the minimal build
-          7z a -t7z -mx=9 -mf=off minimal-build.7z ./minimal-module-dist/*
-
-          # 2. Navigate into the full build directory to perform archiving from there
+          # Create a multi-part archive for the torch libraries from the main build.
           cd main-app-dist
-
-          # 3. Create a multi-part split archive of the very large PyTorch libraries
           7z a -t7z -mx=9 -mf=off -v300m ..\torch_libs.7z torch
-
-          # 4. Get the list of files to exclude (files from the minimal build)
+          
+          # Get the list of files from the minimal build to exclude them from the dependencies archive.
           $minimalFiles = Get-ChildItem -Path "..\minimal-module-dist" -Recurse | ForEach-Object { $_.Name }
           $excludeArgs = $minimalFiles | ForEach-Object { "-xr!$_" }
-
-          # 5. Create a single archive of the medium-sized dependencies by excluding both the minimal build files AND the torch directory
-          7z a -t7z -mx=9 -mf=off ..\dependencies.7z * $excludeArgs -xr!torch
           
-          # 6. Return to the root workflow directory
+          # Create the dependencies archive, excluding torch and the minimal files.
+          7z a -t7z -mx=9 -mf=off ..\dependencies.7z * $excludeArgs -xr!torch
           cd ..
+        shell: pwsh
+
+      - name: Prepare Installer Package Directory
+        run: |
+          # Define paths for the different build directories.
+          $minimal_build_path = (Resolve-Path "minimal-module-dist").Path
+          $main_build_path = (Resolve-Path "main-app-dist").Path
+          $installer_package_path = (Resolve-Path (New-Item -ItemType Directory -Name "installer-package")).Path
+
+          # Get the list of essential files from the minimal build, which will serve as a template.
+          $essential_files = Get-ChildItem -Path $minimal_build_path -Recurse
+
+          # Copy the corresponding essential files from the main build to the new installer package directory.
+          foreach ($file_info in $essential_files) {
+              $source_path = $file_info.FullName.Replace($minimal_build_path, $main_build_path)
+              $destination_path = $file_info.FullName.Replace($minimal_build_path, $installer_package_path)
+
+              if (Test-Path $source_path) {
+                  # Ensure the destination directory for the file exists.
+                  $destination_dir = Split-Path -Path $destination_path -Parent
+                  if (-not (Test-Path $destination_dir)) {
+                      New-Item -ItemType Directory -Path $destination_dir | Out-Null
+                  }
+                  # Copy the file from the main build to the installer package.
+                  Copy-Item -Path $source_path -Destination $destination_path -Force
+              }
+          }
+        shell: pwsh
+
+      - name: Add Version and Updater to Installer Package
+        run: |
+          $installer_package_path = (Resolve-Path "installer-package").Path
+          
+          # Add the APPVERSION file to the installer package.
+          $version = "${{ github.ref_name }}"
+          Set-Content -Path (Join-Path $installer_package_path "APPVERSION") -Value $version
+          
+          # Create the updater subdirectory and move the Updater.exe into it.
+          $updater_dir = Join-Path $installer_package_path "updater"
+          New-Item -Path $updater_dir -ItemType Directory
+          Move-Item -Path "build-artifacts/updater-build/Updater.exe" -Destination $updater_dir
+        shell: pwsh
+
+      - name: Finalize Installer Directory
+        run: |
+          # Remove the original large main application directory.
+          Remove-Item -Path "main-app-dist" -Recurse -Force
+          
+          # Rename the new, stripped-down installer package to what the NSIS script expects.
+          Rename-Item -Path "installer-package" -NewName "main-app-dist"
         shell: pwsh
 
       - name: Install NSIS
