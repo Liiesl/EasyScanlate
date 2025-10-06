@@ -9,6 +9,7 @@ from app.ui.widgets.menu_bar import MenuBar, TitleBarState
 class CustomTitleBar(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
+        self.setObjectName("CustomTitleBar")
         self.parent = parent
         self.layout = QHBoxLayout()
         self.layout.setContentsMargins(0, 0, 0, 0)

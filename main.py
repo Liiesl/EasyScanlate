@@ -130,21 +130,30 @@ class Preloader(QThread):
         """Public method to signal cancellation to the thread."""
         self._is_cancelled = True
 
-    def check_and_download_torch(self):
+    def check_and_download_dependencies(self):
         """
-        Checks for PyTorch. If not found, downloads, COMBINES, and extracts it.
+        Checks for PyTorch and NumPy. If either is not found, downloads and extracts them.
         Handles multi-part, pausable, and resumable downloads.
         """
-        if importlib.util.find_spec("torch") is not None:
-            self.progress_update.emit("PyTorch libraries found.")
+        torch_installed = importlib.util.find_spec("torch") is not None
+        numpy_installed = importlib.util.find_spec("numpy") is not None
+
+        if torch_installed and numpy_installed:
+            self.progress_update.emit("PyTorch and NumPy libraries found.")
             return True
-        else:
-            self.progress_update.emit("PyTorch not found. Preparing download...")
+        
+        if torch_installed:
+            self.progress_update.emit("PyTorch found. Checking for other dependencies...")
+        if numpy_installed:
+            self.progress_update.emit("NumPy found. Checking for other dependencies...")
+
+        self.progress_update.emit("Some required libraries are missing. Preparing download...")
 
         GH_OWNER = "Liiesl"
         GH_REPO = "EasyScanlate"
-        ASSET_NAME_BASE = "torch_libs.7z"
-        COMBINED_ARCHIVE_NAME = "torch_libs_combined.7z" # --- NEW ---
+        TORCH_ASSET_BASE = "torch_libs.7z"
+        DEPS_ASSET_NAME = "dependencies.7z"
+        COMBINED_TORCH_ARCHIVE = "torch_libs_combined.7z"
         MAX_RETRIES = 3
 
         if GH_OWNER == "YourGitHubUsername":
@@ -152,10 +161,11 @@ class Preloader(QThread):
             self.preload_failed.emit(error_msg)
             return False
 
-        download_dir = os.path.join(tempfile.gettempdir(), "easyscanlate_torch_libs")
+        download_dir = os.path.join(tempfile.gettempdir(), "easyscanlate_deps")
         os.makedirs(download_dir, exist_ok=True)
-        downloaded_parts = []
-        combined_archive_path = os.path.join(download_dir, COMBINED_ARCHIVE_NAME) # --- NEW ---
+        
+        combined_torch_path = os.path.join(download_dir, COMBINED_TORCH_ARCHIVE)
+        deps_archive_path = os.path.join(download_dir, DEPS_ASSET_NAME)
 
         try:
             api_url = f"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}/releases/latest"
@@ -165,20 +175,31 @@ class Preloader(QThread):
                     raise Exception(f"GitHub API returned status {response.status}")
                 release_data = json.loads(response.read().decode())
 
-            assets = sorted([asset for asset in release_data.get("assets", []) if asset["name"].startswith(ASSET_NAME_BASE)], key=lambda x: x['name'])
-            if not assets:
-                raise Exception(f"No assets matching '{ASSET_NAME_BASE}.*' found in the latest release.")
+            all_assets = release_data.get("assets", [])
+            
+            assets_to_download = []
+            if not torch_installed:
+                torch_assets = sorted([a for a in all_assets if a["name"].startswith(TORCH_ASSET_BASE)], key=lambda x: x['name'])
+                if not torch_assets:
+                    raise Exception(f"No assets matching '{TORCH_ASSET_BASE}.*' found.")
+                assets_to_download.extend(torch_assets)
 
-            total_download_size = sum(asset['size'] for asset in assets)
+            if not numpy_installed:
+                deps_asset = next((a for a in all_assets if a["name"] == DEPS_ASSET_NAME), None)
+                if not deps_asset:
+                    raise Exception(f"Asset '{DEPS_ASSET_NAME}' not found.")
+                assets_to_download.append(deps_asset)
+
+            total_download_size = sum(asset['size'] for asset in assets_to_download)
             total_bytes_downloaded = 0
 
-            # Calculate already downloaded size for resume progress
-            for asset in assets:
+            # Calculate already downloaded size
+            for asset in assets_to_download:
                 local_path = os.path.join(download_dir, asset['name'])
                 if os.path.exists(local_path):
                     total_bytes_downloaded += os.path.getsize(local_path)
 
-            for asset in assets:
+            for asset in assets_to_download:
                 if self._is_cancelled:
                     self.progress_update.emit("Download cancelled.")
                     return False
@@ -187,21 +208,19 @@ class Preloader(QThread):
                 download_url = asset['browser_download_url']
                 asset_size = asset['size']
                 local_path = os.path.join(download_dir, asset_name)
-                downloaded_parts.append(local_path)
-
+                
                 current_size = 0
                 if os.path.exists(local_path):
                     current_size = os.path.getsize(local_path)
-
+                
                 if current_size >= asset_size:
-                    self.progress_update.emit(f"Part '{asset_name}' already downloaded.")
+                    self.progress_update.emit(f"'{asset_name}' already downloaded.")
                     continue
 
-                self.progress_update.emit(f"Downloading part '{asset_name}'...")
-
+                self.progress_update.emit(f"Downloading '{asset_name}'...")
+                
                 for attempt in range(MAX_RETRIES):
-                    if self._is_cancelled:
-                        return False
+                    if self._is_cancelled: return False
                     try:
                         req = urllib.request.Request(download_url)
                         req.add_header('Range', f'bytes={current_size}-')
@@ -221,58 +240,49 @@ class Preloader(QThread):
                                     percent = (total_bytes_downloaded / total_download_size) * 100
                                     self.progress_update.emit(f"Downloading... {int(percent)}%")
                                     self.download_progress.emit(int(percent))
-                        
                         break
-                    
                     except Exception as e:
                         if attempt < MAX_RETRIES - 1:
-                            self.progress_update.emit(f"Download of '{asset_name}' failed (Attempt {attempt + 1}). Retrying in 5 seconds... Error: {e}")
+                            self.progress_update.emit(f"Download of '{asset_name}' failed. Retrying... Error: {e}")
                             time.sleep(5)
                         else:
-                            raise Exception(f"Failed to download '{asset_name}' after {MAX_RETRIES} attempts.") from e
-
+                            raise Exception(f"Failed to download '{asset_name}'.") from e
+            
             if self._is_cancelled: return False
+            
+            if not torch_installed:
+                self.progress_update.emit("Combining PyTorch parts...")
+                torch_part_paths = [os.path.join(download_dir, a['name']) for a in torch_assets]
+                with open(combined_torch_path, 'wb') as combined_file:
+                    for part_path in torch_part_paths:
+                        with open(part_path, 'rb') as part_file:
+                            shutil.copyfileobj(part_file, combined_file)
+                
+                self.progress_update.emit("Extracting PyTorch... This may take several minutes.")
+                with py7zr.SevenZipFile(combined_torch_path, mode='r') as z:
+                    z.extractall()
 
-            # Combine the downloaded parts before extraction
-            self.progress_update.emit("Combining downloaded parts...")
-            with open(combined_archive_path, 'wb') as combined_file:
-                for part_path in downloaded_parts:
-                    with open(part_path, 'rb') as part_file:
-                        shutil.copyfileobj(part_file, combined_file)
-            
-            self.progress_update.emit("Extracting... This may take several minutes.")
-            # Extract from the combined file
-            with py7zr.SevenZipFile(combined_archive_path, mode='r') as z:
-                z.extractall()
-            
+            if not numpy_installed and os.path.exists(deps_archive_path):
+                self.progress_update.emit("Extracting dependencies...")
+                with py7zr.SevenZipFile(deps_archive_path, mode='r') as z:
+                    z.extractall()
+
             self.progress_update.emit("Extraction complete.")
             self.download_complete.emit()
-            return False
+            return False # Needs restart
 
         except Exception as e:
-            error_message = f"Failed to download required libraries.\n\nError: {e}\n\nPlease check your internet connection and try again."
-            self.preload_failed.emit(error_message)
+            self.preload_failed.emit(f"Failed to download required libraries.\n\nError: {e}")
             return False
         finally:
-            # Clean up all temporary files
-            for part_path in downloaded_parts:
-                if os.path.exists(part_path):
-                    try:
-                        os.remove(part_path)
-                    except OSError as e:
-                        print(f"Warning: Could not remove temporary file {part_path}. Error: {e}")
-            if os.path.exists(combined_archive_path):
-                try:
-                    os.remove(combined_archive_path)
-                except OSError as e:
-                    print(f"Warning: Could not remove combined archive {combined_archive_path}. Error: {e}")
-
+            # Cleanup
+            shutil.rmtree(download_dir, ignore_errors=True)
 
     def run(self):
         """The entry point for the thread."""
         
-        if not self.check_and_download_torch():
-            return  # Stop preloading on failure, cancellation, or if a restart is needed.
+        if not self.check_and_download_dependencies():
+            return
 
         self.progress_update.emit("Loading application settings...")
         
@@ -453,7 +463,8 @@ def on_preload_finished(projects_data):
 if __name__ == '__main__':
     if sys.platform == 'win32':
         # Use a faster check that doesn't import the whole library
-        NEEDS_DOWNLOAD = importlib.util.find_spec("torch") is None
+        NEEDS_DOWNLOAD = importlib.util.find_spec("torch") is None or \
+                         importlib.util.find_spec("numpy") is None
 
         if NEEDS_DOWNLOAD:
             try:

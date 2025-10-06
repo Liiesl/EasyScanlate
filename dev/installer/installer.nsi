@@ -22,7 +22,7 @@ Name "${APP_NAME}"
 OutFile "${APP_NAME}-Installer.exe"
 InstallDir "$PROGRAMFILES\${APP_NAME}"
 RequestExecutionLevel admin
-SetCompressor lzma
+SetCompressor /FINAL /SOLID lzma
 
 ; --- Modern UI 2 Settings ---
 !define MUI_ABORTWARNING
@@ -87,7 +87,7 @@ Section "Main Application" SecApp
   
   DetailPrint "Installing application files (excluding PyTorch)..."
   ; Package everything EXCEPT the torch directory, which is handled separately.
-  File /r /x torch "..\..\build\main.dist\*"
+  File /r /x torch "..\..\main-app-dist\*"
 
   ; --- Create Uninstaller and Write Registry Keys ---
   WriteUninstaller "$INSTDIR\uninstall.exe"

@@ -9,30 +9,23 @@ on:
       - 'v*.*.*'
 
 jobs:
-  build-and-release-windows:
-    runs-on: windows-latest
-    permissions:
-      contents: write
 
+  build-main-app:
+    runs-on: windows-latest
     steps:
-      # 1. Get the code from repository
       - name: Check-out repository
         uses: actions/checkout@v4
 
-      # 2. Set up a Python environment
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      # 3. Install project's dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
-          pip install -r requirements.txt
+          pip install -r not_so_minimal_module.txt
 
-      # 4. Run Nuitka build
       - name: Build Executable with Nuitka
         uses: Nuitka/Nuitka-Action@main
         with:
@@ -45,117 +38,279 @@ jobs:
           company-name: "YourCompany"
           product-name: "MangaOCRTool"
           file-description: "ManhwaOCR"
-          file-version: "1.0.0.0"
-          product-version: "1.0.0.0"
+          file-version: "0.1.2"
+          product-version: "0.1.2"
 
-      # 5. Create a 7z archive of the PyTorch libraries with best compression
-      - name: Zip PyTorch Libraries with 7-Zip
+      - name: Zip Main Build Output
         run: |
           cd build/main.dist
-          7z a -t7z -mx=9 ..\..\pytorch-libs.7z torch
+          7z a -t7z -mx=9 -mf=off ..\..\main-app-build.7z *
           cd ..\..
         shell: pwsh
 
-      # Upload PyTorch 7z as a workflow artifact
-      - name: Upload PyTorch Libraries as Artifact
+      - name: Upload Main Build as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pytorch-libs
-          path: pytorch-libs.7z
+          name: main-app-build
+          path: main-app-build.7z
 
-      # Create a file with the list of dependencies to exclude/include
-      - name: Create Dependency Exclusion List
+  build-minimal-module:
+    runs-on: windows-latest
+    steps:
+      - name: Check-out minimal_module branch
+        uses: actions/checkout@v4
+        with:
+          ref: minimal-module
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install minimal dependencies
         run: |
-          @"
-          OCR
-          PIL
-          bidi
-          certifi
-          charset_normalizer
-          cv2
-          markupsafe
-          numpy
-          numpy.libs
-          pyclipper
-          pydantic_core
-          scipy
-          scipy.libs
-          shapely
-          shapely.libs
-          skimage
-          torchaudio
-          torchvision
-          websockets
-          yaml
-          zstandard
-          _elementtree.pyd
-          _sqlite3.pyd
-          _uuid.pyd
-          _zoneinfo.pyd
-          asmjit.dll
-          cudart64_12.dll
-          fbgemm.dll
-          jpeg8.dll
-          libsharpyuv.dll
-          libwebp.dll
-          nvjpeg64_12.dll
-          sqlite3.dll
-          "@ | Set-Content -Path "dependency-list.txt"
-        shell: pwsh
+          python -m pip install --upgrade pip
+          pip install -r minimal_module_requirements.txt
 
-      # Create a 7z archive of the dependency DLLs and folders
-      - name: Zip Dependency DLLs with 7-Zip
+      - name: Build Executable with Nuitka
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          script-name: main.py
+          mode: standalone
+          mingw64: true
+          enable-plugins: pyside6
+          windows-icon-from-ico: assets/app_icon.ico
+          company-name: "YourCompany"
+          product-name: "MangaOCRTool"
+          file-description: "ManhwaOCR"
+          file-version: "0.1.2"
+          product-version: "0.1.2"
+
+      - name: Zip Minimal Build Output
         run: |
           cd build/main.dist
-          7z a -t7z -mx=9 ..\..\dependency-dll.7z @..\..\dependency-list.txt
+          7z a -t7z -mx=9 -mf=off ..\..\minimal-module-build.7z *
           cd ..\..
         shell: pwsh
 
-      # Upload Dependency DLLs as a workflow artifact
-      - name: Upload Dependency DLLs as Artifact
+      - name: Upload Minimal Build as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dependency-dll
-          path: dependency-dll.7z
+          name: minimal-module-build
+          path: minimal-module-build.7z
 
-      # Zip the main build output (excluding torch AND the new dependencies)
-      - name: Zip Main Build Output (Without Dependencies)
+  build-updater:
+    runs-on: windows-latest
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
         run: |
-          cd build/main.dist
-          7z a -t7z -mx=9 ..\..\build-output.7z * -xr!torch -x@..\..\dependency-list.txt
-          cd ..\..
+          python -m pip install --upgrade pip
+          pip install -r not_so_minimal_module.txt # Assuming updater needs same deps
+
+      - name: Build Updater Executable with Nuitka
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          script-name: dev/updater/updater.py
+          mode: onefile
+          enable-plugins: pyside6
+          mingw64: true
+          company-name: "YourCompany"
+          product-name: "MangaOCRTool Updater"
+          file-description: "Application Updater"
+          windows-uac-admin: on
+          file-version: "0.1.2"
+          product-version: "0.1.2"
+
+      - name: List Build Output
+        run: |
+          echo "Listing contents of the build directory:"
+          dir build
         shell: pwsh
 
-      # Upload the zipped build output as an artifact
-      - name: Upload Full Build Output as Artifact
+      - name: Upload Updater Executable as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: full-build-output
-          path: build-output.7z
+          name: updater-build
+          path: build/Updater.exe # Path to the one-file executable
 
-      # Compile the NSIS installer
+  # --- Stage 2: Parallel Jobs for Release Assets ---
+  
+  create-installer:
+    runs-on: windows-latest
+    needs: [build-main-app, build-minimal-module, build-updater]
+    permissions:
+      contents: write
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: build-artifacts
+
+      - name: Extract Build Artifacts
+        run: |
+          7z x build-artifacts/main-app-build/main-app-build.7z -o"main-app-dist"
+          7z x build-artifacts/minimal-module-build/minimal-module-build.7z -o"minimal-module-dist"
+        shell: pwsh
+
+      - name: Create and move APPVERSION file
+        run: |
+          # Get the version from the tag name
+          $version = "${{ github.ref_name }}"
+          # Write the version string to the file
+          Set-Content -Path "main-app-dist/APPVERSION" -Value $version
+        shell: pwsh
+
+      - name: Create updater subdirectory and move Updater.exe
+        run: |
+          New-Item -Path "main-app-dist/updater" -ItemType Directory
+          Move-Item -Path "build-artifacts/updater-build/Updater.exe" -Destination "main-app-dist/updater/"
+        shell: pwsh
+
+      - name: Create Minimal Build and Dependency Archives
+        run: |
+          # Create an archive of the minimal build
+          7z a -t7z -mx=9 -mf=off minimal-build.7z ./minimal-module-dist/*
+
+          # Get the list of files to exclude (i.e., files in the minimal build)
+          $minimalFiles = Get-ChildItem -Path "minimal-module-dist" -Recurse | ForEach-Object { $_.Name }
+          $excludeArgs = $minimalFiles | ForEach-Object { "-xr!$_" }
+
+          # Create an archive of the extra dependencies by excluding minimal files
+          cd main-app-dist
+          7z a -t7z -mx=9 -mf=off ..\dependencies.7z * $excludeArgs
+          cd ..
+        shell: pwsh
+
       - name: Install NSIS
         run: choco install nsis
-      
+
       - name: Add NSIS to PATH
         run: echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         shell: pwsh
 
       - name: Compile NSIS installer
-        run: makensis dev\installer\installer.nsi
+        run: makensis dev/installer/installer.nsi
 
       - name: Move Installer to Root Directory
-        run: Move-Item -Path dev/installer/MangaOCRTool-Installer.exe -Destination .
+        run: Move-Item -Path dev/installer/EasyScanlate-Installer.exe -Destination .
         shell: pwsh
 
-      # 6. Upload Installer as a workflow artifact
-      - name: Upload Installer as Artifact
+      - name: Upload Installer and Archives as Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installer
-          path: MangaOCRTool-Installer.exe
+          name: installer-assets
+          path: |
+            EasyScanlate-Installer.exe
+            minimal-build.7z
+            dependencies.7z
 
-      # 7. Create a DRAFT GitHub Release
+  create_update_package:
+    runs-on: ubuntu-latest
+    needs: build-main-app
+    outputs:
+      package_created: ${{ steps.create_package.outputs.package_created }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies for script
+        run: pip install bsdiff4
+
+      - name: Download Main App Build
+        uses: actions/download-artifact@v4
+        with:
+          name: main-app-build
+          path: main-app-build
+
+      - name: Unzip Main App Build
+        run: 7z x main-app-build/main-app-build.7z -o"current-build"
+
+      # IMPORTANT: Archive the executable with its version tag in the name
+      # This allows the script to fetch specific old versions later.
+      - name: Archive Current Main Executable
+        run: |
+          7z a -t7z main-executable-${{ github.ref_name }}.7z ./current-build/main.exe
+        
+      - name: Create Update Package with Python Script
+        id: create_package
+        run: |
+          python dev/updater/create_update_package.py \
+            --build-dir current-build \
+            --main-executable-name main.exe \
+            --new-version ${{ github.ref_name }} \
+            --repo ${{ github.repository }}
+        env:
+          # The script uses the gh CLI, which needs a token to access repository releases.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Update Assets
+        if: steps.create_package.outputs.package_created == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-package-assets
+          path: |
+            update-*.zip
+            *.patch
+
+      - name: Upload Manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-asset
+          path: |
+            manifest.json
+            main-executable-${{ github.ref_name }}.7z
+
+  # --- Stage 3: Create GitHub Release ---
+  create-release:
+    runs-on: ubuntu-latest
+    needs: [create-installer, create_update_package]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      # Create the destination directory first
+      - name: Create Release Directory
+        run: mkdir -p release-assets
+
+      # Download the installer assets
+      - name: Download Installer Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: installer-assets
+          path: release-assets/
+
+      # Download the update package assets if they were created
+      - name: Download Update Package Artifacts
+        if: needs.create_update_package.outputs.package_created == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: update-package-assets
+          path: release-assets/
+
+      - name: Download Manifest Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: manifest-asset
+          path: release-assets/
+
       - name: Create Draft GitHub Release
         id: create_release
         uses: softprops/action-gh-release@v2
@@ -164,10 +319,6 @@ jobs:
           draft: true
           preserve_order: true
           body_path: changelog.md
-          # Upload all three files to the release page
-          files: |
-            MangaOCRTool-Installer.exe
-            pytorch-libs.7z
-            dependency-dll.7z
+          files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
