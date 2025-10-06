@@ -135,13 +135,19 @@ class Preloader(QThread):
         Checks for PyTorch and NumPy. If either is not found, downloads and extracts them.
         Handles multi-part, pausable, and resumable downloads.
         """
-        torch_installed = importlib.util.find_spec("torch") is not None
-        numpy_installed = importlib.util.find_spec("numpy") is not None
+        # --- MODIFIED: Bypassed torch and numpy check for minimal dependency build ---
+        # Nuitka will handle the dependency check in this build configuration.
+        # Setting these to True ensures the download logic is always skipped.
+        torch_installed = True
+        numpy_installed = True
+        # --- END MODIFICATION ---
 
         if torch_installed and numpy_installed:
             self.progress_update.emit("PyTorch and NumPy libraries found.")
             return True
         
+        # The rest of this function is now effectively unreachable but is kept
+        # for other build configurations.
         if torch_installed:
             self.progress_update.emit("PyTorch found. Checking for other dependencies...")
         if numpy_installed:
@@ -462,9 +468,11 @@ def on_preload_finished(projects_data):
 
 if __name__ == '__main__':
     if sys.platform == 'win32':
-        # Use a faster check that doesn't import the whole library
-        NEEDS_DOWNLOAD = importlib.util.find_spec("torch") is None or \
-                         importlib.util.find_spec("numpy") is None
+        # --- MODIFIED: Bypassed torch and numpy check for minimal dependency build ---
+        # This prevents the application from asking for administrator privileges
+        # when the dependencies are expected to be included by Nuitka.
+        NEEDS_DOWNLOAD = False
+        # --- END MODIFICATION ---
 
         if NEEDS_DOWNLOAD:
             try:
