@@ -52,17 +52,76 @@ class UpdateHandler(QObject):
         self.reply = None
         self.download_file = None
 
+    def abort_check(self):
+        """Aborts the current network request if it is running."""
+        if self.reply and self.reply.isRunning():
+            print("Aborting update check network request...")
+            # Disconnect signals to prevent finished/error from firing after abort
+            try:
+                self.reply.finished.disconnect()
+            except (TypeError, RuntimeError): # Already disconnected or object destroyed
+                pass
+            self.reply.abort()
+            self.reply.deleteLater()
+            self.reply = None
+
     def get_current_version(self):
         return self.app_version
 
     def check_for_updates(self):
-        """Fetches the manifest.json from the latest GitHub release."""
-        self.status_changed.emit("Checking for updates...")
-        manifest_url = f"https://github.com/{GH_REPO}/releases/latest/download/manifest.json"
+        """Fetches the list of releases from the GitHub API to find the latest one (including pre-releases)."""
+        self.status_changed.emit("Checking for updates (pre-releases enabled)...")
+        # The GitHub API returns a list of all releases, with the most recent one first.
+        # This includes pre-releases, unlike the '/latest' endpoint.
+        api_url = f"https://api.github.com/repos/{GH_REPO}/releases"
         
-        request = QNetworkRequest(QUrl(manifest_url))
+        request = QNetworkRequest(QUrl(api_url))
         self.reply = self.network_manager.get(request)
-        self.reply.finished.connect(self._on_manifest_received)
+        self.reply.finished.connect(self._on_api_releases_received)
+
+    def _on_api_releases_received(self):
+        """
+        Handles the response from the GitHub releases API.
+        Finds the manifest.json from the latest release (pre-releases included) and fetches it.
+        """
+        reply = self.reply # Keep a reference to the current reply
+        if reply.error() != QNetworkReply.NoError:
+            error_string = reply.errorString()
+            self.error_occurred.emit(f"Could not check for pre-releases: {error_string}")
+            self.update_check_finished.emit(False, {})
+            reply.deleteLater()
+            return
+
+        try:
+            releases_data = reply.readAll().data()
+            releases = json.loads(releases_data.decode())
+            
+            if not releases:
+                self.status_changed.emit("No releases found on GitHub.")
+                self.update_check_finished.emit(False, {})
+                return
+
+            latest_release = releases[0]
+            manifest_asset = next((asset for asset in latest_release.get("assets", []) if asset["name"] == "manifest.json"), None)
+
+            if not manifest_asset or "browser_download_url" not in manifest_asset:
+                self.error_occurred.emit("A manifest.json file was not found in the latest release assets.")
+                self.update_check_finished.emit(False, {})
+                return
+
+            manifest_url = manifest_asset["browser_download_url"]
+            
+            # Now that we have the URL, we can fetch the manifest.
+            # The rest of the update process will be the same.
+            request = QNetworkRequest(QUrl(manifest_url))
+            self.reply = self.network_manager.get(request)
+            self.reply.finished.connect(self._on_manifest_received)
+
+        except json.JSONDecodeError as e:
+            self.error_occurred.emit(f"Failed to parse GitHub API response: {e}")
+            self.update_check_finished.emit(False, {})
+        finally:
+            reply.deleteLater()
 
     def _on_manifest_received(self):
         """Handles the response after fetching the manifest."""
