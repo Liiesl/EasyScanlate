@@ -1,13 +1,4 @@
 ### Added
-- 
-
-### Changed
-- 
-
-### Fixed
-- 
-
-### Added
 - context fill.
 - hide text
 - ocr override dialog confirmation
