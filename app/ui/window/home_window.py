@@ -9,11 +9,12 @@ import traceback
 
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton, QFrame, QMainWindow, QLabel, QMessageBox,
                              QScrollArea, QHBoxLayout, QDialog)
-from PySide6.QtCore import Qt, QSettings, QDateTime, QThread, Signal, QEvent
+from PySide6.QtCore import Qt, QSettings, QDateTime, QThread, Signal, QEvent, QTimer
 from assets.styles import (HOME_STYLES, HOME_LEFT_LAYOUT_STYLES)
 from app.ui.window.chrome import CustomTitleBar, WindowResizer
 from app.ui.widgets.menu_bar import TitleBarState
 from app.ui.dialogs.settings_dialog import SettingsDialog
+from app.utils.update import UpdateHandler
 
 
 class ProjectItemWidget(QFrame):
@@ -203,6 +204,7 @@ class Home(QMainWindow):
         
         self.init_ui()
         self.resizer = WindowResizer(self)
+        self.check_for_updates_on_startup()
         
     def init_ui(self):
         def report_progress(message):
@@ -277,9 +279,67 @@ class Home(QMainWindow):
         
         # REMOVED call to self.load_recent_projects()
         
+    def check_for_updates_on_startup(self):
+        """Checks for updates when the app starts, with a timeout."""
+        if self.settings.value("auto_check_updates", "true") == "true":
+            print("Checking for updates on startup...")
+            self.update_handler = UpdateHandler(self)
+            self.update_check_timer = QTimer(self)
+            self.update_check_timer.setSingleShot(True)
+
+            # Connect signals
+            self.update_handler.update_check_finished.connect(self._on_startup_update_check_finished)
+            self.update_handler.error_occurred.connect(self._on_startup_update_check_error)
+            self.update_check_timer.timeout.connect(self._on_update_check_timeout)
+
+            # Start the process
+            self.update_check_timer.start(2000) # 2-second timeout
+            self.update_handler.check_for_updates()
+
+    def _on_startup_update_check_finished(self, update_available, update_info):
+        """Handles the result of the startup update check if it finishes in time."""
+        if not hasattr(self, 'update_check_timer') or not self.update_check_timer.isActive():
+            return # Timed out already, do nothing
+
+        self.update_check_timer.stop()
+        if update_available:
+            print(f"Update available: {update_info.get('to_version')}")
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Information)
+            msg_box.setText(f"A new version ({update_info.get('to_version')}) is available!")
+            msg_box.setInformativeText("You can download and install it from the Settings menu.")
+            open_button = msg_box.addButton("Open Settings", QMessageBox.ActionRole)
+            msg_box.addButton(QMessageBox.Ok)
+            msg_box.exec()
+            
+            if msg_box.clickedButton() == open_button:
+                self.open_settings()
+        else:
+            print("No new updates found on startup.")
+        
+        # Clean up
+        self.update_handler.deleteLater()
+
+    def _on_startup_update_check_error(self, error_message):
+        """Handles an error during the startup update check."""
+        if not hasattr(self, 'update_check_timer') or not self.update_check_timer.isActive():
+            return # Timed out already, do nothing
+        
+        self.update_check_timer.stop()
+        print(f"Startup update check failed: {error_message}")
+        # Clean up
+        self.update_handler.deleteLater()
+
+    def _on_update_check_timeout(self):
+        """Aborts the update check if it takes too long."""
+        print("Startup update check timed out after 2 seconds. Skipping.")
+        if hasattr(self, 'update_handler') and self.update_handler:
+            self.update_handler.abort_check()
+            self.update_handler.deleteLater()
+
     def open_settings(self):
         settings_dialog = SettingsDialog(self)
-        settings_dialog.exec_()
+        settings_dialog.exec()
 
     def populate_recent_projects(self, projects_data):
         """Populates the project list from preloaded data."""
@@ -346,7 +406,7 @@ class Home(QMainWindow):
         self.loader_thread.progress_update.connect(self.loading_dialog.update_message)
         
         self.loader_thread.start()
-        self.loading_dialog.exec_()
+        self.loading_dialog.exec()
 
     def handle_project_loaded(self, mmtl_path, temp_dir):
         try:
