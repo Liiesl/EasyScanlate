@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import ( QVBoxLayout, QPushButton, QProgressBar,  QLabel, QListWidget,  QLineEdit, 
                             QFileDialog, QStatusBar, QHBoxLayout, QDialog, QDialogButtonBox, QComboBox)
 from PySide6.QtCore import Qt, QDir, QThread, Signal
-from assets import NEW_PROJECT_STYLES, WFWF_STYLES
+from assets.styles import NEW_PROJECT_STYLES, WFWF_STYLES
 import os, tempfile, requests
 from shutil import rmtree
 from bs4 import BeautifulSoup
