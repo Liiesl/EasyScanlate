@@ -194,7 +194,7 @@ class SettingsDialog(QDialog):
     def on_update_check_complete(self, update_available, update_info):
         self.check_updates_button.setEnabled(True)
         if update_available:
-            self.update_status_label.setText(f"Update available: {update_info.get('version')}")
+            self.update_status_label.setText(f"Update available: {update_info.get('to_version')}")
             self.download_update_button.setVisible(True)
             self.check_updates_button.setVisible(False)
         else:
