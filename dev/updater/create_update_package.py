@@ -46,8 +46,28 @@ def fetch_asset(repo, tag, pattern, output_dir="."):
     if result.returncode == 0:
         print(f"Successfully downloaded '{pattern}'.")
         return Path(output_dir) / pattern
-    print(f"Could not download '{pattern}' from '{tag}'. It might not exist. Error: {result.stderr}")
+    print(f"Could not download '{pattern}' from '{tag}'. It might not exist. Error: {result.stderr.strip()}")
     return None
+
+def get_latest_tag(repo):
+    """Gets the latest release tag, including pre-releases."""
+    print("Finding the latest release tag (including pre-releases)...")
+    command = [
+        "gh", "release", "list",
+        "--repo", repo,
+        "--limit", "1",
+        "--json", "tagName",
+        "--jq", ".[0].tagName"
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode == 0 and result.stdout.strip():
+        tag = result.stdout.strip()
+        print(f"Found latest tag: {tag}")
+        return tag
+    else:
+        print(f"Could not find any previous releases. Error: {result.stderr.strip()}")
+        return None
+
 
 def create_differential_package(
     from_version, to_version,
@@ -121,13 +141,18 @@ def main():
     new_version_tag = args.new_version
     
     # Load existing master manifest or create a new one
-    if fetch_asset(args.repo, "latest", "manifest.json"):
-        print("Loaded existing master manifest.")
+    manifest_fetched = False
+    latest_tag = get_latest_tag(args.repo)
+    if latest_tag and fetch_asset(args.repo, latest_tag, "manifest.json"):
+        print(f"Loaded existing master manifest from release '{latest_tag}'.")
         with open(master_manifest_path, "r") as f:
             master_manifest = json.load(f)
-    else:
+        manifest_fetched = True
+
+    if not manifest_fetched:
         print("No previous manifest found. Starting a new one.")
         master_manifest = {"versions": {}, "packages": {}}
+
 
     # Generate the file list for the new build
     print(f"Generating file list for new version '{new_version_tag}'...")
