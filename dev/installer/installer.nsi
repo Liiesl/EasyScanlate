@@ -22,7 +22,7 @@ Name "${APP_NAME}"
 OutFile "${APP_NAME}-Installer.exe"
 InstallDir "$PROGRAMFILES\${APP_NAME}"
 RequestExecutionLevel admin
-SetCompressor lzma
+SetCompressor /FINAL /SOLID lzma
 
 ; --- Modern UI 2 Settings ---
 !define MUI_ABORTWARNING
