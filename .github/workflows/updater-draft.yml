@@ -1,4 +1,4 @@
-name: Build and Release MangaOCRTool
+name: Build and Release EasyScanlate
 
 # Workflow Trigger
 on:
@@ -24,7 +24,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r not_so_minimal_module.txt
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+          pip install -r requirements.txt
 
       - name: Build Executable with Nuitka
         uses: Nuitka/Nuitka-Action@main
@@ -35,8 +36,8 @@ jobs:
           mingw64: true
           enable-plugins: pyside6
           windows-icon-from-ico: assets/app_icon.ico
-          company-name: "YourCompany"
-          product-name: "MangaOCRTool"
+          company-name: "Liiesl"
+          product-name: "EasyScanlate"
           file-description: "ManhwaOCR"
           file-version: "0.1.2"
           product-version: "0.1.2"
@@ -80,8 +81,8 @@ jobs:
           mingw64: true
           enable-plugins: pyside6
           windows-icon-from-ico: assets/app_icon.ico
-          company-name: "YourCompany"
-          product-name: "MangaOCRTool"
+          company-name: "Liiesl"
+          product-name: "EasyScanlate"
           file-description: "ManhwaOCR"
           file-version: "0.1.2"
           product-version: "0.1.2"
@@ -113,7 +114,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r not_so_minimal_module.txt # Assuming updater needs same deps
+          pip install -r requirements.txt 
 
       - name: Build Updater Executable with Nuitka
         uses: Nuitka/Nuitka-Action@main
@@ -122,24 +123,18 @@ jobs:
           mode: onefile
           enable-plugins: pyside6
           mingw64: true
-          company-name: "YourCompany"
-          product-name: "MangaOCRTool Updater"
+          company-name: "Liiesl"
+          product-name: "EasyScanlate Updater"
           file-description: "Application Updater"
           windows-uac-admin: on
           file-version: "0.1.2"
           product-version: "0.1.2"
 
-      - name: List Build Output
-        run: |
-          echo "Listing contents of the build directory:"
-          dir build
-        shell: pwsh
-
       - name: Upload Updater Executable as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: updater-build
-          path: build/Updater.exe # Path to the one-file executable
+          path: build/Updater.exe
 
   # --- Stage 2: Parallel Jobs for Release Assets ---
   
@@ -165,9 +160,7 @@ jobs:
 
       - name: Create and move APPVERSION file
         run: |
-          # Get the version from the tag name
           $version = "${{ github.ref_name }}"
-          # Write the version string to the file
           Set-Content -Path "main-app-dist/APPVERSION" -Value $version
         shell: pwsh
 
@@ -177,18 +170,25 @@ jobs:
           Move-Item -Path "build-artifacts/updater-build/Updater.exe" -Destination "main-app-dist/updater/"
         shell: pwsh
 
-      - name: Create Minimal Build and Dependency Archives
+      - name: Create Minimal, Dependency, and Torch Library Archives
         run: |
-          # Create an archive of the minimal build
+          # 1. Create a single archive of the minimal build
           7z a -t7z -mx=9 -mf=off minimal-build.7z ./minimal-module-dist/*
 
-          # Get the list of files to exclude (i.e., files in the minimal build)
-          $minimalFiles = Get-ChildItem -Path "minimal-module-dist" -Recurse | ForEach-Object { $_.Name }
+          # 2. Navigate into the full build directory to perform archiving from there
+          cd main-app-dist
+
+          # 3. Create a multi-part split archive of the very large PyTorch libraries
+          7z a -t7z -mx=9 -mf=off -v300m ..\torch_libs.7z torch
+
+          # 4. Get the list of files to exclude (files from the minimal build)
+          $minimalFiles = Get-ChildItem -Path "..\minimal-module-dist" -Recurse | ForEach-Object { $_.Name }
           $excludeArgs = $minimalFiles | ForEach-Object { "-xr!$_" }
 
-          # Create an archive of the extra dependencies by excluding minimal files
-          cd main-app-dist
-          7z a -t7z -mx=9 -mf=off ..\dependencies.7z * $excludeArgs
+          # 5. Create a single archive of the medium-sized dependencies by excluding both the minimal build files AND the torch directory
+          7z a -t7z -mx=9 -mf=off ..\dependencies.7z * $excludeArgs -xr!torch
+          
+          # 6. Return to the root workflow directory
           cd ..
         shell: pwsh
 
@@ -214,6 +214,7 @@ jobs:
             EasyScanlate-Installer.exe
             minimal-build.7z
             dependencies.7z
+            torch_libs.7z.*
 
   create_update_package:
     runs-on: ubuntu-latest
@@ -240,8 +241,6 @@ jobs:
       - name: Unzip Main App Build
         run: 7z x main-app-build/main-app-build.7z -o"current-build"
 
-      # IMPORTANT: Archive the executable with its version tag in the name
-      # This allows the script to fetch specific old versions later.
       - name: Archive Current Main Executable
         run: |
           7z a -t7z main-executable-${{ github.ref_name }}.7z ./current-build/main.exe
@@ -255,7 +254,6 @@ jobs:
             --new-version ${{ github.ref_name }} \
             --repo ${{ github.repository }}
         env:
-          # The script uses the gh CLI, which needs a token to access repository releases.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Update Assets
@@ -286,18 +284,15 @@ jobs:
       - name: Check-out repository
         uses: actions/checkout@v4
 
-      # Create the destination directory first
       - name: Create Release Directory
         run: mkdir -p release-assets
 
-      # Download the installer assets
       - name: Download Installer Artifacts
         uses: actions/download-artifact@v4
         with:
           name: installer-assets
           path: release-assets/
 
-      # Download the update package assets if they were created
       - name: Download Update Package Artifacts
         if: needs.create_update_package.outputs.package_created == 'true'
         uses: actions/download-artifact@v4
