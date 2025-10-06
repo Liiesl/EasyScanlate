@@ -20,3 +20,6 @@ initmodels.py
 retry-update.bat
 test_torch
 minimal_module
+test_updater
+launcher.exe
+*temp*
