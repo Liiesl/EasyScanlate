@@ -1,42 +1,21 @@
 # main.py
 # Application entry point with a splash screen for a smooth startup.
-# FIXED to prevent multiple Home windows and handle app termination properly.
-# FIXED to clean up partial downloads on cancellation.
-# --- MODIFIED: Download archive to temp directory to avoid permission errors ---
-# --- MODIFIED: Check for elevated privileges on Windows before download ---
-# --- MODIFIED: Prompt user to manually restart after download instead of forcing it ---
 
-import sys
-import os
-# --- NEW IMPORTS for downloader and 7z extraction ---
-import urllib.request
-import json
-import py7zr # <--- ADDED for .7z support
-import tempfile # <--- MODIFIED: Added to handle temporary file downloads
-# --- NEW IMPORT for Windows administrator check ---
-import ctypes
-
+import sys, os, urllib.request, json, py7zr, tempfile, shutil, ctypes, time, importlib.util
 
 # --- Dependency Checking ---
-
-# Nuitka provides the __nuitka_version__ attribute during compilation.
-# We check if it's NOT defined, meaning we are running as a normal script.
+# Check if we are running as a normal script.
 IS_RUNNING_AS_SCRIPT = "__nuitka_version__" not in locals()
 
 try:
     from PySide6.QtWidgets import QApplication, QSplashScreen, QMessageBox, QDialog
     from PySide6.QtCore import Qt, QThread, Signal, QSettings, QDateTime, QObject
     from PySide6.QtGui import QPixmap, QPainter, QFont, QColor
-    # --- NEW: Import the download dialog ---
     from app.ui.window.download_dialog import DownloadDialog
 except ImportError:
     # This entire block will only be executed if running as a script,
-    # as Nuitka will bundle PySide6, preventing this error.
     if IS_RUNNING_AS_SCRIPT:
         try:
-            # If this import succeeds, it means the user has PyQt5.
-            # We need to inform them to install PySide6.
-            # We will use PyQt5 components to show a more robust and helpful error message.
             from PyQt5.QtWidgets import QApplication, QMessageBox #type: ignore
             from PyQt5.QtCore import Qt #type: ignore
 
@@ -52,28 +31,25 @@ except ImportError:
                 "To resolve this, please uninstall PyQt5 and then install PySide6."
             )
             
-            # --- NEW: Make the informative text selectable by the user ---
+            # Make the informative text selectable by the user
             msg_box.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-            # --- NEW: Place the commands in a collapsible "Details" section ---
-            # This text is naturally copyable.
+            # Place the commands in a collapsible "Details" section
             commands = "pip uninstall PyQt5\npip install pyside6"
             msg_box.setDetailedText(
                 "Run the following commands in your terminal or command prompt:\n\n" + commands
             )
-            
-            # --- NEW: Add a custom button to copy the commands to the clipboard ---
+
+            # Add a custom button to copy the commands to the clipboard
             copy_button = msg_box.addButton("Copy Commands", QMessageBox.ActionRole)
             msg_box.setDefaultButton(QMessageBox.Ok)
 
             msg_box.exec() # Show the dialog and wait for user interaction
 
-            # If the user clicked our custom "Copy" button, copy the commands
             if msg_box.clickedButton() == copy_button:
                 try:
                     clipboard = QApplication.clipboard()
                     clipboard.setText(commands)
-                    # Optional: Show a confirmation message
                     confirm_msg = QMessageBox()
                     confirm_msg.setIcon(QMessageBox.Information)
                     confirm_msg.setText("Commands copied to clipboard!")
@@ -134,18 +110,16 @@ def get_relative_time(timestamp_str):
     years = seconds // 31536000
     return f"{years} year{'s' if years > 1 else ''} ago"
 
-# main.py
 
 class Preloader(QThread):
     """
     Performs initial, non-GUI tasks in a separate thread.
     This now includes loading the recent projects list.
     """
-    finished = Signal(list)
-    progress_update = Signal(str)
-    download_progress = Signal(int)
-    preload_failed = Signal(str)
-    # --- MODIFIED: Signal to indicate the download is complete ---
+    finished = Signal(list)  # Signal will emit the list of loaded project data
+    progress_update = Signal(str) 
+    download_progress = Signal(int) # download progress bar
+    preload_failed = Signal(str) # critical preload failures
     download_complete = Signal()
 
     def __init__(self, parent=None):
@@ -156,101 +130,189 @@ class Preloader(QThread):
         """Public method to signal cancellation to the thread."""
         self._is_cancelled = True
 
-    def check_and_download_torch(self):
+    def check_and_download_dependencies(self):
         """
-        Checks if PyTorch ('torch') is installed. If not, downloads and extracts it
-        from a specified GitHub release before the main app starts.
-        Returns True on success or if already present, False on critical failure.
+        Checks for PyTorch and NumPy. If either is not found, downloads and extracts them.
+        Handles multi-part, pausable, and resumable downloads.
         """
-        try:
-            import torch
-            self.progress_update.emit("PyTorch libraries found.")
-            return True
-        except ImportError:
-            self.progress_update.emit("PyTorch not found. Preparing download...")
+        torch_installed = importlib.util.find_spec("torch") is not None
+        numpy_installed = importlib.util.find_spec("numpy") is not None
 
-        # --- ACTION REQUIRED: Configure your GitHub repository details here ---
-        GH_OWNER = "Liiesl"
-        GH_REPO = "test-easyocr-compile"
-        ASSET_NAME = "torch_libs.7z"
+        if torch_installed and numpy_installed:
+            self.progress_update.emit("PyTorch and NumPy libraries found.")
+            return True
         
+        if torch_installed:
+            self.progress_update.emit("PyTorch found. Checking for other dependencies...")
+        if numpy_installed:
+            self.progress_update.emit("NumPy found. Checking for other dependencies...")
+
+        self.progress_update.emit("Some required libraries are missing. Preparing download...")
+
+        GH_OWNER = "Liiesl"
+        GH_REPO = "EasyScanlate"
+        TORCH_ASSET_BASE = "torch_libs.7z"
+        DEPS_ASSET_NAME = "dependencies.7z"
+        COMBINED_TORCH_ARCHIVE = "torch_libs_combined.7z"
+        MAX_RETRIES = 3
+
         if GH_OWNER == "YourGitHubUsername":
-            error_msg = "Initial setup required: Please configure GitHub repository details in main.py inside the 'check_and_download_torch' function before compiling."
-            self.progress_update.emit("ERROR: GitHub details not configured.")
+            error_msg = "Initial setup required: Please configure GitHub repository details in main.py."
             self.preload_failed.emit(error_msg)
             return False
-            
-        archive_path = os.path.join(tempfile.gettempdir(), ASSET_NAME)
-            
+
+        download_dir = os.path.join(tempfile.gettempdir(), "easyscanlate_deps")
+        os.makedirs(download_dir, exist_ok=True)
+        
+        combined_torch_path = os.path.join(download_dir, COMBINED_TORCH_ARCHIVE)
+        deps_archive_path = os.path.join(download_dir, DEPS_ASSET_NAME)
+
         try:
             api_url = f"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}/releases/latest"
             self.progress_update.emit("Connecting to GitHub...")
             with urllib.request.urlopen(api_url) as response:
-                if response.status != 200: raise Exception(f"GitHub API returned status {response.status}")
+                if response.status != 200:
+                    raise Exception(f"GitHub API returned status {response.status}")
                 release_data = json.loads(response.read().decode())
+
+            all_assets = release_data.get("assets", [])
             
-            download_url = next((asset["browser_download_url"] for asset in release_data.get("assets", []) if asset["name"] == ASSET_NAME), None)
-            if not download_url: raise Exception(f"Asset '{ASSET_NAME}' not found in the latest release.")
+            assets_to_download = []
+            if not torch_installed:
+                torch_assets = sorted([a for a in all_assets if a["name"].startswith(TORCH_ASSET_BASE)], key=lambda x: x['name'])
+                if not torch_assets:
+                    raise Exception(f"No assets matching '{TORCH_ASSET_BASE}.*' found.")
+                assets_to_download.extend(torch_assets)
 
-            self.progress_update.emit(f"Downloading '{ASSET_NAME}'...")
+            if not numpy_installed:
+                deps_asset = next((a for a in all_assets if a["name"] == DEPS_ASSET_NAME), None)
+                if not deps_asset:
+                    raise Exception(f"Asset '{DEPS_ASSET_NAME}' not found.")
+                assets_to_download.append(deps_asset)
 
-            with urllib.request.urlopen(download_url) as response:
-                if response.status != 200: raise Exception(f"Download failed. Status: {response.status}")
-                total_size = int(response.getheader('Content-Length', 0))
-                bytes_downloaded = 0
-                chunk_size = 8192
-                with open(archive_path, 'wb') as f:
-                    while chunk := response.read(chunk_size):
-                        if self._is_cancelled:
-                            self.progress_update.emit("Download cancelled.")
-                            return False
+            total_download_size = sum(asset['size'] for asset in assets_to_download)
+            total_bytes_downloaded = 0
 
-                        f.write(chunk)
-                        bytes_downloaded += len(chunk)
-                        if total_size > 0:
-                            percent = (bytes_downloaded / total_size) * 100
-                            self.progress_update.emit(f"Downloading... {int(percent)}%")
-                            self.download_progress.emit(int(percent))
+            # Calculate already downloaded size
+            for asset in assets_to_download:
+                local_path = os.path.join(download_dir, asset['name'])
+                if os.path.exists(local_path):
+                    total_bytes_downloaded += os.path.getsize(local_path)
+
+            for asset in assets_to_download:
+                if self._is_cancelled:
+                    self.progress_update.emit("Download cancelled.")
+                    return False
+
+                asset_name = asset['name']
+                download_url = asset['browser_download_url']
+                asset_size = asset['size']
+                local_path = os.path.join(download_dir, asset_name)
+                
+                current_size = 0
+                if os.path.exists(local_path):
+                    current_size = os.path.getsize(local_path)
+                
+                if current_size >= asset_size:
+                    self.progress_update.emit(f"'{asset_name}' already downloaded.")
+                    continue
+
+                self.progress_update.emit(f"Downloading '{asset_name}'...")
+                
+                for attempt in range(MAX_RETRIES):
+                    if self._is_cancelled: return False
+                    try:
+                        req = urllib.request.Request(download_url)
+                        req.add_header('Range', f'bytes={current_size}-')
+                        
+                        with urllib.request.urlopen(req) as response:
+                            if response.status not in [200, 206]:
+                                raise Exception(f"Download failed for {asset_name}. Status: {response.status}")
+                            
+                            with open(local_path, 'ab') as f:
+                                while chunk := response.read(8192):
+                                    if self._is_cancelled:
+                                        self.progress_update.emit("Download cancelled during part download.")
+                                        return False
+                                    
+                                    f.write(chunk)
+                                    total_bytes_downloaded += len(chunk)
+                                    percent = (total_bytes_downloaded / total_download_size) * 100
+                                    self.progress_update.emit(f"Downloading... {int(percent)}%")
+                                    self.download_progress.emit(int(percent))
+                        break
+                    except Exception as e:
+                        if attempt < MAX_RETRIES - 1:
+                            self.progress_update.emit(f"Download of '{asset_name}' failed. Retrying... Error: {e}")
+                            time.sleep(5)
+                        else:
+                            raise Exception(f"Failed to download '{asset_name}'.") from e
             
-            if self._is_cancelled:
-                self.progress_update.emit("Operation cancelled before extraction.")
-                return False
-
-            self.progress_update.emit("Download complete. Extracting files...")
-            with py7zr.SevenZipFile(archive_path, mode='r') as z:
-                z.extractall()
+            if self._is_cancelled: return False
             
+            if not torch_installed:
+                self.progress_update.emit("Combining PyTorch parts...")
+                torch_part_paths = [os.path.join(download_dir, a['name']) for a in torch_assets]
+                with open(combined_torch_path, 'wb') as combined_file:
+                    for part_path in torch_part_paths:
+                        with open(part_path, 'rb') as part_file:
+                            shutil.copyfileobj(part_file, combined_file)
+                
+                self.progress_update.emit("Extracting PyTorch... This may take several minutes.")
+                with py7zr.SevenZipFile(combined_torch_path, mode='r') as z:
+                    z.extractall()
+
+            if not numpy_installed and os.path.exists(deps_archive_path):
+                self.progress_update.emit("Extracting dependencies...")
+                with py7zr.SevenZipFile(deps_archive_path, mode='r') as z:
+                    z.extractall()
+
             self.progress_update.emit("Extraction complete.")
-
-            # --- MODIFIED: Emit the download complete signal. The main thread will handle the user prompt. ---
             self.download_complete.emit()
-            
-            # Return False to stop the rest of the preloader task in this run.
-            # The app will exit, and on the next run, this function will return True.
-            return False
+            return False # Needs restart
 
         except Exception as e:
-            error_message = f"Failed to download required libraries.\n\nError: {e}\n\nPlease check your internet connection and try again. If the issue persists, the asset may be missing from the GitHub release."
-            self.preload_failed.emit(error_message)
+            self.preload_failed.emit(f"Failed to download required libraries.\n\nError: {e}")
             return False
         finally:
-            if os.path.exists(archive_path):
-                os.remove(archive_path)
+            # Cleanup
+            shutil.rmtree(download_dir, ignore_errors=True)
 
     def run(self):
         """The entry point for the thread."""
         
-        if not self.check_and_download_torch():
-            return  # Stop preloading on failure, cancellation, or if a restart is needed.
+        if not self.check_and_download_dependencies():
+            return
 
         self.progress_update.emit("Loading application settings...")
         
         self.progress_update.emit("Finding recent projects...")
         projects_data = []
         try:
-            settings = QSettings("YourCompany", "MangaOCRTool")
+            settings = QSettings("Liiesl", "EasyScanlate")
             recent_projects = settings.value("recent_projects", [])
             recent_timestamps = settings.value("recent_timestamps", {})
+
+            # --- START: Added logic to limit recent projects ---
+            MAX_RECENT_PROJECTS = 6
+            if len(recent_projects) > MAX_RECENT_PROJECTS:
+                self.progress_update.emit("Cleaning up old project entries...")
+                # Get the list of projects to remove (the oldest ones)
+                projects_to_remove = recent_projects[MAX_RECENT_PROJECTS:]
+                # Trim the main list to the 6 most recent
+                recent_projects = recent_projects[:MAX_RECENT_PROJECTS]
+                
+                # Update the settings with the trimmed list
+                settings.setValue("recent_projects", recent_projects)
+                
+                # Remove the timestamps associated with the old projects
+                for path_to_remove in projects_to_remove:
+                    if path_to_remove in recent_timestamps:
+                        del recent_timestamps[path_to_remove]
+                
+                # Update the settings with the cleaned timestamps dictionary
+                settings.setValue("recent_timestamps", recent_timestamps)
+            # --- END: Added logic ---
             
             for path in recent_projects:
                 filename = os.path.basename(path)
@@ -269,13 +331,13 @@ class Preloader(QThread):
 
         self.finished.emit(projects_data)
 
-
-# --- Global variables to hold instances ---
 splash = None
 home_window = None
 
-# --- NEW: UI Manager to handle switching between splash and download dialog ---
 class UIManager(QObject):
+    """
+    Manages the transition between the splash screen and the download dialog.
+    """
     def __init__(self, splash, preloader, parent=None):
         super().__init__(parent)
         self.splash = splash
@@ -283,10 +345,8 @@ class UIManager(QObject):
         self.download_dialog = None
 
         self.preloader.progress_update.connect(self.route_progress_message)
-        # --- MODIFIED: Connect to the new download_complete signal ---
         self.preloader.download_complete.connect(self.handle_download_complete)
     
-    # --- MODIFIED: Renamed from handle_restart_required to handle_download_complete ---
     def handle_download_complete(self):
         """Shows a success message and tells the user to restart the app."""
         if self.download_dialog:
@@ -299,7 +359,7 @@ class UIManager(QObject):
         msg_box.setIcon(QMessageBox.Information)
         msg_box.setWindowTitle("Installation Successful")
         msg_box.setText("The required libraries have been successfully installed.")
-        # --- MODIFIED: Clear instructions for the user ---
+        # Clear instructions for the user
         msg_box.setInformativeText("Please close and re-open the application to continue.")
         msg_box.setStandardButtons(QMessageBox.Ok)
         msg_box.exec()
@@ -351,7 +411,7 @@ class UIManager(QObject):
         else:
             self.splash.showMessage(message)
 
-# --- NEW: Handler for critical startup failures ---
+# Handler for critical startup failures
 def on_preload_failed(error_message):
     """Shows a critical error message box and terminates the application."""
     global splash
@@ -402,11 +462,9 @@ def on_preload_finished(projects_data):
 
 if __name__ == '__main__':
     if sys.platform == 'win32':
-        NEEDS_DOWNLOAD = False
-        try:
-            import torch
-        except ImportError:
-            NEEDS_DOWNLOAD = True
+        # Use a faster check that doesn't import the whole library
+        NEEDS_DOWNLOAD = importlib.util.find_spec("torch") is None or \
+                         importlib.util.find_spec("numpy") is None
 
         if NEEDS_DOWNLOAD:
             try:
@@ -443,7 +501,7 @@ if __name__ == '__main__':
 
     app = QApplication(sys.argv)
     
-    app.setApplicationName("ManhwaOCR")
+    app.setApplicationName("EasyScanlate")
     app.setApplicationVersion("1.0")
 
     pixmap = QPixmap(500, 250)
@@ -452,7 +510,7 @@ if __name__ == '__main__':
     painter.setPen(QColor(220, 220, 220))
     font = QFont("Segoe UI", 24, QFont.Bold)
     painter.setFont(font)
-    painter.drawText(pixmap.rect().adjusted(0, -20, 0, -20), Qt.AlignCenter, "ManhwaOCR")
+    painter.drawText(pixmap.rect().adjusted(0, -20, 0, -20), Qt.AlignCenter, "EasyScanlate")
     painter.end()
 
     splash = CustomSplashScreen(pixmap)
