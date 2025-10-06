@@ -21,7 +21,7 @@
   - make manual ocr overlay presistent
 
 ## currently in progress
-  - 
+  - testing final updater
 
 ## not yet started
 
@@ -36,7 +36,9 @@
     - add 
   - add link to github issues for when there is crash
     - add issue template
-    - 
+  - 2 pane view of manhwa (for original and translated view side by side)(layers and overlays can be individualy toggle off and on)
+  - add tool bar on the right
+  - add direct retranslate on main window
 
   #### fixes
   - fix skew/free transform
@@ -51,8 +53,7 @@
   - save edited state of textboxitem
   - dynamic link between import export ocr and translation
   - change how translation Work
-    - make translations into non blocking window
-      - or integrate it into main window
+    - integrate it into main window
       - easier retranslate workflow
     - characters, places, and lore name dictionaries
   - hide textboximage button
@@ -64,3 +65,6 @@
     - free form selection (pen tools/draw)
     - switch on/off from selection
     - undo/redo
+  - 
+  - deprecate result widgets and table (be replaced by direct text editing on image textbox)
+    - it should be merged into translation feature cause it still needed there
