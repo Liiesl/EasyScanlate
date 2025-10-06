@@ -132,7 +132,7 @@ class Preloader(QThread):
         and then signals the main thread to launch the updater.
         """
         self.progress_update.emit("Checking for updates...")
-        TARGET_VERSION = "v0.1.3" 
+        TARGET_VERSION = "v0.1.4" 
         GH_OWNER = "Liiesl"
         GH_REPO = "EasyScanlate"
 
@@ -420,7 +420,7 @@ if __name__ == '__main__':
     painter.setPen(QColor(220, 220, 220))
     font = QFont("Segoe UI", 24, QFont.Bold)
     painter.setFont(font)
-    painter.drawText(pixmap.rect().adjusted(0, -20, 0, -20), Qt.AlignCenter, "EasyScanlate")
+    painter.drawText(pixmap.rect().adjusted(0, -20, 0, -20), Qt.AlignCenter, "ManhwaOCR")
     painter.end()
 
     splash = CustomSplashScreen(pixmap)
