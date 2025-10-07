@@ -1,7 +1,7 @@
 # main.py
 # Application entry point with a splash screen for a smooth startup.
 
-import sys, os, urllib.request, json, py7zr, tempfile, shutil, ctypes, time, importlib.util
+import sys, os, urllib.request, json, py7zr, tempfile, shutil, ctypes, time, importlib
 
 # --- Dependency Checking ---
 # Check if we are running as a normal script.
@@ -530,7 +530,7 @@ if __name__ == '__main__':
     painter.setPen(QColor(220, 220, 220))
     font = QFont("Segoe UI", 24, QFont.Bold)
     painter.setFont(font)
-    painter.drawText(pixmap.rect().adjusted(0, -20, 0, -20), Qt.AlignCenter, "ManhwaOCR")
+    painter.drawText(pixmap.rect().adjusted(0, -20, 0, -20), Qt.AlignCenter, "EasyScanlate")
     painter.end()
 
     splash = CustomSplashScreen(pixmap)
