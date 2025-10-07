@@ -21,3 +21,4 @@ retry-update.bat
 test_torch
 minimal_module
 *temp*
+test_updater
