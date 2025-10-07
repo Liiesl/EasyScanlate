@@ -130,13 +130,26 @@ class Preloader(QThread):
         """Public method to signal cancellation to the thread."""
         self._is_cancelled = True
 
+    def _is_dependency_installed(self, package_name):
+        """
+        Reliably and quickly checks if a package is correctly installed by importing a minimal submodule.
+        """
+        try:
+            # Import a lightweight submodule (like 'version') to test integrity
+            # without the performance hit of a full import.
+            importlib.import_module(f"{package_name}.version")
+            return True
+        except (ImportError, ModuleNotFoundError):
+            # This will catch missing modules, broken installs, and missing .pyd files.
+            return False
+
     def check_and_download_dependencies(self):
         """
         Checks for PyTorch and NumPy. If either is not found, downloads and extracts them.
         Handles multi-part, pausable, and resumable downloads.
         """
-        torch_installed = importlib.util.find_spec("torch") is not None
-        numpy_installed = importlib.util.find_spec("numpy") is not None
+        torch_installed = self._is_dependency_installed("torch")
+        numpy_installed = self._is_dependency_installed("numpy")
 
         if torch_installed and numpy_installed:
             self.progress_update.emit("PyTorch and NumPy libraries found.")
@@ -462,9 +475,15 @@ def on_preload_finished(projects_data):
 
 if __name__ == '__main__':
     if sys.platform == 'win32':
-        # Use a faster check that doesn't import the whole library
-        NEEDS_DOWNLOAD = importlib.util.find_spec("torch") is None or \
-                         importlib.util.find_spec("numpy") is None
+        # --- MODIFIED: Use a fast but reliable minimal import to check for dependencies ---
+        # This is much faster than `import torch` but more reliable than `find_spec`.
+        try:
+            importlib.import_module("torch.version")
+            importlib.import_module("numpy.version")
+            NEEDS_DOWNLOAD = False
+        except (ImportError, ModuleNotFoundError):
+            NEEDS_DOWNLOAD = True
+        # --- END MODIFICATION ---
 
         if NEEDS_DOWNLOAD:
             try:
@@ -510,7 +529,7 @@ if __name__ == '__main__':
     painter.setPen(QColor(220, 220, 220))
     font = QFont("Segoe UI", 24, QFont.Bold)
     painter.setFont(font)
-    painter.drawText(pixmap.rect().adjusted(0, -20, 0, -20), Qt.AlignCenter, "EasyScanlate")
+    painter.drawText(pixmap.rect().adjusted(0, -20, 0, -20), Qt.AlignCenter, "ManhwaOCR")
     painter.end()
 
     splash = CustomSplashScreen(pixmap)

@@ -77,7 +77,7 @@ class SettingsDialog(QDialog):
 
         self.download_update_button = QPushButton("Download Update")
         self.download_update_button.setVisible(False)
-        self.download_update_button.clicked.connect(self.update_handler.start_update_download)
+        self.download_update_button.clicked.connect(self.update_handler.download_manifest_and_start_update)
         update_button_layout.addWidget(self.download_update_button)
 
         self.restart_update_button = QPushButton("Restart & Update")

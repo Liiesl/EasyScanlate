@@ -44,6 +44,7 @@ class UpdateHandler(QObject):
         self.total_download_size = 0
         self.total_bytes_received = 0
         self.current_bytes_offset = 0
+        self.latest_release_data = None # To store latest release info
         
         self.app_version = get_app_version()
         # Create a specific directory for this update attempt
@@ -69,25 +70,23 @@ class UpdateHandler(QObject):
         return self.app_version
 
     def check_for_updates(self):
-        """Fetches the list of releases from the GitHub API to find the latest one (including pre-releases)."""
-        self.status_changed.emit("Checking for updates (pre-releases enabled)...")
-        # The GitHub API returns a list of all releases, with the most recent one first.
-        # This includes pre-releases, unlike the '/latest' endpoint.
-        api_url = f"https://api.github.com/repos/{GH_REPO}/releases"
+        """Fetches only the latest release from the GitHub API to check its version tag."""
+        self.status_changed.emit("Checking for updates...")
+        self.latest_release_data = None # Reset previous check
+        # By adding "?per_page=1", we ask the API for only the most recent release,
+        # which is much faster than downloading the entire release history.
+        api_url = f"https://api.github.com/repos/{GH_REPO}/releases?per_page=1"
         
         request = QNetworkRequest(QUrl(api_url))
         self.reply = self.network_manager.get(request)
-        self.reply.finished.connect(self._on_api_releases_received)
+        self.reply.finished.connect(self._on_releases_check_finished)
 
-    def _on_api_releases_received(self):
-        """
-        Handles the response from the GitHub releases API.
-        Finds the manifest.json from the latest release (pre-releases included) and fetches it.
-        """
-        reply = self.reply # Keep a reference to the current reply
+    def _on_releases_check_finished(self):
+        """Handles the response from the GitHub releases API and compares version tags."""
+        reply = self.reply
         if reply.error() != QNetworkReply.NoError:
             error_string = reply.errorString()
-            self.error_occurred.emit(f"Could not check for pre-releases: {error_string}")
+            self.error_occurred.emit(f"Could not check for updates: {error_string}")
             self.update_check_finished.emit(False, {})
             reply.deleteLater()
             return
@@ -102,33 +101,58 @@ class UpdateHandler(QObject):
                 return
 
             latest_release = releases[0]
-            manifest_asset = next((asset for asset in latest_release.get("assets", []) if asset["name"] == "manifest.json"), None)
+            latest_version = latest_release.get("tag_name")
 
-            if not manifest_asset or "browser_download_url" not in manifest_asset:
-                self.error_occurred.emit("A manifest.json file was not found in the latest release assets.")
+            if not latest_version:
+                self.error_occurred.emit("Latest release found, but it has no version tag.")
                 self.update_check_finished.emit(False, {})
                 return
 
-            manifest_url = manifest_asset["browser_download_url"]
-            
-            # Now that we have the URL, we can fetch the manifest.
-            # The rest of the update process will be the same.
-            request = QNetworkRequest(QUrl(manifest_url))
-            self.reply = self.network_manager.get(request)
-            self.reply.finished.connect(self._on_manifest_received)
+            if latest_version > self.app_version:
+                self.status_changed.emit(f"Update available: {latest_version}")
+                self.latest_release_data = latest_release # Store for the download step
+                update_info = {"to_version": latest_version}
+                self.update_check_finished.emit(True, update_info)
+            else:
+                self.status_changed.emit("You are using the latest version.")
+                self.update_check_finished.emit(False, {})
 
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, KeyError) as e:
             self.error_occurred.emit(f"Failed to parse GitHub API response: {e}")
             self.update_check_finished.emit(False, {})
         finally:
             reply.deleteLater()
+
+    def download_manifest_and_start_update(self):
+        """
+        Finds the manifest from the stored latest release data, downloads it,
+        and then proceeds with the update process.
+        """
+        if not self.latest_release_data:
+            self.error_occurred.emit("Update check has not been run or found no new version.")
+            self.download_finished.emit(False, "")
+            return
+
+        manifest_asset = next((asset for asset in self.latest_release_data.get("assets", []) if asset["name"] == "manifest.json"), None)
+
+        if not manifest_asset or "browser_download_url" not in manifest_asset:
+            self.error_occurred.emit("A manifest.json file was not found in the latest release assets.")
+            self.download_finished.emit(False, "")
+            return
+
+        self.status_changed.emit("Downloading update information...")
+        manifest_url = manifest_asset["browser_download_url"]
+        
+        request = QNetworkRequest(QUrl(manifest_url))
+        self.reply = self.network_manager.get(request)
+        self.reply.finished.connect(self._on_manifest_received)
 
     def _on_manifest_received(self):
         """Handles the response after fetching the manifest."""
         if self.reply.error() != QNetworkReply.NoError:
             error_string = self.reply.errorString()
             self.error_occurred.emit(f"Could not download update manifest: {error_string}")
-            self.update_check_finished.emit(False, {})
+            self.download_finished.emit(False, "")
             return
         
         try:
@@ -137,44 +161,30 @@ class UpdateHandler(QObject):
             self._process_manifest()
         except json.JSONDecodeError as e:
             self.error_occurred.emit(f"Failed to parse update manifest: {e}")
-            self.update_check_finished.emit(False, {})
+            self.download_finished.emit(False, "")
         finally:
             self.reply.deleteLater()
 
     def _process_manifest(self):
-        """Compares versions and calculates the best update path."""
+        """Calculates the best update path from the manifest and starts the download."""
         try:
-            all_versions = sorted(self.manifest["versions"].keys(), reverse=True)
-            if not all_versions:
-                raise ValueError("No versions found in manifest.")
+            target_version = self.latest_release_data.get("tag_name")
+            if not target_version:
+                raise ValueError("Could not determine target version for update.")
+
+            self.update_path = self._find_update_path(self.app_version, target_version)
             
-            latest_version = all_versions[0]
+            if not self.update_path:
+                self.error_occurred.emit(f"Update to {target_version} found, but no viable update path from {self.app_version} exists.")
+                self.download_finished.emit(False, "")
+                return
 
-            if latest_version > self.app_version:
-                self.status_changed.emit(f"Update available: {latest_version}")
-                
-                self.update_path = self._find_update_path(self.app_version, latest_version)
-                
-                if not self.update_path:
-                    self.error_occurred.emit(f"Update to {latest_version} found, but no viable update path from {self.app_version} exists.")
-                    self.update_check_finished.emit(False, {})
-                    return
-
-                total_size = sum(pkg['size'] for pkg in self.update_path)
-                update_info = {
-                    "from_version": self.app_version,
-                    "to_version": latest_version,
-                    "package_count": len(self.update_path),
-                    "total_size": total_size
-                }
-                self.update_check_finished.emit(True, update_info)
-            else:
-                self.status_changed.emit("You are using the latest version.")
-                self.update_check_finished.emit(False, {})
+            # Path found, proceed to download the actual packages
+            self.start_update_download()
 
         except (ValueError, KeyError) as e:
             self.error_occurred.emit(f"Failed to process update manifest: {e}")
-            self.update_check_finished.emit(False, {})
+            self.download_finished.emit(False, "")
 
     def _find_update_path(self, start_version, end_version):
         """Calculates the most efficient (smallest total size) update path using Dijkstra's algorithm."""
