@@ -5,8 +5,9 @@ import sys
 import json
 import heapq
 import shutil
+import requests
+import threading
 from PySide6.QtCore import QObject, Signal, QStandardPaths, QUrl, QProcess, QCoreApplication, QSettings
-from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
 # --- UPDATE CONSTANTS ---
 GH_REPO = "Liiesl/EasyScanlate"
@@ -26,7 +27,7 @@ def get_app_version():
 
 class UpdateHandler(QObject):
     """Handles the backend logic for checking for and downloading updates."""
-    # Signals to communicate with the UI
+    # Signals to communicate with the UI (emitted from worker threads)
     update_check_finished = Signal(bool, dict)  # update_available, update_info
     download_progress = Signal(int, int)       # bytes_received, bytes_total
     download_finished = Signal(bool, str)     # success, path_to_update_dir
@@ -36,7 +37,6 @@ class UpdateHandler(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.settings = QSettings("Liiesl", "EasyScanlate")
-        self.network_manager = QNetworkAccessManager(self)
         self.manifest_data = None
         self.update_path = []
         self.download_queue = []
@@ -45,56 +45,32 @@ class UpdateHandler(QObject):
         self.total_bytes_received = 0
         self.current_bytes_offset = 0
         self.latest_release_data = None # To store latest release info
-        
+        self.session = requests.Session() # Use a session for potential connection pooling
+
         self.app_version = get_app_version()
         # Create a specific directory for this update attempt
         self.update_temp_dir = os.path.join(QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation), "update_package")
-        
-        self.reply = None
-        self.download_file = None
-
-    def abort_check(self):
-        """Aborts the current network request if it is running."""
-        if self.reply and self.reply.isRunning():
-            print("Aborting update check network request...")
-            # Disconnect signals to prevent finished/error from firing after abort
-            try:
-                self.reply.finished.disconnect()
-            except (TypeError, RuntimeError): # Already disconnected or object destroyed
-                pass
-            self.reply.abort()
-            self.reply.deleteLater()
-            self.reply = None
 
     def get_current_version(self):
         return self.app_version
 
     def check_for_updates(self):
-        """Fetches only the latest release from the GitHub API to check its version tag."""
+        """Spawns a thread to fetch the latest release from the GitHub API."""
         self.status_changed.emit("Checking for updates...")
         self.latest_release_data = None # Reset previous check
-        # By adding "?per_page=1", we ask the API for only the most recent release,
-        # which is much faster than downloading the entire release history.
-        api_url = f"https://api.github.com/repos/{GH_REPO}/releases?per_page=1"
         
-        request = QNetworkRequest(QUrl(api_url))
-        self.reply = self.network_manager.get(request)
-        self.reply.finished.connect(self._on_releases_check_finished)
+        thread = threading.Thread(target=self._run_check_for_updates)
+        thread.daemon = True
+        thread.start()
 
-    def _on_releases_check_finished(self):
-        """Handles the response from the GitHub releases API and compares version tags."""
-        reply = self.reply
-        if reply.error() != QNetworkReply.NoError:
-            error_string = reply.errorString()
-            self.error_occurred.emit(f"Could not check for updates: {error_string}")
-            self.update_check_finished.emit(False, {})
-            reply.deleteLater()
-            return
-
+    def _run_check_for_updates(self):
+        """Fetches release info in a separate thread."""
+        api_url = f"https://api.github.com/repos/{GH_REPO}/releases?per_page=1"
         try:
-            releases_data = reply.readAll().data()
-            releases = json.loads(releases_data.decode())
-            
+            response = self.session.get(api_url, timeout=15)
+            response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+            releases = response.json()
+
             if not releases:
                 self.status_changed.emit("No releases found on GitHub.")
                 self.update_check_finished.emit(False, {})
@@ -110,29 +86,33 @@ class UpdateHandler(QObject):
 
             if latest_version > self.app_version:
                 self.status_changed.emit(f"Update available: {latest_version}")
-                self.latest_release_data = latest_release # Store for the download step
+                self.latest_release_data = latest_release
                 update_info = {"to_version": latest_version}
                 self.update_check_finished.emit(True, update_info)
             else:
                 self.status_changed.emit("You are using the latest version.")
                 self.update_check_finished.emit(False, {})
 
+        except requests.exceptions.RequestException as e:
+            self.error_occurred.emit(f"Could not check for updates: {e}")
+            self.update_check_finished.emit(False, {})
         except (json.JSONDecodeError, KeyError) as e:
             self.error_occurred.emit(f"Failed to parse GitHub API response: {e}")
             self.update_check_finished.emit(False, {})
-        finally:
-            reply.deleteLater()
 
     def download_manifest_and_start_update(self):
-        """
-        Finds the manifest from the stored latest release data, downloads it,
-        and then proceeds with the update process.
-        """
+        """Spawns a thread to download the manifest and begin the update process."""
         if not self.latest_release_data:
             self.error_occurred.emit("Update check has not been run or found no new version.")
             self.download_finished.emit(False, "")
             return
 
+        thread = threading.Thread(target=self._run_download_manifest)
+        thread.daemon = True
+        thread.start()
+
+    def _run_download_manifest(self):
+        """Downloads and processes the manifest in a thread."""
         manifest_asset = next((asset for asset in self.latest_release_data.get("assets", []) if asset["name"] == "manifest.json"), None)
 
         if not manifest_asset or "browser_download_url" not in manifest_asset:
@@ -142,28 +122,23 @@ class UpdateHandler(QObject):
 
         self.status_changed.emit("Downloading update information...")
         manifest_url = manifest_asset["browser_download_url"]
-        
-        request = QNetworkRequest(QUrl(manifest_url))
-        self.reply = self.network_manager.get(request)
-        self.reply.finished.connect(self._on_manifest_received)
 
-    def _on_manifest_received(self):
-        """Handles the response after fetching the manifest."""
-        if self.reply.error() != QNetworkReply.NoError:
-            error_string = self.reply.errorString()
-            self.error_occurred.emit(f"Could not download update manifest: {error_string}")
-            self.download_finished.emit(False, "")
-            return
-        
         try:
-            self.manifest_data = self.reply.readAll().data()
+            response = self.session.get(manifest_url, timeout=15)
+            response.raise_for_status()
+            
+            self.manifest_data = response.content
             self.manifest = json.loads(self.manifest_data.decode())
+            
+            # Manifest is downloaded, now process it to find the update path
             self._process_manifest()
+
+        except requests.exceptions.RequestException as e:
+            self.error_occurred.emit(f"Could not download update manifest: {e}")
+            self.download_finished.emit(False, "")
         except json.JSONDecodeError as e:
             self.error_occurred.emit(f"Failed to parse update manifest: {e}")
             self.download_finished.emit(False, "")
-        finally:
-            self.reply.deleteLater()
 
     def _process_manifest(self):
         """Calculates the best update path from the manifest and starts the download."""
@@ -231,7 +206,7 @@ class UpdateHandler(QObject):
         return path
 
     def start_update_download(self):
-        """Starts downloading the chain of update packages."""
+        """Prepares for and starts downloading the chain of update packages."""
         if not self.update_path:
             self.error_occurred.emit("No update path calculated.")
             return
@@ -254,7 +229,7 @@ class UpdateHandler(QObject):
         self._start_next_download()
 
     def _start_next_download(self):
-        """Downloads the next file in the queue."""
+        """Spawns a thread to download the next file in the queue."""
         if not self.download_queue:
             self.status_changed.emit("All updates downloaded. Ready to install.")
             self.settings.setValue("downloaded_update_dir", self.update_temp_dir)
@@ -262,48 +237,47 @@ class UpdateHandler(QObject):
             return
 
         package = self.download_queue.pop(0)
+        
+        thread = threading.Thread(target=self._run_download_file, args=(package,))
+        thread.daemon = True
+        thread.start()
+
+    def _run_download_file(self, package):
+        """Downloads a single package file in a thread, with progress."""
         file_name = package['file']
         tag = package['download_from_tag']
         
         self.status_changed.emit(f"Downloading {file_name}...")
-        url = QUrl(f"https://github.com/{GH_REPO}/releases/download/{tag}/{file_name}")
+        url = f"https://github.com/{GH_REPO}/releases/download/{tag}/{file_name}"
         file_path = os.path.join(self.update_temp_dir, file_name)
-
+        
         try:
-            self.download_file = open(file_path, 'wb')
-        except IOError as e:
-            self.error_occurred.emit(f"Could not open file for writing: {e}")
-            self._cleanup_after_failure()
-            return
-        
-        self.downloaded_files.append({"file": file_name, "path": file_path})
-        
-        request = QNetworkRequest(url)
-        self.reply = self.network_manager.get(request)
-        self.reply.downloadProgress.connect(self._on_download_progress)
-        self.reply.readyRead.connect(self._on_download_ready_read)
-        self.reply.finished.connect(self._on_download_finished)
-    
-    def _on_download_progress(self, bytes_received, bytes_total):
-        self.total_bytes_received = self.current_bytes_offset + bytes_received
-        self.download_progress.emit(self.total_bytes_received, self.total_download_size)
+            # Use streaming to avoid loading the whole file into memory and to track progress
+            with self.session.get(url, stream=True, timeout=30) as response:
+                response.raise_for_status()
+                with open(file_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                        # Update progress
+                        bytes_received = len(chunk)
+                        self.total_bytes_received += bytes_received
+                        self.download_progress.emit(self.total_bytes_received, self.total_download_size)
+            
+            # Download of this file is complete
+            self.downloaded_files.append({"file": file_name, "path": file_path})
+            self.current_bytes_offset += os.path.getsize(file_path)
+            
+            # Start the next download in the chain
+            self._start_next_download()
 
-    def _on_download_ready_read(self):
-        self.download_file.write(self.reply.readAll())
-
-    def _on_download_finished(self):
-        self.download_file.close()
-        if self.reply.error():
-            error_str = self.reply.errorString()
-            self.error_occurred.emit(f"Download failed for {self.downloaded_files[-1]['file']}: {error_str}")
+        except requests.exceptions.RequestException as e:
+            self.error_occurred.emit(f"Download failed for {file_name}: {e}")
             self._cleanup_after_failure()
             self.download_finished.emit(False, "")
-        else:
-            completed_file_path = self.downloaded_files[-1]['path']
-            self.current_bytes_offset += os.path.getsize(completed_file_path)
-            self._start_next_download()
-            
-        self.reply.deleteLater()
+        except IOError as e:
+            self.error_occurred.emit(f"Could not write file {file_name}: {e}")
+            self._cleanup_after_failure()
+            self.download_finished.emit(False, "")
 
     def _cleanup_after_failure(self):
         """Removes the entire update temp directory on failure."""
