@@ -7,6 +7,26 @@ import sys, os, urllib.request, json, py7zr, tempfile, shutil, ctypes, time, imp
 # Check if we are running as a normal script.
 IS_RUNNING_AS_SCRIPT = "__nuitka_version__" not in locals()
 
+# --- START: New, targeted dependency check functions ---
+def _is_torch_functional():
+    """Checks if PyTorch's core C library can be loaded."""
+    try:
+        importlib.import_module("torch._C")
+        return True
+    except (ImportError, ModuleNotFoundError):
+        return False
+
+def _is_numpy_functional():
+    """Checks if NumPy's core C library (_multiarray_umath) can be loaded."""
+    try:
+        # This is the exact module that fails in the user's traceback.
+        # Testing it directly is the most reliable check.
+        importlib.import_module("numpy.core._multiarray_umath")
+        return True
+    except (ImportError, ModuleNotFoundError):
+        return False
+# --- END: New functions ---
+
 try:
     from PySide6.QtWidgets import QApplication, QSplashScreen, QMessageBox, QDialog
     from PySide6.QtCore import Qt, QThread, Signal, QSettings, QDateTime, QObject
@@ -130,27 +150,15 @@ class Preloader(QThread):
         """Public method to signal cancellation to the thread."""
         self._is_cancelled = True
 
-    def _is_dependency_installed(self, package_name):
-        """
-        Reliably and quickly checks if a package is correctly installed by importing a minimal submodule.
-        """
-        try:
-            # Import a lightweight submodule (like 'version') to test integrity
-            # without the performance hit of a full import.
-            importlib.import_module(f"{package_name}.version")
-            return True
-        except (ImportError, ModuleNotFoundError):
-            # This will catch missing modules, broken installs, and missing .pyd files.
-            return False
-
     def check_and_download_dependencies(self):
         """
         Checks for PyTorch and NumPy. If either is not found, downloads and extracts them.
         Handles multi-part, pausable, and resumable downloads.
         """
-        torch_installed = self._is_dependency_installed("torch")
-        numpy_installed = self._is_dependency_installed("numpy")
-
+        # --- MODIFIED: Use the new, targeted functional checks ---
+        torch_installed = _is_torch_functional()
+        numpy_installed = _is_numpy_functional()
+        
         if torch_installed and numpy_installed:
             self.progress_update.emit("PyTorch and NumPy libraries found.")
             return True
@@ -475,15 +483,8 @@ def on_preload_finished(projects_data):
 
 if __name__ == '__main__':
     if sys.platform == 'win32':
-        # --- MODIFIED: Use a fast but reliable minimal import to check for dependencies ---
-        # This is much faster than `import torch` but more reliable than `find_spec`.
-        try:
-            importlib.import_module("torch.version")
-            importlib.import_module("numpy.version")
-            NEEDS_DOWNLOAD = False
-        except (ImportError, ModuleNotFoundError):
-            NEEDS_DOWNLOAD = True
-        # --- END MODIFICATION ---
+        # --- MODIFIED: Use the new, targeted functional checks ---
+        NEEDS_DOWNLOAD = not (_is_torch_functional() and _is_numpy_functional())
 
         if NEEDS_DOWNLOAD:
             try:
