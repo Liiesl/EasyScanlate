@@ -7,6 +7,28 @@ import sys, os, urllib.request, json, py7zr, tempfile, shutil, ctypes, time, imp
 # Check if we are running as a normal script.
 IS_RUNNING_AS_SCRIPT = "__nuitka_version__" not in locals()
 
+# --- START: New, targeted dependency check functions ---
+def _is_torch_functional():
+    """Checks if PyTorch's core C library can be loaded. Prints error details if not."""
+    try:
+        import torch
+        print(f"[PyTorch] Version: {torch.__version__}, CUDA Available: {torch.cuda.is_available()}")
+        return True
+    except (ImportError, ModuleNotFoundError) as e:
+        print(f"[PyTorch Import Error] {e}")
+        return False
+
+def _is_numpy_functional():
+    """Checks if NumPy's core C library (_multiarray_umath) can be loaded. Prints error details if not."""
+    try:
+        import numpy
+        print(f"[NumPy] Version: {numpy.__version__}")
+        return True
+    except (ImportError, ModuleNotFoundError) as e:
+        print(f"[NumPy Import Error] {e}")
+        return False
+# --- END: New functions ---
+
 try:
     from PySide6.QtWidgets import QApplication, QSplashScreen, QMessageBox, QDialog
     from PySide6.QtCore import Qt, QThread, Signal, QSettings, QDateTime, QObject
