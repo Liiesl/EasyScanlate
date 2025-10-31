@@ -9,21 +9,23 @@ IS_RUNNING_AS_SCRIPT = "__nuitka_version__" not in locals()
 
 # --- START: New, targeted dependency check functions ---
 def _is_torch_functional():
-    """Checks if PyTorch's core C library can be loaded."""
+    """Checks if PyTorch's core C library can be loaded. Prints error details if not."""
     try:
-        importlib.import_module("torch._C")
+        import torch
+        print(f"[PyTorch] Version: {torch.__version__}, CUDA Available: {torch.cuda.is_available()}")
         return True
-    except (ImportError, ModuleNotFoundError):
+    except (ImportError, ModuleNotFoundError) as e:
+        print(f"[PyTorch Import Error] {e}")
         return False
 
 def _is_numpy_functional():
-    """Checks if NumPy's core C library (_multiarray_umath) can be loaded."""
+    """Checks if NumPy's core C library (_multiarray_umath) can be loaded. Prints error details if not."""
     try:
-        # This is the exact module that fails in the user's traceback.
-        # Testing it directly is the most reliable check.
-        importlib.import_module("numpy.core._multiarray_umath")
+        import numpy
+        print(f"[NumPy] Version: {numpy.__version__}")
         return True
-    except (ImportError, ModuleNotFoundError):
+    except (ImportError, ModuleNotFoundError) as e:
+        print(f"[NumPy Import Error] {e}")
         return False
 # --- END: New functions ---
 
