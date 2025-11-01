@@ -19,7 +19,7 @@ def _is_torch_functional():
         
     try:
         import torch
-        print(f"[PyTorch] Version: {torch.__version__}, CUDA Available: {torch.cuda.is_available()}")
+        print(f"[PyTorch] Version:, CUDA Available:")
         return True
     except (ImportError, ModuleNotFoundError, AttributeError, RuntimeError) as e:
         # Catch RuntimeError as well, just in case.
