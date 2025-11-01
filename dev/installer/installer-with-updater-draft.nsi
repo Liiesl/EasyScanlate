@@ -1,13 +1,13 @@
-; NSIS Script for EasyScanlate Application
+; NSIS Script for MangaOCRTool Application
 ; =============================================
 
 !include "MUI2.nsh"
 
 ; --- Application Information ---
-!define APP_NAME "EasyScanlate"
-!define APP_PUBLISHER "Liie"
+!define APP_NAME "MangaOCRTool"
+!define APP_PUBLISHER "YourCompany"
 !define APP_EXE "main.exe"
-!define APP_VERSION "0.2.0" ; Use a consistent versioning scheme
+!define APP_VERSION "0.0.1" ; Use a consistent versioning scheme
 
 ; --- Registry & Path Definitions ---
 !define REG_UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
@@ -22,13 +22,13 @@ Name "${APP_NAME}"
 OutFile "${APP_NAME}-Installer.exe"
 InstallDir "$PROGRAMFILES\${APP_NAME}"
 RequestExecutionLevel admin
-SetCompressor /FINAL /SOLID lzma
+SetCompressor lzma
 
 ; --- Modern UI 2 Settings ---
 !define MUI_ABORTWARNING
 !define MUI_ICON "..\..\assets\app_icon.ico"
 !define MUI_UNICON "..\..\assets\app_icon.ico"
-!define MUI_WELCOMEPAGE_TEXT "This setup will guide you through the installation of EasyScanlate.$\r$\n$\r$\nClick Next to continue."
+!define MUI_WELCOMEPAGE_TEXT "This setup will guide you through the installation of MangaOCRTool.$\r$\n$\r$\nClick Next to continue."
 
 ; --- Installer Pages ---
 !insertmacro MUI_PAGE_WELCOME
@@ -79,15 +79,16 @@ FunctionEnd
 
 Section "Main Application" SecApp
   SectionIn RO
-  ; This size should reflect the application WITHOUT torch (e.g., from 'build-output.7z')
-  ; If your app is 300MB without torch, this is approx 307200 KB.
-  AddSize 309200
+  ; This size should be significantly smaller now, reflecting only the core app files.
+  ; Adjust this value based on the actual size of 'build-output.7z'.
+  ; Example: If core app is 50MB, this would be approx 51200 KB.
+  AddSize 51200
 
   SetOutPath $INSTDIR
   
-  DetailPrint "Installing application files (excluding PyTorch)..."
-  ; Package everything EXCEPT the torch directory, which is handled separately.
-  File /r /x torch "..\..\main-app-dist\*"
+  DetailPrint "Installing application files (excluding PyTorch and dependencies)..."
+  ; Package everything EXCEPT the torch directory and other dependencies.
+  File /r /x torch /x OCR /x PIL /x bidi /x certifi /x charset_normalizer /x cv2 /x markupsafe /x numpy /x numpy.libs /x pyclipper /x pydantic_core /x scipy /x scipy.libs /x shapely /x shapely.libs /x skimage /x torchaudio /x torchvision /x websockets /x yaml /x zstandard /x _elementtree.pyd /x _sqlite3.pyd /x _uuid.pyd /x _zoneinfo.pyd /x asmjit.dll /x cudart64_12.dll /x fbgemm.dll /x jpeg8.dll /x libsharpyuv.dll /x libwebp.dll /x nvjpeg64_12.dll /x sqlite3.dll "..\..\build\main.dist\*"
 
   ; --- Create Uninstaller and Write Registry Keys ---
   WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -99,7 +100,7 @@ Section "Main Application" SecApp
   WriteRegStr HKLM "${REG_UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\${APP_EXE}"
   WriteRegStr HKLM "${REG_UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
   WriteRegStr HKLM "${REG_UNINSTALL_KEY}" "Publisher" "${APP_PUBLISHER}"
-  WriteRegDWORD HKLM "${REG_UNINSTALL_KEY}" "EstimatedSize" 309200 ; Update to match AddSize
+  WriteRegDWORD HKLM "${REG_UNINSTALL_KEY}" "EstimatedSize" 51200 ; Update to match AddSize
   WriteRegStr HKLM "${REG_UNINSTALL_KEY}" "InstallDate" "${INSTALL_DATE_YYYYMMDD}"
   WriteRegDWORD HKLM "${REG_UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "${REG_UNINSTALL_KEY}" "NoRepair" 1
@@ -121,10 +122,10 @@ Section "Register File Association" SecFileAssoc
   SetRegView 64
   
   DetailPrint "Registering .mmtl file association..."
-  WriteRegStr HKCR ".mmtl" "" "EasyScanlate.MMTLFile"
-  WriteRegStr HKCR "EasyScanlate.MMTLFile" "" "Manga OCR Tool Project"
-  WriteRegStr HKCR "EasyScanlate.MMTLFile\DefaultIcon" "" "$INSTDIR\${APP_EXE},0"
-  WriteRegStr HKCR "EasyScanlate.MMTLFile\shell\open\command" "" '"$INSTDIR\${APP_EXE}" "%1"'
+  WriteRegStr HKCR ".mmtl" "" "MangaOCRTool.MMTLFile"
+  WriteRegStr HKCR "MangaOCRTool.MMTLFile" "" "Manga OCR Tool Project"
+  WriteRegStr HKCR "MangaOCRTool.MMTLFile\DefaultIcon" "" "$INSTDIR\${APP_EXE},0"
+  WriteRegStr HKCR "MangaOCRTool.MMTLFile\shell\open\command" "" '"$INSTDIR\${APP_EXE}" "%1"'
 SectionEnd
 
 Section "Add Application to Path" SecAppPath
@@ -152,6 +153,41 @@ SectionEnd
 Section "Uninstall"
   SetRegView 64
   
+  ; --- Explicitly remove dependency files and folders ---
+  Delete "$INSTDIR\_elementtree.pyd"
+  Delete "$INSTDIR\_sqlite3.pyd"
+  Delete "$INSTDIR\_uuid.pyd"
+  Delete "$INSTDIR\_zoneinfo.pyd"
+  Delete "$INSTDIR\asmjit.dll"
+  Delete "$INSTDIR\cudart64_12.dll"
+  Delete "$INSTDIR\fbgemm.dll"
+  Delete "$INSTDIR\jpeg8.dll"
+  Delete "$INSTDIR\libsharpyuv.dll"
+  Delete "$INSTDIR\libwebp.dll"
+  Delete "$INSTDIR\nvjpeg64_12.dll"
+  Delete "$INSTDIR\sqlite3.dll"
+  RMDir /r "$INSTDIR\OCR"
+  RMDir /r "$INSTDIR\PIL"
+  RMDir /r "$INSTDIR\bidi"
+  RMDir /r "$INSTDIR\certifi"
+  RMDir /r "$INSTDIR\charset_normalizer"
+  RMDir /r "$INSTDIR\cv2"
+  RMDir /r "$INSTDIR\markupsafe"
+  RMDir /r "$INSTDIR\numpy"
+  RMDir /r "$INSTDIR\numpy.libs"
+  RMDir /r "$INSTDIR\pyclipper"
+  RMDir /r "$INSTDIR\pydantic_core"
+  RMDir /r "$INSTDIR\scipy"
+  RMDir /r "$INSTDIR\scipy.libs"
+  RMDir /r "$INSTDIR\shapely"
+  RMDir /r "$INSTDIR\shapely.libs"
+  RMDir /r "$INSTDIR\skimage"
+  RMDir /r "$INSTDIR\torchaudio"
+  RMDir /r "$INSTDIR\torchvision"
+  RMDir /r "$INSTDIR\websockets"
+  RMDir /r "$INSTDIR\yaml"
+  RMDir /r "$INSTDIR\zstandard"
+  
   ; Check if this is a silent uninstall triggered by an update.
   ReadRegStr $R0 HKLM "${REG_APP_KEY}" "UpdateInProgress"
   StrCmp $R0 "1" HandleUpdateUninstall HandleManualUninstall
@@ -178,7 +214,7 @@ HandleManualUninstall:
   
     ; Prompt the user.
     MessageBox MB_YESNO|MB_ICONQUESTION \
-      "Do you want to completely remove EasyScanlate, including the large PyTorch libraries (over 4GB)?$\r$\n$\r$\nClicking 'No' will preserve these libraries to speed up future installations." \
+      "Do you want to completely remove MangaOCRTool, including the large PyTorch libraries (over 4GB)?$\r$\n$\r$\nClicking 'No' will preserve these libraries to speed up future installations." \
       IDYES CompleteRemove IDNO PreserveTorch
     
     Goto CleanupRegistry ; Should not be reached, but as a fallback.
@@ -214,7 +250,7 @@ CleanupRegistry:
   SetRegView 64
   DetailPrint "Removing registry keys..."
   DeleteRegKey HKCR ".mmtl"
-  DeleteRegKey HKCR "EasyScanlate.MMTLFile"
+  DeleteRegKey HKCR "MangaOCRTool.MMTLFile"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\${APP_EXE}"
   DeleteRegKey HKLM "${REG_UNINSTALL_KEY}"
   ; Also remove the app's own registry key, if it exists.

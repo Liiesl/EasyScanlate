@@ -1,0 +1,353 @@
+name: Build and Release EasyScanlate
+
+# Workflow Trigger
+on:
+  workflow_dispatch:
+
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+
+  build-main-app:
+    runs-on: windows-latest
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+          pip install -r requirements.txt
+
+      - name: Build Executable with Nuitka
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          script-name: main.py
+          mode: standalone
+          include-data-dir: 'OCR/model=OCR/model'
+          mingw64: true
+          enable-plugins: pyside6
+          windows-icon-from-ico: assets/app_icon.ico
+          company-name: "Liiesl"
+          product-name: "EasyScanlate"
+          file-description: "ManhwaOCR"
+          file-version: "0.1.2"
+          product-version: "0.1.2"
+
+      - name: Zip Main Build Output
+        run: |
+          cd build/main.dist
+          7z a -t7z -mx=9 -mf=off ..\..\main-app-build.7z *
+          cd ..\..
+        shell: pwsh
+
+      - name: Upload Main Build as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: main-app-build
+          path: main-app-build.7z
+
+  build-minimal-module:
+    runs-on: windows-latest
+    steps:
+      - name: Check-out minimal_module branch
+        uses: actions/checkout@v4
+        with:
+          ref: minimal-module
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install minimal dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r minimal_module_requirements.txt
+
+      - name: Build Executable with Nuitka
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          script-name: main.py
+          mode: standalone
+          mingw64: true
+          enable-plugins: pyside6
+          windows-icon-from-ico: assets/app_icon.ico
+          company-name: "Liiesl"
+          product-name: "EasyScanlate"
+          file-description: "ManhwaOCR"
+          file-version: "0.1.2"
+          product-version: "0.1.2"
+          disable-cache: true
+
+      - name: Zip Minimal Build Output
+        run: |
+          cd build/main.dist
+          7z a -t7z -mx=9 -mf=off ..\..\minimal-module-build.7z *
+          cd ..\..
+        shell: pwsh
+
+      - name: Upload Minimal Build as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: minimal-module-build
+          path: minimal-module-build.7z
+
+  build-updater:
+    runs-on: windows-latest
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt 
+
+      - name: Build Updater Executable with Nuitka
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          script-name: dev/updater/updater.py
+          mode: onefile
+          enable-plugins: pyside6
+          mingw64: true
+          company-name: "Liiesl"
+          product-name: "EasyScanlate Updater"
+          file-description: "Application Updater"
+          windows-icon-from-ico: assets/updater.ico
+          windows-uac-admin: on
+          file-version: "0.1.2"
+          product-version: "0.1.2"
+          disable-cache: true
+
+      - name: Upload Updater Executable as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-build
+          path: build/Updater.exe
+
+  # --- Stage 2: Parallel Jobs for Release Assets ---
+  
+  create-installer:
+    runs-on: windows-latest
+    needs: [build-main-app, build-minimal-module, build-updater]
+    permissions:
+      contents: write
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: build-artifacts
+
+      - name: Extract Build Artifacts
+        run: |
+          7z x build-artifacts/main-app-build/main-app-build.7z -o"main-app-dist"
+          7z x build-artifacts/minimal-module-build/minimal-module-build.7z -o"minimal-module-dist"
+        shell: pwsh
+
+      - name: Create Archives for In-App Download
+        run: |
+          # Create a multi-part archive for the torch libraries from the main build.
+          cd main-app-dist
+          7z a -t7z -mx=9 -mf=off -v300m ..\torch_libs.7z torch
+          
+          # Get the list of files from the minimal build to exclude them from the dependencies archive.
+          $minimalFiles = Get-ChildItem -Path "..\minimal-module-dist" -Recurse | ForEach-Object { $_.Name }
+          $excludeArgs = $minimalFiles | ForEach-Object { "-xr!$_" }
+          
+          # Create the dependencies archive, excluding torch and the minimal files.
+          7z a -t7z -mx=9 -mf=off ..\dependencies.7z * $excludeArgs -xr!torch
+          cd ..
+        shell: pwsh
+
+      - name: Prepare Installer Package Directory
+        run: |
+          # Define paths for the different build directories.
+          $minimal_build_path = (Resolve-Path "minimal-module-dist").Path
+          $main_build_path = (Resolve-Path "main-app-dist").Path
+          $installer_package_path = (Resolve-Path (New-Item -ItemType Directory -Name "installer-package")).Path
+
+          # Get the list of essential files from the minimal build, which will serve as a template.
+          $essential_files = Get-ChildItem -Path $minimal_build_path -Recurse
+
+          # Copy the corresponding essential files from the main build to the new installer package directory.
+          foreach ($file_info in $essential_files) {
+              $source_path = $file_info.FullName.Replace($minimal_build_path, $main_build_path)
+              $destination_path = $file_info.FullName.Replace($minimal_build_path, $installer_package_path)
+
+              if (Test-Path $source_path) {
+                  # Ensure the destination directory for the file exists.
+                  $destination_dir = Split-Path -Path $destination_path -Parent
+                  if (-not (Test-Path $destination_dir)) {
+                      New-Item -ItemType Directory -Path $destination_dir | Out-Null
+                  }
+                  # Copy the file from the main build to the installer package.
+                  Copy-Item -Path $source_path -Destination $destination_path -Force
+              }
+          }
+        shell: pwsh
+
+      - name: Add Version and Updater to Installer Package
+        run: |
+          $installer_package_path = (Resolve-Path "installer-package").Path
+          
+          # Add the APPVERSION file to the installer package.
+          $version = "${{ github.ref_name }}"
+          Set-Content -Path (Join-Path $installer_package_path "APPVERSION") -Value $version
+          
+          # Create the updater subdirectory and move the Updater.exe into it.
+          $updater_dir = Join-Path $installer_package_path "updater"
+          New-Item -Path $updater_dir -ItemType Directory
+          Move-Item -Path "build-artifacts/updater-build/Updater.exe" -Destination $updater_dir
+        shell: pwsh
+
+      - name: Finalize Installer Directory
+        run: |
+          # Remove the original large main application directory.
+          Remove-Item -Path "main-app-dist" -Recurse -Force
+          
+          # Rename the new, stripped-down installer package to what the NSIS script expects.
+          Rename-Item -Path "installer-package" -NewName "main-app-dist"
+        shell: pwsh
+
+      - name: Install NSIS
+        run: choco install nsis
+
+      - name: Add NSIS to PATH
+        run: echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: pwsh
+
+      - name: Compile NSIS installer
+        run: makensis dev/installer/installer.nsi
+
+      - name: Move Installer to Root Directory
+        run: Move-Item -Path dev/installer/EasyScanlate-Installer.exe -Destination .
+        shell: pwsh
+
+      - name: Upload Installer and Archives as Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-assets
+          path: |
+            EasyScanlate-Installer.exe
+            minimal-build.7z
+            dependencies.7z
+            torch_libs.7z.*
+
+  create_update_package:
+    runs-on: ubuntu-latest
+    needs: build-main-app
+    outputs:
+      package_created: ${{ steps.create_package.outputs.package_created }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies for script
+        run: pip install bsdiff4
+
+      - name: Download Main App Build
+        uses: actions/download-artifact@v4
+        with:
+          name: main-app-build
+          path: main-app-build
+
+      - name: Unzip Main App Build
+        run: 7z x main-app-build/main-app-build.7z -o"current-build"
+
+      - name: Archive Current Main Executable
+        run: |
+          7z a -t7z main-executable-${{ github.ref_name }}.7z ./current-build/main.exe
+        
+      - name: Create Update Package with Python Script
+        id: create_package
+        run: |
+          python dev/updater/create_update_package.py \
+            --build-dir current-build \
+            --main-executable-name main.exe \
+            --new-version ${{ github.ref_name }} \
+            --repo ${{ github.repository }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Update Assets
+        if: steps.create_package.outputs.package_created == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-package-assets
+          path: |
+            update-*.zip
+            *.patch
+
+      - name: Upload Manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-asset
+          path: |
+            manifest.json
+            main-executable-${{ github.ref_name }}.7z
+
+  # --- Stage 3: Create GitHub Release ---
+  create-release:
+    runs-on: ubuntu-latest
+    needs: [create-installer, create_update_package]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      - name: Create Release Directory
+        run: mkdir -p release-assets
+
+      - name: Download Installer Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: installer-assets
+          path: release-assets/
+
+      - name: Download Update Package Artifacts
+        if: needs.create_update_package.outputs.package_created == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: update-package-assets
+          path: release-assets/
+
+      - name: Download Manifest Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: manifest-asset
+          path: release-assets/
+
+      - name: Create Draft GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          preserve_order: true
+          body_path: changelog.md
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
