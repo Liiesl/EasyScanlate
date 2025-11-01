@@ -10,21 +10,37 @@ IS_RUNNING_AS_SCRIPT = "__nuitka_version__" not in locals()
 # --- START: New, targeted dependency check functions ---
 def _is_torch_functional():
     """Checks if PyTorch's core C library can be loaded. Prints error details if not."""
+    
+    # PREVENTATIVE FIX: In a Nuitka build, if the 'torch' directory doesn't exist,
+    # do not attempt the import, as it can lead to an uncatchable crash.
+    if not IS_RUNNING_AS_SCRIPT and not os.path.isdir("torch"):
+        print("[PyTorch] Compiled environment: 'torch' directory missing. Needs download.")
+        return False
+        
     try:
         import torch
         print(f"[PyTorch] Version: {torch.__version__}, CUDA Available: {torch.cuda.is_available()}")
         return True
-    except (ImportError, ModuleNotFoundError, AttributeError) as e:
+    except (ImportError, ModuleNotFoundError, AttributeError, RuntimeError) as e:
+        # Catch RuntimeError as well, just in case.
         print(f"[PyTorch Import/Attribute Error] {e}")
         return False
 
 def _is_numpy_functional():
     """Checks if NumPy's core C library (_multiarray_umath) can be loaded. Prints error details if not."""
+    
+    # PREVENTATIVE FIX: In a Nuitka build, if the 'numpy' directory doesn't exist,
+    # do not attempt the import, as it causes a fatal RuntimeError.
+    if not IS_RUNNING_AS_SCRIPT and not os.path.isdir("numpy"):
+        print("[NumPy] Compiled environment: 'numpy' directory missing. Needs download.")
+        return False
+
     try:
         import numpy
         print(f"[NumPy] Version: {numpy.__version__}")
         return True
-    except (ImportError, ModuleNotFoundError, AttributeError) as e:
+    except (ImportError, ModuleNotFoundError, AttributeError, RuntimeError) as e:
+        # Catch RuntimeError as well, as this is what Nuitka raises on a fatal load failure.
         print(f"[NumPy Import/Attribute Error] {e}")
         return False
 # --- END: New functions ---
