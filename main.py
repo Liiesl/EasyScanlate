@@ -14,8 +14,8 @@ def _is_torch_functional():
         import torch
         print(f"[PyTorch] Version: {torch.__version__}, CUDA Available: {torch.cuda.is_available()}")
         return True
-    except (ImportError, ModuleNotFoundError) as e:
-        print(f"[PyTorch Import Error] {e}")
+    except (ImportError, ModuleNotFoundError, AttributeError) as e:
+        print(f"[PyTorch Import/Attribute Error] {e}")
         return False
 
 def _is_numpy_functional():
@@ -24,8 +24,8 @@ def _is_numpy_functional():
         import numpy
         print(f"[NumPy] Version: {numpy.__version__}")
         return True
-    except (ImportError, ModuleNotFoundError) as e:
-        print(f"[NumPy Import Error] {e}")
+    except (ImportError, ModuleNotFoundError, AttributeError) as e:
+        print(f"[NumPy Import/Attribute Error] {e}")
         return False
 # --- END: New functions ---
 
