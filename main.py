@@ -14,7 +14,8 @@ def _is_torch_functional():
         import torch
         print(f"[PyTorch] Version: {torch.__version__}, CUDA Available: {torch.cuda.is_available()}")
         return True
-    except (ImportError, ModuleNotFoundError, AttributeError) as e:
+    except (ImportError, ModuleNotFoundError, AttributeError, RuntimeError) as e:
+        # Catch RuntimeError as well, just in case.
         print(f"[PyTorch Import/Attribute Error] {e}")
         return False
 
@@ -24,7 +25,8 @@ def _is_numpy_functional():
         import numpy
         print(f"[NumPy] Version: {numpy.__version__}")
         return True
-    except (ImportError, ModuleNotFoundError, AttributeError) as e:
+    except (ImportError, ModuleNotFoundError, AttributeError, RuntimeError) as e:
+        # Catch RuntimeError as well, as this is what Nuitka raises on a fatal load failure.
         print(f"[NumPy Import/Attribute Error] {e}")
         return False
 # --- END: New functions ---
