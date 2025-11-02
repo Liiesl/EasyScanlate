@@ -46,6 +46,7 @@ class UpdateHandler(QObject):
         self.current_bytes_offset = 0
         self.latest_release_data = None # To store latest release info
         self.session = requests.Session() # Use a session for potential connection pooling
+        self._abort_check_flag = False # Flag to signal abortion
 
         self.app_version = get_app_version()
         # Create a specific directory for this update attempt
@@ -58,6 +59,7 @@ class UpdateHandler(QObject):
         """Spawns a thread to fetch the latest release from the GitHub API."""
         self.status_changed.emit("Checking for updates...")
         self.latest_release_data = None # Reset previous check
+        self._abort_check_flag = False # Reset abort flag for new check
         
         thread = threading.Thread(target=self._run_check_for_updates)
         thread.daemon = True
@@ -68,8 +70,13 @@ class UpdateHandler(QObject):
         api_url = f"https://api.github.com/repos/{GH_REPO}/releases?per_page=1"
         try:
             response = self.session.get(api_url, timeout=15)
+            if self._abort_check_flag: return
+
             response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+            if self._abort_check_flag: return
+            
             releases = response.json()
+            if self._abort_check_flag: return
 
             if not releases:
                 self.status_changed.emit("No releases found on GitHub.")
@@ -78,6 +85,7 @@ class UpdateHandler(QObject):
 
             latest_release = releases[0]
             latest_version = latest_release.get("tag_name")
+            if self._abort_check_flag: return
 
             if not latest_version:
                 self.error_occurred.emit("Latest release found, but it has no version tag.")
@@ -94,9 +102,11 @@ class UpdateHandler(QObject):
                 self.update_check_finished.emit(False, {})
 
         except requests.exceptions.RequestException as e:
+            if self._abort_check_flag: return
             self.error_occurred.emit(f"Could not check for updates: {e}")
             self.update_check_finished.emit(False, {})
         except (json.JSONDecodeError, KeyError) as e:
+            if self._abort_check_flag: return
             self.error_occurred.emit(f"Failed to parse GitHub API response: {e}")
             self.update_check_finished.emit(False, {})
 
@@ -284,6 +294,10 @@ class UpdateHandler(QObject):
         if os.path.exists(self.update_temp_dir):
             shutil.rmtree(self.update_temp_dir, ignore_errors=True)
         self.downloaded_files = []
+
+    def abort_check(self):
+        """Flags the running update check thread to stop processing."""
+        self._abort_check_flag = True
 
     def check_for_existing_download(self):
         """Checks if an update package was downloaded in a previous session."""

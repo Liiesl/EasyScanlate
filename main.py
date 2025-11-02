@@ -525,7 +525,7 @@ if __name__ == '__main__':
 
     app = QApplication(sys.argv)
     
-    app.setApplicationName("EasyScanlate")
+    app.setApplicationName("ManhwaOCR")
     app.setApplicationVersion("1.0")
 
     pixmap = QPixmap(500, 250)
