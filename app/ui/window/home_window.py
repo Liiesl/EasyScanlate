@@ -14,6 +14,7 @@ from assets.styles import (HOME_STYLES, HOME_LEFT_LAYOUT_STYLES)
 from app.ui.window.chrome import CustomTitleBar, WindowResizer
 from app.ui.widgets.menu_bar import TitleBarState
 from app.ui.dialogs.settings_dialog import SettingsDialog
+from app.ui.dialogs.error_dialog import ErrorDialog
 from app.utils.update import UpdateHandler
 
 
@@ -422,15 +423,19 @@ class Home(QMainWindow):
 
             self.hide()
         except Exception as e:
-            traceback.print_exc()
+            import sys
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            traceback_text = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
             self.loading_dialog.accept()
-            QMessageBox.critical(self, "Error", f"Failed to launch project: {str(e)}")
+            error_type = exc_type.__name__ if exc_type else "Exception"
+            error_message = f"Failed to launch project: {str(e)}"
+            ErrorDialog.critical(self, "Error", error_message, traceback_text)
             if temp_dir and os.path.exists(temp_dir):
                 rmtree(temp_dir, ignore_errors=True)
 
     def handle_project_error(self, error_msg):
         self.loading_dialog.accept()
-        QMessageBox.critical(self, "Error", f"Failed to open project:\n{error_msg}")
+        ErrorDialog.critical(self, "Error", f"Failed to open project:\n{error_msg}")
         print(f"Error loading project: {error_msg}")
 
     def closeEvent(self, event):
