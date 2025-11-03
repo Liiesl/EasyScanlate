@@ -327,7 +327,7 @@ def combined_similarity_score(new_issue: Dict, existing_issue: Dict) -> Tuple[fl
     
     # Keyword overlap using meaningful content
     meaningful_text1 = new_title + ' ' + (new_meaningful or new_body)
-    meaningful_text2 = existing_title + ' ' + (existing_meaningful or existing_body)
+    meaningful_text2 = existing_title + ' ' + (existing_meaningful or existing_body or '')
     keyword_overlap = calculate_keyword_overlap(meaningful_text1, meaningful_text2)
     
     # Weighted combination (title is more important, meaningful body content gets more weight)
