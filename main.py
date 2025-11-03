@@ -36,6 +36,8 @@ try:
     from PySide6.QtCore import Qt, QThread, Signal, QSettings, QDateTime, QObject
     from PySide6.QtGui import QPixmap, QPainter, QFont, QColor
     from app.ui.window.download_dialog import DownloadDialog
+    from app.utils.exception_handler import setup_global_exception_handler
+    from app.ui.dialogs.error_dialog import ErrorDialog
 except ImportError:
     # This entire block will only be executed if running as a script,
     if IS_RUNNING_AS_SCRIPT:
@@ -442,7 +444,7 @@ def on_preload_failed(error_message):
     global splash
     if splash:
         splash.close()
-    QMessageBox.critical(None, "Application Startup Error", error_message)
+    ErrorDialog.critical(None, "Application Startup Error", error_message)
     sys.exit(1)
 
 def on_preload_finished(projects_data):
@@ -524,6 +526,9 @@ if __name__ == '__main__':
                 sys.exit(0)
 
     app = QApplication(sys.argv)
+    
+    # Set up global exception handler to catch unhandled exceptions
+    setup_global_exception_handler(app)
     
     app.setApplicationName("ManhwaOCR")
     app.setApplicationVersion("1.0")
