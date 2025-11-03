@@ -1,0 +1,108 @@
+name: Check for Duplicate Issues
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  check-duplicates:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install requests python-levenshtein
+
+      - name: Check for duplicate issues
+        id: check_duplicates
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          python .github/scripts/check_duplicate_issues.py
+          
+      - name: Comment on potential duplicate
+        if: steps.check_duplicates.outputs.has_duplicates == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = context.payload.issue.number;
+            const duplicateIssueNumbers = '${{ steps.check_duplicates.outputs.duplicate_issue_numbers }}'.split(',').filter(n => n);
+            const similarityScores = '${{ steps.check_duplicates.outputs.similarity_scores }}'.split(',').filter(s => s);
+            
+            if (duplicateIssueNumbers.length === 0) {
+              console.log('No duplicate issue numbers found');
+              return;
+            }
+            
+            let comment = '🔍 **Potential Duplicate Detected**\n\n';
+            comment += 'This issue appears to be similar to the following open issue(s):\n\n';
+            
+            duplicateIssueNumbers.forEach((dupNum, index) => {
+              if (dupNum && dupNum.trim()) {
+                const score = similarityScores[index] || 'N/A';
+                comment += `- #${dupNum.trim()} (similarity: ${score}%)\n`;
+              }
+            });
+            
+            comment += '\n---\n\n';
+            comment += '**Please review:**\n';
+            comment += '- If this is a duplicate, please close this issue and reference the original issue(s).\n';
+            comment += '- If this is not a duplicate, please add more details to distinguish it or reply to this comment.\n';
+            comment += '- A maintainer can remove the `potential-duplicate` label if this is confirmed to be unique.';
+            
+            await github.rest.issues.createComment({
+              issue_number: issueNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+            
+            // Add duplicate label (create if it doesn't exist)
+            try {
+              await github.rest.issues.addLabels({
+                issue_number: issueNumber,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: ['potential-duplicate']
+              });
+            } catch (error) {
+              // Try to create the label if it doesn't exist
+              if (error.status === 404 || error.status === 422) {
+                try {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: 'potential-duplicate',
+                    color: 'd4c5f9',
+                    description: 'This issue may be a duplicate of another open issue'
+                  });
+                  
+                  // Try adding the label again
+                  await github.rest.issues.addLabels({
+                    issue_number: issueNumber,
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    labels: ['potential-duplicate']
+                  });
+                } catch (createError) {
+                  console.log('Could not create or add label:', createError.message);
+                }
+              } else {
+                console.log('Error adding label:', error.message);
+              }
+            }
+
