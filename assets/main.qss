@@ -5,7 +5,7 @@
 QMainWindow, QWidget {
     background-color: var(--background);
     color: var(--text);
-    font-size: 20px;
+    font-size: var(--font_size_large);
 }
 /* Buttons style */
 QPushButton {
@@ -124,7 +124,7 @@ QScrollBar::handle:vertical {
     border-radius: 7px;
 }
 QScrollBar::handle:vertical:hover {
-    background-color: #5A5A5A;
+    background-color: var(--duodenary);
 }
 QScrollBar::handle:vertical:pressed {
     background-color: var(--accent);
@@ -149,7 +149,7 @@ QScrollBar::handle:horizontal {
     border-radius: 7px;
 }
 QScrollBar::handle:horizontal:hover {
-    background-color: #5A5A5A;
+    background-color: var(--duodenary);
 }
 QScrollBar::handle:horizontal:pressed {
     background-color: var(--accent);

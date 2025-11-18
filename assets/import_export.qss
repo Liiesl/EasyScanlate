@@ -1,100 +1,100 @@
 QDialog {
-    background-color: #2B2B2B;
-    color: #FFFFFF;
+    background-color: var(--tredecenary);
+    color: var(--text);
 }
 QGroupBox {
     font-weight: bold;
-    border: 2px solid #555;
-    border-radius: 5px;
-    margin-top: 10px;
-    padding-top: 10px;
-    background-color: #333;
+    border: 2px solid var(--border_input);
+    border-radius: var(--border_radius_small);
+    margin-top: var(--spacing_large);
+    padding-top: var(--spacing_large);
+    background-color: var(--quaternary);
 }
 QGroupBox::title {
     subcontrol-origin: margin;
-    left: 10px;
-    padding: 0 5px;
+    left: var(--spacing_large);
+    padding: 0 var(--padding_medium);
 }
 QLabel {
-    color: #FFFFFF;
+    color: var(--text);
 }
 QPushButton {
-    background-color: #4A4A4A;
-    color: #FFFFFF;
-    border: 1px solid #555;
-    border-radius: 4px;
-    padding: 6px 12px;
+    background-color: var(--secondary);
+    color: var(--text);
+    border: 1px solid var(--border_input);
+    border-radius: var(--border_radius_small);
+    padding: var(--padding_6) var(--spacing_xlarge);
     min-width: 80px;
 }
 QPushButton:hover {
-    background-color: #5A5A5A;
+    background-color: var(--duodenary);
 }
 QPushButton:pressed {
-    background-color: #3A3A3A;
+    background-color: var(--primary);
 }
 QComboBox {
-    background-color: #3A3A3A;
-    color: #FFFFFF;
-    border: 1px solid #555;
-    border-radius: 4px;
-    padding: 4px 8px;
+    background-color: var(--primary);
+    color: var(--text);
+    border: 1px solid var(--border_input);
+    border-radius: var(--border_radius_small);
+    padding: var(--padding_small) var(--padding_large);
     min-width: 150px;
 }
 QComboBox:hover {
-    background-color: #4A4A4A;
+    background-color: var(--secondary);
 }
 QComboBox::drop-down {
     border: none;
 }
 QComboBox QAbstractItemView {
-    background-color: #3A3A3A;
-    color: #FFFFFF;
-    selection-background-color: #5A5A5A;
+    background-color: var(--primary);
+    color: var(--text);
+    selection-background-color: var(--duodenary);
 }
 QRadioButton {
-    color: #FFFFFF;
-    spacing: 5px;
+    color: var(--text);
+    spacing: var(--spacing_small);
 }
 QRadioButton::indicator {
-    width: 16px;
-    height: 16px;
+    width: var(--indicator_size_checkbox);
+    height: var(--indicator_size_checkbox);
     border-radius: 8px;
-    border: 2px solid #555;
-    background-color: #2B2B2B;
+    border: 2px solid var(--border_input);
+    background-color: var(--tredecenary);
 }
 QRadioButton::indicator:checked {
-    background-color: #4A9EFF;
-    border-color: #4A9EFF;
+    background-color: var(--accent_checked);
+    border-color: var(--accent_checked);
 }
 QCheckBox {
-    color: #FFFFFF;
-    spacing: 5px;
+    color: var(--text);
+    spacing: var(--spacing_small);
 }
 QCheckBox::indicator {
-    width: 16px;
-    height: 16px;
-    border: 2px solid #555;
+    width: var(--indicator_size_checkbox);
+    height: var(--indicator_size_checkbox);
+    border: 2px solid var(--border_input);
     border-radius: 3px;
-    background-color: #2B2B2B;
+    background-color: var(--tredecenary);
 }
 QCheckBox::indicator:checked {
-    background-color: #4A9EFF;
-    border-color: #4A9EFF;
+    background-color: var(--accent_checked);
+    border-color: var(--accent_checked);
 }
 QLineEdit {
-    background-color: #3A3A3A;
-    color: #FFFFFF;
-    border: 1px solid #555;
-    border-radius: 4px;
-    padding: 4px 8px;
+    background-color: var(--primary);
+    color: var(--text);
+    border: 1px solid var(--border_input);
+    border-radius: var(--border_radius_small);
+    padding: var(--padding_small) var(--padding_large);
 }
 QLineEdit:focus {
-    border-color: #4A9EFF;
+    border-color: var(--accent_checked);
 }
 QSpinBox {
-    background-color: #3A3A3A;
-    color: #FFFFFF;
-    border: 1px solid #555;
-    border-radius: 4px;
-    padding: 4px 8px;
+    background-color: var(--primary);
+    color: var(--text);
+    border: 1px solid var(--border_input);
+    border-radius: var(--border_radius_small);
+    padding: var(--padding_small) var(--padding_large);
 }

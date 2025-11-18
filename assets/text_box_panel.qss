@@ -1,51 +1,51 @@
 #TextBoxStylePanel {
-    background-color: #2A2A2A; 
-    border-left: 1px solid #3A3A3A;
-    border-right: 1px solid #1A1A1A;
+    background-color: var(--tertiary); 
+    border-left: 1px solid var(--primary);
+    border-right: 1px solid var(--nonary);
 }
 #panelTitle {
-    color: #FFFFFF;
-    font-size: 20px;
+    color: var(--text);
+    font-size: var(--font_size_large);
     font-weight: bold;
 }
 #headerDivider {
-    border-color: #3A3A3A;
+    border-color: var(--primary);
 }
 #styleScrollArea {
         background-color: transparent;
 }
 #styleGroup {
-    color: #FFFFFF;
+    color: var(--text);
     font-weight: bold;
-    border: 1px solid #3A3A3A;
+    border: 1px solid var(--primary);
     border-radius: 10px;
     margin-top: 15px;
     padding-top: 15px;
-    font-size: 20px;
+    font-size: var(--font_size_large);
 }
 #styleGroup::title {
     subcontrol-origin: margin;
     subcontrol-position: top center;
     padding: 0 8px;
-    background-color: #2A2A2A;
+    background-color: var(--tertiary);
 }
 #buttonContainer {
-    background-color: #2A2A2A;
+    background-color: var(--tertiary);
 }
 #resetButton, #applyButton {
-        background-color: #3A3A3A;
-        color: #FFFFFF;
+        background-color: var(--primary);
+        color: var(--text);
         border: none;
         padding: 10px;
         border-radius: 20px;
-        font-size: 20px;
+        font-size: var(--font_size_large);
 }
 #addPresetButton { 
-    background-color: #333; 
-    border: 1px solid #555; 
+    background-color: var(--quaternary); 
+    border: 1px solid var(--border_input); 
     border-radius: 3px; 
 }
 #addPresetButton:hover { 
-    background-color: #444; 
-    border-color: #666; 
+    background-color: var(--senary); 
+    border-color: var(--quinary); 
 }

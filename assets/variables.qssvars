@@ -19,20 +19,47 @@
   --button_pressed: #252525;
   --icon_color: #FFFFFF;
   --icon_disabled_color: #777777;
+  --border_input: #555555;
+  --accent_checked: #4A9EFF;
+  --text_light: #EAEAEA;
+  --text_gray: #B0B1B2;
+  --border_gray: #60666E;
+  --border_gray_hover: #70777F;
+  --accent_blue: #0078D7;
+  --accent_blue_border: #005A9E;
+  --bg_dark: #2F2F2F;
+  --success: #4CAF50;
+  --success_hover: #45a049;
+  --danger: #f44336;
+  --danger_hover: #da190b;
+  --warning_orange: #ff9800;
+  --warning_orange_hover: #e68a00;
 
   /* Additional variables for QSS files */
-  --tertiary: #2A2A2A;         /* Darker background for pressed/secondary elements */
-  --quaternary: #333333;       /* Intermediate dark for hover states */
-  --quinary: #666666;          /* Disabled text color */
-  --senary: #444444;           /* Border color for disabled elements */
-  --septenary: #CCCCCC;         /* Secondary text color */
-  --octenary: #999999;         /* Disabled button text color */
-  --nonary: #1a1a1a;           /* Darker background for home elements */
-  --denary: #3E3E3E;           /* Button background for home layouts */
-  --undenary: #4f4f4f;         /* Button hover for home layouts */
-  --duodenary: #5A5A5A;        /* Darker secondary hover */
-  --tredecenary: #2B2B2B;      /* Home left layout background */
-  --progress_chunk: #5294e2;   /* Progress bar chunk color */
+  --tertiary: #2A2A2A;
+  /* Darker background for pressed/secondary elements */
+  --quaternary: #333333;
+  /* Intermediate dark for hover states */
+  --quinary: #666666;
+  /* Disabled text color */
+  --senary: #444444;
+  /* Border color for disabled elements */
+  --septenary: #CCCCCC;
+  /* Secondary text color */
+  --octenary: #999999;
+  /* Disabled button text color */
+  --nonary: #1a1a1a;
+  /* Darker background for home elements */
+  --denary: #3E3E3E;
+  /* Button background for home layouts */
+  --undenary: #4f4f4f;
+  /* Button hover for home layouts */
+  --duodenary: #5A5A5A;
+  /* Darker secondary hover */
+  --tredecenary: #2B2B2B;
+  /* Home left layout background */
+  --progress_chunk: #5294e2;
+  /* Progress bar chunk color */
 
   /* Border radius variables */
   --border_radius_small: 4px;
@@ -54,6 +81,7 @@
   --indicator_size_medium: 22px;
   --scrollbar_width: 10px;
   --scrollbar_handle_min_height: 20px;
+  --indicator_size_checkbox: 16px;
 
   /* Font sizes */
   --font_size_small: 14px;
@@ -63,6 +91,7 @@
   /* Padding variables */
   --padding_small: 4px;
   --padding_medium: 5px;
+  --padding_6: 6px;
   --padding_large: 8px;
   --padding_xlarge: 10px;
 

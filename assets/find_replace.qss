@@ -13,7 +13,7 @@
     border: 1px solid var(--border);
     border-radius: 3px;
     padding: 6px 8px;
-    font-size: 15px;
+    font-size: var(--font_size_medium);
     min-height: 28px;
 }
 /* Base style for all icon buttons within the widget */
@@ -58,7 +58,7 @@
 /* Match count label */
 #FindReplaceWidget QLabel#MatchCountLabel {
     color: var(--text_secondary);
-    font-size: 14px;
+    font-size: var(--font_size_small);
     padding: 0 10px;
     min-width: 80px;
     background-color: transparent;

@@ -3,31 +3,31 @@
     border-radius: 5px; 
 }
 QPushButton { 
-    background-color: #4CAF50; 
+    background-color: var(--success); 
     border: none; 
-    color: white; 
+    color: var(--text); 
     padding: 5px 10px; 
     text-align: center; 
-    font-size: 14px; 
+    font-size: var(--font_size_small); 
     margin: 2px; 
     border-radius: 3px; 
 }
 QPushButton:hover { 
-    background-color: #45a049; 
+    background-color: var(--success_hover); 
 }
 QPushButton#CancelButton { 
-    background-color: #f44336; 
+    background-color: var(--danger); 
 }
 QPushButton#CancelButton:hover { 
-    background-color: #da190b; 
+    background-color: var(--danger_hover); 
 }
 QPushButton#ResetButton { 
-    background-color: #ff9800; 
+    background-color: var(--warning_orange); 
 }
 QPushButton#ResetButton:hover { 
-    background-color: #e68a00; 
+    background-color: var(--warning_orange_hover); 
 }
 QLabel { 
-    color: white; 
-    font-size: 12px; 
+    color: var(--text); 
+    font-size: var(--font_size_small); 
 }

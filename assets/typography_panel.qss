@@ -2,38 +2,38 @@
     background-color: transparent; 
 }
 QLabel { 
-    color: #EAEAEA; 
-    font-size: 13px; 
+    color: var(--text_light); 
+    font-size: var(--font_size_medium); 
     font-family: "Segoe UI"; 
 }
 QLabel#mainLabel {
-    color: #EAEAEA;
+    color: var(--text_light);
     font-weight: 600;
-    font-size: 13px;
+    font-size: var(--font_size_medium);
     margin-top: 5px; 
     margin-bottom: 4px; 
     padding-left: 2px;
 }
 QLabel#tinyLabel {
-    color: #B0B1B2; 
-    font-size: 11px; 
+    color: var(--text_gray); 
+    font-size: var(--font_size_small); 
     font-weight: 500; 
     margin-bottom: 3px;
 }
 QPushButton#colorButton {
-    border: 1px solid #60666E; 
+    border: 1px solid var(--border_gray); 
     border-radius: 3px;
 }
 QPushButton#colorButton:hover { 
-    border: 1px solid #70777F; 
+    border: 1px solid var(--border_gray_hover); 
 }
 QComboBox, QSpinBox {
-    background-color: #3A3A3A; 
-    color: #FFFFFF; 
-    border: 1px solid #4A4A4A;
+    background-color: var(--primary); 
+    color: var(--text); 
+    border: 1px solid var(--secondary);
     padding: 4px; 
     border-radius: 4px; 
-    font-size: 13px; 
+    font-size: var(--font_size_medium); 
     font-family: "Segoe UI";
 }
 QSpinBox { 
@@ -44,16 +44,16 @@ QComboBox::drop-down {
     width: 20px; 
 }
 QComboBox QAbstractItemView {
-    background-color: #3A3A3A; 
-    color: #FFFFFF;
-    selection-background-color: #0078D7; 
-    font-size: 13px; 
+    background-color: var(--primary); 
+    color: var(--text);
+    selection-background-color: var(--accent_blue); 
+    font-size: var(--font_size_medium); 
     outline: 0px;
 }
 QSpinBox::up-button, QSpinBox::down-button {
     subcontrol-origin: border; 
     width: 16px; 
-    border-left: 1px solid #4A4A4A;
+    border-left: 1px solid var(--secondary);
 }
 QSpinBox::up-arrow, QSpinBox::down-arrow { 
     width: 10px; 
@@ -61,8 +61,8 @@ QSpinBox::up-arrow, QSpinBox::down-arrow {
 }
 QCheckBox { 
     spacing: 5px; 
-    color: #B0B1B2; 
-    font-size: 11px; 
+    color: var(--text_gray); 
+    font-size: var(--font_size_medium); 
 }
 QCheckBox::indicator { 
     width: 18px; 
@@ -70,21 +70,21 @@ QCheckBox::indicator {
 }
 
 QPushButton#alignButton, QPushButton#styleToggleButton {
-    border: 1px solid #555; 
+    border: 1px solid var(--border_input); 
     background-color: transparent;
     padding: 5px; 
     margin: 0px; 
     border-radius: 4px;
 }
 QPushButton#alignButton:checked, QPushButton#styleToggleButton:checked {
-    background-color: #0078D7; 
-    border-color: #005A9E;
+    background-color: var(--accent_blue); 
+    border-color: var(--accent_blue_border);
 }
 QPushButton#alignButton:hover, QPushButton#styleToggleButton:hover {
-    border-color: #777;
+    border-color: var(--icon_disabled_color);
 }
 QFrame#gradientGroup {
-    background-color: #2F2F2F; 
+    background-color: var(--bg_dark); 
     border-radius: 4px; 
     padding: 0 8px 8px 8px;
 }

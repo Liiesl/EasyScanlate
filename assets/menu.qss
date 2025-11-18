@@ -9,7 +9,7 @@ QPushButton {
     color: var(--text);
     border: 1px solid var(--border);
     padding: 10px 15px;
-    font-size: 14px;
+    font-size: var(--font_size_small);
     text-align: left;
     border-radius: 4px;
     margin: 2px;
