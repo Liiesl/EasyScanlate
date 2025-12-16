@@ -8,7 +8,7 @@ from PySide6.QtGui import QColor
 import qtawesome as qta
 from app.ui.components.textbox_style.preset import PresetButton
 # TEXT_BOX_STYLE_PANEL_STYLESHEET is no longer needed here
-from assets import DEFAULT_GRADIENT, TEXT_BOX_STYLE_PANEL_STYLE
+from assets import DEFAULT_GRADIENT
 from app.ui.dialogs.BetterColorDialog.MainDialog import CustomColorDialog
 from .shape_panel import ShapeStylePanel
 from .typography_panel import TypographyStylePanel
@@ -142,7 +142,6 @@ class TextBoxStylePanel(QWidget):
         preset_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         preset_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         preset_scroll_area.setFrameShape(QFrame.NoFrame)
-        preset_scroll_area.setStyleSheet("background-color: transparent;")
         
         self.preset_buttons_container = QWidget()
         self.presets_buttons_layout = QHBoxLayout(self.preset_buttons_container)
@@ -165,7 +164,6 @@ class TextBoxStylePanel(QWidget):
         main_layout.addWidget(presets_widget)
 
         # The large stylesheet is removed from here. Only panel-specific styles remain.
-        self.setStyleSheet(TEXT_BOX_STYLE_PANEL_STYLE)
 
     def get_current_style(self):
         """
@@ -236,7 +234,6 @@ class TextBoxStylePanel(QWidget):
         color = CustomColorDialog.getColor(initial_color=current_color, parent=self)
         
         if color is not None and color.isValid():
-            button.setStyleSheet(f"background-color: {color.name(QColor.HexArgb)}; border: 1px solid #60666E; border-radius: 3px;")
             self.style_changed_handler()
 
     def clear_selection(self):

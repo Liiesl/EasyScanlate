@@ -3,7 +3,6 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtGui import QIcon
-from assets import MENU_STYLES
 
 class ToggleButton(QPushButton):
     """
@@ -66,8 +65,6 @@ class Menu(QWidget):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Popup)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_DeleteOnClose)
-
-        self.setStyleSheet(MENU_STYLES)
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(5, 5, 5, 5)

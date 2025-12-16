@@ -2,7 +2,6 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QComboBox, QSpinBox
                              QHBoxLayout, QPushButton, QFrame)
 from PySide6.QtCore import Signal, Qt, QSize, QPoint
 from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter, QBrush, QPolygon
-from assets import SHAPE_PANEL_STYLE
 
 class ShapeStylePanel(QWidget):
     """
@@ -204,8 +203,6 @@ class ShapeStylePanel(QWidget):
         main_layout.addStretch()
         self._toggle_fill_gradient_controls()
         
-        self.setStyleSheet(SHAPE_PANEL_STYLE)
-
     def _handle_color_choice(self, button):
         """
         Generic handler for all color buttons. It uses the external chooser

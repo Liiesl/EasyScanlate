@@ -4,7 +4,6 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QComboBox, QSpinBox
 from PySide6.QtCore import Signal, Qt, QSize
 from PySide6.QtGui import QFontDatabase, QColor, QIcon
 import qtawesome as qta
-from assets import TYPOGRAPHY_PANEL_STYLE
 
 class TypographyStylePanel(QWidget):
     """
@@ -236,7 +235,6 @@ class TypographyStylePanel(QWidget):
         main_layout.addStretch()
         self._toggle_text_gradient_controls()
         
-        self.setStyleSheet(TYPOGRAPHY_PANEL_STYLE)
 
     def _on_style_changed(self):
         if not self._updating_controls:
@@ -259,7 +257,6 @@ class TypographyStylePanel(QWidget):
         color = QColor(color_str)
         if not color.isValid():
             color = QColor(255, 255, 255)
-        button.setStyleSheet(f"background-color: {color.name(QColor.HexArgb)}; border: 1px solid #60666E; border-radius: 3px;")
 
     def _toggle_text_gradient_controls(self):
         is_gradient = self.combo_text_color_type.currentIndex() == 1

@@ -10,7 +10,6 @@ import sys
 from app.core.translations import TranslationThread, generate_for_translate_content, generate_retranslate_content, import_translation_file_content
 from app.ui.dialogs.error_dialog import ErrorDialog
 from app.ui.dialogs.settings_dialog import GEMINI_MODELS_WITH_INFO
-from assets import ADVANCED_CHECK_STYLES
 
 class TranslationChatWidget(QWidget):
     """A chat-style widget for AI translation functionality."""
@@ -46,7 +45,6 @@ class TranslationChatWidget(QWidget):
         self.chat_scroll_area = QScrollArea()
         self.chat_scroll_area.setWidgetResizable(True)
         self.chat_scroll_area.setFrameShape(QFrame.NoFrame)
-        self.chat_scroll_area.setStyleSheet("QScrollArea { background-color: #2c2c2c; }")
 
         chat_container_widget = QWidget()
         self.chat_container_layout = QVBoxLayout(chat_container_widget)
@@ -56,7 +54,6 @@ class TranslationChatWidget(QWidget):
         # Input area
         input_area_frame = QFrame()
         input_area_frame.setObjectName("inputAreaFrame")
-        input_area_frame.setStyleSheet("#inputAreaFrame { background-color: #2c2c2c; border-top: 1px solid #444; }")
         input_area_layout = QVBoxLayout(input_area_frame)
         input_area_layout.setContentsMargins(10, 10, 10, 10)
         input_area_layout.setSpacing(10)
@@ -98,16 +95,7 @@ class TranslationChatWidget(QWidget):
         self.prompt_input_edit = QTextEdit()
         self.prompt_input_edit.setMaximumHeight(120)
         self.prompt_input_edit.setPlaceholderText("Describe how to translate (e.g., 'Translate formally')...")
-        self.prompt_input_edit.setStyleSheet("""
-            QTextEdit { 
-                border: 1px solid #555; 
-                border-radius: 18px; 
-                padding: 10px; 
-                padding-left: 15px; 
-                background-color: #383838; 
-                color: white;
-            }
-        """)
+
         
         # Bottom bar with translate button
         bottom_bar = QWidget()
@@ -121,21 +109,11 @@ class TranslationChatWidget(QWidget):
         self.translate_button.setToolTip("Translate (Ctrl+Enter)")
         self.translate_button.setIconSize(QSize(18, 18))
         self.translate_button.setFixedSize(40, 40)
-        self.translate_button.setStyleSheet("""
-            QPushButton { 
-                background-color: #0b57d0; 
-                border-radius: 20px; 
-                padding: 5px; 
-            }
-            QPushButton:hover { background-color: #1c6aeb; }
-            QPushButton:pressed { background-color: #2f79f2; }
-            QPushButton:disabled { background-color: #444; }
-        """)
+
         self.translate_button.clicked.connect(self.start_translation)
         
         # Options
         self.retranslate_selected_check = QCheckBox("Retranslate selected only")
-        self.retranslate_selected_check.setStyleSheet(ADVANCED_CHECK_STYLES)
         self.retranslate_selected_check.setChecked(False)
         
         bottom_bar_layout.addWidget(self.retranslate_selected_check)
@@ -199,36 +177,15 @@ class TranslationChatWidget(QWidget):
         bubble.setMaximumWidth(int(self.chat_scroll_area.width() * 0.8))
 
         if sender == "You":
-            bubble.setStyleSheet("""
-                background-color: #0b57d0; 
-                color: white; 
-                border-radius: 12px;
-                border: none;
-            """)
-            name_label.setStyleSheet("color: #e0e0e0; font-weight: bold; margin-bottom: 3px;")
             message_layout.addStretch()
             message_layout.addWidget(bubble)
         elif sender == "Gemini":
-            bubble.setStyleSheet("""
-                background-color: #3c4043; 
-                color: #e8eaed; 
-                border-radius: 12px;
-                border: none;
-            """)
-            name_label.setStyleSheet("color: #bbb; font-weight: bold; margin-bottom: 3px;")
             if is_streaming:
                 self.current_gemini_bubble_label = text_label
             message_layout.addWidget(bubble)
             message_layout.addStretch()
         elif sender == "Error":
-            bubble.setStyleSheet("""
-                background-color: #4d2d2d; 
-                color: #ff8e8e; 
-                border: 1px solid #884444; 
-                border-radius: 12px;
-            """)
             name_label.setText("<b>SYSTEM ERROR</b>")
-            name_label.setStyleSheet("color: #ffc9c9; font-weight: bold; margin-bottom: 3px;")
             message_layout.addWidget(bubble)
             message_layout.addStretch()
 

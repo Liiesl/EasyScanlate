@@ -24,8 +24,7 @@ from app.handlers.selection_manager import SelectionManager
 from app.core.project_model import ProjectModel
 from app.ui.dialogs.settings_dialog import SettingsDialog
 from app.ui.window.translation_window import TranslationWindow
-from assets import (COLORS, MAIN_STYLESHEET, ADVANCED_CHECK_STYLES, RIGHT_WIDGET_STYLES,
-                    DEFAULT_TEXT_STYLE, DELETE_ROW_STYLES, get_style_diff)
+from assets import (DEFAULT_TEXT_STYLE, get_style_diff)
 import os, gc, json, traceback # easyocr, # ocr functionality disabled
 
 class MainWindow(QMainWindow):
@@ -92,28 +91,6 @@ class MainWindow(QMainWindow):
         vertical_toolbar_layout = QVBoxLayout(self.vertical_toolbar)
         vertical_toolbar_layout.setContentsMargins(5, 10, 5, 10)
         vertical_toolbar_layout.setSpacing(10)
-        self.vertical_toolbar.setStyleSheet("""
-            QWidget#VerticalToolBar {
-                background-color: #2d2d30;
-                border-right: 1px solid #3e3e42;
-            }
-            QPushButton {
-                border: none;
-                border-radius: 4px;
-                padding: 8px;
-                background-color: transparent;
-            }
-            QPushButton:hover {
-                background-color: #3e3e42;
-            }
-            QPushButton:checked {
-                background-color: #007acc;
-            }
-            QPushButton:disabled {
-                background-color: transparent;
-                opacity: 0.5;
-            }
-        """)
         
         # Settings button (moved from settings_layout)
         self.btn_settings = QPushButton(qta.icon('fa5s.cog', color='white'), "")
@@ -145,8 +122,6 @@ class MainWindow(QMainWindow):
         vertical_toolbar_layout.addStretch()
 
         # Rest of the UI setup continues...
-        self.colors = COLORS
-        self.setStyleSheet(MAIN_STYLESHEET)
         self.update_profile_selector()
 
         left_panel = QVBoxLayout()
@@ -161,7 +136,6 @@ class MainWindow(QMainWindow):
         left_panel.addLayout(settings_layout)
         
         self.scroll_content = QWidget()
-        self.scroll_content.setStyleSheet("background-color: transparent;")
         self.scroll_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.scroll_layout = QVBoxLayout(self.scroll_content)
         self.scroll_layout.setContentsMargins(0, 0, 0, 0)
@@ -258,7 +232,6 @@ class MainWindow(QMainWindow):
         bottom_controls_layout = QHBoxLayout()
         # REMOVED: btn_translate from bottom_controls_layout
         self.advanced_mode_check = QCheckBox("Advanced Mode")
-        self.advanced_mode_check.setStyleSheet(ADVANCED_CHECK_STYLES)
         self.advanced_mode_check.setChecked(False)
         self.advanced_mode_check.setCursor(Qt.PointingHandCursor)
         self.advanced_mode_check.stateChanged.connect(self.toggle_advanced_mode)
@@ -268,7 +241,6 @@ class MainWindow(QMainWindow):
         right_widget = QWidget()
         right_widget.setObjectName("RightWidget")
         right_widget.setLayout(right_panel)
-        right_widget.setStyleSheet(RIGHT_WIDGET_STYLES)
 
         splitter = QSplitter(Qt.Horizontal)
         left_widget = QWidget()
@@ -815,10 +787,8 @@ class MainWindow(QMainWindow):
             msg.setWindowTitle("Confirm Deletion Marking")
             msg.setText("<b>Mark for Deletion Warning</b>")
             msg.setInformativeText("Mark this entry for deletion? It will be hidden and excluded from exports.")
-            msg.setStyleSheet(DELETE_ROW_STYLES)
             dont_show_cb = QCheckBox("Remember choice", msg)
             msg.setCheckBox(dont_show_cb)
-            dont_show_cb.setStyleSheet(ADVANCED_CHECK_STYLES)
             msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No) 
             msg.setDefaultButton(QMessageBox.No)
             response = msg.exec()

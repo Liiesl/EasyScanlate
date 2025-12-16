@@ -7,7 +7,6 @@ from app.ui.dialogs.error_dialog import ErrorDialog
 from PySide6.QtCore import Qt, Signal, QEvent
 import qtawesome as qta
 import math
-from assets import SIMPLE_VIEW_STYLES, DELETE_ROW_STYLES
 
 class ResultsWidget(QWidget):
     # --- DELETED: rowSelected signal is no longer needed ---
@@ -56,7 +55,6 @@ class ResultsWidget(QWidget):
         self.simple_scroll_content = QWidget()
         self.simple_scroll_layout = QVBoxLayout(self.simple_scroll_content)
         self.simple_scroll.setWidget(self.simple_scroll_content)
-        self.simple_scroll.setStyleSheet("border: none;")
         self.right_content_stack.addWidget(self.simple_scroll)
         self.right_content_stack.addWidget(self.results_table)
         main_layout.addWidget(self.right_content_stack, 1)
@@ -145,11 +143,10 @@ class ResultsWidget(QWidget):
             container.setObjectName(f"SimpleViewRowContainer_{original_row_number}")
             container_layout = QHBoxLayout(container)
             container_layout.setContentsMargins(5, 5, 5, 5); container_layout.setSpacing(10)
-            text_frame = QFrame(); text_frame.setStyleSheet(SIMPLE_VIEW_STYLES)
+            text_frame = QFrame()
             text_layout = QVBoxLayout(text_frame); text_layout.setContentsMargins(0, 0, 0, 0)
             
             text_edit = QTextEdit()
-            text_edit.setStyleSheet(SIMPLE_VIEW_STYLES)
             text_edit.setProperty("ocr_row_number", original_row_number)
             text_edit.installEventFilter(self)
             text_edit.setLineWrapMode(QTextEdit.WidgetWidth)
@@ -162,7 +159,7 @@ class ResultsWidget(QWidget):
             text_edit.textChanged.connect(lambda rn=original_row_number, te=text_edit: self.on_simple_text_changed(rn, te.toPlainText()))
             text_layout.addWidget(text_edit)
             delete_btn = QPushButton(qta.icon('fa5s.trash-alt', color='red'), "")
-            delete_btn.setFixedSize(40, 40); delete_btn.setStyleSheet(DELETE_ROW_STYLES)
+            delete_btn.setFixedSize(40, 40)
             delete_btn.clicked.connect(lambda _, rn=original_row_number: self.main_window.delete_row(rn))
             container_layout.addWidget(text_frame, 1); container_layout.addWidget(delete_btn)
             self.simple_scroll_layout.addWidget(container)
@@ -249,7 +246,6 @@ class ResultsWidget(QWidget):
 
             delete_btn = QPushButton(qta.icon('fa5s.trash-alt', color='red'), "")
             delete_btn.setFixedSize(30, 30)
-            delete_btn.setStyleSheet(DELETE_ROW_STYLES)
             container = QWidget()
             layout = QHBoxLayout(container); layout.addStretch(); layout.addWidget(delete_btn); layout.setContentsMargins(0, 0, 5, 0)
             delete_btn.clicked.connect(lambda _, rn=original_row_number: self.main_window.delete_row(rn))
