@@ -18,7 +18,7 @@ from app.ui.components.find_replace import FindReplaceWidget
 from app.ui.components.translation_chat import TranslationChatWidget
 from app.ui.widgets.menu_bar import MenuBar
 from app.ui.widgets.progress_bar import CustomProgressBar
-from app.ui.widgets.menus import Menu
+from app.ui.widgets.menus import Menu, ToggleButton
 # from app.handlers.ocr_batch_handler import BatchOCRHandler # ocr functionality disabled
 from app.handlers.selection_manager import SelectionManager
 from app.core.project_model import ProjectModel
@@ -117,6 +117,71 @@ class MainWindow(QMainWindow):
         self.btn_translate.setToolTip("AI Translation")
         self.btn_translate.clicked.connect(self.start_translation)
         vertical_toolbar_layout.addWidget(self.btn_translate)
+
+        # --- NEW ACTION BUTTONS ---
+
+        # Toggle Text Visibility
+        self.btn_toggle_text = ToggleButton(
+            off_text="", on_text="",
+            off_icon=qta.icon('fa5s.eye', color='white'),
+            on_icon=qta.icon('fa5s.eye-slash', color='white')
+        )
+        self.btn_toggle_text.setFixedSize(40, 40)
+        self.btn_toggle_text.setToolTip("Toggle Text Visibility")
+        self.btn_toggle_text.clicked.connect(self.scroll_area.toggle_text_visibility)
+        self.btn_toggle_text.setState(False) 
+        vertical_toolbar_layout.addWidget(self.btn_toggle_text)
+
+        # Toggle Inpainting
+        self.btn_toggle_inpainting = ToggleButton(
+             off_text="", on_text="",
+             off_icon=qta.icon('fa5s.eye', color='white'), # Using eye for "Inpainting is Visible"
+             on_icon=qta.icon('fa5s.eraser', color='white') # Using eraser/slash for "Inpainting is Hidden"
+        )
+        
+        self.btn_toggle_inpainting = ToggleButton(
+            off_text="", on_text="",
+            off_icon=qta.icon('fa5s.eraser', color='white'), # Hidden state
+            on_icon=qta.icon('fa5s.fill', color='white')   # Visible state
+        )
+        self.btn_toggle_inpainting.setFixedSize(40, 40)
+        self.btn_toggle_inpainting.setToolTip("Toggle Context Fill Visibility")
+        self.btn_toggle_inpainting.setState(True) # Default is visible
+        self.btn_toggle_inpainting.clicked.connect(self.scroll_area.toggle_inpainting_visibility)
+
+        vertical_toolbar_layout.addWidget(self.btn_toggle_inpainting)
+
+        # Context Fill (Normal Button)
+        self.btn_context_fill = QPushButton(qta.icon('fa5s.fill-drip', color='white'), "")
+        self.btn_context_fill.setFixedSize(40, 40)
+        self.btn_context_fill.setToolTip("Context Fill Mode")
+        self.btn_context_fill.clicked.connect(self.scroll_area.context_fill_handler.start_mode)
+        vertical_toolbar_layout.addWidget(self.btn_context_fill)
+
+        # Edit Context Fill (Toggle Button)
+        self.btn_edit_context_fill = ToggleButton(
+            off_text="", on_text="",
+            off_icon=qta.icon('fa5s.paint-brush', color='white'),
+            on_icon=qta.icon('fa5s.check-circle', color='white')
+        )
+        self.btn_edit_context_fill.setFixedSize(40, 40)
+        self.btn_edit_context_fill.setToolTip("Edit Context Fills")
+        self.btn_edit_context_fill.clicked.connect(self.scroll_area.context_fill_handler.toggle_edit_mode)
+        vertical_toolbar_layout.addWidget(self.btn_edit_context_fill)
+
+        # Split Images
+        self.btn_split = QPushButton(qta.icon('fa5s.object-ungroup', color='white'), "")
+        self.btn_split.setFixedSize(40, 40)
+        self.btn_split.setToolTip("Split Images")
+        self.btn_split.clicked.connect(self.scroll_area.split_handler.start_splitting_mode)
+        vertical_toolbar_layout.addWidget(self.btn_split)
+
+        # Stitch Images
+        self.btn_stitch = QPushButton(qta.icon('fa5s.object-group', color='white'), "")
+        self.btn_stitch.setFixedSize(40, 40)
+        self.btn_stitch.setToolTip("Stitch Images")
+        self.btn_stitch.clicked.connect(self.scroll_area.stitch_handler.start_stitching_mode)
+        vertical_toolbar_layout.addWidget(self.btn_stitch)
 
         # Add stretch to push buttons to top
         vertical_toolbar_layout.addStretch()

@@ -7,8 +7,8 @@ from app.handlers.stitch_handler import StitchHandler
 from app.handlers.split_handler import SplitHandler
 from app.handlers.context_fill_handler import ContextFillHandler
 from app.handlers.manual_ocr_handler import ManualOCRHandler
-# --- MODIFIED: Import the generic Menu class and the new ToggleButton ---
-from app.ui.widgets.menus import Menu, ToggleButton
+# --- MODIFIED: Import the generic Menu class ---
+from app.ui.widgets.menus import Menu
 from app.ui.components.image_area.label import ResizableImageLabel
     
 class CustomScrollArea(QScrollArea):
@@ -59,12 +59,6 @@ class CustomScrollArea(QScrollArea):
         btn_scroll_top.clicked.connect(lambda: self.verticalScrollBar().setValue(0))
         layout.addWidget(btn_scroll_top)
 
-        # Action Menu Button
-        btn_action_menu = QPushButton(qta.icon('fa5s.bars', color='white'), "")
-        btn_action_menu.setFixedSize(50, 50)
-        btn_action_menu.clicked.connect(self._show_action_menu)
-        layout.addWidget(btn_action_menu)
-
         # Save Menu Button
         btn_save_menu = QPushButton(qta.icon('fa5s.save', color='white'), "Save")
         btn_save_menu.setFixedSize(120, 50)
@@ -76,64 +70,6 @@ class CustomScrollArea(QScrollArea):
         btn_scroll_bottom.setFixedSize(50, 50)
         btn_scroll_bottom.clicked.connect(lambda: self.verticalScrollBar().setValue(self.verticalScrollBar().maximum()))
         layout.addWidget(btn_scroll_bottom)
-
-    def _show_action_menu(self):
-        """ Creates, populates, and shows the Action Menu using the generic Menu class. """
-        trigger_button = self.sender()
-        if not isinstance(trigger_button, QWidget):
-            return
-
-        menu = Menu(self)
-
-        # Create and add action buttons to the menu
-        btn_hide_text = ToggleButton(
-            off_text=" Show Text", on_text=" Hide Text",
-            off_icon=qta.icon('fa5s.eye', color='white'),
-            on_icon=qta.icon('fa5s.eye-slash', color='white')
-        )
-        
-        # If edit mode is active, text is forced off. Reflect this in the button state and disable it.
-        is_edit_mode = self.context_fill_handler.is_edit_mode_active
-        is_text_currently_visible = self._text_is_visible and not is_edit_mode
-        btn_hide_text.setState(is_text_currently_visible)
-        btn_hide_text.setEnabled(not is_edit_mode)
-        
-        btn_hide_text.clicked.connect(self.toggle_text_visibility)
-        menu.addButton(btn_hide_text, close_on_click=False)
-        
-        btn_hide_inpainting = ToggleButton(
-            off_text=" Show Context Fills", on_text=" Hide Context Fills",
-            off_icon=qta.icon('fa5s.eye', color='white'),
-            on_icon=qta.icon('fa5s.eraser', color='white')
-        )
-        btn_hide_inpainting.setState(self._inpainting_is_visible)
-        btn_hide_inpainting.clicked.connect(self.toggle_inpainting_visibility)
-        menu.addButton(btn_hide_inpainting, close_on_click=False)
-
-        btn_context_fill = QPushButton(qta.icon('fa5s.fill-drip', color='white'), " Context Fill")
-        btn_context_fill.clicked.connect(self.context_fill_handler.start_mode)
-        menu.addButton(btn_context_fill)
-
-        # --- NEW: Edit Context Fill uses the ToggleButton to show state ---
-        btn_edit_context_fill = ToggleButton(
-            off_text=" Edit Context Fill", on_text=" Finish Editing",
-            off_icon=qta.icon('fa5s.paint-brush', color='white'),
-            on_icon=qta.icon('fa5s.check-circle', color='white')
-        )
-        btn_edit_context_fill.setState(self.context_fill_handler.is_edit_mode_active)
-        btn_edit_context_fill.clicked.connect(self.context_fill_handler.toggle_edit_mode)
-        menu.addButton(btn_edit_context_fill, close_on_click=False)
-
-        btn_split_images = QPushButton(qta.icon('fa5s.object-ungroup', color='white'), " Split Images")
-        btn_split_images.clicked.connect(self.split_handler.start_splitting_mode)
-        menu.addButton(btn_split_images)
-        
-        btn_stitch_images = QPushButton(qta.icon('fa5s.object-group', color='white'), " Stitch Images")
-        btn_stitch_images.clicked.connect(self.stitch_handler.start_stitching_mode)
-        menu.addButton(btn_stitch_images)
-
-        # Position the menu above the button that triggered it
-        menu.set_position_and_show(trigger_button, 'top left')
     
     def _show_save_menu(self):
         """Creates, populates, and shows the Save menu."""
