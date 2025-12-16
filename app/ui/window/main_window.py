@@ -84,9 +84,7 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        # Custom Title Bar
         self.title_bar = CustomTitleBar(self)
-        self.title_bar.setState(TitleBarState.MAIN_WINDOW)
         root_layout.addWidget(self.title_bar)
         
         # Main Content Widget
@@ -145,7 +143,7 @@ class MainWindow(QMainWindow):
         )
         self.btn_toggle_text.setFixedSize(40, 40)
         self.btn_toggle_text.setToolTip("Toggle Text Visibility")
-        self.btn_toggle_text.clicked.connect(self.scroll_area.toggle_text_visibility)
+        self.btn_toggle_text.toggled.connect(self.scroll_area.toggle_text_visibility)
         self.btn_toggle_text.setState(False) 
         vertical_toolbar_layout.addWidget(self.btn_toggle_text)
 
@@ -164,7 +162,7 @@ class MainWindow(QMainWindow):
         self.btn_toggle_inpainting.setFixedSize(40, 40)
         self.btn_toggle_inpainting.setToolTip("Toggle Context Fill Visibility")
         self.btn_toggle_inpainting.setState(True) # Default is visible
-        self.btn_toggle_inpainting.clicked.connect(self.scroll_area.toggle_inpainting_visibility)
+        self.btn_toggle_inpainting.toggled.connect(self.scroll_area.toggle_inpainting_visibility)
 
         vertical_toolbar_layout.addWidget(self.btn_toggle_inpainting)
 
@@ -317,14 +315,9 @@ class MainWindow(QMainWindow):
         content_splitter.setHandleWidth(5)
         right_panel.addWidget(content_splitter, 1)
 
-        bottom_controls_layout = QHBoxLayout()
-        # REMOVED: btn_translate from bottom_controls_layout
-        self.advanced_mode_check = QCheckBox("Advanced Mode")
-        self.advanced_mode_check.setChecked(False)
-        self.advanced_mode_check.setCursor(Qt.PointingHandCursor)
-        self.advanced_mode_check.stateChanged.connect(self.toggle_advanced_mode)
-        bottom_controls_layout.addWidget(self.advanced_mode_check)
-        right_panel.addLayout(bottom_controls_layout)
+        # bottom_controls_layout removed as Advanced Mode checkbox is now in View Menu
+        # self.advanced_mode_check = QCheckBox("Advanced Mode") ... REMOVED
+
 
         right_widget = QWidget()
         right_widget.setObjectName("RightWidget")
@@ -342,6 +335,9 @@ class MainWindow(QMainWindow):
 
         # Connect Window Resizer
         self.resizer = WindowResizer(self)
+
+        # Initialize Title Bar State (needs all other widgets to be created first)
+        self.title_bar.setState(TitleBarState.MAIN_WINDOW)
 
     def changeEvent(self, event):
         if event.type() == QEvent.WindowStateChange:
@@ -380,6 +376,10 @@ class MainWindow(QMainWindow):
             index = self.profile_selector.findText(self.model.active_profile_name)
             if index != -1: self.profile_selector.setCurrentIndex(index)
         self.profile_selector.blockSignals(False)
+        
+        # Sync Menu Bar profiles if available
+        if hasattr(self, 'title_bar') and hasattr(self.title_bar, 'menu_bar'):
+             self.title_bar.menu_bar.update_profiles_menu()
         
         # Also update translation chat profiles
         self._update_translation_chat_data()
@@ -875,8 +875,7 @@ class MainWindow(QMainWindow):
             ErrorDialog.critical(self, "Error", message)
     
     def toggle_advanced_mode(self, state):
-        self.results_widget.right_content_stack.setCurrentIndex(1 if state else 0)
-        self.results_widget.update_views()
+        self.results_widget.toggle_advanced_mode(state)
 
     def delete_row(self, row_number_to_delete):
         show_warning = self.settings.value("show_delete_warning", "true") == "true"

@@ -126,20 +126,70 @@ class MenuBar(QMenuBar):
             
             view_menu.addSeparator()
 
-            # Vertical Toolbar Toggles (if we want to expose them here)
-            # For now, let's just keep it simple as requested.
-            
+            # Profiles Submenu
+            self.profiles_menu = view_menu.addMenu("Profiles")
+            # Populate initially (though it might be empty until project loads)
+            self.update_profiles_menu()
+
+            view_menu.addSeparator()
+
+            # Text Visibility
+            toggle_text_action = QAction("Toggle Text Visibility", self)
+            toggle_text_action.setCheckable(True)
+            if hasattr(self.main_window, 'btn_toggle_text'):
+                toggle_text_action.setChecked(self.main_window.btn_toggle_text.isChecked())
+                # Sync: Menu -> Button
+                toggle_text_action.toggled.connect(self.main_window.btn_toggle_text.setChecked)
+                # Sync: Button -> Menu
+                self.main_window.btn_toggle_text.toggled.connect(toggle_text_action.setChecked)
+            view_menu.addAction(toggle_text_action)
+
+            # Inpainting Visibility (Context Fill)
+            toggle_inpainting_action = QAction("Toggle Inpainting Visibility", self)
+            toggle_inpainting_action.setCheckable(True)
+            if hasattr(self.main_window, 'btn_toggle_inpainting'):
+                toggle_inpainting_action.setChecked(self.main_window.btn_toggle_inpainting.isChecked())
+                 # Sync: Menu -> Button
+                toggle_inpainting_action.toggled.connect(self.main_window.btn_toggle_inpainting.setChecked)
+                # Sync: Button -> Menu
+                self.main_window.btn_toggle_inpainting.toggled.connect(toggle_inpainting_action.setChecked)
+            view_menu.addAction(toggle_inpainting_action)
+
+            view_menu.addSeparator()
+
             # Advanced Mode
             advanced_action = QAction("Advanced Mode", self)
             advanced_action.setCheckable(True)
-            if hasattr(self.main_window, 'advanced_mode_check'):
-                # Sync with checkbox
-                advanced_action.setChecked(self.main_window.advanced_mode_check.isChecked())
-                # We need to bridge the signal
-                advanced_action.triggered.connect(lambda c: self.main_window.advanced_mode_check.setChecked(c))
-                # Also listen to checkbox changes to update menu? 
-                # Ideally, but let's just trigger connections.
+            # Check state against results_widget if possible, else default false
+            if hasattr(self.main_window, 'results_widget'):
+                 advanced_action.setChecked(self.main_window.results_widget.is_advanced_mode)
+            
+            # Connect directly to toggle_advanced_mode
+            advanced_action.toggled.connect(self.main_window.toggle_advanced_mode)
             view_menu.addAction(advanced_action)
+            
+    def update_profiles_menu(self):
+        """Updates the Profiles submenu with available profiles."""
+        if not hasattr(self, 'profiles_menu') or self.state != TitleBarState.MAIN_WINDOW:
+            return
+            
+        self.profiles_menu.clear()
+        
+        if not hasattr(self.main_window, 'model'):
+            return
+
+        sorted_profiles = sorted([p for p in self.main_window.model.profiles.keys() if p != "Original"])
+        sorted_profiles.insert(0, "Original")
+        
+        active_profile = self.main_window.model.active_profile_name
+        
+        for profile_name in sorted_profiles:
+            action = QAction(profile_name, self)
+            action.setCheckable(True)
+            action.setChecked(profile_name == active_profile)
+            # Use lambda with default arg to capture variable current value
+            action.triggered.connect(lambda checked=False, p=profile_name: self.main_window.switch_active_profile(p))
+            self.profiles_menu.addAction(action)
 
     def new_project(self):
         from utils.project_processing import new_project

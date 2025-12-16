@@ -23,6 +23,7 @@ class ResultsWidget(QWidget):
         self._is_updating_views = False  # Flag to prevent textChanged from processing during view updates
         # Connect to the selection manager's signal
         self.selection_manager.selection_changed.connect(self.on_external_selection_changed)
+        self.is_advanced_mode = False  # Initialize advanced mode state
         self._init_ui()
         
     def _init_ui(self):
@@ -85,14 +86,14 @@ class ResultsWidget(QWidget):
         
         # If the selection was cleared externally, we don't need to do anything.
         if row_number is None:
-            if self.main_window.advanced_mode_check.isChecked():
+            if self.is_advanced_mode:
                 self.results_table.clearSelection()
             return
             
         self.scroll_to_row(row_number)
         
         # Additionally, provide visual feedback in the table
-        if self.main_window.advanced_mode_check.isChecked():
+        if self.is_advanced_mode:
             for row in range(self.results_table.rowCount()):
                 item = self.results_table.item(row, 0)
                 if item and item.data(Qt.UserRole) == row_number:
@@ -103,10 +104,16 @@ class ResultsWidget(QWidget):
 
     def update_views(self):
         """Public method called by MainWindow to refresh the currently visible view."""
-        if self.main_window.advanced_mode_check.isChecked():
+        if self.is_advanced_mode:
             self.update_results_table()
         else:
             self.update_simple_view()
+
+    def toggle_advanced_mode(self, enabled):
+        """Toggles the advanced mode view state."""
+        self.is_advanced_mode = enabled
+        self.right_content_stack.setCurrentIndex(1 if enabled else 0)
+        self.update_views()
     
     # ... (the rest of the file is unchanged, only the selection logic is modified) ...
     def update_simple_view(self):
@@ -313,7 +320,7 @@ class ResultsWidget(QWidget):
         except (ValueError, TypeError):
             return False
 
-        if self.main_window.advanced_mode_check.isChecked():
+        if self.is_advanced_mode:
             for row in range(self.results_table.rowCount()):
                 item = self.results_table.item(row, 0)
                 if item and item.data(Qt.UserRole) is not None:
