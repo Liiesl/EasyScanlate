@@ -1,8 +1,8 @@
-QDialog {
+#ImportDialog, #ExportDialog {
     background-color: var(--tredecenary);
     color: var(--text);
 }
-QGroupBox {
+#ImportDialog QGroupBox, #ExportDialog QGroupBox {
     font-weight: bold;
     border: 2px solid var(--border_input);
     border-radius: var(--border_radius_small);
@@ -10,15 +10,15 @@ QGroupBox {
     padding-top: var(--spacing_large);
     background-color: var(--quaternary);
 }
-QGroupBox::title {
+#ImportDialog QGroupBox::title, #ExportDialog QGroupBox::title {
     subcontrol-origin: margin;
     left: var(--spacing_large);
     padding: 0 var(--padding_medium);
 }
-QLabel {
+#ImportDialog QLabel, #ExportDialog QLabel {
     color: var(--text);
 }
-QPushButton {
+#ImportDialog QPushButton, #ExportDialog QPushButton {
     background-color: var(--secondary);
     color: var(--text);
     border: 1px solid var(--border_input);
@@ -26,13 +26,13 @@ QPushButton {
     padding: var(--padding_6) var(--spacing_xlarge);
     min-width: 80px;
 }
-QPushButton:hover {
+#ImportDialog QPushButton:hover, #ExportDialog QPushButton:hover {
     background-color: var(--duodenary);
 }
-QPushButton:pressed {
+#ImportDialog QPushButton:pressed, #ExportDialog QPushButton:pressed {
     background-color: var(--primary);
 }
-QComboBox {
+#ImportDialog QComboBox, #ExportDialog QComboBox {
     background-color: var(--primary);
     color: var(--text);
     border: 1px solid var(--border_input);
@@ -40,58 +40,58 @@ QComboBox {
     padding: var(--padding_small) var(--padding_large);
     min-width: 150px;
 }
-QComboBox:hover {
+#ImportDialog QComboBox:hover, #ExportDialog QComboBox:hover {
     background-color: var(--secondary);
 }
-QComboBox::drop-down {
+#ImportDialog QComboBox::drop-down, #ExportDialog QComboBox::drop-down {
     border: none;
 }
-QComboBox QAbstractItemView {
+#ImportDialog QComboBox QAbstractItemView, #ExportDialog QComboBox QAbstractItemView {
     background-color: var(--primary);
     color: var(--text);
     selection-background-color: var(--duodenary);
 }
-QRadioButton {
+#ImportDialog QRadioButton, #ExportDialog QRadioButton {
     color: var(--text);
     spacing: var(--spacing_small);
 }
-QRadioButton::indicator {
+#ImportDialog QRadioButton::indicator, #ExportDialog QRadioButton::indicator {
     width: var(--indicator_size_checkbox);
     height: var(--indicator_size_checkbox);
     border-radius: 8px;
     border: 2px solid var(--border_input);
     background-color: var(--tredecenary);
 }
-QRadioButton::indicator:checked {
+#ImportDialog QRadioButton::indicator:checked, #ExportDialog QRadioButton::indicator:checked {
     background-color: var(--accent_checked);
     border-color: var(--accent_checked);
 }
-QCheckBox {
+#ImportDialog QCheckBox, #ExportDialog QCheckBox {
     color: var(--text);
     spacing: var(--spacing_small);
 }
-QCheckBox::indicator {
+#ImportDialog QCheckBox::indicator, #ExportDialog QCheckBox::indicator {
     width: var(--indicator_size_checkbox);
     height: var(--indicator_size_checkbox);
     border: 2px solid var(--border_input);
     border-radius: 3px;
     background-color: var(--tredecenary);
 }
-QCheckBox::indicator:checked {
+#ImportDialog QCheckBox::indicator:checked, #ExportDialog QCheckBox::indicator:checked {
     background-color: var(--accent_checked);
     border-color: var(--accent_checked);
 }
-QLineEdit {
+#ImportDialog QLineEdit, #ExportDialog QLineEdit {
     background-color: var(--primary);
     color: var(--text);
     border: 1px solid var(--border_input);
     border-radius: var(--border_radius_small);
     padding: var(--padding_small) var(--padding_large);
 }
-QLineEdit:focus {
+#ImportDialog QLineEdit:focus, #ExportDialog QLineEdit:focus {
     border-color: var(--accent_checked);
 }
-QSpinBox {
+#ImportDialog QSpinBox, #ExportDialog QSpinBox {
     background-color: var(--primary);
     color: var(--text);
     border: 1px solid var(--border_input);

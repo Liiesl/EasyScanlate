@@ -1,8 +1,8 @@
-QMainWindow, QWidget {
+#HomeWindow QWidget {
     background-color: var(--nonary);
     color: var(--text);
 }
-QPushButton {
+#HomeWindow QPushButton {
     background-color: var(--denary);
     color: var(--text);
     border-radius: var(--border_radius_medium);
@@ -10,23 +10,23 @@ QPushButton {
     border: none;
     font-size: var(--font_size_small);
 }
-QPushButton:hover {
+#HomeWindow QPushButton:hover {
     background-color: var(--undenary);
 }
-QScrollArea {
+#HomeWindow QScrollArea {
     background-color: transparent;
     border: none;
 }
-QScrollBar:vertical {
+#HomeWindow QScrollBar:vertical {
     background: var(--nonary);
     width: var(--scrollbar_width);
     margin: 0px;
 }
-QScrollBar::handle:vertical {
+#HomeWindow QScrollBar::handle:vertical {
     background: var(--senary);
     min-height: var(--scrollbar_handle_min_height);
     border-radius: var(--border_radius_small);
 }
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+#HomeWindow QScrollBar::add-line:vertical, #HomeWindow QScrollBar::sub-line:vertical {
     height: 0px;
 }

@@ -1,16 +1,16 @@
-QDialog {
+#NewProjectDialog {
     background-color: var(--surface);
     color: var(--text);
     font-size: var(--font_size_small);
 }
-QLineEdit {
+#NewProjectDialog QLineEdit {
     background-color: var(--primary);
     padding: var(--padding_large);
     border: 1px solid var(--secondary);
     border-radius: var(--border_radius_small);
     margin: var(--spacing_small) 0;
 }
-QPushButton {
+#NewProjectDialog QPushButton {
     background-color: var(--secondary);
     color: var(--text);
     padding: var(--padding_large) var(--spacing_xxlarge);
@@ -18,25 +18,25 @@ QPushButton {
     border-radius: var(--border_radius_small);
     min-width: 80px;
 }
-QPushButton:hover {
+#NewProjectDialog QPushButton:hover {
     background-color: var(--duodenary);
 }
-QLabel {
+#NewProjectDialog QLabel {
     margin-top: var(--padding_large);
     color: var(--septenary);
     background-color: none;
 }
-QComboBox {
+#NewProjectDialog QComboBox {
     background-color: var(--primary);
     color: var(--text);
     padding: var(--padding_medium);
     border: 1px solid var(--secondary);
     border-radius: var(--border_radius_small);
 }
-QComboBox::drop-down {
+#NewProjectDialog QComboBox::drop-down {
     border: none;
 }
-QComboBox QAbstractItemView {
+#NewProjectDialog QComboBox QAbstractItemView {
     background-color: var(--primary);
     color: var(--text);
     selection-background-color: var(--duodenary);

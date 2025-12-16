@@ -1,10 +1,10 @@
-QWidget {
+#HomeLeftLayout {
     background-color: var(--tredecenary);
     padding: var(--spacing_xxxlarge);
     border: none;
     border-top-right-radius: var(--border_radius_large);
 }
-QPushButton {
+#HomeLeftLayout QPushButton {
     background-color: var(--denary);
     color: var(--text);
     border-radius: var(--border_radius_medium);
@@ -13,6 +13,6 @@ QPushButton {
     font-size: var(--font_size_small);
     min-height: 40px;
 }
-QPushButton:hover {
+#HomeLeftLayout QPushButton:hover {
     background-color: var(--undenary);
 }

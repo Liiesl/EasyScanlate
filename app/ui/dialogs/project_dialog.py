@@ -54,6 +54,7 @@ class ImportWFWFDialog(QDialog):
         self.temp_dir = None
         self.download_worker = None
         
+        self.setObjectName("ImportWFWFDialog")
         self.setStyleSheet(WFWF_STYLES)
     
     def get_url(self):
@@ -230,6 +231,7 @@ class NewProjectDialog(QDialog):
         layout.addWidget(self.button_box)
         
         # Styling
+        self.setObjectName("NewProjectDialog")
         self.setStyleSheet(NEW_PROJECT_STYLES)
     
     def choose_image(self):

@@ -1,35 +1,35 @@
-QCheckBox {
+.AdvancedCheck {
     color: var(--text);
     font-size: var(--font_size_medium);
     spacing: var(--spacing_xxlarge);
     padding: var(--padding_small);
 }
-QCheckBox::indicator {
+.AdvancedCheck::indicator {
     width: var(--indicator_size_medium);
     height: var(--indicator_size_medium);
     border-radius: var(--border_radius_small);
 }
-QCheckBox::indicator:unchecked {
+.AdvancedCheck::indicator:unchecked {
     border: 2px solid var(--primary);
     background-color: var(--tertiary);
 }
-QCheckBox::indicator:unchecked:hover {
+.AdvancedCheck::indicator:unchecked:hover {
     border: 2px solid var(--secondary);
     background-color: var(--quaternary);
 }
-QCheckBox::indicator:checked {
+.AdvancedCheck::indicator:checked {
     border: 2px solid var(--accent);
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 var(--gradient_stop_1), stop:1 var(--accent));
     image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNGRkZGRkYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSIyMCA2IDkgMTcgNCAxMiI+PC9wb2x5bGluZT48L3N2Zz4=);
 }
-QCheckBox::indicator:checked:hover {
+.AdvancedCheck::indicator:checked:hover {
     border: 2px solid var(--gradient_stop_1);
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 var(--gradient_stop_2), stop:1 var(--gradient_stop_1));
 }
-QCheckBox:disabled {
+.AdvancedCheck:disabled {
     color: var(--quinary);
 }
-QCheckBox::indicator:disabled {
+.AdvancedCheck::indicator:disabled {
     border: 2px solid var(--senary);
     background-color: var(--quaternary);
 }
