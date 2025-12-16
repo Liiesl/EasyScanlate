@@ -69,19 +69,7 @@ COLORS = {
 # Legacy stylesheets - these will be removed once all setStyleSheet calls are updated
 # For now, they return the processed QSS content
 
-FIND_REPLACE_STYLESHEET = _load_stylesheet("main.qss")
-
-MAIN_STYLESHEET = _load_stylesheet("find_replace.qss")
-
-IV_BUTTON_STYLES = _load_stylesheet("iv_button.qss")
-
 ADVANCED_CHECK_STYLES = _load_stylesheet("advanced_check.qss")
-
-RIGHT_WIDGET_STYLES = _load_stylesheet("right_widget.qss")
-
-SIMPLE_VIEW_STYLES = _load_stylesheet("simple_view.qss")
-
-DELETE_ROW_STYLES = _load_stylesheet("delete_row.qss")
 
 HOME_STYLES = _load_stylesheet("home.qss")
 
@@ -90,16 +78,6 @@ HOME_LEFT_LAYOUT_STYLES = _load_stylesheet("home_left_layout.qss")
 NEW_PROJECT_STYLES = _load_stylesheet("new_project.qss")
 
 WFWF_STYLES = _load_stylesheet("wfwf.qss")
-
-MENU_STYLES = _load_stylesheet("menu.qss")
-
-MANUALOCR_STYLES = _load_stylesheet("manual_ocr.qss")
-
-TEXT_BOX_STYLE_PANEL_STYLE = _load_stylesheet("text_box_panel.qss")
-
-SHAPE_PANEL_STYLE = _load_stylesheet("shape_panel.qss")
-
-TYPOGRAPHY_PANEL_STYLE = _load_stylesheet("typography_panel.qss")
 
 IMPORT_EXPORT_STYLES = _load_stylesheet("import_export.qss")
 
