@@ -39,73 +39,107 @@ class MenuBar(QMenuBar):
         # Add other menus here
         
     def create_menu_bar(self):
-        # File menu
-        file_menu = self.addMenu("File")
-        file_menu.setStyleSheet("""
+        # Common Styles
+        menu_style = """
             QMenu {
                 background-color: #3A3A3A;
                 color: #FFFFFF;
-                border: none;
-                border-radius: 4px;
+                border: 1px solid #555555;
+                font-family: "Segoe UI";
             }
             QMenu::item {
-                padding: 8px 16px;
-                border-radius: 4px;
+                padding: 6px 24px;
+                background-color: transparent;
             }
             QMenu::item:selected {
                 background-color: #4A4A4A;
             }
-        """)
-        
-        file_menu_action = file_menu.menuAction()
-        file_menu_action.setIcon(qta.icon('fa5s.file', color="white"))
+            QMenu::separator {
+                height: 1px;
+                background: #555555;
+                margin: 4px 0px;
+            }
+        """
 
-        # --- Actions available in all states (HOME and MAIN_WINDOW) ---
+        # --- 1. HOME (Action) ---
+        # Only show Home button if we are in Main Window
+        if self.state == TitleBarState.MAIN_WINDOW:
+            home_action = QAction("Home", self)
+            home_action.triggered.connect(self.go_to_home)
+            self.addAction(home_action)
+
+        # --- 2. FILES (Menu) ---
+        files_menu = self.addMenu("Files")
+        files_menu.setStyleSheet(menu_style)
+        
+        # Actions
         new_project_action = QAction(qta.icon('fa5s.file-alt', color="white"), "New Project", self)
         new_project_action.setShortcut("Ctrl+N")
         new_project_action.triggered.connect(self.new_project)
-        file_menu.addAction(new_project_action)
+        files_menu.addAction(new_project_action)
         
         open_project_action = QAction(qta.icon('fa5s.folder-open', color="white"), "Open Project", self)
         open_project_action.setShortcut("Ctrl+O")
         open_project_action.triggered.connect(self.open_project)
-        file_menu.addAction(open_project_action)
+        files_menu.addAction(open_project_action)
 
         import_wfwf_action = QAction(qta.icon('fa5s.file-import', color="white"), "Import from WFWF", self)
         import_wfwf_action.triggered.connect(self.import_from_wfwf)
-        file_menu.addAction(import_wfwf_action)
+        files_menu.addAction(import_wfwf_action)
 
-        file_menu.addSeparator()
+        files_menu.addSeparator()
         
-        # --- Create actions that depend on the state ---
-        # These actions require an active project/main window context.
         save_action = QAction(qta.icon('fa5s.save', color="white"), "Save Project", self)
         save_as_action = QAction(qta.icon('fa5s.download', color="white"), "Save Project As...", self)
         
-        file_menu.addAction(save_action)
-        file_menu.addAction(save_as_action)
+        files_menu.addAction(save_action)
+        files_menu.addAction(save_as_action)
         
-        file_menu.addSeparator()
-        
-        home_action = QAction(qta.icon('fa5s.home', color="white"), "Go to Home", self)
-        file_menu.addAction(home_action)
-
-        # --- Configure state-dependent actions ---
         if self.state == TitleBarState.MAIN_WINDOW:
-            # In MAIN_WINDOW state, actions are fully enabled and connected.
             save_action.setShortcut("Ctrl+S")
             save_action.triggered.connect(self.main_window.save_project)
             
             save_as_action.setShortcut("Ctrl+Shift+S")
             save_as_action.triggered.connect(self.save_project_as)
-            
-            home_action.triggered.connect(self.go_to_home)
         else:
-            # In HOME state, these actions are not applicable and are disabled.
-            # This prevents calling methods that don't exist on the Home window.
             save_action.setEnabled(False)
             save_as_action.setEnabled(False)
-            home_action.setEnabled(False)
+
+        # --- 3. VIEW (Menu) ---
+        if self.state == TitleBarState.MAIN_WINDOW:
+            view_menu = self.addMenu("View")
+            view_menu.setStyleSheet(menu_style)
+
+            # Find/Replace
+            find_action = QAction("Find/Replace", self)
+            find_action.setShortcut("Ctrl+F")
+            find_action.triggered.connect(self.main_window.toggle_find_widget)
+            view_menu.addAction(find_action)
+
+            # Toggle Chat
+            chat_action = QAction("Translation Chat", self)
+            chat_action.setCheckable(True)
+            if hasattr(self.main_window, 'translation_chat'):
+                chat_action.setChecked(self.main_window.translation_chat.isVisible())
+            chat_action.triggered.connect(self.main_window.toggle_chat)
+            view_menu.addAction(chat_action)
+            
+            view_menu.addSeparator()
+
+            # Vertical Toolbar Toggles (if we want to expose them here)
+            # For now, let's just keep it simple as requested.
+            
+            # Advanced Mode
+            advanced_action = QAction("Advanced Mode", self)
+            advanced_action.setCheckable(True)
+            if hasattr(self.main_window, 'advanced_mode_check'):
+                # Sync with checkbox
+                advanced_action.setChecked(self.main_window.advanced_mode_check.isChecked())
+                # We need to bridge the signal
+                advanced_action.triggered.connect(lambda c: self.main_window.advanced_mode_check.setChecked(c))
+                # Also listen to checkbox changes to update menu? 
+                # Ideally, but let's just trigger connections.
+            view_menu.addAction(advanced_action)
 
     def new_project(self):
         from utils.project_processing import new_project

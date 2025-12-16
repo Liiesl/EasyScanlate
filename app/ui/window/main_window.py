@@ -6,7 +6,7 @@ import traceback
 import sys
 import json
 from app.ui.dialogs.error_dialog import ErrorDialog
-from PySide6.QtCore import Qt, QSettings, QPoint, QRectF
+from PySide6.QtCore import Qt, QSettings, QPoint, QRectF, QEvent
 from PySide6.QtGui import QPixmap, QKeySequence, QAction, QColor
 import qtawesome as qta
 from app.utils.file_io import export_ocr_results, import_translation_file, export_rendered_images
@@ -16,7 +16,8 @@ from app.ui.components.results_tables import ResultsWidget
 from app.ui.components.textbox_style.panel import TextBoxStylePanel
 from app.ui.components.find_replace import FindReplaceWidget
 from app.ui.components.translation_chat import TranslationChatWidget
-from app.ui.widgets.menu_bar import MenuBar
+from app.ui.widgets.menu_bar import MenuBar, TitleBarState
+from app.ui.window.chrome import CustomTitleBar, WindowResizer
 from app.ui.widgets.progress_bar import CustomProgressBar
 from app.ui.widgets.menus import Menu, ToggleButton, ToggleWithProgress
 # from app.handlers.ocr_batch_handler import BatchOCRHandler # ocr functionality disabled
@@ -74,13 +75,29 @@ class MainWindow(QMainWindow):
         print(f"Loaded settings: MinH={self.min_text_height}, MaxH={self.max_text_height}, MinConf={self.min_confidence}, DistThr={self.distance_threshold}")
 
     def init_ui(self):
-        self.menuBar = MenuBar(self)
-        self.setMenuBar(self.menuBar)
+        # Window Setup
+        self.setWindowFlags(Qt.FramelessWindowHint)
+
+        # Root Container
+        root_container = QWidget()
+        root_layout = QVBoxLayout(root_container)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+
+        # Custom Title Bar
+        self.title_bar = CustomTitleBar(self)
+        self.title_bar.setState(TitleBarState.MAIN_WINDOW)
+        root_layout.addWidget(self.title_bar)
+        
+        # Main Content Widget
         main_widget = QWidget()
         main_widget.setObjectName("CentralWidget")
-        main_layout = QHBoxLayout()
-        main_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins for cleaner look
+        main_layout = QHBoxLayout(main_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
+
+        root_layout.addWidget(main_widget)
+        self.setCentralWidget(root_container)
 
         self.scroll_area = CustomScrollArea(main_window=self)
         
@@ -323,8 +340,14 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.vertical_toolbar)  # Add vertical toolbar first
         main_layout.addWidget(splitter)  # Then the main content splitter
 
-        main_widget.setLayout(main_layout)
-        self.setCentralWidget(main_widget)
+        # Connect Window Resizer
+        self.resizer = WindowResizer(self)
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.WindowStateChange:
+            if hasattr(self, 'title_bar'):
+                self.title_bar.update_maximize_icon()
+        super().changeEvent(event)
 
     def on_profile_selected(self, index):
         profile_name = self.profile_selector.itemText(index)
