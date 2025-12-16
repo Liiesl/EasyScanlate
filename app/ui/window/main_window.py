@@ -18,7 +18,7 @@ from app.ui.components.find_replace import FindReplaceWidget
 from app.ui.components.translation_chat import TranslationChatWidget
 from app.ui.widgets.menu_bar import MenuBar
 from app.ui.widgets.progress_bar import CustomProgressBar
-from app.ui.widgets.menus import Menu, ToggleButton
+from app.ui.widgets.menus import Menu, ToggleButton, ToggleWithProgress
 # from app.handlers.ocr_batch_handler import BatchOCRHandler # ocr functionality disabled
 from app.handlers.selection_manager import SelectionManager
 from app.core.project_model import ProjectModel
@@ -192,13 +192,9 @@ class MainWindow(QMainWindow):
         left_panel = QVBoxLayout()
         left_panel.setSpacing(20)
 
-        # MODIFIED: settings_layout now only contains progress bar
-        settings_layout = QHBoxLayout()
-        # Remove the btn_settings from here
-        self.ocr_progress = CustomProgressBar()
-        self.ocr_progress.setFixedHeight(20)
-        settings_layout.addWidget(self.ocr_progress, 1)
-        left_panel.addLayout(settings_layout)
+        # MODIFIED: settings_layout removed as progress bar is integrated
+        # settings_layout = QHBoxLayout()
+        # self.ocr_progress = CustomProgressBar() ... REMOVED
         
         self.scroll_content = QWidget()
         self.scroll_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -216,17 +212,27 @@ class MainWindow(QMainWindow):
         right_panel.setSpacing(20)
 
         button_layout = QHBoxLayout()
-        self.btn_process = QPushButton(qta.icon('fa5s.magic', color='white'), "Process OCR")
-        self.btn_process.setFixedWidth(160)
-        self.btn_process.clicked.connect(self.start_ocr)
-        self.btn_process.setEnabled(False)
-        button_layout.addWidget(self.btn_process)
-        self.btn_stop_ocr = QPushButton(qta.icon('fa5s.stop', color='white'), "Stop OCR")
-        self.btn_stop_ocr.setFixedWidth(160)
-        self.btn_stop_ocr.clicked.connect(self.stop_ocr)
-        self.btn_stop_ocr.setVisible(False)
-        self.btn_stop_ocr.setEnabled(False)
-        button_layout.addWidget(self.btn_stop_ocr)
+        
+        # ToggleWithProgress Button
+        self.btn_ocr_toggle = ToggleWithProgress(
+            start_text="Process OCR", 
+            stop_text="Stop OCR",
+            start_icon=qta.icon('fa5s.magic', color='white'),
+            stop_icon=qta.icon('fa5s.stop', color='white'),
+            parent=self
+        )
+        self.btn_ocr_toggle.setFixedWidth(200) # Slightly wider to accommodate progress
+        self.btn_ocr_toggle.clicked.connect(self.toggle_ocr)
+        self.btn_ocr_toggle.setEnabled(False) # Disabled until project loaded
+        button_layout.addWidget(self.btn_ocr_toggle)
+
+        # Progress Controller (Hidden Logic)
+        self.progress_controller = CustomProgressBar()
+        self.progress_controller.setVisible(False)
+        self.progress_controller.valueChanged.connect(self.btn_ocr_toggle.setValue)
+        # Assuming 0-100 range, we can also sync max if needed, but CustomProgressBar defaults to 100
+        self.btn_ocr_toggle.setMaximum(100)
+
         # REMOVED: btn_manual_ocr from button_layout
         
         file_button_layout = QHBoxLayout()
@@ -420,9 +426,10 @@ class MainWindow(QMainWindow):
 
         image_paths = self.model.image_paths
         self.setWindowTitle(f"{self.model.project_name} | ManhwaOCR")
-        self.btn_process.setEnabled(bool(image_paths))
+        self.setWindowTitle(f"{self.model.project_name} | ManhwaOCR")
+        self.btn_ocr_toggle.setEnabled(bool(image_paths))
         self.btn_manual_ocr.setEnabled(bool(image_paths))
-        self.ocr_progress.setValue(0)
+        # self.ocr_progress.setValue(0) # Removed
         
         if not image_paths:
             QMessageBox.warning(self, "No Images", "The project was loaded, but no images were found inside.")
@@ -639,6 +646,12 @@ class MainWindow(QMainWindow):
                     widget.update_inpaint_data(records_for_this_image)
                     widget.apply_translation(self, results_for_this_image, DEFAULT_TEXT_STYLE)
 
+    def toggle_ocr(self):
+        if self.btn_ocr_toggle.isChecked():
+            self.stop_ocr()
+        else:
+            self.start_ocr()
+
     def start_ocr(self):
         """OCR functionality disabled - shows message instead"""
         # if not self.model.image_paths:
@@ -662,8 +675,7 @@ class MainWindow(QMainWindow):
         # if not self._initialize_ocr_reader("Standard OCR"):
         #     return
 
-        # self.btn_process.setVisible(False)
-        # self.btn_stop_ocr.setVisible(True)
+        # self.btn_ocr_toggle.transition_to_active()
 
         # self.model.clear_standard_results()
         # self.on_model_updated(None)
@@ -682,8 +694,9 @@ class MainWindow(QMainWindow):
         #     settings=ocr_settings, 
         #     starting_row_number=self.model.next_global_row_number,
         #     model=self.model,
-        #     progress_bar=self.ocr_progress
+        #     progress_bar=self.progress_controller # Use controller for logic
         # )
+        # self.progress_controller.start_initial_progress() # Start animation
         # self.batch_handler.batch_finished.connect(self.on_batch_finished)
         # self.batch_handler.error_occurred.connect(self.on_batch_error)
         # self.batch_handler.processing_stopped.connect(self.on_batch_stopped)
@@ -726,10 +739,9 @@ class MainWindow(QMainWindow):
     def cleanup_ocr_session(self):
         """Resets UI and state after an OCR run (success, error, or stop)."""
         """OCR functionality disabled - placeholder method"""
-        # self.btn_stop_ocr.setVisible(False)
-        # self.btn_process.setVisible(True)
-        # self.btn_process.setEnabled(bool(self.model.image_paths))
-        # self.ocr_progress.reset()
+        # self.btn_ocr_toggle.transition_to_idle()
+        # self.btn_ocr_toggle.setEnabled(bool(self.model.image_paths))
+        # self.progress_controller.reset() # Reset controller
         # if self.batch_handler:
         #     self.batch_handler.deleteLater()
         #     self.batch_handler = None

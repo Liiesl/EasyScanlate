@@ -1,7 +1,7 @@
 # app/ui/widgets/menus.py
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton
-from PySide6.QtCore import Qt, QPoint
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QProgressBar, QLabel, QHBoxLayout, QSizePolicy
+from PySide6.QtCore import Qt, QPoint, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QIcon
 
 class ToggleButton(QPushButton):
@@ -121,3 +121,114 @@ class Menu(QWidget):
 
         self.move(menu_pos)
         self.show()
+
+class ToggleWithProgress(QPushButton):
+    """
+    A custom button that integrates a progress bar. 
+    It expands to show the progress bar when active (Stop state) 
+    and collapses to a normal button when idle (Start state).
+    """
+    def __init__(self, start_text="Process OCR", stop_text="Stop OCR", 
+                 start_icon=None, stop_icon=None, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        self.setMinimumHeight(40) # Match existing buttons
+
+        self._start_text = start_text
+        self._stop_text = stop_text
+        self._start_icon = start_icon
+        self._stop_icon = stop_icon
+        
+        # Main Layout
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(15, 0, 15, 0)
+        self.layout.setSpacing(10)
+        
+        # Icon Label 
+        self.icon_label = QLabel()
+        self.text_label = QLabel(self._start_text)
+        self.text_label.setStyleSheet("font-weight: bold; color: white;")
+        
+        if self._start_icon:
+            self.icon_label.setPixmap(self._start_icon.pixmap(20, 20))
+            
+        # Progress Container (Hidden by default)
+        self.progress_container = QWidget()
+        self.progress_layout = QHBoxLayout(self.progress_container)
+        self.progress_layout.setContentsMargins(0, 0, 0, 0)
+        self.progress_layout.setSpacing(10)
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: none;
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 2px;
+                height: 4px;
+                min-width: 100px;
+            }
+            QProgressBar::chunk {
+                background-color: #0b57d0;
+                border-radius: 2px;
+            }
+        """)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setFixedHeight(4)
+        
+        self.percent_label = QLabel("0%")
+        self.percent_label.setStyleSheet("color: #aaaaaa; font-size: 11px;")
+        
+        self.progress_layout.addWidget(self.progress_bar)
+        self.progress_layout.addWidget(self.percent_label)
+        
+        # Add to main layout
+        self.layout.addWidget(self.icon_label)
+        self.layout.addWidget(self.text_label)
+        self.layout.addWidget(self.progress_container)
+        
+        # Initial State
+        self.progress_container.setVisible(False)
+        self.transition_to_idle()
+
+    def transition_to_active(self):
+        """ Switches to 'Stop' state, showing progress bar. """
+        self.setChecked(True)
+        if self._stop_icon:
+            self.icon_label.setPixmap(self._stop_icon.pixmap(20, 20))
+        self.text_label.setText(self._stop_text)
+        self.progress_container.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.percent_label.setText("0%")
+        self.update() # Force redraw
+
+    def transition_to_idle(self):
+        """ Switches to 'Start' state, hiding progress bar. """
+        self.setChecked(False)
+        if self._start_icon:
+            self.icon_label.setPixmap(self._start_icon.pixmap(20, 20))
+        self.text_label.setText(self._start_text)
+        self.progress_container.setVisible(False)
+        self.update()
+
+    def set_progress(self, value, total):
+        """ Updates the progress bar and percentage label. """
+        if total > 0:
+            percent = int((value / total) * 100)
+            self.progress_bar.setMaximum(total)
+            self.progress_bar.setValue(value)
+            self.percent_label.setText(f"{percent}%")
+        else:
+            self.progress_bar.setValue(0)
+            self.percent_label.setText("0%")
+
+    def setValue(self, value):
+        """ Compatibility method for QProgressBar interface. """
+        self.progress_bar.setValue(value)
+        total = self.progress_bar.maximum()
+        if total > 0:
+             percent = int((value / total) * 100)
+             self.percent_label.setText(f"{percent}%")
+
+    def setMaximum(self, value):
+        self.progress_bar.setMaximum(value)
