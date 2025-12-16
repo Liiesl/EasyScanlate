@@ -211,7 +211,6 @@ class ShapeStylePanel(QWidget):
         current_color = self._get_color_from_button(button)
 
         # Temporarily set a simple background for the generic color picker to read.
-        button.setStyleSheet(f"background-color: {current_color.name(QColor.HexArgb)};")
 
         # Call the modal color chooser function passed from the parent.
         # This function will modify the button's stylesheet directly.
@@ -268,17 +267,6 @@ class ShapeStylePanel(QWidget):
         
         hover_color = color.lighter(130)
 
-        self.btn_border_color.setStyleSheet(f"""
-            QPushButton#colorButton {{
-                background-color: transparent;
-                border: {preview_width}px solid {color.name(QColor.HexArgb)};
-                border-radius: 3px;
-            }}
-            QPushButton#colorButton:hover {{
-                border-color: {hover_color.name(QColor.HexArgb)};
-            }}
-        """)
-
     def set_button_color(self, button, color_str):
         """Sets the color for a button, storing it in a property and updating visuals."""
         color = QColor(color_str)
@@ -291,7 +279,7 @@ class ShapeStylePanel(QWidget):
             self._update_stroke_button_visuals()
         else:
             # For all other buttons, just set the background color
-            button.setStyleSheet(f"background-color: {color.name(QColor.HexArgb)};")
+            return
 
     def get_style(self):
         """Retrieves the current style settings from the UI controls."""

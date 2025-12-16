@@ -27,20 +27,7 @@ class StitchHandler(QObject):
         """Creates the UI widget, parenting it to the scroll_area."""
         self.stitch_widget = QWidget(self.scroll_area)
         self.stitch_widget.setObjectName("StitchWidget")
-        self.stitch_widget.setStyleSheet("""
-            #StitchWidget {
-                background-color: rgba(30, 30, 30, 0.9); border-radius: 10px;
-                border: 1px solid #555;
-            }
-            QPushButton {
-                background-color: #007ACC; color: white; border: none;
-                padding: 8px 16px; border-radius: 4px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: #005C99; }
-            QPushButton:disabled { background-color: #555; }
-            #CancelButton { background-color: #C40C0C; }
-            #CancelButton:hover { background-color: #8B0000; }
-        """)
+
         
         layout = QHBoxLayout(self.stitch_widget)
         

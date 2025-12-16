@@ -3,7 +3,6 @@
 from PySide6.QtWidgets import QScrollArea, QWidget, QHBoxLayout, QPushButton
 from PySide6.QtCore import Signal, QPoint
 import qtawesome as qta
-from assets import IV_BUTTON_STYLES
 from app.handlers.stitch_handler import StitchHandler
 from app.handlers.split_handler import SplitHandler
 from app.handlers.context_fill_handler import ContextFillHandler
@@ -49,7 +48,6 @@ class CustomScrollArea(QScrollArea):
         """ Creates and configures the overlay widget and its buttons. """
         self.overlay_widget = QWidget(self)
         self.overlay_widget.setObjectName("ScrollButtonOverlay")
-        self.overlay_widget.setStyleSheet("#ScrollButtonOverlay { background-color: transparent; }")
 
         layout = QHBoxLayout(self.overlay_widget)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -59,28 +57,24 @@ class CustomScrollArea(QScrollArea):
         btn_scroll_top = QPushButton(qta.icon('fa5s.arrow-up', color='white'), "")
         btn_scroll_top.setFixedSize(50, 50)
         btn_scroll_top.clicked.connect(lambda: self.verticalScrollBar().setValue(0))
-        btn_scroll_top.setStyleSheet(IV_BUTTON_STYLES)
         layout.addWidget(btn_scroll_top)
 
         # Action Menu Button
         btn_action_menu = QPushButton(qta.icon('fa5s.bars', color='white'), "")
         btn_action_menu.setFixedSize(50, 50)
         btn_action_menu.clicked.connect(self._show_action_menu)
-        btn_action_menu.setStyleSheet(IV_BUTTON_STYLES)
         layout.addWidget(btn_action_menu)
 
         # Save Menu Button
         btn_save_menu = QPushButton(qta.icon('fa5s.save', color='white'), "Save")
         btn_save_menu.setFixedSize(120, 50)
         btn_save_menu.clicked.connect(self._show_save_menu)
-        btn_save_menu.setStyleSheet(IV_BUTTON_STYLES)
         layout.addWidget(btn_save_menu)
 
         # Scroll to Bottom Button
         btn_scroll_bottom = QPushButton(qta.icon('fa5s.arrow-down', color='white'), "")
         btn_scroll_bottom.setFixedSize(50, 50)
         btn_scroll_bottom.clicked.connect(lambda: self.verticalScrollBar().setValue(self.verticalScrollBar().maximum()))
-        btn_scroll_bottom.setStyleSheet(IV_BUTTON_STYLES)
         layout.addWidget(btn_scroll_bottom)
 
     def _show_action_menu(self):
