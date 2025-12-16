@@ -40,27 +40,23 @@ class SettingsDialog(QDialog):
 
         self.show_delete_warning_check = QCheckBox()
         self.show_delete_warning_check.setProperty("class", "AdvancedCheck")
-        self.show_delete_warning_check.setStyleSheet(ADVANCED_CHECK_STYLES)
         self.show_delete_warning_check.setChecked(self.settings.value("show_delete_warning", "true") == "true")
         general_layout.addRow("Show delete confirmation dialog:", self.show_delete_warning_check)
 
         self.use_gpu_check = QCheckBox()
         self.use_gpu_check.setProperty("class", "AdvancedCheck")
-        self.use_gpu_check.setStyleSheet(ADVANCED_CHECK_STYLES)
         self.use_gpu_check.setChecked(self.settings.value("use_gpu", "true").lower() == "true")
         self.use_gpu_check.setToolTip("Requires compatible NVIDIA GPU and CUDA drivers. Restart may be needed.")
         general_layout.addRow("Use GPU for OCR (if available):", self.use_gpu_check)
 
         self.auto_context_fill_check = QCheckBox()
         self.auto_context_fill_check.setProperty("class", "AdvancedCheck")
-        self.auto_context_fill_check.setStyleSheet(ADVANCED_CHECK_STYLES)
         self.auto_context_fill_check.setChecked(self.settings.value("auto_context_fill", "false") == "true")
         self.auto_context_fill_check.setToolTip("Automatically inpaint background during Batch OCR. Can improve text rendering but may slow processing.")
         general_layout.addRow("Auto Context Fill on Batch OCR:", self.auto_context_fill_check)
         
         self.auto_check_updates_check = QCheckBox()
         self.auto_check_updates_check.setProperty("class", "AdvancedCheck")
-        self.auto_check_updates_check.setStyleSheet(ADVANCED_CHECK_STYLES)
         self.auto_check_updates_check.setChecked(self.settings.value("auto_check_updates", "true") == "true")
         general_layout.addRow("Auto-check for updates on startup:", self.auto_check_updates_check)
 
