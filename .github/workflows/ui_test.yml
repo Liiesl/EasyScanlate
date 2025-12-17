@@ -21,41 +21,40 @@ jobs:
       with:
         python-version: "3.10"
 
-    # --- LINUX SPECIFIC SETUP ---
+    # --- LINUX SPECIFIC SYSTEM LIBS ---
     - name: Install Linux System Libs
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
         sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 x11-utils xvfb
 
-    # --- INSTALL DEPENDENCIES ---
-    - name: Install Python Libs (and PyTorch)
-      run: |
-        pip install -r requirements.txt
-        
-        if [[ "${{ runner.os }}" == "macOS" ]]; then
-          pip install torch==2.9.0 torchvision==0.24.0 --index-url https://download.pytorch.org/whl/cpu
-        else
-          pip install torch==2.9.0 torchvision==0.24.0 --index-url https://download.pytorch.org/whl/cu128
-        fi
-        
-        # Alternatively: if you *only* want to specify these and not use requirements.txt
-        # pip install PySide6 qtawesome torch==2.9.0 torchvision==0.24.0 --index-url https://download.pytorch.org/whl/cu128  # Linux & Windows
-        # pip install PySide6 qtawesome torch==2.9.0 torchvision==0.24.0 --index-url https://download.pytorch.org/whl/cpu        # macOS
+    # --- INSTALL COMMON DEPENDENCIES ---
+    - name: Install requirements.txt
+      run: pip install -r requirements.txt
+
+    # --- INSTALL PYTORCH (OS SPECIFIC) ---
+    
+    # CASE 1: macOS (CPU Only)
+    - name: Install PyTorch (macOS)
+      if: runner.os == 'macOS'
+      run: pip install torch==2.9.0 torchvision==0.24.0 --index-url https://download.pytorch.org/whl/cpu
+
+    # CASE 2: Windows & Linux (CUDA)
+    # Using '!=' is safer than trying to list both
+    - name: Install PyTorch (Windows/Linux)
+      if: runner.os != 'macOS'
+      run: pip install torch==2.9.0 torchvision==0.24.0 --index-url https://download.pytorch.org/whl/cu128
 
     # --- RUN TESTS ---
 
-    # 1. Windows (Native)
     - name: Run Windows Test
       if: runner.os == 'Windows'
       run: python capture_ui.py
 
-    # 2. Linux (Virtual Display)
     - name: Run Linux Test
       if: runner.os == 'Linux'
       run: xvfb-run --auto-servernum --server-args="-screen 0 1366x768x24" python capture_ui.py
 
-    # 3. macOS (Offscreen Platform)
     - name: Run macOS Test
       if: runner.os == 'macOS'
       run: python capture_ui.py
