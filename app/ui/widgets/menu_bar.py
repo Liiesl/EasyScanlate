@@ -30,7 +30,8 @@ class MenuBar(QMenuBar):
                 background-color: #4A4A4A;
                 color: #FFFFFF;
             }
-        """)                   
+        """)    
+        self.setMaximumWidth(200)               
         
         # Only create menu bar contents if the state is not NON_MAIN.
         # This is a safe guard; the parent (CustomTitleBar) should already handle this.

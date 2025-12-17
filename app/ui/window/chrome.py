@@ -1,10 +1,61 @@
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
-from PySide6.QtCore import Qt, QPoint, QObject, QEvent, QRect
-from PySide6.QtGui import QCursor
+from PySide6.QtCore import Qt, QPoint, QObject, QEvent, QRect, QTimer
+from PySide6.QtGui import QCursor, QPixmap
 import qtawesome
+import sys
+import ctypes
 
 # MODIFIED: Import MenuBar and the new TitleBarState enum
 from app.ui.widgets.menu_bar import MenuBar, TitleBarState
+
+class CornersEffect:
+    """
+    A class to apply rounded corners to a window using Windows DWM API.
+    """
+    def __init__(self):
+        self.dwmapi = None
+        self.DwmSetWindowAttribute = None
+        
+        # --- Minimal Windows API ctypes Definitions ---
+        try:
+            from ctypes import wintypes
+            self.dwmapi = ctypes.WinDLL("dwmapi")
+            self.DwmSetWindowAttribute = self.dwmapi.DwmSetWindowAttribute
+            self.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+            self.DwmSetWindowAttribute.restype = ctypes.c_long
+        except (OSError, AttributeError):
+            pass
+
+        # Constants for DWM attributes
+        self.DWMWA_WINDOW_CORNER_PREFERENCE = 33
+
+        # Enum for corner preference
+        self.DWMWCP_ROUND = 2
+
+    def apply_rounded_corners(self, hwnd: int):
+        """Applies rounded corners to the window."""
+        if self.dwmapi is None:
+            return
+            
+        if sys.platform != "win32":
+            return
+
+        # DWMWA_WINDOW_CORNER_PREFERENCE is typically available on Windows 11 (build 22000+)
+        try:
+            if sys.getwindowsversion().build < 22000:
+                return
+        except AttributeError:
+            return
+
+        hwnd = ctypes.c_void_p(hwnd)
+        
+        corner_preference = ctypes.c_int(self.DWMWCP_ROUND)
+        self.DwmSetWindowAttribute(
+            hwnd,
+            self.DWMWA_WINDOW_CORNER_PREFERENCE,
+            ctypes.byref(corner_preference),
+            ctypes.sizeof(corner_preference)
+        )
 
 class CustomTitleBar(QWidget):
     def __init__(self, parent):
@@ -15,14 +66,22 @@ class CustomTitleBar(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
 
-        self.title = QLabel("ManhwaOCR")
+        # ADDED: Icon for the title bar
+        self.icon_label = QLabel()
+        # Ensure path is correct relative to execution root or use absolute
+        self.icon_label.setPixmap(QPixmap("assets/app_icon.ico").scaled(20, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.icon_label.setStyleSheet("padding-left: 10px; margin-right: 5px;")
+        self.icon_label.setAlignment(Qt.AlignVCenter)
+
+        self.title = QLabel("EasyScanlate")
         self.title.setFixedHeight(35)
         self.title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.title.setStyleSheet("""
             background-color: #1E1E1E;
             color: white;
             font-weight: bold;
-            padding-left: 10px;
+            padding-left: 0px; 
+            padding-right: 10px;
         """)
 
         # MODIFIED: MenuBar is no longer created here directly.
@@ -69,10 +128,17 @@ class CustomTitleBar(QWidget):
         self.btn_maximize.setStyleSheet(button_style + "QPushButton:hover { background-color: #3E3E3E; }")
         self.btn_minimize.setStyleSheet(button_style + "QPushButton:hover { background-color: #3E3E3E; }")
 
-        # MODIFIED: Layout assembly changed to accommodate dynamic MenuBar
+        # MODIFIED: Layout assembly changed to accomodate centered title
+        # Sequence: [MenuBar (inserted at 0)] [Stretch] [Icon] [Title] [Stretch] [Controls]
+        
+        # We start by adding the first stretch (which will be at index 0 initially, or 1 after menu insertion)
+        self.layout.addStretch()
+        
+        self.layout.addWidget(self.icon_label)
         self.layout.addWidget(self.title)
-        # The MenuBar will be inserted at index 1 by setState, before the stretch
+        
         self.layout.addStretch() 
+        
         self.layout.addWidget(self.btn_minimize)
         self.layout.addWidget(self.btn_maximize)
         self.layout.addWidget(self.btn_close)
@@ -84,6 +150,16 @@ class CustomTitleBar(QWidget):
 
         self.start = QPoint(0, 0)
         self.pressing = False
+
+        # Apply rounded corners
+        self.corners_effect = CornersEffect()
+        QTimer.singleShot(100, self.apply_window_effects)
+
+    def apply_window_effects(self):
+        """Get the window handle and apply the rounded corners."""
+        if hasattr(self.parent, 'winId'):
+             hwnd = int(self.parent.winId())
+             self.corners_effect.apply_rounded_corners(hwnd)
 
     # ADDED: Method to set the state and configure the menu bar accordingly.
     def setState(self, state):
@@ -103,8 +179,8 @@ class CustomTitleBar(QWidget):
 
         # 3. For HOME and MAIN_WINDOW, create a new MenuBar with the correct state.
         self.menu_bar = MenuBar(self.parent, state)
-        # Insert the menu bar into the layout after the title (index 1).
-        self.layout.insertWidget(1, self.menu_bar)
+        # Insert the menu bar into the layout at the beginning (index 0).
+        self.layout.insertWidget(0, self.menu_bar)
 
     def toggle_maximize_restore(self):
         if self.parent.isMaximized():
@@ -125,7 +201,7 @@ class CustomTitleBar(QWidget):
 
         should_move = (
             event.button() == Qt.LeftButton and
-            (not child or child is self.title) and
+            (not child or child is self.title or child is self.icon_label) and
             (self.parent.isMaximized() or event.y() >= RESIZE_MARGIN)
         )
 
