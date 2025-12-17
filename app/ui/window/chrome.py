@@ -1,389 +1,340 @@
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
-from PySide6.QtCore import Qt, QPoint, QObject, QEvent, QRect, QTimer
-from PySide6.QtGui import QCursor, QPixmap
-import qtawesome
 import sys
 import ctypes
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtCore import Qt, QPoint, QObject, QEvent, QRect
+from PySide6.QtGui import QCursor, QPixmap
+import qtawesome
 
-# MODIFIED: Import MenuBar and the new TitleBarState enum
 from app.ui.widgets.menu_bar import MenuBar, TitleBarState
 
-class CornersEffect:
-    """
-    A class to apply rounded corners to a window using Windows DWM API.
-    """
-    def __init__(self):
-        self.dwmapi = None
-        self.DwmSetWindowAttribute = None
-        
-        # --- Minimal Windows API ctypes Definitions ---
-        try:
-            from ctypes import wintypes
-            self.dwmapi = ctypes.WinDLL("dwmapi")
-            self.DwmSetWindowAttribute = self.dwmapi.DwmSetWindowAttribute
-            self.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
-            self.DwmSetWindowAttribute.restype = ctypes.c_long
-        except (OSError, AttributeError):
-            pass
+# OS DETECTION & WINDOWS API SETUP
+IS_WINDOWS = sys.platform == "win32"
 
-        # Constants for DWM attributes
-        self.DWMWA_WINDOW_CORNER_PREFERENCE = 33
+if IS_WINDOWS:
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    dwmapi = ctypes.windll.dwmapi
 
-        # Enum for corner preference
-        self.DWMWCP_ROUND = 2
+    # Windows Constants
+    WM_NCCALCSIZE = 0x0083
+    WM_NCHITTEST = 0x0084
+    WM_NCLBUTTONDOWN = 0x00A1  # <--- NEW
+    WM_NCLBUTTONUP = 0x00A2    # <--- NEW
 
-    def apply_rounded_corners(self, hwnd: int):
-        """Applies rounded corners to the window."""
-        if self.dwmapi is None:
-            return
-            
-        if sys.platform != "win32":
-            return
+    GWL_STYLE = -16
+    WS_CAPTION = 0x00C00000
+    WS_THICKFRAME = 0x00040000
+    WS_MAXIMIZEBOX = 0x00010000
+    WS_MINIMIZEBOX = 0x00020000
+    
+    HTNOWHERE = 0
+    HTCLIENT = 1
+    HTCAPTION = 2
+    HTMAXBUTTON = 9            # <--- NEW
+    HTLEFT = 10
+    HTRIGHT = 11
+    HTTOP = 12
+    HTTOPLEFT = 13
+    HTTOPRIGHT = 14
+    HTBOTTOM = 15
+    HTBOTTOMLEFT = 16
+    HTBOTTOMRIGHT = 17
 
-        # DWMWA_WINDOW_CORNER_PREFERENCE is typically available on Windows 11 (build 22000+)
-        try:
-            if sys.getwindowsversion().build < 22000:
-                return
-        except AttributeError:
-            return
+    class RECT(ctypes.Structure):
+        _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long), 
+                    ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
 
-        hwnd = ctypes.c_void_p(hwnd)
-        
-        corner_preference = ctypes.c_int(self.DWMWCP_ROUND)
-        self.DwmSetWindowAttribute(
-            hwnd,
-            self.DWMWA_WINDOW_CORNER_PREFERENCE,
-            ctypes.byref(corner_preference),
-            ctypes.sizeof(corner_preference)
-        )
-
+# UPDATED CUSTOM TITLE BAR
 class CustomTitleBar(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
         self.setObjectName("CustomTitleBar")
         self.parent = parent
-        self.layout = QHBoxLayout()
+        self.setFixedHeight(35)
+        self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
 
-        # ADDED: Icon for the title bar
         self.icon_label = QLabel()
-        # Ensure path is correct relative to execution root or use absolute
         self.icon_label.setPixmap(QPixmap("assets/app_icon.ico").scaled(20, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         self.icon_label.setStyleSheet("padding-left: 10px; margin-right: 5px;")
-        self.icon_label.setAlignment(Qt.AlignVCenter)
-
+        
         self.title = QLabel("EasyScanlate")
-        self.title.setFixedHeight(35)
-        self.title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.title.setStyleSheet("""
-            background-color: #1E1E1E;
-            color: white;
-            font-weight: bold;
-            padding-left: 0px; 
-            padding-right: 10px;
-        """)
+        self.title.setStyleSheet("background-color: #1E1E1E; color: white; font-weight: bold;")
 
-        # MODIFIED: MenuBar is no longer created here directly.
-        # It will be managed by the setState method.
         self.menu_bar = None
-
-        btn_size = 35
-        icon_color = "#AAAAAA"
-        icon_hover_color = "white"
-
-        # Create buttons
         self.btn_close = QPushButton()
         self.btn_maximize = QPushButton()
         self.btn_minimize = QPushButton()
 
-        # Set icons using qtawesome
-        self.icon_close = qtawesome.icon('mdi.close', color=icon_color, color_active=icon_hover_color)
-        self.icon_minimize = qtawesome.icon('msc.chrome-minimize', color=icon_color, color_active=icon_hover_color)
-        self.icon_maximize = qtawesome.icon('msc.chrome-maximize', color=icon_color, color_active=icon_hover_color)
-        self.icon_restore = qtawesome.icon('msc.chrome-restore', color=icon_color, color_active=icon_hover_color)
+        # Icons
+        icon_color, icon_hover = "#AAAAAA", "white"
+        self.icon_close = qtawesome.icon('mdi.close', color=icon_color, color_active=icon_hover)
+        self.icon_minimize = qtawesome.icon('msc.chrome-minimize', color=icon_color, color_active=icon_hover)
+        self.icon_maximize = qtawesome.icon('msc.chrome-maximize', color=icon_color, color_active=icon_hover)
+        self.icon_restore = qtawesome.icon('msc.chrome-restore', color=icon_color, color_active=icon_hover)
         
         self.btn_close.setIcon(self.icon_close)
         self.btn_minimize.setIcon(self.icon_minimize)
-        self.btn_maximize.setIcon(self.icon_maximize) # Start with maximize icon
+        self.btn_maximize.setIcon(self.icon_maximize)
 
-        # Connect signals
+        # Logic
         self.btn_close.clicked.connect(self.parent.close)
-        self.btn_maximize.clicked.connect(self.toggle_maximize_restore)
+        self.btn_maximize.clicked.connect(self.toggle_max)
         self.btn_minimize.clicked.connect(self.parent.showMinimized)
 
-        # Set size
-        self.btn_close.setFixedSize(btn_size, btn_size)
-        self.btn_maximize.setFixedSize(btn_size, btn_size)
-        self.btn_minimize.setFixedSize(btn_size, btn_size)
+        for btn in [self.btn_close, self.btn_maximize, self.btn_minimize]:
+            btn.setFixedSize(35, 35)
+            # Initial Style
+            btn.setStyleSheet("QPushButton { background: transparent; border: none; } QPushButton:hover { background: #3E3E3E; }")
+            
+        self.btn_close.setStyleSheet(self.btn_close.styleSheet().replace("#3E3E3E", "#E81123"))
 
-        button_style = """
-            QPushButton {
-                background-color: #1E1E1E;
-                border: none;
-                border-radius: 0px;
-            }
-        """
-        self.btn_close.setStyleSheet(button_style + "QPushButton:hover { background-color: #E81123; }")
-        self.btn_maximize.setStyleSheet(button_style + "QPushButton:hover { background-color: #3E3E3E; }")
-        self.btn_minimize.setStyleSheet(button_style + "QPushButton:hover { background-color: #3E3E3E; }")
+        # FIX: Make max button transparent to mouse so Native events catch it easily
+        if IS_WINDOWS:
+            self.btn_maximize.setAttribute(Qt.WA_TransparentForMouseEvents)
 
-        # MODIFIED: Layout assembly changed to accomodate centered title
-        # Sequence: [MenuBar (inserted at 0)] [Stretch] [Icon] [Title] [Stretch] [Controls]
-        
-        # We start by adding the first stretch (which will be at index 0 initially, or 1 after menu insertion)
         self.layout.addStretch()
-        
         self.layout.addWidget(self.icon_label)
         self.layout.addWidget(self.title)
-        
         self.layout.addStretch() 
-        
         self.layout.addWidget(self.btn_minimize)
         self.layout.addWidget(self.btn_maximize)
         self.layout.addWidget(self.btn_close)
 
-        self.setLayout(self.layout)
-
-        # ADDED: Set the default state. This creates the HOME-style menu bar.
         self.setState(TitleBarState.HOME)
-
-        self.start = QPoint(0, 0)
-        self.pressing = False
-
-        # Apply rounded corners
-        self.corners_effect = CornersEffect()
-        QTimer.singleShot(100, self.apply_window_effects)
-        
-        # FIX: Install event filter on parent to catch WindowStateChange events automatically
         self.parent.installEventFilter(self)
 
-    def eventFilter(self, obj, event):
-        """
-        Intercepts parent events to update icon on state changes.
-        We rely PURELY on this event to ensure the icon matches the internal Qt state.
-        """
-        if obj == self.parent and event.type() == QEvent.WindowStateChange:
-            self.update_maximize_icon()
-        
-        return super().eventFilter(obj, event)
+        # Software dragging for Linux/Mac
+        self.pressing = False
+        self.start_pos = QPoint(0,0)
 
-    def apply_window_effects(self):
-        """Get the window handle and apply the rounded corners."""        
-        # Ensure icon matches state immediately after startup
-        self.update_maximize_icon()
-        
-        if hasattr(self.parent, 'winId'):
-             hwnd = int(self.parent.winId())
-             self.corners_effect.apply_rounded_corners(hwnd)
-
-    # ADDED: Method to set the state and configure the menu bar accordingly.
     def setState(self, state):
-        """
-        Configures the title bar's appearance and functionality based on the window's context.
-        This is the primary method for controlling the menu bar.
-        """
-        # 1. Remove the existing menu bar, if any, to ensure a clean state.
         if self.menu_bar:
             self.layout.removeWidget(self.menu_bar)
             self.menu_bar.deleteLater()
             self.menu_bar = None
-        
-        # 2. For NON_MAIN state, we don't want a menu bar at all. We're done.
-        if state == TitleBarState.NON_MAIN:
-            return
+        if state != TitleBarState.NON_MAIN:
+            self.menu_bar = MenuBar(self.parent, state)
+            self.layout.insertWidget(0, self.menu_bar)
 
-        # 3. For HOME and MAIN_WINDOW, create a new MenuBar with the correct state.
-        self.menu_bar = MenuBar(self.parent, state)
-        # Insert the menu bar into the layout at the beginning (index 0).
-        self.layout.insertWidget(0, self.menu_bar)
-
-    def toggle_maximize_restore(self):
-        # FIX: Check for both Maximized OR FullScreen
-        state = self.parent.windowState()
-        is_max = (state & Qt.WindowMaximized) or (state & Qt.WindowFullScreen)
-        
-
-        if is_max:
+    def toggle_max(self):
+        # FIX: Check both Maximized and FullScreen flags
+        if self.parent.windowState() & (Qt.WindowMaximized | Qt.WindowFullScreen):
             self.parent.showNormal()
         else:
             self.parent.showMaximized()
 
     def update_maximize_icon(self):
-        """Updates the maximize/restore icon based on the window state."""
-        # FIX: Check for both Maximized OR FullScreen
-        state = self.parent.windowState()
-        is_max = (state & Qt.WindowMaximized) or (state & Qt.WindowFullScreen)
-        
-        if is_max:
-            self.btn_maximize.setIcon(self.icon_restore)
-            self.btn_maximize.setToolTip("Restore")
-        else:
-            self.btn_maximize.setIcon(self.icon_maximize)
-            self.btn_maximize.setToolTip("Maximize")
+        is_max = self.parent.windowState() & (Qt.WindowMaximized | Qt.WindowFullScreen)
+        self.btn_maximize.setIcon(self.icon_restore if is_max else self.icon_maximize)
+    
+    # --- NEW: Helper to manually style the button since Qt events are bypassed ---
+    def set_max_btn_style(self, state):
+        if state == 'hover':
+            self.btn_maximize.setStyleSheet("QPushButton { background: #3E3E3E; border: none; }")
+        elif state == 'pressed':
+            self.btn_maximize.setStyleSheet("QPushButton { background: #505050; border: none; }")
+        else: # normal
+            self.btn_maximize.setStyleSheet("QPushButton { background: transparent; border: none; }")
 
+    def eventFilter(self, obj, event):
+        if obj == self.parent and event.type() == QEvent.WindowStateChange:
+            self.update_maximize_icon()
+        return super().eventFilter(obj, event)
+
+    # --- Linux/Mac Software Dragging ---
     def mousePressEvent(self, event):
-        RESIZE_MARGIN = 5 
+        if IS_WINDOWS: return
         child = self.childAt(event.pos())
-
-        # FIX: Logic to allow dragging needs to treat FullScreen as maximized
-        state = self.parent.windowState()
-        is_max = (state & Qt.WindowMaximized) or (state & Qt.WindowFullScreen)
-
-        should_move = (
-            event.button() == Qt.LeftButton and
-            (not child or child is self.title or child is self.icon_label) and
-            (is_max or event.y() >= RESIZE_MARGIN)
-        )
-
-        if should_move:
-            self.start = self.mapToGlobal(event.pos())
+        if event.button() == Qt.LeftButton and (not child or child in [self.title, self.icon_label]):
             self.pressing = True
-        else:
-            super().mousePressEvent(event)
+            self.start_pos = event.globalPosition().toPoint() - self.parent.frameGeometry().topLeft()
 
     def mouseMoveEvent(self, event):
-        if self.pressing:
-            end = self.mapToGlobal(event.pos())
-            movement = end - self.start
-
-            # FIX: Logic for dragging out of maximize needs to support FullScreen
-            state = self.parent.windowState()
-            is_max = (state & Qt.WindowMaximized) or (state & Qt.WindowFullScreen)
-
-            if is_max:
-                norm_geom = self.parent.normalGeometry()
-                rel_pos_on_title = event.pos().x() / self.width()
-                
-                self.parent.showNormal()
-                
-                new_x = end.x() - norm_geom.width() * rel_pos_on_title
-                new_y = end.y() - event.pos().y()
-                self.parent.move(int(new_x), int(new_y))
-                
-                self.start = self.mapToGlobal(event.pos())
-                return
-
-            self.parent.move(self.parent.pos() + movement)
-            self.start = end
-        else:
-            super().mouseMoveEvent(event)
+        if not IS_WINDOWS and self.pressing:
+            self.parent.move(event.globalPosition().toPoint() - self.start_pos)
 
     def mouseReleaseEvent(self, event):
         self.pressing = False
-        super().mouseReleaseEvent(event)
 
+# INTEGRATED WINDOW RESIZER (Cross-Platform)
 class WindowResizer(QObject):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
-        self.margin = 5  # The size of the resize handles in pixels
-        self.resizing = False
-        self.resize_edges = {}
-        self.start_pos = None
-        self.start_geo = None
+        self.margin = 5
+        self._max_hovering = False # Track hover state for max button
+        
+        # 1. Initialize Window Styles
+        self.window.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowMinMaxButtonsHint)
+        
+        if IS_WINDOWS:
+            # Enable native Windows features (Shadows, Snapping)
+            hwnd = int(self.window.winId())
+            style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+            user32.SetWindowLongW(hwnd, GWL_STYLE, style | WS_CAPTION | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX)
+            
+            # Apply Windows 11 Rounded Corners
+            try:
+                if sys.getwindowsversion().build >= 22000:
+                    pref = ctypes.c_int(2) # DWMWCP_ROUND
+                    dwmapi.DwmSetWindowAttribute(wintypes.HWND(hwnd), 33, ctypes.byref(pref), 4)
+            except: pass
+        else:
+            # 2. Initialize Software Resizing for Linux/Mac
+            self.window.setMouseTracking(True)
+            self.window.installEventFilter(self)
+            self.resizing = False
+            self.resize_edge = None
 
-        # Install the event filter on the window
-        self.window.setMouseTracking(True)
-        self.window.installEventFilter(self)
+    def handle_windows_native(self, message):
+        """
+        Logic for MainWindow's nativeEvent. 
+        Returns (handled: bool, result: int)
+        """
+        if not IS_WINDOWS: return False, 0
+        
+        msg = wintypes.MSG.from_address(int(message))
+        
+        if msg.message == WM_NCCALCSIZE:
+            return True, 0 # Removes standard titlebar area
 
+        # --- 1. HANDLE BUTTON CLICK SEQUENCE (Manually) ---
+        # Find Title Bar instance
+        tb = self.window.findChild(CustomTitleBar)
+        
+        if msg.message == WM_NCLBUTTONDOWN:
+            if msg.wParam == HTMAXBUTTON and tb:
+                tb.set_max_btn_style('pressed')
+                return True, 0
+
+        if msg.message == WM_NCLBUTTONUP:
+            if msg.wParam == HTMAXBUTTON and tb:
+                tb.set_max_btn_style('hover')
+                tb.toggle_max()
+                return True, 0
+
+        if msg.message == WM_NCHITTEST:
+            x_phys = msg.lParam & 0xFFFF
+            y_phys = (msg.lParam >> 16) & 0xFFFF
+            if x_phys > 32767: x_phys -= 65536
+            if y_phys > 32767: y_phys -= 65536
+            
+            # Get Window Rect
+            rect = RECT()
+            user32.GetWindowRect(int(self.window.winId()), ctypes.byref(rect))
+            
+            # Local coordinates relative to window
+            lx = x_phys - rect.left
+            ly = y_phys - rect.top
+            w = rect.right - rect.left
+            h = rect.bottom - rect.top
+            
+            # FIX: Robust check for maximized state (Maximized OR FullScreen)
+            is_max = self.window.windowState() & (Qt.WindowMaximized | Qt.WindowFullScreen)
+
+            # --- 2. CHECK MAXIMIZE BUTTON (SNAP LAYOUT SUPPORT) ---
+            if tb and tb.btn_maximize.isVisible():
+                btn = tb.btn_maximize
+                btn_local_pos = btn.mapTo(self.window, QPoint(0, 0))
+                dpr = self.window.devicePixelRatio()
+                
+                b_x = int(btn_local_pos.x() * dpr)
+                b_y = int(btn_local_pos.y() * dpr)
+                b_w = int(btn.width() * dpr)
+                b_h = int(btn.height() * dpr)
+
+                if (b_x <= lx < b_x + b_w) and (b_y <= ly < b_y + b_h):
+                    if not self._max_hovering:
+                        self._max_hovering = True
+                        tb.set_max_btn_style('hover')
+                    return True, HTMAXBUTTON
+                else:
+                    if self._max_hovering:
+                        self._max_hovering = False
+                        tb.set_max_btn_style('normal')
+
+            # --- 3. STANDARD RESIZE BORDERS ---
+            if not is_max:
+                if ly < self.margin:
+                    if lx < self.margin: return True, HTTOPLEFT
+                    if lx > w - self.margin: return True, HTTOPRIGHT
+                    return True, HTTOP
+                if ly > h - self.margin:
+                    if lx < self.margin: return True, HTBOTTOMLEFT
+                    if lx > w - self.margin: return True, HTBOTTOMRIGHT
+                    return True, HTBOTTOM
+                if lx < self.margin: return True, HTLEFT
+                if lx > w - self.margin: return True, HTRIGHT
+
+            # --- 4. TITLE BAR DRAGGING ---
+            if tb and tb.geometry().contains(int(lx / self.window.devicePixelRatio()), int(ly / self.window.devicePixelRatio())):
+                # If maximized, return False so Qt handles drag-to-restore
+                if is_max:
+                    return False, 0
+                    
+                local_pos = tb.mapFromGlobal(QCursor.pos())
+                child = tb.childAt(local_pos)
+                
+                # If clicking other buttons (Close/Min) or MenuBar
+                if isinstance(child, QPushButton) or (tb.menu_bar and tb.menu_bar.geometry().contains(local_pos)):
+                    return True, HTCLIENT 
+                
+                return True, HTCAPTION 
+                
+        return False, 0
+
+    # --- Software Resizing for Linux / Mac ---
     def eventFilter(self, obj, event):
-        if obj is not self.window or event.type() not in [QEvent.MouseMove, QEvent.MouseButtonPress, QEvent.MouseButtonRelease, QEvent.HoverMove]:
-            return super().eventFilter(obj, event)
-
-        global_pos = QCursor.pos()
-        pos_in_window = self.window.mapFromGlobal(global_pos)
-
-        # Helper to check max state locally
-        state = self.window.windowState()
-        is_max = (state & Qt.WindowMaximized) or (state & Qt.WindowFullScreen)
-
+        if IS_WINDOWS or obj is not self.window: return False
+        
         if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
-            # FIX: Do not allow resize if Max OR FullScreen
-            if not is_max and self._check_edges(pos_in_window):
+            edge = self._get_edge(event.pos())
+            if edge:
                 self.resizing = True
-                self.start_pos = global_pos
+                self.resize_edge = edge
+                self.start_pos = event.globalPosition().toPoint()
                 self.start_geo = self.window.geometry()
                 return True
-
-        elif event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+        elif event.type() == QEvent.MouseMove:
             if self.resizing:
-                self.resizing = False
-                self.resize_edges = {}
-                return True
-
-        elif event.type() == QEvent.MouseMove or event.type() == QEvent.HoverMove:
-            if self.resizing:
-                self._resize_window(global_pos)
+                self._do_resize(event.globalPosition().toPoint())
                 return True
             else:
-                self._update_cursor(pos_in_window, is_max)
-        
-        return super().eventFilter(obj, event)
+                self._set_cursor(self._get_edge(event.pos()))
+        elif event.type() == QEvent.MouseButtonRelease:
+            self.resizing = False
+        return False
 
-    def _check_edges(self, pos):
-        """Check which edge(s) the mouse is on and store them."""
-        rect = self.window.rect()
-        self.resize_edges['top'] = pos.y() < self.margin
-        self.resize_edges['bottom'] = pos.y() > rect.bottom() - self.margin
-        self.resize_edges['left'] = pos.x() < self.margin
-        self.resize_edges['right'] = pos.x() > rect.right() - self.margin
-        return any(self.resize_edges.values())
+    def _get_edge(self, pos):
+        if self.window.isMaximized(): return None
+        x, y = pos.x(), pos.y()
+        w, h = self.window.width(), self.window.height()
+        m = self.margin
+        if x < m and y < m: return "tl"
+        if x > w-m and y < m: return "tr"
+        if x < m and y > h-m: return "bl"
+        if x > w-m and y > h-m: return "br"
+        if x < m: return "l"
+        if x > w-m: return "r"
+        if y < m: return "t"
+        if y > h-m: return "b"
+        return None
 
-    def _update_cursor(self, pos, is_max):
-        """Update the cursor icon based on the mouse position over the edges."""
-        # FIX: Check passed is_max state
-        if is_max or self.resizing:
-            self.window.unsetCursor()
-            return
-            
-        rect = self.window.rect()
-        on_top = pos.y() < self.margin
-        on_bottom = pos.y() > rect.bottom() - self.margin
-        on_left = pos.x() < self.margin
-        on_right = pos.x() > rect.right() - self.margin
+    def _set_cursor(self, edge):
+        cursors = {"tl": Qt.SizeFDiagCursor, "br": Qt.SizeFDiagCursor,
+                   "tr": Qt.SizeBDiagCursor, "bl": Qt.SizeBDiagCursor,
+                   "l": Qt.SizeHorCursor, "r": Qt.SizeHorCursor,
+                   "t": Qt.SizeVerCursor, "b": Qt.SizeVerCursor}
+        self.window.setCursor(cursors.get(edge, Qt.ArrowCursor))
 
-        if (on_top and on_left) or (on_bottom and on_right):
-            self.window.setCursor(Qt.SizeFDiagCursor)
-        elif (on_top and on_right) or (on_bottom and on_left):
-            self.window.setCursor(Qt.SizeBDiagCursor)
-        elif on_top or on_bottom:
-            self.window.setCursor(Qt.SizeVerCursor)
-        elif on_left or on_right:
-            self.window.setCursor(Qt.SizeHorCursor)
-        else:
-            self.window.unsetCursor()
-
-    def _resize_window(self, global_pos):
-        """Calculate the new window geometry and apply it, respecting minimum size."""
-        delta = global_pos - self.start_pos
-        start_rect = self.start_geo
-        min_size = self.window.minimumSize()
-        
-        new_rect = QRect(start_rect)
-
-        if self.resize_edges.get('left'):
-            new_left = start_rect.left() + delta.x()
-            if start_rect.width() - delta.x() < min_size.width():
-                new_left = start_rect.right() - min_size.width()
-            new_rect.setLeft(new_left)
-
-        if self.resize_edges.get('right'):
-            new_right = start_rect.right() + delta.x()
-            if start_rect.width() + delta.x() < min_size.width():
-                new_right = start_rect.left() + min_size.width()
-            new_rect.setRight(new_right)
-
-        if self.resize_edges.get('top'):
-            new_top = start_rect.top() + delta.y()
-            if start_rect.height() - delta.y() < min_size.height():
-                new_top = start_rect.bottom() - min_size.height()
-            new_rect.setTop(new_top)
-
-        if self.resize_edges.get('bottom'):
-            new_bottom = start_rect.bottom() + delta.y()
-            if start_rect.height() + delta.y() < min_size.height():
-                new_bottom = start_rect.top() + min_size.height()
-            new_rect.setBottom(new_bottom)
-            
-        self.window.setGeometry(new_rect)
+    def _do_resize(self, global_pos):
+        geo = QRect(self.start_geo)
+        diff = global_pos - self.start_pos
+        if "l" in self.resize_edge: geo.setLeft(self.start_geo.left() + diff.x())
+        if "r" in self.resize_edge: geo.setRight(self.start_geo.right() + diff.x())
+        if "t" in self.resize_edge: geo.setTop(self.start_geo.top() + diff.y())
+        if "b" in self.resize_edge: geo.setBottom(self.start_geo.bottom() + diff.y())
+        if geo.width() >= self.window.minimumWidth() and geo.height() >= self.window.minimumHeight():
+            self.window.setGeometry(geo)

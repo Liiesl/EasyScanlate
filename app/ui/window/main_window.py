@@ -340,6 +340,16 @@ class MainWindow(QMainWindow):
         # Initialize Title Bar State (needs all other widgets to be created first)
         self.title_bar.setState(TitleBarState.MAIN_WINDOW)
 
+    def nativeEvent(self, eventType, message):
+        # Use getattr to safely check if resizer exists and is fully initialized
+        resizer = getattr(self, 'resizer', None)
+        if resizer:
+            handled, result = resizer.handle_windows_native(message)
+            if handled:
+                return True, result
+                
+        return super().nativeEvent(eventType, message)
+
     def changeEvent(self, event):
         if event.type() == QEvent.WindowStateChange:
             if hasattr(self, 'title_bar'):
