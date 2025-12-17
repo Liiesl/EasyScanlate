@@ -18,21 +18,33 @@ from app.ui.window.main_window import MainWindow
 # Assumes ui_test.py is in the root directory
 from ui_test import create_fake_project_data, create_fake_mmtl_file
 from app.utils.exception_handler import setup_global_exception_handler
+from PySide6.QtGui import QGuiApplication, QScreen # ADD THIS
 
 def capture_and_exit(window, output_path):
     print(f"Capturing screenshot to {output_path}...")
     
-    # Force a resize to a standard resolution for comparison
+    # Resize window
     window.resize(1280, 800)
     
-    # Grab the window content
-    pixmap = window.grab()
+    # Center the window to ensure it's not cut off
+    screen_geometry = window.screen().availableGeometry()
+    x = (screen_geometry.width() - window.width()) // 2
+    y = (screen_geometry.height() - window.height()) // 2
+    window.move(x, y)
+
+    # Allow time for move/resize events to process
+    QApplication.processEvents()
+
+    # --- CHANGED: CAPTURE ENTIRE SCREEN ---
+    # grabWindow(0) captures the entire desktop. 
+    # This includes the window + OS borders + shadows + wallpaper.
+    screen = QGuiApplication.primaryScreen()
+    pixmap = screen.grabWindow(0)
     
     # Save
     pixmap.save(output_path)
     print("Screenshot saved.")
     
-    # Exit application
     QApplication.quit()
 
 if __name__ == '__main__':
