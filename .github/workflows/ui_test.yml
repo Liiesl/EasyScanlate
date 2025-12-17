@@ -2,6 +2,8 @@ name: UI Visual Test
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ "ui-rework" ]
 
 jobs:
   visual-test:
