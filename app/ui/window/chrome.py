@@ -154,9 +154,25 @@ class CustomTitleBar(QWidget):
         # Apply rounded corners
         self.corners_effect = CornersEffect()
         QTimer.singleShot(100, self.apply_window_effects)
+        
+        # FIX: Install event filter on parent to catch WindowStateChange events automatically
+        self.parent.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        """
+        Intercepts parent events to update icon on state changes.
+        We rely PURELY on this event to ensure the icon matches the internal Qt state.
+        """
+        if obj == self.parent and event.type() == QEvent.WindowStateChange:
+            self.update_maximize_icon()
+        
+        return super().eventFilter(obj, event)
 
     def apply_window_effects(self):
-        """Get the window handle and apply the rounded corners."""
+        """Get the window handle and apply the rounded corners."""        
+        # Ensure icon matches state immediately after startup
+        self.update_maximize_icon()
+        
         if hasattr(self.parent, 'winId'):
              hwnd = int(self.parent.winId())
              self.corners_effect.apply_rounded_corners(hwnd)
@@ -183,26 +199,41 @@ class CustomTitleBar(QWidget):
         self.layout.insertWidget(0, self.menu_bar)
 
     def toggle_maximize_restore(self):
-        if self.parent.isMaximized():
+        # FIX: Check for both Maximized OR FullScreen
+        state = self.parent.windowState()
+        is_max = (state & Qt.WindowMaximized) or (state & Qt.WindowFullScreen)
+        
+
+        if is_max:
             self.parent.showNormal()
         else:
             self.parent.showMaximized()
-    
+
     def update_maximize_icon(self):
         """Updates the maximize/restore icon based on the window state."""
-        if self.parent.isMaximized():
+        # FIX: Check for both Maximized OR FullScreen
+        state = self.parent.windowState()
+        is_max = (state & Qt.WindowMaximized) or (state & Qt.WindowFullScreen)
+        
+        if is_max:
             self.btn_maximize.setIcon(self.icon_restore)
+            self.btn_maximize.setToolTip("Restore")
         else:
             self.btn_maximize.setIcon(self.icon_maximize)
+            self.btn_maximize.setToolTip("Maximize")
 
     def mousePressEvent(self, event):
         RESIZE_MARGIN = 5 
         child = self.childAt(event.pos())
 
+        # FIX: Logic to allow dragging needs to treat FullScreen as maximized
+        state = self.parent.windowState()
+        is_max = (state & Qt.WindowMaximized) or (state & Qt.WindowFullScreen)
+
         should_move = (
             event.button() == Qt.LeftButton and
             (not child or child is self.title or child is self.icon_label) and
-            (self.parent.isMaximized() or event.y() >= RESIZE_MARGIN)
+            (is_max or event.y() >= RESIZE_MARGIN)
         )
 
         if should_move:
@@ -216,7 +247,11 @@ class CustomTitleBar(QWidget):
             end = self.mapToGlobal(event.pos())
             movement = end - self.start
 
-            if self.parent.isMaximized():
+            # FIX: Logic for dragging out of maximize needs to support FullScreen
+            state = self.parent.windowState()
+            is_max = (state & Qt.WindowMaximized) or (state & Qt.WindowFullScreen)
+
+            if is_max:
                 norm_geom = self.parent.normalGeometry()
                 rel_pos_on_title = event.pos().x() / self.width()
                 
@@ -259,8 +294,13 @@ class WindowResizer(QObject):
         global_pos = QCursor.pos()
         pos_in_window = self.window.mapFromGlobal(global_pos)
 
+        # Helper to check max state locally
+        state = self.window.windowState()
+        is_max = (state & Qt.WindowMaximized) or (state & Qt.WindowFullScreen)
+
         if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
-            if not self.window.isMaximized() and self._check_edges(pos_in_window):
+            # FIX: Do not allow resize if Max OR FullScreen
+            if not is_max and self._check_edges(pos_in_window):
                 self.resizing = True
                 self.start_pos = global_pos
                 self.start_geo = self.window.geometry()
@@ -277,7 +317,7 @@ class WindowResizer(QObject):
                 self._resize_window(global_pos)
                 return True
             else:
-                self._update_cursor(pos_in_window)
+                self._update_cursor(pos_in_window, is_max)
         
         return super().eventFilter(obj, event)
 
@@ -290,9 +330,10 @@ class WindowResizer(QObject):
         self.resize_edges['right'] = pos.x() > rect.right() - self.margin
         return any(self.resize_edges.values())
 
-    def _update_cursor(self, pos):
+    def _update_cursor(self, pos, is_max):
         """Update the cursor icon based on the mouse position over the edges."""
-        if self.window.isMaximized() or self.resizing:
+        # FIX: Check passed is_max state
+        if is_max or self.resizing:
             self.window.unsetCursor()
             return
             
