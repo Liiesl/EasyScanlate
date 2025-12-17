@@ -25,6 +25,7 @@ from app.handlers.selection_manager import SelectionManager
 from app.core.project_model import ProjectModel
 from app.ui.dialogs.settings_dialog import SettingsDialog
 from app.ui.window.translation_window import TranslationWindow
+from app.ui.components.background import AuroraCanvas
 from assets import (DEFAULT_TEXT_STYLE, get_style_diff)
 import os, gc, json, traceback # easyocr, # ocr functionality disabled
 
@@ -79,8 +80,8 @@ class MainWindow(QMainWindow):
         self.setWindowFlags(Qt.FramelessWindowHint)
 
         # Root Container
-        root_container = QWidget()
-        root_layout = QVBoxLayout(root_container)
+        self.background_canvas = AuroraCanvas()
+        root_layout = QVBoxLayout(self.background_canvas)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
@@ -95,7 +96,7 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(0)
 
         root_layout.addWidget(main_widget)
-        self.setCentralWidget(root_container)
+        self.setCentralWidget(self.background_canvas)
 
         self.scroll_area = CustomScrollArea(main_window=self)
         

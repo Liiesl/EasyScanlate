@@ -8,9 +8,10 @@ from PySide6.QtWidgets import (QDialog, QDoubleSpinBox, QVBoxLayout, QHBoxLayout
                              QWidget, QLineEdit, QKeySequenceEdit, QCheckBox,
                              QGroupBox, QPushButton, QLabel, QProgressBar, QMessageBox)
 from PySide6.QtGui import QKeySequence, QDesktopServices
-from PySide6.QtCore import QSettings, QUrl
+from PySide6.QtCore import QSettings, QUrl, Qt
 from app.utils.update import UpdateHandler
 from app.ui.dialogs.error_dialog import ErrorDialog
+from app.ui.components.background_settings import AuroraEditorPanel
 GEMINI_MODELS_WITH_INFO = [
     ("gemini-2.5-flash", "250 req/day (free tier)"),
     ("gemini-2.5-pro", "100 req/day (free tier)"),
@@ -119,6 +120,22 @@ class SettingsDialog(QDialog):
         
         general_tab.setLayout(general_layout)
         self.tab_widget.addTab(general_tab, "General")
+
+        # --- Background / Appearance Tab ---
+        background_tab = QWidget()
+        bg_layout = QVBoxLayout()
+        bg_layout.setAlignment(Qt.AlignCenter)
+        
+        canvas = getattr(parent, 'background_canvas', None)
+        if canvas:
+            self.background_editor = AuroraEditorPanel(canvas)
+            # Center the panel in the tab
+            bg_layout.addWidget(self.background_editor)
+        else:
+            bg_layout.addWidget(QLabel("Background canvas not found."))
+            
+        background_tab.setLayout(bg_layout)
+        self.tab_widget.addTab(background_tab, "Appearance")
 
         # --- OCR Processing Settings Tab (No changes) ---
         processing_tab = QWidget()
