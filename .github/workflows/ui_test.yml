@@ -7,7 +7,7 @@ on:
 
 jobs:
   visual-test:
-    name: Test UI on ${{ matrix.os }}
+    name: Screenshot on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -21,36 +21,46 @@ jobs:
       with:
         python-version: "3.10"
 
-    # Install System Dependencies for Linux (Headless Display)
-    - name: Install Linux Libs
+    # --- LINUX SPECIFIC SETUP ---
+    - name: Install Linux System Libs
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
         sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 x11-utils xvfb
 
-    - name: Install Python Dependencies
+    # --- INSTALL DEPENDENCIES ---
+    - name: Install Python Libs (and PyTorch)
       run: |
-        pip install PySide6 qtawesome
-        # Add any other requirements from your project
-        # pip install -r requirements.txt
+        pip install -r requirements.txt
+        
+        if [[ "${{ runner.os }}" == "macOS" ]]; then
+          pip install torch==2.9.0 torchvision==0.24.0 --index-url https://download.pytorch.org/whl/cpu
+        else
+          pip install torch==2.9.0 torchvision==0.24.0 --index-url https://download.pytorch.org/whl/cu128
+        fi
+        
+        # Alternatively: if you *only* want to specify these and not use requirements.txt
+        # pip install PySide6 qtawesome torch==2.9.0 torchvision==0.24.0 --index-url https://download.pytorch.org/whl/cu128  # Linux & Windows
+        # pip install PySide6 qtawesome torch==2.9.0 torchvision==0.24.0 --index-url https://download.pytorch.org/whl/cpu        # macOS
 
-    # WINDOWS RUN
-    - name: Run UI Test (Windows)
+    # --- RUN TESTS ---
+
+    # 1. Windows (Native)
+    - name: Run Windows Test
       if: runner.os == 'Windows'
       run: python capture_ui.py
 
-    # LINUX RUN (Requires xvfb-run)
-    - name: Run UI Test (Linux)
+    # 2. Linux (Virtual Display)
+    - name: Run Linux Test
       if: runner.os == 'Linux'
-      run: |
-        # xvfb-run creates a fake monitor so Qt can render
-        xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" python capture_ui.py
+      run: xvfb-run --auto-servernum --server-args="-screen 0 1366x768x24" python capture_ui.py
 
-    # MACOS RUN (Uses 'offscreen' plugin defined in python script)
-    - name: Run UI Test (macOS)
+    # 3. macOS (Offscreen Platform)
+    - name: Run macOS Test
       if: runner.os == 'macOS'
       run: python capture_ui.py
 
+    # --- UPLOAD ARTIFACTS ---
     - name: Upload Screenshots
       uses: actions/upload-artifact@v4
       if: always()
