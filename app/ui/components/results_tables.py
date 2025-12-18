@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame, QScrol
                              QPushButton, QTableWidget, QTableWidgetItem, QMessageBox, QHeaderView,
                              QTextEdit, QAbstractItemView, QStyledItemDelegate)
 from app.ui.dialogs.error_dialog import ErrorDialog
+from app.ui.components.simple_view import SimpleView
 from PySide6.QtCore import Qt, Signal, QEvent
 import qtawesome as qta
 import math
@@ -47,16 +48,16 @@ class ResultsWidget(QWidget):
         self.results_table.cellChanged.connect(self.on_cell_changed)
         self.results_table.currentCellChanged.connect(self.on_table_focus_changed)
         self.update_column_resize_modes()
-        self.simple_view_widget = QWidget()
-        self.simple_layout = QVBoxLayout(self.simple_view_widget)
-        self.simple_layout.setContentsMargins(5, 5, 5, 5)
-        self.simple_layout.setSpacing(10)
-        self.simple_scroll = QScrollArea()
-        self.simple_scroll.setWidgetResizable(True)
-        self.simple_scroll_content = QWidget()
-        self.simple_scroll_layout = QVBoxLayout(self.simple_scroll_content)
-        self.simple_scroll.setWidget(self.simple_scroll_content)
-        self.right_content_stack.addWidget(self.simple_scroll)
+        self.results_table.currentCellChanged.connect(self.on_table_focus_changed)
+        self.update_column_resize_modes()
+        
+        # New Simple View Integration
+        self.simple_view = SimpleView()
+        self.simple_view.rowDeleted.connect(lambda rn: self.main_window.delete_row(rn))
+        self.simple_view.textChanged.connect(self.on_simple_view_text_changed)
+        self.simple_view.rowSelected.connect(lambda rn: self.selection_manager.select(rn, self))
+        
+        self.right_content_stack.addWidget(self.simple_view)
         self.right_content_stack.addWidget(self.results_table)
         main_layout.addWidget(self.right_content_stack, 1)
 
@@ -117,92 +118,43 @@ class ResultsWidget(QWidget):
     
     # ... (the rest of the file is unchanged, only the selection logic is modified) ...
     def update_simple_view(self):
-        # Clear the layout - this will delete old widgets
-        # Highlighters should have been cleared by on_profile_changed() before this is called
-        
         # Set flag to prevent textChanged from processing during widget recreation
         self._is_updating_views = True
         
-        # Disconnect textChanged from all existing widgets before clearing to prevent them from firing
-        for i in range(self.simple_scroll_layout.count()):
-            item = self.simple_scroll_layout.itemAt(i)
-            if item:
-                widget = item.widget()
-                if widget:
-                    text_edit = widget.findChild(QTextEdit)
-                    if text_edit:
-                        try:
-                            text_edit.textChanged.disconnect()
-                        except:
-                            pass  # Ignore if not connected
-        
-        self.main_window._clear_layout(self.simple_scroll_layout)
-        
         visible_results = [res for res in self.main_window.model.ocr_results if not res.get('is_deleted', False)]
         
-        for idx, result in enumerate(visible_results):
-            original_row_number = result['row_number']
-            # Get display text from the current active profile - this ensures new profile text is used
-            display_text = self.main_window.get_display_text(result)
+        # Use a lambda or helper to get the display text properly
+        def get_text(res):
+            return self.main_window.get_display_text(res)
             
-            container = QWidget()
-            container.setProperty("ocr_row_number", original_row_number)
-            container.setObjectName(f"SimpleViewRowContainer_{original_row_number}")
-            container_layout = QHBoxLayout(container)
-            container_layout.setContentsMargins(5, 5, 5, 5); container_layout.setSpacing(10)
-            text_frame = QFrame()
-            text_layout = QVBoxLayout(text_frame); text_layout.setContentsMargins(0, 0, 0, 0)
-            
-            text_edit = QTextEdit()
-            text_edit.setProperty("ocr_row_number", original_row_number)
-            text_edit.installEventFilter(self)
-            text_edit.setLineWrapMode(QTextEdit.WidgetWidth)
-            # Set text with signals blocked to prevent any interference during initialization
-            text_edit.blockSignals(True)
-            text_edit.setPlainText(display_text)
-            text_edit.blockSignals(False)
-            
-            # Connect textChanged AFTER setting text to avoid triggering during initialization
-            text_edit.textChanged.connect(lambda rn=original_row_number, te=text_edit: self.on_simple_text_changed(rn, te.toPlainText()))
-            text_layout.addWidget(text_edit)
-            delete_btn = QPushButton(qta.icon('fa5s.trash-alt', color='red'), "")
-            delete_btn.setFixedSize(40, 40)
-            delete_btn.clicked.connect(lambda _, rn=original_row_number: self.main_window.delete_row(rn))
-            container_layout.addWidget(text_frame, 1); container_layout.addWidget(delete_btn)
-            self.simple_scroll_layout.addWidget(container)
-        self.simple_scroll_layout.addStretch()
-        
-        # Reset flag after widgets are created and connected
-        # Use QTimer to ensure all textChanged signals from widget creation have been processed
+        self.simple_view.populate(self.main_window.model.ocr_results, get_text)
+
+        # Reset flag after widgets are created
         from PySide6.QtCore import QTimer
         QTimer.singleShot(100, lambda: setattr(self, '_is_updating_views', False))
         
-        # Refresh find widget after widgets are created with new profile text
-        # Use a longer delay to ensure widgets are fully created and rendered before searching/highlighting
+        # Refresh find widget
         if self.main_window.find_replace_widget.isVisible(): 
             QTimer.singleShot(300, lambda: self.main_window.find_replace_widget.find_text())
 
-    def on_simple_text_changed(self, original_row_number, text):
-        # Ignore textChanged during view updates (profile changes, widget recreation)
+    def on_simple_view_text_changed(self, original_row_number, text):
         if self._is_updating_views:
             return
-        
-        # Always check if text actually changed by comparing with model
-        # This prevents false positives from cursor changes, highlighting, etc.
+            
+        # Check against model like before
         result_data = self.main_window.model._find_result_by_row_number(original_row_number)[0]
         if result_data:
             current_text_in_model = self.main_window.get_display_text(result_data)
-            # Normalize only line endings for comparison (don't strip whitespace - preserve user edits like trailing spaces)
-            # This handles cases where cursor positioning adds invisible newline differences
-            # but preserves meaningful whitespace changes like trailing spaces
             normalized_widget_text = text.replace('\r\n', '\n').replace('\r', '\n')
             normalized_model_text = current_text_in_model.replace('\r\n', '\n').replace('\r', '\n')
             
             if normalized_widget_text == normalized_model_text:
                 return
-            
+
         self.main_window.update_ocr_text(original_row_number, text)
         self._update_table_cell_if_visible(original_row_number, 0, text)
+
+
 
     def update_results_table(self):
         self.results_table.blockSignals(True)
@@ -335,28 +287,8 @@ class ResultsWidget(QWidget):
                     except (ValueError, TypeError):
                         continue
         else:
-            for i in range(self.simple_scroll_layout.count()):
-                widget = self.simple_scroll_layout.itemAt(i).widget()
-                if widget and widget.property("ocr_row_number") is not None:
-                    try:
-                        if math.isclose(float(widget.property("ocr_row_number")), target_rn_float):
-                            scrollbar = self.simple_scroll.verticalScrollBar()
-                            viewport_height = self.simple_scroll.viewport().height()
-                            current_scroll_y = scrollbar.value()
-
-                            widget_y = widget.y()
-                            widget_height = widget.height()
-
-                            is_visible = (widget_y >= current_scroll_y) and (widget_y + widget_height <= current_scroll_y + viewport_height)
-                            if not is_visible:
-                                target_scroll_y = widget_y + (widget_height / 2) - (viewport_height / 2)
-                                clamped_scroll_y = max(scrollbar.minimum(), min(int(target_scroll_y), scrollbar.maximum()))
-                                scrollbar.setValue(clamped_scroll_y)
-                            
-                            found = True
-                            break
-                    except (ValueError, TypeError):
-                        continue
+            self.simple_view.scroll_to_row(row_number)
+            found = True # Assuming simple view handles it or we trust it exists since it's populated from results
         
         if not found:
             print(f"Info: Could not find row {row_number} in the current results view to scroll to.")
@@ -376,16 +308,8 @@ class ResultsWidget(QWidget):
                 break
 
     def _update_simple_view_text_if_visible(self, original_row_number, new_text):
-        for i in range(self.simple_scroll_layout.count()):
-             widget = self.simple_scroll_layout.itemAt(i).widget()
-             if isinstance(widget, QWidget) and widget.property("ocr_row_number") == original_row_number:
-                 text_edit = widget.findChild(QTextEdit)
-                 if text_edit:
-                     if text_edit.toPlainText() != new_text:
-                         text_edit.blockSignals(True)
-                         text_edit.setText(new_text)
-                         text_edit.blockSignals(False)
-                 break
+        if not self.is_advanced_mode:
+            self.simple_view.update_text(original_row_number, new_text)
 
     def combine_selected_rows(self):
         selected_ranges = self.results_table.selectedRanges()

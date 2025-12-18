@@ -81,6 +81,8 @@ WFWF_STYLES = _load_stylesheet("wfwf.qss")
 
 IMPORT_EXPORT_STYLES = _load_stylesheet("import_export.qss")
 
+SIMPLE_VIEW_STYLES = _load_stylesheet("simple_view.qss")
+
 from PySide6.QtGui import QColor
 
 DEFAULT_GRADIENT = {

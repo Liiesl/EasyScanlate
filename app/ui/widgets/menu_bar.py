@@ -228,7 +228,7 @@ class MenuBar(QMenuBar):
             view_menu.addSeparator()
 
             # Advanced Mode
-            advanced_action = QAction("Advanced Mode", self)
+            advanced_action = QAction("(Legacy) Advanced Mode", self)
             advanced_action.setCheckable(True)
             # Check state against results_widget if possible, else default false
             if hasattr(self.main_window, 'results_widget'):
