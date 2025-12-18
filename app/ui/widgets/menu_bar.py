@@ -31,7 +31,6 @@ class MenuBar(QMenuBar):
                 color: #FFFFFF;
             }
         """)    
-        self.setMaximumWidth(200)               
         
         # Only create menu bar contents if the state is not NON_MAIN.
         # This is a safe guard; the parent (CustomTitleBar) should already handle this.
@@ -89,6 +88,17 @@ class MenuBar(QMenuBar):
         files_menu.addAction(import_wfwf_action)
 
         files_menu.addSeparator()
+
+        # Import/Export (Parity with existing button)
+        if self.state == TitleBarState.MAIN_WINDOW:
+            import_trans_action = QAction(qta.icon('fa5s.file-import', color="white"), "Import Translation", self)
+            import_trans_action.triggered.connect(self.main_window.import_translation)
+            files_menu.addAction(import_trans_action)
+
+            export_ocr_action = QAction(qta.icon('fa5s.file-export', color="white"), "Export OCR Results", self)
+            export_ocr_action.triggered.connect(self.main_window.export_ocr_results)
+            files_menu.addAction(export_ocr_action)
+            files_menu.addSeparator()
         
         save_action = QAction(qta.icon('fa5s.save', color="white"), "Save Project", self)
         save_as_action = QAction(qta.icon('fa5s.download', color="white"), "Save Project As...", self)
@@ -106,16 +116,75 @@ class MenuBar(QMenuBar):
             save_action.setEnabled(False)
             save_as_action.setEnabled(False)
 
-        # --- 3. VIEW (Menu) ---
+        # --- 3. EDIT (Menu) ---
         if self.state == TitleBarState.MAIN_WINDOW:
-            view_menu = self.addMenu("View")
-            view_menu.setStyleSheet(menu_style)
+            edit_menu = self.addMenu("Edit")
+            edit_menu.setStyleSheet(menu_style)
 
-            # Find/Replace
+            # Find/Replace (Parity with Toolbar/Ctrl+F)
             find_action = QAction("Find/Replace", self)
             find_action.setShortcut("Ctrl+F")
             find_action.triggered.connect(self.main_window.toggle_find_widget)
-            view_menu.addAction(find_action)
+            edit_menu.addAction(find_action)
+            
+            # Note: Undo/Redo/Select All are skipped as they don't exist in the current backend.
+
+        # --- 4. PROCESS (Menu) ---
+        if self.state == TitleBarState.MAIN_WINDOW:
+            process_menu = self.addMenu("Process")
+            process_menu.setStyleSheet(menu_style)
+
+            # OCR Process
+            ocr_action = QAction(qta.icon('fa5s.magic', color='white'), "Start/Stop OCR", self)
+            if hasattr(self.main_window, 'toggle_ocr'):
+                ocr_action.triggered.connect(self.main_window.toggle_ocr)
+            process_menu.addAction(ocr_action)
+
+            process_menu.addSeparator()
+
+            # Manual OCR Mode
+            manual_mode_action = QAction(qta.icon('fa5s.crop-alt', color="white"), "Manual OCR Mode", self)
+            manual_mode_action.setCheckable(True)
+            if hasattr(self.main_window, 'btn_manual_ocr'):
+                manual_mode_action.setChecked(self.main_window.btn_manual_ocr.isChecked())
+                manual_mode_action.toggled.connect(self.main_window.btn_manual_ocr.setChecked)
+                self.main_window.btn_manual_ocr.toggled.connect(manual_mode_action.setChecked)
+            process_menu.addAction(manual_mode_action)
+
+            # Context Fill Mode
+            context_fill_action = QAction(qta.icon('fa5s.fill-drip', color="white"), "Context Fill Mode", self)
+            if hasattr(self.main_window, 'scroll_area') and hasattr(self.main_window.scroll_area, 'context_fill_handler'):
+                 context_fill_action.triggered.connect(self.main_window.scroll_area.context_fill_handler.start_mode)
+            process_menu.addAction(context_fill_action)
+
+            # Edit Context Fill
+            edit_context_action = QAction(qta.icon('fa5s.paint-brush', color="white"), "Edit Context Fills", self)
+            edit_context_action.setCheckable(True)
+            if hasattr(self.main_window, 'btn_edit_context_fill'):
+                edit_context_action.setChecked(self.main_window.btn_edit_context_fill.isChecked())
+                edit_context_action.toggled.connect(self.main_window.btn_edit_context_fill.setChecked)
+                self.main_window.btn_edit_context_fill.toggled.connect(edit_context_action.setChecked)
+            process_menu.addAction(edit_context_action)
+            
+            process_menu.addSeparator()
+
+            # Split Images
+            split_action = QAction(qta.icon('fa5s.object-ungroup', color='white'), "Split Images", self)
+            if hasattr(self.main_window, 'btn_split'):
+                 split_action.triggered.connect(self.main_window.btn_split.click)
+            process_menu.addAction(split_action)
+
+            # Stitch Images
+            stitch_action = QAction(qta.icon('fa5s.object-group', color='white'), "Stitch Images", self)
+            if hasattr(self.main_window, 'btn_stitch'):
+                 stitch_action.triggered.connect(self.main_window.btn_stitch.click)
+            process_menu.addAction(stitch_action)
+
+
+        # --- 5. VIEW (Menu) ---
+        if self.state == TitleBarState.MAIN_WINDOW:
+            view_menu = self.addMenu("View")
+            view_menu.setStyleSheet(menu_style)
 
             # Toggle Chat
             chat_action = QAction("Translation Chat", self)
