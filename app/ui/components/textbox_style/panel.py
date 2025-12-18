@@ -36,7 +36,6 @@ class TextBoxStylePanel(QWidget):
 
     def __init__(self, parent=None, default_style=None):
         super().__init__(parent)
-        self.setObjectName("TextBoxStylePanel")
         self.setMinimumWidth(400)
         self.settings = QSettings("Liiesl", "EasyScanlate")
         self.presets = []

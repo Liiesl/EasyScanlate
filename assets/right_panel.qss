@@ -1,0 +1,53 @@
+/* Main Container Style */
+#TransparentPanel, .ResultsWidget, .TextBoxStylePanel, .TranslationChatWidget {
+    background-color: rgba(43, 43, 43, 178);
+    border-radius: 15px;
+}
+
+/* Make internal structure transparent so the main background shows */
+#TransparentPanel > QWidget,
+#TransparentPanel > QStackedWidget,
+#TransparentPanel > QSplitter,
+#TransparentPanel > QScrollArea,
+#TransparentPanel QScrollArea,
+#TransparentPanel QScrollArea > QWidget > QWidget {
+    background-color: transparent;
+    border: none;
+}
+
+/* Ensure scroll area viewports are transparent */
+#TransparentPanel QScrollArea > QWidget {
+    background-color: transparent;
+}
+
+/* Labels should be transparent */
+#TransparentPanel QLabel {
+    background-color: transparent;
+    color: #E0E0E0;
+}
+
+/* Fix QTableWidget transparency */
+#TransparentPanel QTableWidget {
+    background-color: transparent;
+    border: none;
+    gridline-color: rgba(255, 255, 255, 0.1);
+}
+#TransparentPanel QTableWidget::item {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+#TransparentPanel QTableWidget::item:selected {
+    background-color: rgba(0, 120, 215, 0.3);
+}
+
+/* Headings */
+#TransparentPanel QLabel#sectionLabel {
+    font-weight: bold;
+    color: #CCCCCC;
+    font-size: 14px;
+    padding: 5px;
+}
+
+/* Dividers */
+#TransparentPanel QFrame#headerDivider {
+    color: rgba(255, 255, 255, 0.2);
+}

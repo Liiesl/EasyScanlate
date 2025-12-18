@@ -1,0 +1,8 @@
+/* Global QSplitter Styling */
+QSplitter::handle {
+    background-color: transparent;
+}
+
+QSplitter {
+    background-color: transparent;
+}

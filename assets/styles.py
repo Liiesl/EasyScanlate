@@ -144,3 +144,7 @@ def get_style_diff(current_style, default_style):
     return diff
 
 PROGRESS_STYLES = """QProgressBar {...}"""
+
+RIGHT_PANEL_STYLES = _load_stylesheet("right_panel.qss")
+
+UNIVERSAL_STYLES = _load_stylesheet("universal.qss")

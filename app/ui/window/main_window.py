@@ -26,7 +26,7 @@ from app.core.project_model import ProjectModel
 from app.ui.dialogs.settings_dialog import SettingsDialog
 from app.ui.window.translation_window import TranslationWindow
 from app.ui.components.background import AuroraCanvas
-from assets import (DEFAULT_TEXT_STYLE, get_style_diff)
+from assets import (DEFAULT_TEXT_STYLE, get_style_diff, RIGHT_PANEL_STYLES, UNIVERSAL_STYLES)
 import os, gc, json, traceback # easyocr, # ocr functionality disabled
 
 class MainWindow(QMainWindow):
@@ -91,6 +91,7 @@ class MainWindow(QMainWindow):
         # Main Content Widget
         main_widget = QWidget()
         main_widget.setObjectName("CentralWidget")
+        main_widget.setStyleSheet(UNIVERSAL_STYLES)
         main_layout = QHBoxLayout(main_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
@@ -206,6 +207,7 @@ class MainWindow(QMainWindow):
         self.update_profile_selector()
 
         left_panel = QVBoxLayout()
+        left_panel.setContentsMargins(10, 10, 5, 10)
         left_panel.setSpacing(20)
 
         # MODIFIED: settings_layout removed as progress bar is integrated
@@ -224,7 +226,7 @@ class MainWindow(QMainWindow):
         # Right Panel
         right_panel = QVBoxLayout()
         right_panel.padding = 30
-        right_panel.setContentsMargins(20, 20, 20, 20)
+        right_panel.setContentsMargins(5, 10, 10, 10)
         right_panel.setSpacing(20)
 
         button_layout = QHBoxLayout()
@@ -291,7 +293,7 @@ class MainWindow(QMainWindow):
         right_splitter.addWidget(self.results_widget)
         right_splitter.setStretchFactor(0, 0)
         right_splitter.setStretchFactor(1, 1)
-        right_splitter.setHandleWidth(5)
+        right_splitter.setHandleWidth(10)
 
         # Find/replace widget
         self.find_replace_widget = FindReplaceWidget(self)
@@ -323,6 +325,14 @@ class MainWindow(QMainWindow):
         right_widget = QWidget()
         right_widget.setObjectName("RightWidget")
         right_widget.setLayout(right_panel)
+
+        # === APPLY STYLES ===
+        for w in [self.style_panel, self.results_widget, self.translation_chat]:
+            w.setObjectName("TransparentPanel")
+            w.setAttribute(Qt.WA_StyledBackground, True)
+        
+        # Apply the stylesheet to the parent widget so children can inherit or use the ID selector
+        right_widget.setStyleSheet(RIGHT_PANEL_STYLES + UNIVERSAL_STYLES)
 
         splitter = QSplitter(Qt.Horizontal)
         left_widget = QWidget()
