@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QGraphicsScene, QSizePolicy, QGraphicsRectItem, Q
                              QRubberBand, QGraphicsLineItem, QGraphicsEllipseItem, 
                              QGraphicsPathItem, QGraphicsItem)
 from PySide6.QtCore import Qt, Signal, QRectF, QPoint, QRect, QSize, QTimer
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QPainterPath
 from app.ui.components.image_area.textbox import TextBoxItem
 
 class ResizableImageLabel(QGraphicsView):
