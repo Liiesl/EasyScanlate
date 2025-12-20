@@ -1,0 +1,144 @@
+/* Style for Style Panels (Shape, Typography) */
+
+/* -------------------------------------------------------------------------
+   Generic Widget Styles
+   ------------------------------------------------------------------------- */
+
+/* Main Container - relying on parent transparency or right_panel.qss */
+#ShapeStylePanel, #TypographyStylePanel, #PresetPanel {
+    background-color: transparent;
+}
+
+/* Labels */
+#ShapeStylePanel QLabel, #TypographyStylePanel QLabel {
+    color: var(--text_secondary);
+    font-size: var(--font_size_small);
+    font-family: 'Segoe UI', sans-serif;
+}
+
+#ShapeStylePanel QLabel#tinyLabel, #TypographyStylePanel QLabel#tinyLabel {
+    font-size: 11px;
+    color: var(--text_gray);
+    font-weight: normal;
+}
+
+/* -------------------------------------------------------------------------
+   Input Controls
+   ------------------------------------------------------------------------- */
+
+/* QComboBox */
+#ShapeStylePanel QComboBox, #TypographyStylePanel QComboBox {
+    background-color: var(--input_bg);
+    border-radius: var(--border_radius_small);
+    color: var(--text);
+    padding: 10px;
+    selection-background-color: var(--accent);
+}
+
+#ShapeStylePanel QComboBox:hover, #TypographyStylePanel QComboBox:hover {
+    background-color: var(--surface);
+}
+
+#ShapeStylePanel QComboBox::drop-down, #TypographyStylePanel QComboBox::drop-down {
+    border: none;
+    background-color: transparent;
+    width: 20px;
+}
+
+#ShapeStylePanel QComboBox::down-arrow, #TypographyStylePanel QComboBox::down-arrow {
+    image: none;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 5px solid var(--text_secondary);
+    margin-right: 5px;
+}
+
+/* QSpinBox */
+#ShapeStylePanel QSpinBox, #TypographyStylePanel QSpinBox {
+    background-color: var(--input_bg);
+    border-radius: var(--border_radius_small);
+    color: var(--text);
+    padding: 10px;
+    selection-background-color: var(--accent);
+}
+
+#ShapeStylePanel QSpinBox:hover, #TypographyStylePanel QSpinBox:hover {
+    border: 1px solid var(--border_gray_hover);
+}
+
+#ShapeStylePanel QSpinBox::up-button, #ShapeStylePanel QSpinBox::down-button,
+#TypographyStylePanel QSpinBox::up-button, #TypographyStylePanel QSpinBox::down-button {
+    background-color: transparent;
+    border: none;
+    width: 16px;
+}
+
+#ShapeStylePanel QSpinBox::up-button:hover, #ShapeStylePanel QSpinBox::down-button:hover,
+#TypographyStylePanel QSpinBox::up-button:hover, #TypographyStylePanel QSpinBox::down-button:hover {
+    background-color: var(--button_hover_bg);
+}
+
+/* -------------------------------------------------------------------------
+   Buttons
+   ------------------------------------------------------------------------- */
+
+/* Generic Buttons */
+#ShapeStylePanel QPushButton, #TypographyStylePanel QPushButton {
+    color: var(--text);
+    border-radius: var(--border_radius_small);
+}
+
+/* Color Picker Buttons */
+#ShapeStylePanel QPushButton#colorButton, #TypographyStylePanel QPushButton#colorButton {
+    background-color: transparent;
+    border: 1px solid var(--border_input);
+    border-radius: var(--border_radius_small);
+}
+
+#ShapeStylePanel QPushButton#colorButton:hover, #TypographyStylePanel QPushButton#colorButton:hover {
+    border: 1px solid var(--accent);
+}
+
+/* Alignment and Formatting Toggle Buttons */
+#ShapeStylePanel QPushButton#alignButton, #TypographyStylePanel QPushButton#alignButton,
+#ShapeStylePanel QPushButton#styleToggleButton, #TypographyStylePanel QPushButton#styleToggleButton {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    padding: 10px;
+    margin: 0px;
+}
+
+/* Grouping tweaks for segmented buttons look if needed, but keeping separate for now */
+#ShapeStylePanel QPushButton#alignButton:hover, #TypographyStylePanel QPushButton#alignButton:hover,
+#ShapeStylePanel QPushButton#styleToggleButton:hover, #TypographyStylePanel QPushButton#styleToggleButton:hover {
+    background-color: var(--button_hover_bg);
+}
+
+#ShapeStylePanel QPushButton#alignButton:checked, #TypographyStylePanel QPushButton#alignButton:checked,
+#ShapeStylePanel QPushButton#styleToggleButton:checked, #TypographyStylePanel QPushButton#styleToggleButton:checked {
+    background-color: var(--accent_blue);
+}
+
+#ShapeStylePanel > QScrollBar:vertical {
+    border: none;
+    background: #121212;
+    width: 10px;
+    margin: 0px;
+}
+#ShapeStylePanel > QScrollBar::handle:vertical {
+    background: #333333;
+    min-height: 30px;
+    border-radius: 5px;
+}
+#ShapeStylePanel > QScrollBar::handle:vertical:hover {
+    background: #444444;
+}
+#ShapeStylePanel > QScrollBar::add-line:vertical, #ShapeStylePanel > QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+/* -------------------------------------------------------------------------
+   Preset Buttons (in preset.py, usually strictly painted, but container might need style)
+   ------------------------------------------------------------------------- */
+/* No specific QSS for PresetButton as it is custom painted, 
+   but we can style the container if we wrap it later. */

@@ -2,6 +2,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QComboBox, QSpinBox
                              QHBoxLayout, QPushButton, QFrame)
 from PySide6.QtCore import Signal, Qt, QSize, QPoint
 from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter, QBrush, QPolygon
+from assets import STYLE_PANEL_STYLES
 
 class ShapeStylePanel(QWidget):
     """
@@ -21,6 +22,7 @@ class ShapeStylePanel(QWidget):
         """
         super().__init__(parent)
         self.setObjectName("ShapeStylePanel")
+        self.setStyleSheet(STYLE_PANEL_STYLES)
         self._color_chooser_fn = color_chooser_fn
         self._updating_controls = False
         self.init_ui()
@@ -110,7 +112,7 @@ class ShapeStylePanel(QWidget):
         self.spin_border_width = QSpinBox()
         self.spin_border_width.setObjectName("borderWidthSpinner")
         self.spin_border_width.setRange(0, 99)
-        self.spin_border_width.setFixedHeight(28)
+        self.spin_border_width.setFixedHeight(35)
         self.spin_border_width.valueChanged.connect(self._on_style_changed)
         self.spin_border_width.valueChanged.connect(self._update_stroke_button_visuals)
         stroke_width_layout.addWidget(self.spin_border_width)

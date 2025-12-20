@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QComboBox, QSpinBox
 from PySide6.QtCore import Signal, Qt, QSize
 from PySide6.QtGui import QFontDatabase, QColor, QIcon
 import qtawesome as qta
+from assets import STYLE_PANEL_STYLES
 
 class TypographyStylePanel(QWidget):
     """
@@ -22,6 +23,7 @@ class TypographyStylePanel(QWidget):
         """
         super().__init__(parent)
         self.setObjectName("TypographyStylePanel")
+        self.setStyleSheet(STYLE_PANEL_STYLES)
         self._color_chooser_fn = color_chooser_fn
         self._updating_controls = False
         self.font_styles = {} # { "Family Name": ["Style1", "Style2", ...] }

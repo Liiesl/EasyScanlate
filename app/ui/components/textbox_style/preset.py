@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QPushButton, QMenu
 from PySide6.QtGui import QPainter, QPen, QColor, QBrush, QFont, QLinearGradient
 from PySide6.QtCore import Qt, Signal
-from assets import DEFAULT_GRADIENT
+from assets import DEFAULT_GRADIENT, STYLE_PANEL_STYLES
 
 class PresetButton(QPushButton):
     """A button that displays a preview of a style preset."""
@@ -13,6 +13,7 @@ class PresetButton(QPushButton):
         self.index = index
         self._style = None
         self.setFixedSize(48, 48)
+        self.setStyleSheet(STYLE_PANEL_STYLES)
         self.setToolTip("Click to apply preset.\nRight-click for more options.")
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
