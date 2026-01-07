@@ -101,7 +101,7 @@ class CustomTitleBar(QWidget):
         self.btn_minimize.clicked.connect(self.minimize_window)
 
         for btn in [self.btn_close, self.btn_maximize, self.btn_minimize]:
-            btn.setFixedSize(35, 35)
+            btn.setFixedSize(45, 35)
             # Initial Style
             btn.setStyleSheet("QPushButton { background: transparent; border: none; } QPushButton:hover { background: #3E3E3E; }")
             
