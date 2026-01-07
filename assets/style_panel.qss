@@ -26,31 +26,72 @@
    Input Controls
    ------------------------------------------------------------------------- */
 
-/* QComboBox */
+/* QComboBox - Modernized */
 #ShapeStylePanel QComboBox, #TypographyStylePanel QComboBox {
     background-color: var(--input_bg);
+    border: 1px solid var(--border_input);
     border-radius: var(--border_radius_small);
     color: var(--text);
-    padding: 10px;
-    selection-background-color: var(--accent);
+    padding: 6px 12px;
+    min-height: 20px;
 }
 
 #ShapeStylePanel QComboBox:hover, #TypographyStylePanel QComboBox:hover {
-    background-color: var(--surface);
+    background-color: var(--button_hover_bg);
+    border-color: var(--border_gray_hover);
+}
+
+#ShapeStylePanel QComboBox:on, #TypographyStylePanel QComboBox:on {
+    /* State when the dropdown is open */
+    border-color: var(--accent);
 }
 
 #ShapeStylePanel QComboBox::drop-down, #TypographyStylePanel QComboBox::drop-down {
-    border: none;
-    background-color: transparent;
-    width: 20px;
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 24px; 
+    border-left-width: 0px;
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
 }
 
 #ShapeStylePanel QComboBox::down-arrow, #TypographyStylePanel QComboBox::down-arrow {
+    /* Custom CSS Chevron */
     image: none;
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
+    border: none;
+    width: 0; 
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
     border-top: 5px solid var(--text_secondary);
-    margin-right: 5px;
+    margin-right: 8px; /* Center it nicely */
+}
+
+/* Modern Popup Styling */
+#ShapeStylePanel QComboBox QAbstractItemView, #TypographyStylePanel QComboBox QAbstractItemView {
+    border: 1px solid var(--border);
+    background-color: var(--bg_dark);
+    border-radius: 6px;
+    selection-background-color: var(--accent);
+    outline: 0;
+    padding: 4px;
+    /* Box shadow simulation via margin if supported, usually not in QSS but we can add padding */
+}
+
+#ShapeStylePanel QComboBox QAbstractItemView::item, #TypographyStylePanel QComboBox QAbstractItemView::item {
+    padding: 6px 10px;
+    border-radius: 4px; /* Inner radius for items */
+    margin: 2px 0px;
+    color: var(--text);
+}
+
+#ShapeStylePanel QComboBox QAbstractItemView::item:selected, #TypographyStylePanel QComboBox QAbstractItemView::item:selected {
+    background-color: var(--accent);
+    color: #FFFFFF;
+}
+
+#ShapeStylePanel QComboBox QAbstractItemView::item:hover, #TypographyStylePanel QComboBox QAbstractItemView::item:hover {
+    background-color: var(--button_hover_bg);
 }
 
 /* QSpinBox */
@@ -60,6 +101,7 @@
     color: var(--text);
     padding: 10px;
     selection-background-color: var(--accent);
+    border: 1px solid transparent; 
 }
 
 #ShapeStylePanel QSpinBox:hover, #TypographyStylePanel QSpinBox:hover {
@@ -117,6 +159,7 @@
 #ShapeStylePanel QPushButton#alignButton:checked, #TypographyStylePanel QPushButton#alignButton:checked,
 #ShapeStylePanel QPushButton#styleToggleButton:checked, #TypographyStylePanel QPushButton#styleToggleButton:checked {
     background-color: var(--accent_blue);
+    border-color: var(--accent_blue_border);
 }
 
 #ShapeStylePanel > QScrollBar:vertical {
@@ -136,9 +179,3 @@
 #ShapeStylePanel > QScrollBar::add-line:vertical, #ShapeStylePanel > QScrollBar::sub-line:vertical {
     height: 0px;
 }
-
-/* -------------------------------------------------------------------------
-   Preset Buttons (in preset.py, usually strictly painted, but container might need style)
-   ------------------------------------------------------------------------- */
-/* No specific QSS for PresetButton as it is custom painted, 
-   but we can style the container if we wrap it later. */
