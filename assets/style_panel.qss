@@ -36,7 +36,7 @@
 }
 
 #ShapeStylePanel QComboBox:hover, #TypographyStylePanel QComboBox:hover {
-    background-color: rgba(43, 43, 43, 178);
+    background-color: rgba(69, 69, 69, 178);
     border-color: var(--border_gray_hover);
 }
 
@@ -90,7 +90,7 @@
 }
 
 #ShapeStylePanel QComboBox QAbstractItemView::item:hover, #TypographyStylePanel QComboBox QAbstractItemView::item:hover {
-    background-color: rgba(43, 43, 43, 178);
+    background-color: rgba(69, 69, 69, 178);
 }
 
 /* QSpinBox */
@@ -116,7 +116,7 @@
 
 #ShapeStylePanel QSpinBox::up-button:hover, #ShapeStylePanel QSpinBox::down-button:hover,
 #TypographyStylePanel QSpinBox::up-button:hover, #TypographyStylePanel QSpinBox::down-button:hover {
-    background-color: rgba(43, 43, 43, 178);
+    background-color: rgba(69, 69, 69, 178);
 }
 
 /* -------------------------------------------------------------------------
@@ -151,7 +151,7 @@
 /* Grouping tweaks for segmented buttons look if needed, but keeping separate for now */
 #ShapeStylePanel QPushButton#alignButton:hover, #TypographyStylePanel QPushButton#alignButton:hover,
 #ShapeStylePanel QPushButton#styleToggleButton:hover, #TypographyStylePanel QPushButton#styleToggleButton:hover {
-    background-color: rgba(43, 43, 43, 178);
+    background-color: rgba(69, 69, 69, 178);
 }
 
 #ShapeStylePanel QPushButton#alignButton:checked, #TypographyStylePanel QPushButton#alignButton:checked,
