@@ -7,7 +7,7 @@ import sys
 import json
 from app.ui.dialogs.error_dialog import ErrorDialog
 from PySide6.QtCore import Qt, QSettings, QPoint, QRectF, QEvent
-from PySide6.QtGui import QPixmap, QKeySequence, QAction, QColor
+from PySide6.QtGui import QPixmap, QKeySequence, QAction, QColor, QIcon
 import qtawesome as qta
 from app.utils.file_io import export_ocr_results, import_translation_file, export_rendered_images
 from app.ui.components.image_area.label import ResizableImageLabel
@@ -120,7 +120,7 @@ class MainWindow(QMainWindow):
         vertical_toolbar_layout.addSpacing(10)
         
         # Manual OCR button (moved from button_layout)
-        self.btn_manual_ocr = QPushButton(qta.icon('fa5s.crop-alt', color='white'), "")
+        self.btn_manual_ocr = QPushButton(QIcon("assets/icons/manual_ocr.svg"), "")
         self.btn_manual_ocr.setFixedSize(40, 40)
         self.btn_manual_ocr.setToolTip("Manual OCR Mode")
         self.btn_manual_ocr.setCheckable(True)
@@ -187,14 +187,14 @@ class MainWindow(QMainWindow):
         vertical_toolbar_layout.addWidget(self.btn_edit_context_fill)
 
         # Split Images
-        self.btn_split = QPushButton(qta.icon('fa5s.object-ungroup', color='white'), "")
+        self.btn_split = QPushButton(QIcon("assets/icons/split.svg"), "")
         self.btn_split.setFixedSize(40, 40)
         self.btn_split.setToolTip("Split Images")
         self.btn_split.clicked.connect(self.scroll_area.split_handler.start_splitting_mode)
         vertical_toolbar_layout.addWidget(self.btn_split)
 
         # Stitch Images
-        self.btn_stitch = QPushButton(qta.icon('fa5s.object-group', color='white'), "")
+        self.btn_stitch = QPushButton(QIcon("assets/icons/stitch.svg"), "")
         self.btn_stitch.setFixedSize(40, 40)
         self.btn_stitch.setToolTip("Stitch Images")
         self.btn_stitch.clicked.connect(self.scroll_area.stitch_handler.start_stitching_mode)

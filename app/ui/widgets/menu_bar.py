@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QMenuBar, QFileDialog
-from PySide6.QtGui import QAction 
+from PySide6.QtGui import QAction, QIcon
 import qtawesome as qta
 from enum import Enum, auto
 
@@ -143,7 +143,7 @@ class MenuBar(QMenuBar):
             process_menu.addSeparator()
 
             # Manual OCR Mode
-            manual_mode_action = QAction(qta.icon('fa5s.crop-alt', color="white"), "Manual OCR Mode", self)
+            manual_mode_action = QAction(QIcon("assets/icons/manual_ocr.svg"), "Manual OCR Mode", self)
             manual_mode_action.setCheckable(True)
             if hasattr(self.main_window, 'btn_manual_ocr'):
                 manual_mode_action.setChecked(self.main_window.btn_manual_ocr.isChecked())
@@ -169,13 +169,13 @@ class MenuBar(QMenuBar):
             process_menu.addSeparator()
 
             # Split Images
-            split_action = QAction(qta.icon('fa5s.object-ungroup', color='white'), "Split Images", self)
+            split_action = QAction(QIcon("assets/icons/split.svg"), "Split Images", self)
             if hasattr(self.main_window, 'btn_split'):
                  split_action.triggered.connect(self.main_window.btn_split.click)
             process_menu.addAction(split_action)
 
             # Stitch Images
-            stitch_action = QAction(qta.icon('fa5s.object-group', color='white'), "Stitch Images", self)
+            stitch_action = QAction(QIcon("assets/icons/stitch.svg"), "Stitch Images", self)
             if hasattr(self.main_window, 'btn_stitch'):
                  stitch_action.triggered.connect(self.main_window.btn_stitch.click)
             process_menu.addAction(stitch_action)
