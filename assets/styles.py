@@ -152,3 +152,5 @@ RIGHT_PANEL_STYLES = _load_stylesheet("right_panel.qss")
 UNIVERSAL_STYLES = _load_stylesheet("universal.qss")
 
 STYLE_PANEL_STYLES = _load_stylesheet("style_panel.qss")
+
+SCROLL_OVERLAY_STYLES = _load_stylesheet("scroll_overlay.qss")

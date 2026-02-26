@@ -1,6 +1,6 @@
 # scroll_container.py
 
-from PySide6.QtWidgets import QScrollArea, QWidget, QHBoxLayout, QPushButton
+from PySide6.QtWidgets import QScrollArea, QWidget, QVBoxLayout, QPushButton
 from PySide6.QtCore import Signal, QPoint
 import qtawesome as qta
 from app.handlers.stitch_handler import StitchHandler
@@ -10,6 +10,7 @@ from app.handlers.manual_ocr_handler import ManualOCRHandler
 # --- MODIFIED: Import the generic Menu class ---
 from app.ui.widgets.menus import Menu
 from app.ui.components.image_area.label import ResizableImageLabel
+from assets.styles import SCROLL_OVERLAY_STYLES
     
 class CustomScrollArea(QScrollArea):
     """
@@ -48,26 +49,30 @@ class CustomScrollArea(QScrollArea):
         """ Creates and configures the overlay widget and its buttons. """
         self.overlay_widget = QWidget(self)
         self.overlay_widget.setObjectName("ScrollButtonOverlay")
+        self.overlay_widget.setStyleSheet(SCROLL_OVERLAY_STYLES)
 
-        layout = QHBoxLayout(self.overlay_widget)
+        layout = QVBoxLayout(self.overlay_widget)
         layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(1)
+        layout.setSpacing(8)
 
         # Scroll to Top Button
         btn_scroll_top = QPushButton(qta.icon('fa5s.arrow-up', color='white'), "")
-        btn_scroll_top.setFixedSize(50, 50)
+        btn_scroll_top.setObjectName("ScrollArrowButton")
+        btn_scroll_top.setFixedSize(40, 40)
         btn_scroll_top.clicked.connect(lambda: self.verticalScrollBar().setValue(0))
         layout.addWidget(btn_scroll_top)
 
         # Save Menu Button
         btn_save_menu = QPushButton(qta.icon('fa5s.save', color='white'), "Save")
-        btn_save_menu.setFixedSize(120, 50)
+        btn_save_menu.setObjectName("ScrollSaveButton")
+        btn_save_menu.setFixedSize(100, 40)
         btn_save_menu.clicked.connect(self._show_save_menu)
         layout.addWidget(btn_save_menu)
 
         # Scroll to Bottom Button
         btn_scroll_bottom = QPushButton(qta.icon('fa5s.arrow-down', color='white'), "")
-        btn_scroll_bottom.setFixedSize(50, 50)
+        btn_scroll_bottom.setObjectName("ScrollArrowButton")
+        btn_scroll_bottom.setFixedSize(40, 40)
         btn_scroll_bottom.clicked.connect(lambda: self.verticalScrollBar().setValue(self.verticalScrollBar().maximum()))
         layout.addWidget(btn_scroll_bottom)
     
@@ -133,11 +138,11 @@ class CustomScrollArea(QScrollArea):
     def update_overlay_position(self):
         """ Calculates and sets the correct position for the overlay widget. """
         if self.overlay_widget:
-            overlay_width = 320
-            overlay_height = 60
+            overlay_width = 140
+            overlay_height = 186
             viewport_width = self.viewport().width()
             viewport_height = self.viewport().height()
-            x = (viewport_width - overlay_width) // 2
-            y = viewport_height - overlay_height - 10 
+            x = 10
+            y = viewport_height - overlay_height - 10
             self.overlay_widget.setGeometry(x, y, overlay_width, overlay_height)
             self.overlay_widget.raise_()
