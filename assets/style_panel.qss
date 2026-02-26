@@ -26,10 +26,9 @@
    Input Controls
    ------------------------------------------------------------------------- */
 
-/* QComboBox - Modernized */
+/* QComboBox - Modernized with transparency */
 #ShapeStylePanel QComboBox, #TypographyStylePanel QComboBox {
-    background-color: var(--input_bg);
-    border: 1px solid var(--border_input);
+    background-color: rgba(43, 43, 43, 178);
     border-radius: var(--border_radius_small);
     color: var(--text);
     padding: 6px 12px;
@@ -37,7 +36,7 @@
 }
 
 #ShapeStylePanel QComboBox:hover, #TypographyStylePanel QComboBox:hover {
-    background-color: var(--button_hover_bg);
+    background-color: rgba(43, 43, 43, 178);
     border-color: var(--border_gray_hover);
 }
 
@@ -70,7 +69,7 @@
 /* Modern Popup Styling */
 #ShapeStylePanel QComboBox QAbstractItemView, #TypographyStylePanel QComboBox QAbstractItemView {
     border: 1px solid var(--border);
-    background-color: var(--bg_dark);
+    background-color: rgba(43, 43, 43, 178);
     border-radius: 6px;
     selection-background-color: var(--accent);
     outline: 0;
@@ -91,12 +90,12 @@
 }
 
 #ShapeStylePanel QComboBox QAbstractItemView::item:hover, #TypographyStylePanel QComboBox QAbstractItemView::item:hover {
-    background-color: var(--button_hover_bg);
+    background-color: rgba(43, 43, 43, 178);
 }
 
 /* QSpinBox */
 #ShapeStylePanel QSpinBox, #TypographyStylePanel QSpinBox {
-    background-color: var(--input_bg);
+    background-color: rgba(43, 43, 43, 178);
     border-radius: var(--border_radius_small);
     color: var(--text);
     padding: 10px;
@@ -117,7 +116,7 @@
 
 #ShapeStylePanel QSpinBox::up-button:hover, #ShapeStylePanel QSpinBox::down-button:hover,
 #TypographyStylePanel QSpinBox::up-button:hover, #TypographyStylePanel QSpinBox::down-button:hover {
-    background-color: var(--button_hover_bg);
+    background-color: rgba(43, 43, 43, 178);
 }
 
 /* -------------------------------------------------------------------------
@@ -133,7 +132,6 @@
 /* Color Picker Buttons */
 #ShapeStylePanel QPushButton#colorButton, #TypographyStylePanel QPushButton#colorButton {
     background-color: transparent;
-    border: 1px solid var(--border_input);
     border-radius: var(--border_radius_small);
 }
 
@@ -144,7 +142,7 @@
 /* Alignment and Formatting Toggle Buttons */
 #ShapeStylePanel QPushButton#alignButton, #TypographyStylePanel QPushButton#alignButton,
 #ShapeStylePanel QPushButton#styleToggleButton, #TypographyStylePanel QPushButton#styleToggleButton {
-    background-color: var(--surface);
+    background-color: rgba(43, 43, 43, 178);
     border: 1px solid var(--border);
     padding: 10px;
     margin: 0px;
@@ -153,7 +151,7 @@
 /* Grouping tweaks for segmented buttons look if needed, but keeping separate for now */
 #ShapeStylePanel QPushButton#alignButton:hover, #TypographyStylePanel QPushButton#alignButton:hover,
 #ShapeStylePanel QPushButton#styleToggleButton:hover, #TypographyStylePanel QPushButton#styleToggleButton:hover {
-    background-color: var(--button_hover_bg);
+    background-color: rgba(43, 43, 43, 178);
 }
 
 #ShapeStylePanel QPushButton#alignButton:checked, #TypographyStylePanel QPushButton#alignButton:checked,
@@ -162,20 +160,66 @@
     border-color: var(--accent_blue_border);
 }
 
-#ShapeStylePanel > QScrollBar:vertical {
+/* Vertical Scrollbar */
+#typographyScrollArea QScrollBar:vertical,
+#shapeScrollArea QScrollBar:vertical,
+#presetScrollArea QScrollBar:vertical {
     border: none;
     background: #121212;
     width: 10px;
     margin: 0px;
 }
-#ShapeStylePanel > QScrollBar::handle:vertical {
+#typographyScrollArea QScrollBar::handle:vertical,
+#shapeScrollArea QScrollBar::handle:vertical,
+#presetScrollArea QScrollBar::handle:vertical {
     background: #333333;
     min-height: 30px;
     border-radius: 5px;
 }
-#ShapeStylePanel > QScrollBar::handle:vertical:hover {
+#typographyScrollArea QScrollBar::handle:vertical:hover,
+#shapeScrollArea QScrollBar::handle:vertical:hover,
+#presetScrollArea QScrollBar::handle:vertical:hover {
     background: #444444;
 }
-#ShapeStylePanel > QScrollBar::add-line:vertical, #ShapeStylePanel > QScrollBar::sub-line:vertical {
+#typographyScrollArea QScrollBar::add-line:vertical, #typographyScrollArea QScrollBar::sub-line:vertical,
+#shapeScrollArea QScrollBar::add-line:vertical, #shapeScrollArea QScrollBar::sub-line:vertical,
+#presetScrollArea QScrollBar::add-line:vertical, #presetScrollArea QScrollBar::sub-line:vertical {
     height: 0px;
+}
+#typographyScrollArea QScrollBar::add-page:vertical, #typographyScrollArea QScrollBar::sub-page:vertical,
+#shapeScrollArea QScrollBar::add-page:vertical, #shapeScrollArea QScrollBar::sub-page:vertical,
+#presetScrollArea QScrollBar::add-page:vertical, #presetScrollArea QScrollBar::sub-page:vertical {
+    background: none;
+}
+
+/* Horizontal Scrollbar */
+#typographyScrollArea QScrollBar:horizontal,
+#shapeScrollArea QScrollBar:horizontal,
+#presetScrollArea QScrollBar:horizontal {
+    border: none;
+    background: #121212;
+    height: 10px;
+    margin: 0px;
+}
+#typographyScrollArea QScrollBar::handle:horizontal,
+#shapeScrollArea QScrollBar::handle:horizontal,
+#presetScrollArea QScrollBar::handle:horizontal {
+    background: #333333;
+    min-width: 30px;
+    border-radius: 5px;
+}
+#typographyScrollArea QScrollBar::handle:horizontal:hover,
+#shapeScrollArea QScrollBar::handle:horizontal:hover,
+#presetScrollArea QScrollBar::handle:horizontal:hover {
+    background: #444444;
+}
+#typographyScrollArea QScrollBar::add-line:horizontal, #typographyScrollArea QScrollBar::sub-line:horizontal,
+#shapeScrollArea QScrollBar::add-line:horizontal, #shapeScrollArea QScrollBar::sub-line:horizontal,
+#presetScrollArea QScrollBar::add-line:horizontal, #presetScrollArea QScrollBar::sub-line:horizontal {
+    width: 0px;
+}
+#typographyScrollArea QScrollBar::add-page:horizontal, #typographyScrollArea QScrollBar::sub-page:horizontal,
+#shapeScrollArea QScrollBar::add-page:horizontal, #shapeScrollArea QScrollBar::sub-page:horizontal,
+#presetScrollArea QScrollBar::add-page:horizontal, #presetScrollArea QScrollBar::sub-page:horizontal {
+    background: none;
 }
