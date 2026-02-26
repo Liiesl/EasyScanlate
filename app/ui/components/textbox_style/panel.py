@@ -237,6 +237,7 @@ class TextBoxStylePanel(QWidget):
         color = CustomColorDialog.getColor(initial_color=current_color, parent=self)
         
         if color is not None and color.isValid():
+            button.setStyleSheet(f"background-color: {color.name(QColor.HexArgb)}; border: 1px solid #60666E; border-radius: 3px;")
             self.style_changed_handler()
 
     def clear_selection(self):

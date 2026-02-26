@@ -60,7 +60,7 @@ class TypographyStylePanel(QWidget):
         color_layout.addWidget(color_label)
         self.btn_text_color = QPushButton("")
         self.btn_text_color.setObjectName("colorButton")
-        self.btn_text_color.setFixedSize(48, 28)
+        self.btn_text_color.setFixedSize(48, 38)
         self.btn_text_color.clicked.connect(lambda: self._color_chooser_fn(self.btn_text_color))
         color_layout.addWidget(self.btn_text_color)
         solid_controls_layout.addLayout(color_layout)
@@ -265,6 +265,7 @@ class TypographyStylePanel(QWidget):
         color = QColor(color_str)
         if not color.isValid():
             color = QColor(255, 255, 255)
+        button.setStyleSheet(f"background-color: {color.name(QColor.HexArgb)}; border: 1px solid #60666E; border-radius: 3px;")
 
     def _toggle_text_gradient_controls(self):
         is_gradient = self.combo_text_color_type.currentIndex() == 1
@@ -328,9 +329,9 @@ class TypographyStylePanel(QWidget):
             self.combo_font_style.addItems(styles)
             if "Regular" in styles:
                 self.combo_font_style.setCurrentText("Regular")
-            self.combo_font_style.setVisible(True)
         else:
-            self.combo_font_style.setVisible(False)
+            # Always show "Regular" as default even when no specific styles available
+            self.combo_font_style.addItem("Regular")
         self._on_style_changed()
 
 

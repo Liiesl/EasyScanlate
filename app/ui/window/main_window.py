@@ -285,7 +285,7 @@ class MainWindow(QMainWindow):
         # Style panel - always visible above results with resizable splitter
         self.style_panel = TextBoxStylePanel(default_style=DEFAULT_TEXT_STYLE)
         self.style_panel.setMinimumHeight(70)
-        self.style_panel.setMaximumHeight(440)
+        self.style_panel.setMaximumHeight(480)
         
         # Create vertical splitter for resizable layout
         right_splitter = QSplitter(Qt.Vertical)

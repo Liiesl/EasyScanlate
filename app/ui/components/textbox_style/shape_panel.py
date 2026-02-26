@@ -99,10 +99,10 @@ class ShapeStylePanel(QWidget):
         fill_layout.addWidget(fill_label)
         self.btn_bg_color = QPushButton("")
         self.btn_bg_color.setObjectName("colorButton")
-        self.btn_bg_color.setFixedSize(48, 28)
+        self.btn_bg_color.setFixedSize(48, 38)
         self.btn_bg_color.clicked.connect(lambda: self._handle_color_choice(self.btn_bg_color))
         fill_layout.addWidget(self.btn_bg_color)
-        solid_controls_layout.addLayout(fill_layout, 1)
+        solid_controls_layout.addLayout(fill_layout)
 
         stroke_width_layout = QVBoxLayout()
         stroke_width_layout.setSpacing(2)
@@ -112,11 +112,10 @@ class ShapeStylePanel(QWidget):
         self.spin_border_width = QSpinBox()
         self.spin_border_width.setObjectName("borderWidthSpinner")
         self.spin_border_width.setRange(0, 99)
-        self.spin_border_width.setFixedHeight(35)
         self.spin_border_width.valueChanged.connect(self._on_style_changed)
         self.spin_border_width.valueChanged.connect(self._update_stroke_button_visuals)
         stroke_width_layout.addWidget(self.spin_border_width)
-        solid_controls_layout.addLayout(stroke_width_layout, 1)
+        solid_controls_layout.addLayout(stroke_width_layout)
 
         stroke_color_layout = QVBoxLayout()
         stroke_color_layout.setSpacing(2)
@@ -125,24 +124,31 @@ class ShapeStylePanel(QWidget):
         stroke_color_layout.addWidget(stroke_color_label)
         self.btn_border_color = QPushButton("")
         self.btn_border_color.setObjectName("colorButton")
-        self.btn_border_color.setFixedSize(48, 28)
+        self.btn_border_color.setFixedSize(48, 38)
         self.btn_border_color.clicked.connect(lambda: self._handle_color_choice(self.btn_border_color))
         stroke_color_layout.addWidget(self.btn_border_color)
-        solid_controls_layout.addLayout(stroke_color_layout, 1)
+        solid_controls_layout.addLayout(stroke_color_layout)
         main_layout.addWidget(self.solid_controls_widget)
 
         shape_details_layout = QHBoxLayout()
         shape_details_layout.setSpacing(10)
-        
+
+        bubble_shape_layout = QVBoxLayout()
+        bubble_shape_layout.setSpacing(2)
+        bubble_shape_label = QLabel("Bubble Shape")
+        bubble_shape_label.setObjectName("tinyLabel")
+        bubble_shape_layout.addWidget(bubble_shape_label)
         self.combo_bubble_type = QComboBox()
         self.combo_bubble_type.setObjectName("styleCombo")
         self.combo_bubble_type.setIconSize(QSize(28, 28))
         self.combo_bubble_type.addItems(["Rectangle", "Rounded Rectangle", "Ellipse", "Speech Bubble"])
         self.combo_bubble_type.currentIndexChanged.connect(self._on_style_changed)
-        shape_details_layout.addWidget(self.combo_bubble_type, 1)
+        bubble_shape_layout.addWidget(self.combo_bubble_type)
+        shape_details_layout.addLayout(bubble_shape_layout, 1)
 
-        radius_layout = QHBoxLayout()
-        radius_label = QLabel("Radius:")
+        radius_layout = QVBoxLayout()
+        radius_layout.setSpacing(2)
+        radius_label = QLabel("Radius")
         radius_label.setObjectName("tinyLabel")
         radius_layout.addWidget(radius_label)
         self.spin_corner_radius = QSpinBox()
@@ -213,6 +219,7 @@ class ShapeStylePanel(QWidget):
         current_color = self._get_color_from_button(button)
 
         # Temporarily set a simple background for the generic color picker to read.
+        button.setStyleSheet(f"background-color: {current_color.name(QColor.HexArgb)};")
 
         # Call the modal color chooser function passed from the parent.
         # This function will modify the button's stylesheet directly.
@@ -259,15 +266,23 @@ class ShapeStylePanel(QWidget):
     def _update_stroke_button_visuals(self):
         """
         Updates the visual style of the stroke button to preview the
-        color and width. The width in the preview is capped for clarity.
+        color as a fill with a thin border outline.
         """
         if not hasattr(self, 'btn_border_color'): return
 
-        width = self.spin_border_width.value()
-        preview_width = min(width, 4) # Cap visual width at 4px
         color = self._get_color_from_button(self.btn_border_color)
-        
         hover_color = color.lighter(130)
+
+        self.btn_border_color.setStyleSheet(f"""
+            QPushButton#colorButton {{
+                background-color: {color.name(QColor.HexArgb)};
+                border: 1px solid #666666;
+                border-radius: 3px;
+            }}
+            QPushButton#colorButton:hover {{
+                background-color: {hover_color.name(QColor.HexArgb)};
+            }}
+        """)
 
     def set_button_color(self, button, color_str):
         """Sets the color for a button, storing it in a property and updating visuals."""
@@ -281,7 +296,7 @@ class ShapeStylePanel(QWidget):
             self._update_stroke_button_visuals()
         else:
             # For all other buttons, just set the background color
-            return
+            button.setStyleSheet(f"background-color: {color.name(QColor.HexArgb)};")
 
     def get_style(self):
         """Retrieves the current style settings from the UI controls."""
