@@ -8,7 +8,7 @@ from PySide6.QtGui import QColor
 import qtawesome as qta
 from app.ui.components.textbox_style.preset import PresetButton
 # TEXT_BOX_STYLE_PANEL_STYLESHEET is no longer needed here
-from assets import DEFAULT_GRADIENT
+from assets import DEFAULT_GRADIENT, STYLE_PANEL_STYLES
 from app.ui.dialogs.BetterColorDialog.MainDialog import CustomColorDialog
 from .shape_panel import ShapeStylePanel
 from .typography_panel import TypographyStylePanel
@@ -45,6 +45,7 @@ class TextBoxStylePanel(QWidget):
         self.selected_style_info = None
         
         self.init_ui()
+        self.setStyleSheet(STYLE_PANEL_STYLES)
         self.update_style_panel(self._default_style)
         self._load_presets()
 
@@ -102,6 +103,7 @@ class TextBoxStylePanel(QWidget):
         typography_layout.addWidget(typography_label)
         
         typography_scroll = QScrollArea()
+        typography_scroll.setObjectName("typographyScrollArea")
         typography_scroll.setWidgetResizable(True)
         typography_scroll.setFrameShape(QFrame.NoFrame)
         typography_scroll.setWidget(self.typography_panel)
@@ -116,6 +118,7 @@ class TextBoxStylePanel(QWidget):
         shape_layout.addWidget(shape_label)
         
         shape_scroll = QScrollArea()
+        shape_scroll.setObjectName("shapeScrollArea")
         shape_scroll.setWidgetResizable(True)
         shape_scroll.setFrameShape(QFrame.NoFrame)
         shape_scroll.setWidget(self.shape_panel)
@@ -129,7 +132,7 @@ class TextBoxStylePanel(QWidget):
         # Row 2: Presets (minimal layout)
         presets_widget = QWidget()
         presets_layout = QVBoxLayout(presets_widget)
-        presets_layout.setContentsMargins(0, 0, 0, 0)
+        presets_layout.setContentsMargins(0, 0, 0, 15)
         presets_layout.setSpacing(5)
         
         presets_label = QLabel("Presets")
@@ -137,6 +140,7 @@ class TextBoxStylePanel(QWidget):
         presets_layout.addWidget(presets_label)
         
         preset_scroll_area = QScrollArea()
+        preset_scroll_area.setObjectName("presetScrollArea")
         preset_scroll_area.setWidgetResizable(True)
         preset_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         preset_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
