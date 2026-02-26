@@ -101,7 +101,7 @@ DEFAULT_TEXT_STYLE = {
     'bg_color': QColor(255, 255, 255).name(QColor.HexArgb), # White solid fill
     'bg_gradient': DEFAULT_GRADIENT.copy(), # Default gradient fill (used if fill_type='linear_gradient')
     # Border
-    'border_color': QColor(0, 0, 0, 0).name(QColor.HexArgb),     # Transparent Black (effectively no border)
+    'border_color': QColor(0, 0, 0,).name(QColor.HexArgb),     # Transparent Black (effectively no border)
     'border_width': 0,
     # Text
     'text_color_type': 'solid', # 'solid' or 'linear_gradient'

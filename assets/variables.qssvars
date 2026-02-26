@@ -21,8 +21,8 @@
   --icon_disabled_color: #777777;
   --border_input: #555555;
   --accent_checked: #4A9EFF;
-  --text_light: #EAEAEA;
-  --text_gray: #B0B1B2;
+  --text_light: #fcfcfc;
+  --text_gray: #e1e1e1;
   --border_gray: #60666E;
   --border_gray_hover: #70777F;
   --accent_blue: #0078D7;

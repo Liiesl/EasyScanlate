@@ -12,12 +12,12 @@
 /* Labels */
 #ShapeStylePanel QLabel, #TypographyStylePanel QLabel {
     color: var(--text_secondary);
-    font-size: var(--font_size_small);
+    font-size: var(--font_size_medium);
     font-family: 'Segoe UI', sans-serif;
 }
 
 #ShapeStylePanel QLabel#tinyLabel, #TypographyStylePanel QLabel#tinyLabel {
-    font-size: 11px;
+    font-size: var(--font_size_small);
     color: var(--text_gray);
     font-weight: normal;
 }
@@ -31,8 +31,9 @@
     background-color: rgba(43, 43, 43, 178);
     border-radius: var(--border_radius_small);
     color: var(--text);
-    padding: 6px 12px;
+    padding: 10px 16px;
     min-height: 20px;
+    font-size: var(--font_size_medium);
 }
 
 #ShapeStylePanel QComboBox:hover, #TypographyStylePanel QComboBox:hover {
@@ -55,15 +56,10 @@
 }
 
 #ShapeStylePanel QComboBox::down-arrow, #TypographyStylePanel QComboBox::down-arrow {
-    /* Custom CSS Chevron */
-    image: none;
-    border: none;
-    width: 0; 
-    height: 0;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid var(--text_secondary);
-    margin-right: 8px; /* Center it nicely */
+    image: url(assets/icons/dropdown_arrow.svg);
+    width: 10px;
+    height: 10px;
+    margin-right: 8px;
 }
 
 /* Modern Popup Styling */
@@ -73,7 +69,7 @@
     border-radius: 6px;
     selection-background-color: var(--accent);
     outline: 0;
-    padding: 4px;
+    padding: 2px;
     /* Box shadow simulation via margin if supported, usually not in QSS but we can add padding */
 }
 
@@ -98,9 +94,10 @@
     background-color: rgba(43, 43, 43, 178);
     border-radius: var(--border_radius_small);
     color: var(--text);
-    padding: 10px;
+    padding: 8px;
     selection-background-color: var(--accent);
     border: 1px solid transparent; 
+    font-size: var(--font_size_medium);
 }
 
 #ShapeStylePanel QSpinBox:hover, #TypographyStylePanel QSpinBox:hover {
@@ -111,7 +108,15 @@
 #TypographyStylePanel QSpinBox::up-button, #TypographyStylePanel QSpinBox::down-button {
     background-color: transparent;
     border: none;
-    width: 16px;
+    width: 50px;
+}
+
+#ShapeStylePanel QSpinBox::up-arrow, #TypographyStylePanel QSpinBox::up-arrow {
+    image: url(assets/icons/spinbox_up_arrow.svg);
+}
+
+#ShapeStylePanel QSpinBox::down-arrow, #TypographyStylePanel QSpinBox::down-arrow {
+    image: url(assets/icons/spinbox_down_arrow.svg);
 }
 
 #ShapeStylePanel QSpinBox::up-button:hover, #ShapeStylePanel QSpinBox::down-button:hover,

@@ -43,7 +43,7 @@
 #TransparentPanel QLabel#sectionLabel {
     font-weight: bold;
     color: #CCCCCC;
-    font-size: 14px;
+    font-size: var(--font_size_medium);
     padding: 5px;
 }
 
