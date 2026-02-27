@@ -7,7 +7,7 @@
   - add mistral provider
 
   #### fixes
-  - 
+  - keep textbox handles at constant visual size regardless of zoom
 
   #### modification
   - unify installer

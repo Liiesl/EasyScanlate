@@ -29,6 +29,7 @@ class SelectionFrameItem(QGraphicsItem):
 
         # --- State ---
         self.active_handle = None
+        self.is_dragging = False
         self.drag_start_pos = None
         self.drag_start_rect = None
         self.drag_start_angle = 0
@@ -73,70 +74,138 @@ class SelectionFrameItem(QGraphicsItem):
 
     def boundingRect(self):
         """The bounding rect must include the parent, handles, and control buttons."""
-        self._update_geometry()
+        visual_handle_rects, visual_rotate_handle_rect, visual_delete_btn_rect = self._get_visual_rects()
         rect = self.parent_item.rect()
-        for handle_rect in self._handle_rects.values():
+        for handle_rect in visual_handle_rects.values():
             rect = rect.united(handle_rect)
-        rect = rect.united(self._delete_btn_rect)
-        rect = rect.united(self._rotate_handle_rect)
-        return rect.adjusted(-2, -2, 2, 2)  # Add a small margin for pen widths
+        rect = rect.united(visual_delete_btn_rect)
+        rect = rect.united(visual_rotate_handle_rect)
+        return rect
 
     def paint(self, painter, option, widget=None):
         self._update_geometry()  # Ensure positions are fresh for painting
         painter.setRenderHint(QPainter.Antialiasing)
+
+        scale = self._get_view_scale()
+        visual_handle_size = self.handle_size / scale
+        visual_hs_half = visual_handle_size / 2.0
+        visual_delete_size = self.delete_btn_size / scale
+        visual_rotate_size = self.rotate_btn_size / scale
+        visual_control_offset = self.control_offset / scale
         
         # 1. Draw main outline
-        outline_pen = QPen(self.outline_color, 1.5, Qt.SolidLine)
+        outline_pen = QPen(self.outline_color, 1.5 / scale, Qt.SolidLine)
         painter.setPen(outline_pen)
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(self.parent_item.rect())
 
         # 2. Draw 8 resize handles (unfilled rectangles)
-        handle_pen = QPen(self.outline_color, 1)
+        handle_pen = QPen(self.outline_color, 1 / scale)
         painter.setPen(handle_pen)
         painter.setBrush(self.handle_fill_color)
-        for handle_rect in self._handle_rects.values():
-            painter.drawRect(handle_rect)
+        for name, rect in self._handle_rects.items():
+            visual_rect = QRectF(
+                rect.center().x() - visual_hs_half,
+                rect.center().y() - visual_hs_half,
+                visual_handle_size,
+                visual_handle_size
+            )
+            painter.drawRect(visual_rect)
 
         # 3. Draw center '+' indicator
         center = self.parent_item.rect().center()
-        cross_size = 5
+        cross_size = 5 / scale
         painter.setPen(outline_pen)
         painter.drawLine(QPointF(center.x() - cross_size, center.y()), QPointF(center.x() + cross_size, center.y()))
         painter.drawLine(QPointF(center.x(), center.y() - cross_size), QPointF(center.x(), center.y() + cross_size))
 
         # 4. Draw control buttons and their connecting lines
         top_handle_center = self._handle_rects['t'].center()
-        painter.drawLine(top_handle_center, self._rotate_handle_rect.center())
-        painter.drawLine(self._rotate_handle_rect.center(), self._delete_btn_rect.center())
+        rotate_btn_center_y = top_handle_center.y() - visual_control_offset - visual_rotate_size / 2
+        rotate_btn_center = QPointF(top_handle_center.x(), rotate_btn_center_y)
+        rotate_handle_rect = QRectF(0, 0, visual_rotate_size, visual_rotate_size)
+        rotate_handle_rect.moveCenter(rotate_btn_center)
+
+        delete_btn_center_x = rotate_btn_center.x() + visual_rotate_size / 2 + visual_control_offset
+        delete_btn_center = QPointF(delete_btn_center_x, rotate_btn_center.y())
+        delete_btn_rect = QRectF(0, 0, visual_delete_size, visual_delete_size)
+        delete_btn_rect.moveCenter(delete_btn_center)
+
+        painter.drawLine(top_handle_center, rotate_handle_rect.center())
+        painter.drawLine(rotate_handle_rect.center(), delete_btn_rect.center())
 
         # Draw rotate handle
-        painter.setPen(QPen(self.outline_color, 1)); painter.setBrush(self.handle_fill_color)
-        painter.drawRect(self._rotate_handle_rect)
+        painter.setPen(QPen(self.outline_color, 1 / scale)); painter.setBrush(self.handle_fill_color)
+        painter.drawRect(rotate_handle_rect)
         # Draw rotate icon (circular arrow)
-        icon_rect = self._rotate_handle_rect.adjusted(4, 4, -4, -4)
+        icon_rect = rotate_handle_rect.adjusted(4 / scale, 4 / scale, -4 / scale, -4 / scale)
         path = QPainterPath()
         path.moveTo(icon_rect.right(), icon_rect.center().y())
         path.arcTo(icon_rect, 0, 270)
-        p1 = path.currentPosition(); arrow_size = 3
+        p1 = path.currentPosition(); arrow_size = 3 / scale
         path.moveTo(p1); path.lineTo(p1.x() - arrow_size, p1.y() - arrow_size)
         path.moveTo(p1); path.lineTo(p1.x() + arrow_size, p1.y() - arrow_size)
-        painter.setBrush(Qt.NoBrush); painter.setPen(QPen(self.outline_color, 1.5))
+        painter.setBrush(Qt.NoBrush); painter.setPen(QPen(self.outline_color, 1.5 / scale))
         painter.drawPath(path)
 
         # Draw delete button
-        painter.setBrush(QBrush(Qt.red)); painter.setPen(QPen(Qt.black, 1))
-        painter.drawEllipse(self._delete_btn_rect)
-        painter.setPen(QPen(Qt.white, 2))
-        margin = 6
-        x_rect = self._delete_btn_rect.adjusted(margin, margin, -margin, -margin)
+        painter.setBrush(QBrush(Qt.red)); painter.setPen(QPen(Qt.black, 1 / scale))
+        painter.drawEllipse(delete_btn_rect)
+        painter.setPen(QPen(Qt.white, 2 / scale))
+        margin = 6 / scale
+        x_rect = delete_btn_rect.adjusted(margin, margin, -margin, -margin)
         painter.drawLine(x_rect.topLeft(), x_rect.bottomRight())
         painter.drawLine(x_rect.topRight(), x_rect.bottomLeft())
 
+    def _get_view_scale(self):
+        """Returns the scale factor from the graphics view, or 1.0 if no view."""
+        if not self.scene():
+            return 1.0
+        views = self.scene().views()
+        if not views:
+            return 1.0
+        return views[0].transform().m11()
+
+    def _get_visual_rects(self):
+        """Returns scaled versions of handle/control rects for hit testing and cursor display."""
+        scale = self._get_view_scale()
+
+        visual_handle_size = self.handle_size / scale
+        visual_hs_half = visual_handle_size / 2.0
+        visual_delete_size = self.delete_btn_size / scale
+        visual_rotate_size = self.rotate_btn_size / scale
+        visual_control_offset = self.control_offset / scale
+
+        parent_rect = self.parent_item.rect()
+        visual_handle_rects = {
+            'tl': QRectF(parent_rect.left() - visual_hs_half, parent_rect.top() - visual_hs_half, visual_handle_size, visual_handle_size),
+            'tr': QRectF(parent_rect.right() - visual_hs_half, parent_rect.top() - visual_hs_half, visual_handle_size, visual_handle_size),
+            'bl': QRectF(parent_rect.left() - visual_hs_half, parent_rect.bottom() - visual_hs_half, visual_handle_size, visual_handle_size),
+            'br': QRectF(parent_rect.right() - visual_hs_half, parent_rect.bottom() - visual_hs_half, visual_handle_size, visual_handle_size),
+            't': QRectF(parent_rect.center().x() - visual_hs_half, parent_rect.top() - visual_hs_half, visual_handle_size, visual_handle_size),
+            'b': QRectF(parent_rect.center().x() - visual_hs_half, parent_rect.bottom() - visual_hs_half, visual_handle_size, visual_handle_size),
+            'l': QRectF(parent_rect.left() - visual_hs_half, parent_rect.center().y() - visual_hs_half, visual_handle_size, visual_handle_size),
+            'r': QRectF(parent_rect.right() - visual_hs_half, parent_rect.center().y() - visual_hs_half, visual_handle_size, visual_handle_size),
+        }
+
+        top_handle_center = visual_handle_rects['t'].center()
+        rotate_btn_center_y = top_handle_center.y() - visual_control_offset - visual_rotate_size / 2
+        rotate_btn_center = QPointF(top_handle_center.x(), rotate_btn_center_y)
+        visual_rotate_handle_rect = QRectF(0, 0, visual_rotate_size, visual_rotate_size)
+        visual_rotate_handle_rect.moveCenter(rotate_btn_center)
+
+        delete_btn_center_x = rotate_btn_center.x() + visual_rotate_size / 2 + visual_control_offset
+        delete_btn_center = QPointF(delete_btn_center_x, rotate_btn_center.y())
+        visual_delete_btn_rect = QRectF(0, 0, visual_delete_size, visual_delete_size)
+        visual_delete_btn_rect.moveCenter(delete_btn_center)
+
+        return visual_handle_rects, visual_rotate_handle_rect, visual_delete_btn_rect
+
     def _get_handle_at(self, pos):
-        if self._delete_btn_rect.contains(pos): return 'delete'
-        if self._rotate_handle_rect.contains(pos): return 'rotate'
-        for name, rect in self._handle_rects.items():
+        visual_handle_rects, visual_rotate_handle_rect, visual_delete_btn_rect = self._get_visual_rects()
+        if visual_delete_btn_rect.contains(pos): return 'delete'
+        if visual_rotate_handle_rect.contains(pos): return 'rotate'
+        for name, rect in visual_handle_rects.items():
             if rect.contains(pos): return name
         return None
 
@@ -144,11 +213,14 @@ class SelectionFrameItem(QGraphicsItem):
         handle = self._get_handle_at(event.pos())
         cursor = self.parent_item.cursor()
         if handle:
-            cursors = {'tl': Qt.SizeFDiagCursor, 'br': Qt.SizeFDiagCursor, 'tr': Qt.SizeBDiagCursor, 
-                         'bl': Qt.SizeBDiagCursor, 't': Qt.SizeVerCursor, 'b': Qt.SizeVerCursor,
-                         'l': Qt.SizeHorCursor, 'r': Qt.SizeHorCursor, 'delete': Qt.PointingHandCursor,
-                         'rotate': Qt.CrossCursor}
-            cursor = cursors.get(handle)
+            if handle == 'rotate' and self.is_dragging:
+                cursor = Qt.ClosedHandCursor
+            else:
+                cursors = {'tl': Qt.SizeFDiagCursor, 'br': Qt.SizeFDiagCursor, 'tr': Qt.SizeBDiagCursor, 
+                             'bl': Qt.SizeBDiagCursor, 't': Qt.SizeVerCursor, 'b': Qt.SizeVerCursor,
+                             'l': Qt.SizeHorCursor, 'r': Qt.SizeHorCursor, 'delete': Qt.PointingHandCursor,
+                             'rotate': Qt.OpenHandCursor}
+                cursor = cursors.get(handle)
         self.setCursor(cursor)
         super().hoverMoveEvent(event)
 
@@ -158,7 +230,7 @@ class SelectionFrameItem(QGraphicsItem):
             event.ignore()
             return
 
-        # --- FIX: Check for free transform mode (Ctrl key pressed on a CORNER resize handle) ---
+        self.is_dragging = True
         self.is_free_transform = (event.modifiers() & Qt.ControlModifier) and \
                                  self.active_handle in ['tl', 'tr', 'bl', 'br']
 
@@ -282,6 +354,7 @@ class SelectionFrameItem(QGraphicsItem):
 
     def mouseReleaseEvent(self, event):
         self.active_handle = None
+        self.is_dragging = False
         self.drag_start_pos = None
         self.drag_start_rect = None
         self.drag_start_angle = 0
