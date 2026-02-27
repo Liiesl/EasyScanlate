@@ -1,26 +1,25 @@
 # what i need
 
-## done (milestone 0.2.1 release)
+## done (milestone 0.3.0 release)
 
   #### addition
-  - custom error msg box
-    - link to github issue report if any error
-  - dedicated import/export dialogs for OCR/translation data
-  - add feature request button on settings
-  - add documentation links
+  - add tool bar on the left
+  - add mistral provider
 
   #### fixes
-  - fix import/export OCR/translation data functionality
-  - fix find and replace bugs :
-    - roman character not working for some reason if there are other profile in other type of character (non roman)
-    - profile creation/switching crashes the app when on find
+  - 
 
   #### modification
-  - make protect original text to be for all edits (not just first edit)
-  - make default profile on translation window to be user edit
+  - unify installer
+  - migrate to neverliie ai sdk
+  - migrate to rapidocr as the ocr backend
+  - redesign the ui/ux
+  - varius ui/ux improvement
 
 ## currently in progress
-  - 
+  - add direct retranslate on main window
+  - deprecate result widgets and table (be replaced by direct text editing on image textbox)
+    - it should be merged into translation feature cause it still needed there
 
 ## not yet started
 
@@ -33,8 +32,6 @@
     - add drop shadow to both
     - add 
   - 2 pane view of manhwa (for original and translated view side by side)(layers and overlays can be individualy toggle off and on)
-  - add tool bar on the right
-  - add direct retranslate on main window
   - add more items for ocr export
     - ocr tagging
     - pdf
@@ -56,7 +53,7 @@
   - save edited state of textboxitem
   - dynamic link between import export ocr and translation
   - change how translation Work
-    - integrate it into main window
+    - [X] integrate it into main window
       - easier retranslate workflow
     - characters, places, and lore name dictionaries
   - hide textboximage button
@@ -69,7 +66,5 @@
     - switch on/off from selection
     - undo/redo
   - make font to be from system
-  - deprecate result widgets and table (be replaced by direct text editing on image textbox)
-    - it should be merged into translation feature cause it still needed there
   - briefly highlight sync ocr
   - enhance ocr result merging
