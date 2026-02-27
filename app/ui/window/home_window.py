@@ -201,7 +201,6 @@ class Home(QMainWindow):
         self.progress_signal = progress_signal
         self.settings = QSettings("Liiesl", "EasyScanlate")
         self.setWindowFlags(Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
         
         self.init_ui()
         self.resizer = WindowResizer(self)
@@ -282,7 +281,17 @@ class Home(QMainWindow):
         self.content_layout_hbox.addWidget(self.content, 1)
         
         # REMOVED call to self.load_recent_projects()
-        
+
+    def nativeEvent(self, eventType, message):
+        # Use getattr to safely check if resizer exists and is fully initialized
+        resizer = getattr(self, 'resizer', None)
+        if resizer:
+            handled, result = resizer.handle_windows_native(message)
+            if handled:
+                return True, result
+                
+        return super().nativeEvent(eventType, message)
+
     def check_for_updates_on_startup(self):
         """Checks for updates when the app starts, with a timeout."""
         if self.settings.value("auto_check_updates", "true") == "true":
