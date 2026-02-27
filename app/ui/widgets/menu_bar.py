@@ -262,19 +262,19 @@ class MenuBar(QMenuBar):
             self.profiles_menu.addAction(action)
 
     def new_project(self):
-        from utils.project_processing import new_project
+        from app.utils.project_processing import new_project
         new_project(self)
 
     def open_project(self):
-        from utils.project_processing import open_project
+        from app.utils.project_processing import open_project
         open_project(self)
 
     def import_from_wfwf(self):
-        from utils.project_processing import import_from_wfwf
+        from app.utils.project_processing import import_from_wfwf
         import_from_wfwf(self)
 
     def correct_filenames(self, directory):
-        from utils.project_processing import correct_filenames
+        from app.utils.project_processing import correct_filenames
         return correct_filenames(directory)
 
     def go_to_home(self):
