@@ -11,7 +11,6 @@
 
 ; --- Registry & Path Definitions ---
 !define REG_UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
-!define REG_APP_KEY "Software\${APP_PUBLISHER}\${APP_NAME}" ; For update detection signal
 !define STARTMENU_FOLDER "$SMPROGRAMS\${APP_NAME}"
 
 ; --- Date for Registry ---
@@ -53,7 +52,7 @@ LangString DESC_SecAppPath ${LANG_ENGLISH} "Register the application path for ea
 ; --- Installer Logic ---
 
 ; This function runs before the installer UI is shown.
-; It checks for a previous installation and handles the silent uninstall for updates.
+; It checks for a previous installation and runs the uninstaller if found.
 Function .onInit
   SetRegView 64
   
@@ -61,15 +60,8 @@ Function .onInit
   ReadRegStr $R0 HKLM "${REG_UNINSTALL_KEY}" "UninstallString"
   IfFileExists $R0 0 NoPreviousVersion
 
-  ; Previous version found. Signal to the uninstaller that an update is in progress.
-  WriteRegStr HKLM "${REG_APP_KEY}" "UpdateInProgress" "1"
-  
   ; Silently run the old uninstaller and wait for it to complete.
-  ; The old uninstaller will see the "UpdateInProgress" flag and preserve the 'torch' directory.
   ExecWait '"$R0" /S _?=$INSTDIR'
-  
-  ; Clean up the signal flag after the old uninstaller has finished.
-  DeleteRegValue HKLM "${REG_APP_KEY}" "UpdateInProgress"
 
 NoPreviousVersion:
 FunctionEnd
@@ -79,15 +71,12 @@ FunctionEnd
 
 Section "Main Application" SecApp
   SectionIn RO
-  ; This size should reflect the application WITHOUT torch (e.g., from 'build-output.7z')
-  ; If your app is 300MB without torch, this is approx 307200 KB.
-  AddSize 309200
+  AddSize 102400
 
   SetOutPath $INSTDIR
   
-  DetailPrint "Installing application files (excluding PyTorch)..."
-  ; Package everything EXCEPT the torch directory, which is handled separately.
-  File /r /x torch "..\..\main-app-dist\*"
+  DetailPrint "Installing application files..."
+  File /r "..\..\main-app-dist\*"
 
   ; --- Create Uninstaller and Write Registry Keys ---
   WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -99,7 +88,7 @@ Section "Main Application" SecApp
   WriteRegStr HKLM "${REG_UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\${APP_EXE}"
   WriteRegStr HKLM "${REG_UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
   WriteRegStr HKLM "${REG_UNINSTALL_KEY}" "Publisher" "${APP_PUBLISHER}"
-  WriteRegDWORD HKLM "${REG_UNINSTALL_KEY}" "EstimatedSize" 309200 ; Update to match AddSize
+  WriteRegDWORD HKLM "${REG_UNINSTALL_KEY}" "EstimatedSize" 102400
   WriteRegStr HKLM "${REG_UNINSTALL_KEY}" "InstallDate" "${INSTALL_DATE_YYYYMMDD}"
   WriteRegDWORD HKLM "${REG_UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "${REG_UNINSTALL_KEY}" "NoRepair" 1
@@ -152,57 +141,8 @@ SectionEnd
 Section "Uninstall"
   SetRegView 64
   
-  ; Check if this is a silent uninstall triggered by an update.
-  ReadRegStr $R0 HKLM "${REG_APP_KEY}" "UpdateInProgress"
-  StrCmp $R0 "1" HandleUpdateUninstall HandleManualUninstall
-
-HandleUpdateUninstall:
-  ; UPDATE MODE: Silently uninstall everything EXCEPT the 'torch' directory.
-  DetailPrint "Update detected. Preserving PyTorch libraries..."
-  
-  ; To safely remove everything else, we temporarily move 'torch'.
-  Rename "$INSTDIR\torch" "$PLUGINSDIR\torch_bak"
-  
-  ; Remove all other application files and folders.
+  DetailPrint "Removing application files..."
   RMDir /r "$INSTDIR"
-  
-  ; Re-create the installation directory and move 'torch' back.
-  CreateDirectory "$INSTDIR"
-  Rename "$PLUGINSDIR\torch_bak" "$INSTDIR\torch"
-  
-  Goto CleanupRegistry ; Skip to final registry cleanup.
-
-HandleManualUninstall:
-  ; MANUAL MODE: Ask the user what to do with the 'torch' directory.
-  IfFileExists "$INSTDIR\torch\*.*" 0 NoTorchFound
-  
-    ; Prompt the user.
-    MessageBox MB_YESNO|MB_ICONQUESTION \
-      "Do you want to completely remove EasyScanlate, including the large PyTorch libraries (over 4GB)?$\r$\n$\r$\nClicking 'No' will preserve these libraries to speed up future installations." \
-      IDYES CompleteRemove IDNO PreserveTorch
-    
-    Goto CleanupRegistry ; Should not be reached, but as a fallback.
-
-  PreserveTorch:
-    DetailPrint "Preserving torch directory and removing other files..."
-    Rename "$INSTDIR\torch" "$PLUGINSDIR\torch_bak"
-    RMDir /r "$INSTDIR"
-    CreateDirectory "$INSTDIR"
-    Rename "$PLUGINSDIR\torch_bak" "$INSTDIR\torch"
-    Goto CleanupRegistry
-
-  CompleteRemove:
-    DetailPrint "Performing complete removal of all files..."
-    RMDir /r "$INSTDIR"
-    Goto CleanupRegistry
-
-  NoTorchFound:
-    ; The 'torch' directory doesn't exist, so just remove everything.
-    DetailPrint "Removing application directory..."
-    RMDir /r "$INSTDIR"
-
-CleanupRegistry:
-  ; --- Final cleanup for ALL uninstall scenarios ---
   
   ; --- Cleanup Shortcuts ---
   Delete "$DESKTOP\${APP_NAME}.lnk"
@@ -211,12 +151,9 @@ CleanupRegistry:
   RMDir "${STARTMENU_FOLDER}"
 
   ; --- Cleanup Registry ---
-  SetRegView 64
   DetailPrint "Removing registry keys..."
   DeleteRegKey HKCR ".mmtl"
   DeleteRegKey HKCR "EasyScanlate.MMTLFile"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\${APP_EXE}"
   DeleteRegKey HKLM "${REG_UNINSTALL_KEY}"
-  ; Also remove the app's own registry key, if it exists.
-  DeleteRegKey /ifempty HKLM "${REG_APP_KEY}"
 SectionEnd

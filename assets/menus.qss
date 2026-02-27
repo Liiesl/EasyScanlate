@@ -1,0 +1,72 @@
+/* Menu Widget Styles - app/ui/widgets/menus.py */
+
+/* ToggleButton - Custom toggle button with on/off states */
+ToggleButton {
+    background-color: var(--tertiary);
+    color: var(--text);
+    border: 1px solid var(--senary);
+    border-radius: var(--border_radius_small);
+    padding: var(--padding_6) var(--spacing_xxlarge);
+    font-size: var(--font_size_small);
+    font-weight: 500;
+}
+
+ToggleButton:hover {
+    background-color: var(--quaternary);
+    border-color: var(--quinary);
+}
+
+ToggleButton:pressed {
+    background-color: var(--button_pressed);
+}
+
+/* 'On' state styling */
+ToggleButton[state="on"] {
+    background-color: var(--button_checked_bg);
+    border-color: var(--button_checked_border);
+    color: var(--text);
+}
+
+ToggleButton[state="on"]:hover {
+    background-color: var(--button_hover_bg);
+    border-color: var(--accent_checked);
+}
+
+/* 'Off' state styling (default) */
+ToggleButton[state="off"] {
+    background-color: var(--tertiary);
+    border-color: var(--senary);
+}
+
+ToggleButton[state="off"]:hover {
+    background-color: var(--quaternary);
+}
+
+/* Menu - Popup menu widget */
+Menu {
+    background-color: rgba(43, 43, 43, 178);
+    border: 1px solid var(--border);
+    border-radius: var(--border_radius_small);
+}
+
+Menu QWidget {
+    background-color: transparent;
+}
+
+Menu QPushButton {
+    background-color: transparent;
+    color: var(--text);
+    border: none;
+    border-radius: var(--border_radius_small);
+    padding: var(--padding_6) var(--padding_xlarge);
+    text-align: left;
+    font-size: var(--font_size_small);
+}
+
+Menu QPushButton:hover {
+    background-color: rgba(69, 69, 69, 178);
+}
+
+Menu QPushButton:pressed {
+    background-color: rgba(37, 37, 37, 178);
+}

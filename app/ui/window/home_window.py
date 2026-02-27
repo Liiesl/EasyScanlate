@@ -201,7 +201,6 @@ class Home(QMainWindow):
         self.progress_signal = progress_signal
         self.settings = QSettings("Liiesl", "EasyScanlate")
         self.setWindowFlags(Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
         
         self.init_ui()
         self.resizer = WindowResizer(self)
@@ -228,6 +227,7 @@ class Home(QMainWindow):
         self.title_bar.setState(TitleBarState.HOME)
 
         report_progress("Applying styles...")
+        self.setObjectName("HomeWindow") 
         self.setStyleSheet(HOME_STYLES)
         
         self.content_widget = QWidget()
@@ -261,6 +261,8 @@ class Home(QMainWindow):
         self.left_layout = QWidget()
         self.left_layout.setLayout(self.left_layout_layout)
         self.left_layout.setMaximumWidth(200)
+        self.left_layout.setObjectName("HomeLeftLayout")
+
         self.left_layout.setStyleSheet(HOME_LEFT_LAYOUT_STYLES)
         
         report_progress("Configuring project list...")
@@ -279,7 +281,17 @@ class Home(QMainWindow):
         self.content_layout_hbox.addWidget(self.content, 1)
         
         # REMOVED call to self.load_recent_projects()
-        
+
+    def nativeEvent(self, eventType, message):
+        # Use getattr to safely check if resizer exists and is fully initialized
+        resizer = getattr(self, 'resizer', None)
+        if resizer:
+            handled, result = resizer.handle_windows_native(message)
+            if handled:
+                return True, result
+                
+        return super().nativeEvent(eventType, message)
+
     def check_for_updates_on_startup(self):
         """Checks for updates when the app starts, with a timeout."""
         if self.settings.value("auto_check_updates", "true") == "true":
@@ -397,6 +409,56 @@ class Home(QMainWindow):
         current_time = QDateTime.currentDateTime().toString(Qt.ISODate)
         timestamps[project_path] = current_time
         self.settings.setValue("recent_timestamps", timestamps)
+
+    def load_recent_projects_from_settings(self):
+        """Load recent projects directly from QSettings (used when navigating via menu bar)."""
+        projects_data = []
+        try:
+            recent_projects = self.settings.value("recent_projects", [])
+            recent_timestamps = self.settings.value("recent_timestamps", {})
+
+            for path in recent_projects:
+                if os.path.exists(path):
+                    filename = os.path.basename(path)
+                    timestamp = recent_timestamps.get(path, "")
+                    last_opened = self._get_relative_time(timestamp)
+                    projects_data.append({
+                        "name": filename,
+                        "path": path,
+                        "last_opened": last_opened
+                    })
+
+            self.populate_recent_projects(projects_data)
+        except Exception as e:
+            print(f"Could not load recent projects: {e}")
+
+    def _get_relative_time(self, timestamp_str):
+        """Convert ISO timestamp to relative time string."""
+        if not timestamp_str:
+            return ""
+        try:
+            dt = QDateTime.fromString(timestamp_str, Qt.ISODate)
+            if not dt.isValid():
+                return ""
+            seconds = dt.secsTo(QDateTime.currentDateTime())
+            if seconds < 60:
+                return "Just now"
+            minutes = seconds // 60
+            if minutes < 60:
+                return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+            hours = minutes // 60
+            if hours < 24:
+                return f"{hours} hour{'s' if hours > 1 else ''} ago"
+            days = hours // 24
+            if days < 30:
+                return f"{days} day{'s' if days > 1 else ''} ago"
+            months = days // 30
+            if months < 12:
+                return f"{months} month{'s' if months > 1 else ''} ago"
+            years = seconds // 31536000
+            return f"{years} year{'s' if years > 1 else ''} ago"
+        except Exception:
+            return ""
 
     def launch_main_app(self, mmtl_path):
         self.loading_dialog = LoadingDialog(self)

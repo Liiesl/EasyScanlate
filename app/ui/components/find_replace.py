@@ -5,7 +5,6 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QSyntaxHighlighter, QFont, QTextDocument
 import qtawesome as qta
 import re
-from assets import FIND_REPLACE_STYLESHEET
 
 # --- SearchHighlighter class remains the same ---
 class SearchHighlighter(QSyntaxHighlighter):
@@ -63,7 +62,6 @@ class FindReplaceWidget(QWidget):
 
         self._init_ui()
         self.hide()
-        self.setStyleSheet(FIND_REPLACE_STYLESHEET)
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -123,7 +121,6 @@ class FindReplaceWidget(QWidget):
         self.btn_prev.setToolTip("Previous Match (Shift+Enter)")
         self.btn_prev.clicked.connect(self.find_previous)
         self.btn_prev.setShortcut("Shift+Return")
-        self.btn_prev.setStyleSheet(FIND_REPLACE_STYLESHEET)
         find_row_layout.addWidget(self.btn_prev)
 
         self.btn_next = QPushButton(qta.icon('fa5s.arrow-down', color='inherit'), "")

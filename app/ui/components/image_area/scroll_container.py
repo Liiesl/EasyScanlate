@@ -1,16 +1,16 @@
 # scroll_container.py
 
-from PySide6.QtWidgets import QScrollArea, QWidget, QHBoxLayout, QPushButton
+from PySide6.QtWidgets import QScrollArea, QWidget, QVBoxLayout, QPushButton
 from PySide6.QtCore import Signal, QPoint
 import qtawesome as qta
-from assets import IV_BUTTON_STYLES
 from app.handlers.stitch_handler import StitchHandler
 from app.handlers.split_handler import SplitHandler
 from app.handlers.context_fill_handler import ContextFillHandler
 from app.handlers.manual_ocr_handler import ManualOCRHandler
-# --- MODIFIED: Import the generic Menu class and the new ToggleButton ---
-from app.ui.widgets.menus import Menu, ToggleButton
+# --- MODIFIED: Import the generic Menu class ---
+from app.ui.widgets.menus import Menu
 from app.ui.components.image_area.label import ResizableImageLabel
+from assets.styles import SCROLL_OVERLAY_STYLES
     
 class CustomScrollArea(QScrollArea):
     """
@@ -49,97 +49,32 @@ class CustomScrollArea(QScrollArea):
         """ Creates and configures the overlay widget and its buttons. """
         self.overlay_widget = QWidget(self)
         self.overlay_widget.setObjectName("ScrollButtonOverlay")
-        self.overlay_widget.setStyleSheet("#ScrollButtonOverlay { background-color: transparent; }")
+        self.overlay_widget.setStyleSheet(SCROLL_OVERLAY_STYLES)
 
-        layout = QHBoxLayout(self.overlay_widget)
+        layout = QVBoxLayout(self.overlay_widget)
         layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(1)
+        layout.setSpacing(8)
 
         # Scroll to Top Button
         btn_scroll_top = QPushButton(qta.icon('fa5s.arrow-up', color='white'), "")
-        btn_scroll_top.setFixedSize(50, 50)
+        btn_scroll_top.setObjectName("ScrollArrowButton")
+        btn_scroll_top.setFixedSize(40, 40)
         btn_scroll_top.clicked.connect(lambda: self.verticalScrollBar().setValue(0))
-        btn_scroll_top.setStyleSheet(IV_BUTTON_STYLES)
         layout.addWidget(btn_scroll_top)
-
-        # Action Menu Button
-        btn_action_menu = QPushButton(qta.icon('fa5s.bars', color='white'), "")
-        btn_action_menu.setFixedSize(50, 50)
-        btn_action_menu.clicked.connect(self._show_action_menu)
-        btn_action_menu.setStyleSheet(IV_BUTTON_STYLES)
-        layout.addWidget(btn_action_menu)
 
         # Save Menu Button
         btn_save_menu = QPushButton(qta.icon('fa5s.save', color='white'), "Save")
-        btn_save_menu.setFixedSize(120, 50)
+        btn_save_menu.setObjectName("ScrollSaveButton")
+        btn_save_menu.setFixedSize(100, 40)
         btn_save_menu.clicked.connect(self._show_save_menu)
-        btn_save_menu.setStyleSheet(IV_BUTTON_STYLES)
         layout.addWidget(btn_save_menu)
 
         # Scroll to Bottom Button
         btn_scroll_bottom = QPushButton(qta.icon('fa5s.arrow-down', color='white'), "")
-        btn_scroll_bottom.setFixedSize(50, 50)
+        btn_scroll_bottom.setObjectName("ScrollArrowButton")
+        btn_scroll_bottom.setFixedSize(40, 40)
         btn_scroll_bottom.clicked.connect(lambda: self.verticalScrollBar().setValue(self.verticalScrollBar().maximum()))
-        btn_scroll_bottom.setStyleSheet(IV_BUTTON_STYLES)
         layout.addWidget(btn_scroll_bottom)
-
-    def _show_action_menu(self):
-        """ Creates, populates, and shows the Action Menu using the generic Menu class. """
-        trigger_button = self.sender()
-        if not isinstance(trigger_button, QWidget):
-            return
-
-        menu = Menu(self)
-
-        # Create and add action buttons to the menu
-        btn_hide_text = ToggleButton(
-            off_text=" Show Text", on_text=" Hide Text",
-            off_icon=qta.icon('fa5s.eye', color='white'),
-            on_icon=qta.icon('fa5s.eye-slash', color='white')
-        )
-        
-        # If edit mode is active, text is forced off. Reflect this in the button state and disable it.
-        is_edit_mode = self.context_fill_handler.is_edit_mode_active
-        is_text_currently_visible = self._text_is_visible and not is_edit_mode
-        btn_hide_text.setState(is_text_currently_visible)
-        btn_hide_text.setEnabled(not is_edit_mode)
-        
-        btn_hide_text.clicked.connect(self.toggle_text_visibility)
-        menu.addButton(btn_hide_text, close_on_click=False)
-        
-        btn_hide_inpainting = ToggleButton(
-            off_text=" Show Context Fills", on_text=" Hide Context Fills",
-            off_icon=qta.icon('fa5s.eye', color='white'),
-            on_icon=qta.icon('fa5s.eraser', color='white')
-        )
-        btn_hide_inpainting.setState(self._inpainting_is_visible)
-        btn_hide_inpainting.clicked.connect(self.toggle_inpainting_visibility)
-        menu.addButton(btn_hide_inpainting, close_on_click=False)
-
-        btn_context_fill = QPushButton(qta.icon('fa5s.fill-drip', color='white'), " Context Fill")
-        btn_context_fill.clicked.connect(self.context_fill_handler.start_mode)
-        menu.addButton(btn_context_fill)
-
-        # --- NEW: Edit Context Fill uses the ToggleButton to show state ---
-        btn_edit_context_fill = ToggleButton(
-            off_text=" Edit Context Fill", on_text=" Finish Editing",
-            off_icon=qta.icon('fa5s.paint-brush', color='white'),
-            on_icon=qta.icon('fa5s.check-circle', color='white')
-        )
-        btn_edit_context_fill.setState(self.context_fill_handler.is_edit_mode_active)
-        btn_edit_context_fill.clicked.connect(self.context_fill_handler.toggle_edit_mode)
-        menu.addButton(btn_edit_context_fill, close_on_click=False)
-
-        btn_split_images = QPushButton(qta.icon('fa5s.object-ungroup', color='white'), " Split Images")
-        btn_split_images.clicked.connect(self.split_handler.start_splitting_mode)
-        menu.addButton(btn_split_images)
-        
-        btn_stitch_images = QPushButton(qta.icon('fa5s.object-group', color='white'), " Stitch Images")
-        btn_stitch_images.clicked.connect(self.stitch_handler.start_stitching_mode)
-        menu.addButton(btn_stitch_images)
-
-        # Position the menu above the button that triggered it
-        menu.set_position_and_show(trigger_button, 'top left')
     
     def _show_save_menu(self):
         """Creates, populates, and shows the Save menu."""
@@ -157,7 +92,7 @@ class CustomScrollArea(QScrollArea):
         btn_save_images.clicked.connect(self.main_window.export_manhwa)
         menu.addButton(btn_save_images)
 
-        menu.set_position_and_show(trigger_button, 'top right')
+        menu.set_position_and_show(trigger_button, 'right')
 
     def cancel_active_modes(self, exclude_handler=None):
         """Deactivates any currently running action handler mode."""
@@ -203,11 +138,11 @@ class CustomScrollArea(QScrollArea):
     def update_overlay_position(self):
         """ Calculates and sets the correct position for the overlay widget. """
         if self.overlay_widget:
-            overlay_width = 320
-            overlay_height = 60
+            overlay_width = 140
+            overlay_height = 186
             viewport_width = self.viewport().width()
             viewport_height = self.viewport().height()
-            x = (viewport_width - overlay_width) // 2
-            y = viewport_height - overlay_height - 10 
+            x = 10
+            y = viewport_height - overlay_height - 10
             self.overlay_widget.setGeometry(x, y, overlay_width, overlay_height)
             self.overlay_widget.raise_()

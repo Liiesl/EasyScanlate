@@ -8,10 +8,10 @@ from PySide6.QtWidgets import (QDialog, QDoubleSpinBox, QVBoxLayout, QHBoxLayout
                              QWidget, QLineEdit, QKeySequenceEdit, QCheckBox,
                              QGroupBox, QPushButton, QLabel, QProgressBar, QMessageBox)
 from PySide6.QtGui import QKeySequence, QDesktopServices
-from PySide6.QtCore import QSettings, QUrl
-from assets import ADVANCED_CHECK_STYLES
+from PySide6.QtCore import QSettings, QUrl, Qt
 from app.utils.update import UpdateHandler
 from app.ui.dialogs.error_dialog import ErrorDialog
+from app.ui.components.background_settings import AuroraEditorPanel
 GEMINI_MODELS_WITH_INFO = [
     ("gemini-2.5-flash", "250 req/day (free tier)"),
     ("gemini-2.5-pro", "100 req/day (free tier)"),
@@ -20,6 +20,12 @@ GEMINI_MODELS_WITH_INFO = [
     ("gemini-2.0-flash-lite", "200 req/day (free tier)"),
     ("gemma-3-27b-it", "14400 req/day"),
     ("gemma-3n-e4b-it", "14400 req/day"),
+]
+
+MISTRAL_MODELS_WITH_INFO = [
+    ("mistral-small-latest", "Fast, cost-effective"),
+    ("mistral-medium-latest", "Balanced"),
+    ("mistral-large-latest", "Most capable"),
 ]
 
 class SettingsDialog(QDialog):
@@ -40,24 +46,24 @@ class SettingsDialog(QDialog):
         general_layout = QFormLayout()
 
         self.show_delete_warning_check = QCheckBox()
-        self.show_delete_warning_check.setStyleSheet(ADVANCED_CHECK_STYLES)
+        self.show_delete_warning_check.setProperty("class", "AdvancedCheck")
         self.show_delete_warning_check.setChecked(self.settings.value("show_delete_warning", "true") == "true")
         general_layout.addRow("Show delete confirmation dialog:", self.show_delete_warning_check)
 
         self.use_gpu_check = QCheckBox()
-        self.use_gpu_check.setStyleSheet(ADVANCED_CHECK_STYLES)
+        self.use_gpu_check.setProperty("class", "AdvancedCheck")
         self.use_gpu_check.setChecked(self.settings.value("use_gpu", "true").lower() == "true")
         self.use_gpu_check.setToolTip("Requires compatible NVIDIA GPU and CUDA drivers. Restart may be needed.")
         general_layout.addRow("Use GPU for OCR (if available):", self.use_gpu_check)
 
         self.auto_context_fill_check = QCheckBox()
-        self.auto_context_fill_check.setStyleSheet(ADVANCED_CHECK_STYLES)
+        self.auto_context_fill_check.setProperty("class", "AdvancedCheck")
         self.auto_context_fill_check.setChecked(self.settings.value("auto_context_fill", "false") == "true")
         self.auto_context_fill_check.setToolTip("Automatically inpaint background during Batch OCR. Can improve text rendering but may slow processing.")
         general_layout.addRow("Auto Context Fill on Batch OCR:", self.auto_context_fill_check)
         
         self.auto_check_updates_check = QCheckBox()
-        self.auto_check_updates_check.setStyleSheet(ADVANCED_CHECK_STYLES)
+        self.auto_check_updates_check.setProperty("class", "AdvancedCheck")
         self.auto_check_updates_check.setChecked(self.settings.value("auto_check_updates", "true") == "true")
         general_layout.addRow("Auto-check for updates on startup:", self.auto_check_updates_check)
 
@@ -121,6 +127,22 @@ class SettingsDialog(QDialog):
         general_tab.setLayout(general_layout)
         self.tab_widget.addTab(general_tab, "General")
 
+        # --- Background / Appearance Tab ---
+        background_tab = QWidget()
+        bg_layout = QVBoxLayout()
+        bg_layout.setAlignment(Qt.AlignCenter)
+        
+        canvas = getattr(parent, 'background_canvas', None)
+        if canvas:
+            self.background_editor = AuroraEditorPanel(canvas)
+            # Center the panel in the tab
+            bg_layout.addWidget(self.background_editor)
+        else:
+            bg_layout.addWidget(QLabel("Background canvas not found."))
+            
+        background_tab.setLayout(bg_layout)
+        self.tab_widget.addTab(background_tab, "Appearance")
+
         # --- OCR Processing Settings Tab (No changes) ---
         processing_tab = QWidget()
         form_layout = QFormLayout()
@@ -140,16 +162,6 @@ class SettingsDialog(QDialog):
         self.distance_spin.setRange(0, 1000); self.distance_spin.setSuffix(" px")
         self.distance_spin.setValue(int(self.settings.value("distance_threshold", 100)))
         form_layout.addRow("Merge Distance Threshold:", self.distance_spin)
-        self.batch_size_spin = QSpinBox()
-        self.batch_size_spin.setRange(1, 64)
-        self.batch_size_spin.setValue(int(self.settings.value("ocr_batch_size", 8)))
-        self.batch_size_spin.setToolTip("Number of image patches processed simultaneously (higher needs more GPU VRAM).")
-        form_layout.addRow("OCR Batch Size:", self.batch_size_spin)
-        self.decoder_combo = QComboBox()
-        self.decoder_combo.addItems(["beamsearch", "greedy"])
-        self.decoder_combo.setCurrentText(self.settings.value("ocr_decoder", "beamsearch"))
-        self.decoder_combo.setToolTip("'beamsearch' is generally more accurate but slower. 'greedy' is faster.")
-        form_layout.addRow("OCR Decoder:", self.decoder_combo)
         self.contrast_spin = QDoubleSpinBox()
         self.contrast_spin.setRange(0.0, 1.0); self.contrast_spin.setSingleStep(0.1); self.contrast_spin.setDecimals(1)
         self.contrast_spin.setValue(float(self.settings.value("ocr_adjust_contrast", 0.5)))
@@ -166,6 +178,14 @@ class SettingsDialog(QDialog):
         # --- API Settings Tab (No changes) ---
         api_tab = QWidget()
         api_layout = QFormLayout()
+        
+        # Provider selection
+        self.provider_combo = QComboBox()
+        self.provider_combo.addItems(["Gemini", "Mistral"])
+        self.provider_combo.setCurrentText(self.settings.value("translation_provider", "Gemini"))
+        api_layout.addRow("Provider:", self.provider_combo)
+        
+        # Gemini settings
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setEchoMode(QLineEdit.Password)
         self.api_key_edit.setText(self.settings.value("gemini_api_key", ""))
@@ -178,6 +198,21 @@ class SettingsDialog(QDialog):
             if self.model_combo.itemData(i) == current_model_value:
                 self.model_combo.setCurrentIndex(i); break
         api_layout.addRow("Gemini Model:", self.model_combo)
+        
+        # Mistral settings
+        self.mistral_api_key_edit = QLineEdit()
+        self.mistral_api_key_edit.setEchoMode(QLineEdit.Password)
+        self.mistral_api_key_edit.setText(self.settings.value("mistral_api_key", ""))
+        api_layout.addRow("Mistral API Key:", self.mistral_api_key_edit)
+        self.mistral_model_combo = QComboBox()
+        for model_name, model_info_text in MISTRAL_MODELS_WITH_INFO:
+            self.mistral_model_combo.addItem(f"{model_name} | {model_info_text}", userData=model_name)
+        current_mistral_model = self.settings.value("mistral_model", "mistral-small-latest")
+        for i in range(self.mistral_model_combo.count()):
+            if self.mistral_model_combo.itemData(i) == current_mistral_model:
+                self.mistral_model_combo.setCurrentIndex(i); break
+        api_layout.addRow("Mistral Model:", self.mistral_model_combo)
+        
         self.lang_combo = QComboBox()
         self.lang_combo.addItems(["English", "Japanese", "Chinese (Simplified)", "Korean", "Spanish", "French", "German", "Bahasa Indonesia", "Vietnamese", "Thai", "Russian", "Portuguese"])
         self.lang_combo.setCurrentText(self.settings.value("target_language", "English"))
@@ -281,13 +316,14 @@ class SettingsDialog(QDialog):
         self.settings.setValue("max_text_height", self.max_text_spin.value())
         self.settings.setValue("min_confidence", self.confidence_spin.value())
         self.settings.setValue("distance_threshold", self.distance_spin.value())
-        self.settings.setValue("ocr_batch_size", self.batch_size_spin.value())
-        self.settings.setValue("ocr_decoder", self.decoder_combo.currentText())
         self.settings.setValue("ocr_adjust_contrast", self.contrast_spin.value())
         self.settings.setValue("ocr_resize_threshold", self.resize_threshold_spin.value())
         # API
+        self.settings.setValue("translation_provider", self.provider_combo.currentText())
         self.settings.setValue("gemini_api_key", self.api_key_edit.text())
         self.settings.setValue("gemini_model", self.model_combo.currentData())
+        self.settings.setValue("mistral_api_key", self.mistral_api_key_edit.text())
+        self.settings.setValue("mistral_model", self.mistral_model_combo.currentData())
         self.settings.setValue("target_language", self.lang_combo.currentText())
         # Shortcuts
         self.settings.setValue("combine_shortcut", self.combine_shortcut_edit.keySequence().toString())

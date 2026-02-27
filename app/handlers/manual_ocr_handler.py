@@ -10,7 +10,6 @@ from PySide6.QtWidgets import QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QL
 from PySide6.QtCore import QBuffer, Signal, QObject
 from app.ui.components.image_area.label import ResizableImageLabel
 from app.ui.dialogs.error_dialog import ErrorDialog
-from assets import MANUALOCR_STYLES
 from app.core.ocr_processor import OCRProcessor
 
 class ManualOCRHandler(QObject):
@@ -34,7 +33,6 @@ class ManualOCRHandler(QObject):
         """Creates the overlay widget, parented to the scroll_area."""
         self.overlay_widget = QWidget(self.scroll_area)
         self.overlay_widget.setObjectName("ManualOCROverlay")
-        self.overlay_widget.setStyleSheet(MANUALOCR_STYLES)
         overlay_layout = QVBoxLayout(self.overlay_widget)
         overlay_layout.setContentsMargins(5, 5, 5, 5)
         # --- MODIFIED: More descriptive initial text ---
@@ -218,8 +216,6 @@ class ManualOCRHandler(QObject):
                 "max_text_height": int(settings.value("max_text_height", 100)),
                 "min_confidence": float(settings.value("min_confidence", 0.2)),
                 "distance_threshold": int(settings.value("distance_threshold", 100)),
-                "batch_size": int(settings.value("ocr_batch_size", 8)),
-                "decoder": settings.value("ocr_decoder", "beamsearch"),
                 "adjust_contrast": float(settings.value("ocr_adjust_contrast", 0.5)),
                 "resize_threshold": int(settings.value("ocr_resize_threshold", 1024)),
                 "auto_context_fill": False

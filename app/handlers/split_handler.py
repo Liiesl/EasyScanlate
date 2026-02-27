@@ -28,21 +28,6 @@ class SplitHandler(QObject):
         """Creates the widget that appears during splitting mode."""
         self.split_widget = QWidget(self.scroll_area)
         self.split_widget.setObjectName("SplitWidget")
-        self.split_widget.setStyleSheet("""
-            #SplitWidget {
-                background-color: rgba(30, 30, 30, 0.95); border-radius: 10px;
-                border: 1px solid #555;
-            }
-            QPushButton {
-                background-color: #007ACC; color: white; border: none;
-                padding: 8px 12px; border-radius: 4px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: #005C99; }
-            QPushButton:disabled { background-color: #555; }
-            #CancelButton { background-color: #C40C0C; }
-            #CancelButton:hover { background-color: #8B0000; }
-            QLabel { color: white; font-size: 13px; }
-        """)
 
         layout = QVBoxLayout(self.split_widget)
         self.info_label = QLabel("Click on an image to place a split indicator.")
