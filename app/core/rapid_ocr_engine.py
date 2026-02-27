@@ -96,17 +96,16 @@ class RapidOCREngine:
             }
         )
     
-    def readtext(self, img: np.ndarray, **kwargs) -> List[Tuple[Any, str, float]]:
+    def readtext(self, img: np.ndarray) -> List[Tuple[Any, str, float]]:
         """
         Run OCR on an image using the manual Det -> Crop -> Rec pipeline.
         
         Args:
             img: Input image as numpy array (grayscale or RGB)
-            **kwargs: Ignored for now (for EasyOCR compatibility)
             
         Returns:
             List of tuples: (coordinates, text, confidence)
-            Format matches EasyOCR output: ([[x1,y1], [x2,y2], [x3,y3], [x4,y4]], text, confidence)
+            Format matches RapidOCR output: ([[x1,y1], [x2,y2], [x3,y3], [x4,y4]], text, confidence)
         """
         results = []
         
@@ -172,7 +171,7 @@ class RapidOCREngine:
                     text, score = rec_out[0]
                 
                 if text:
-                    # Convert box to format expected by EasyOCR: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+                    # Convert box to format expected by RapidOCR: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
                     if hasattr(box, 'tolist'):
                         box_list = box.tolist()
                     else:

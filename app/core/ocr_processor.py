@@ -19,10 +19,10 @@ class OCRProcessor(QThread):
     def __init__(self, reader,
                  # Filters
                  min_text_height, max_text_height, min_confidence,
-                 # Merging
-                 distance_threshold,
-                 # OCR Params (EasyOCR legacy - kept for API compatibility)
-                 batch_size, decoder, adjust_contrast, resize_threshold,
+                  # Merging
+                  distance_threshold,
+                  # OCR Params (used for image preprocessing)
+                  adjust_contrast, resize_threshold,
                  # Inpainting
                  auto_context_fill=False,
                  # Image Sources (one must be provided)
@@ -40,9 +40,7 @@ class OCRProcessor(QThread):
         self.max_text_height = max_text_height
         self.min_confidence = min_confidence
         self.distance_threshold = distance_threshold
-        # Legacy params - kept for API compatibility but not used by RapidOCR
-        self.batch_size = batch_size
-        self.decoder = decoder
+        # Preprocessing params for image quality
         self.adjust_contrast = adjust_contrast
         self.resize_threshold = resize_threshold
         self.auto_context_fill = auto_context_fill

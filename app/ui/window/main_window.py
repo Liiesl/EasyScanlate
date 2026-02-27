@@ -716,7 +716,6 @@ class MainWindow(QMainWindow):
         ocr_settings = {
             "min_text_height": self.min_text_height, "max_text_height": self.max_text_height,
             "min_confidence": self.min_confidence, "distance_threshold": self.distance_threshold,
-            "batch_size": int(self.settings.value("ocr_batch_size", 8)), "decoder": self.settings.value("ocr_decoder", "beamsearch"),
             "adjust_contrast": float(self.settings.value("ocr_adjust_contrast", 0.5)), "resize_threshold": int(self.settings.value("ocr_resize_threshold", 1024)),
             "auto_context_fill": self.settings.value("auto_context_fill", "false").lower() == "true"
         }
