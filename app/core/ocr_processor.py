@@ -7,6 +7,7 @@ from PIL import Image, ImageEnhance # Added ImageEnhance
 import traceback
 import time
 from app.utils.data_processing import group_and_merge_text # Import merging function
+from app.core.rapid_ocr_engine import RapidOCREngine # Import RapidOCR engine
 
 class OCRProcessor(QThread):
     ocr_progress = Signal(int)  # Progress for the current image (0-100)
@@ -20,7 +21,7 @@ class OCRProcessor(QThread):
                  min_text_height, max_text_height, min_confidence,
                  # Merging
                  distance_threshold,
-                 # EasyOCR Params
+                 # OCR Params (EasyOCR legacy - kept for API compatibility)
                  batch_size, decoder, adjust_contrast, resize_threshold,
                  # Inpainting
                  auto_context_fill=False,
@@ -30,6 +31,7 @@ class OCRProcessor(QThread):
         super().__init__()
         self.image_path = image_path
         self.image_data = image_data # Store the in-memory image data
+        # reader is now a RapidOCREngine instance
         self.reader = reader
         self.stop_requested = False
 
@@ -38,6 +40,7 @@ class OCRProcessor(QThread):
         self.max_text_height = max_text_height
         self.min_confidence = min_confidence
         self.distance_threshold = distance_threshold
+        # Legacy params - kept for API compatibility but not used by RapidOCR
         self.batch_size = batch_size
         self.decoder = decoder
         self.adjust_contrast = adjust_contrast
@@ -64,8 +67,11 @@ class OCRProcessor(QThread):
             
             original_width, original_height = img_pil.size
 
-            # Convert to grayscale first
-            img_pil_processed = img_pil.convert('L')
+            # Ensure RGB mode (not grayscale) - matching quick.py approach
+            if img_pil.mode != 'RGB':
+                img_pil_processed = img_pil.convert('RGB')
+            else:
+                img_pil_processed = img_pil
 
             # Optional Contrast Adjustment (before potential resize)
             if self.adjust_contrast > 0.0: # 0 means disabled or no effect
@@ -95,18 +101,12 @@ class OCRProcessor(QThread):
             if self.stop_requested:
                 print("OCR Proc: Stop requested before running reader."); return
 
-            # --- 3. Run EasyOCR ---
-            print(f"OCR Proc: Running reader.readtext (batch={self.batch_size}, decoder='{self.decoder}')")
+            # --- 3. Run RapidOCR ---
+            print(f"OCR Proc: Running RapidOCR (manual Det->Crop->Rec pipeline)")
             start_time_readtext = time.time()
-            raw_results = self.reader.readtext(
-                img_np,
-                batch_size=self.batch_size,
-                decoder=self.decoder,
-                detail=1 # Ensure coordinates, text, confidence
-                # Removed adjust_contrast from here
-            )
+            raw_results = self.reader.readtext(img_np)
             readtext_duration = time.time() - start_time_readtext
-            print(f"OCR Proc: reader.readtext found {len(raw_results)} regions in {readtext_duration:.2f}s.")
+            print(f"OCR Proc: RapidOCR found {len(raw_results)} regions in {readtext_duration:.2f}s.")
 
             self.ocr_progress.emit(50)
 

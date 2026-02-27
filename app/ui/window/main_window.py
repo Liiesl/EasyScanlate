@@ -27,7 +27,8 @@ from app.ui.dialogs.settings_dialog import SettingsDialog
 from app.ui.window.translation_window import TranslationWindow
 from app.ui.components.background import AuroraCanvas
 from assets import (DEFAULT_TEXT_STYLE, get_style_diff, RIGHT_PANEL_STYLES, UNIVERSAL_STYLES)
-import os, gc, json, traceback, easyocr
+import os, gc, json, traceback
+from app.core.rapid_ocr_engine import RapidOCREngine
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -617,23 +618,20 @@ class MainWindow(QMainWindow):
 
 
     def _initialize_ocr_reader(self, context="OCR"):
-        """Initializes the EasyOCR reader if it doesn't exist. - disabled """
+        """Initializes the RapidOCR reader if it doesn't exist."""
         if self.reader:
-            print("EasyOCR reader already initialized.")
+            print("RapidOCR reader already initialized.")
             return True
         try:
-            lang_code = self.language_map.get(self.model.original_language, 'ko')
-            use_gpu = self.settings.value("use_gpu", "true").lower() == "true"
-            print(f"Initializing EasyOCR reader for {context}: Lang='{lang_code}', GPU={use_gpu}")
-            self.reader = easyocr.Reader([lang_code], gpu=use_gpu, model_storage_directory='OCR/model')
-            print("EasyOCR reader initialized successfully.")
+            print(f"Initializing RapidOCR reader for {context}")
+            self.reader = RapidOCREngine()
+            print("RapidOCR reader initialized successfully.")
             return True
         except Exception as e:
             error_msg = f"Failed to initialize OCR reader for {context}: {str(e)}\n\n" \
                         f"Common causes:\n" \
-                        f"- Incorrect language code.\n" \
-                        f"- Missing EasyOCR models (try running OCR once).\n" \
-                        f"- If using GPU: CUDA/driver issues or insufficient VRAM."
+                        f"- Missing RapidOCR models (try running initmodels.py).\n" \
+                        f"- ONNX Runtime not properly installed."
             print(f"Error: {error_msg}")
             traceback.print_exc()
             exc_type, exc_value, exc_traceback = sys.exc_info()
