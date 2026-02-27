@@ -76,8 +76,7 @@ class RapidOCREngine:
         self.det_engine = RapidOCR(
             params={
                 "Det.engine_type": EngineType.ONNXRUNTIME,
-                "Det.lang_type": LangDet.CH,  # CH det usually works fine for generic shapes
-                "Det.ocr_version": OCRVersion.PPOCRV5,
+                "Det.model_path": "./OCR/model/ch_PP-OCRv5_mobile_det.onnx",
                 "Global.use_det": True,
                 "Global.use_rec": False,
                 "Global.use_cls": True,
@@ -88,8 +87,8 @@ class RapidOCREngine:
         self.rec_engine = RapidOCR(
             params={
                 "Rec.engine_type": EngineType.ONNXRUNTIME,
-                "Rec.lang_type": LangRec.KOREAN,
-                "Rec.ocr_version": OCRVersion.PPOCRV5,
+                "Rec.model_path": "./OCR/model/korean_PP-OCRv5_rec_mobile_infer.onnx",
+                "Rec.rec_keys_path": "./OCR/model/korean_dict.txt",
                 "Global.use_det": False,
                 "Global.use_rec": True,
                 "Global.use_cls": False,
