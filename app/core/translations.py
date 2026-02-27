@@ -1,7 +1,7 @@
 # translations.py
 import re
 import traceback
-from google import genai
+from neverliie_ai_sdk import Google
 from PySide6.QtCore import QThread, Signal
 from xml.sax.saxutils import escape, unescape
 import xml.etree.ElementTree as ET
@@ -23,35 +23,36 @@ class TranslationThread(QThread):
         self._is_running = True
 
     def run(self):
+        client = None
         try:
-            client = genai.Client(api_key=self.api_key)
+            client = Google(api_key=self.api_key)
             
-            response_stream = client.models.generate_content_stream(
-                model=self.model_name,
-                contents=self.full_prompt,
-            )
             full_response_text = ""
             
-            for chunk in response_stream:
+            for event in client.chat_stream(
+                messages=self.full_prompt,
+                model=self.model_name,
+            ):
                 if not self._is_running:
                     print("Translation thread stopped by user.")
                     break
 
-                try:
-                    text = chunk.text
-                    if text: # Also check if the text is not an empty string
+                if event.get("type") == "content":
+                    text = event.get("content", "")
+                    if text:
                         full_response_text += text
                         self.translation_progress.emit(text)
-                except (ValueError, IndexError):
-                    pass
             
             if self._is_running:
                 self.translation_finished.emit(full_response_text)
                 
         except Exception:
             error_details = traceback.format_exc()
-            print(f"Gemini API Error:\n{error_details}") # Print full traceback to console
+            print(f"Gemini API Error:\n{error_details}")
             self.translation_failed.emit(f"Gemini API Error:\n\n{error_details}")
+        finally:
+            if client:
+                client.close()
 
     def stop(self):
         self._is_running = False
