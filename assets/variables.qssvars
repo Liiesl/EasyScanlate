@@ -1,0 +1,101 @@
+:root {
+  /* QSS Variables - Global color and style definitions */
+  /* Format: --variable: value; */
+
+  --background: #1E1E1E;
+  --surface: #2D2D2D;
+  --primary: #3A3A3A;
+  --secondary: #4A4A4A;
+  --accent: #007ACC;
+  --text: #FFFFFF;
+  --text_secondary: #E0E0E0;
+  --border: #606060;
+  --error: #c42b1c;
+  --warning: #DAA520;
+  --input_bg: #303030;
+  --button_hover_bg: #454545;
+  --button_checked_bg: #505050;
+  --button_checked_border: #0090FF;
+  --button_pressed: #252525;
+  --icon_color: #FFFFFF;
+  --icon_disabled_color: #777777;
+  --border_input: #555555;
+  --accent_checked: #4A9EFF;
+  --text_light: #fcfcfc;
+  --text_gray: #e1e1e1;
+  --border_gray: #60666E;
+  --border_gray_hover: #70777F;
+  --accent_blue: #0078D7;
+  --accent_blue_border: #005A9E;
+  --bg_dark: #2F2F2F;
+  --success: #4CAF50;
+  --success_hover: #45a049;
+  --danger: #f44336;
+  --danger_hover: #da190b;
+  --warning_orange: #ff9800;
+  --warning_orange_hover: #e68a00;
+
+  /* Additional variables for QSS files */
+  --tertiary: #2A2A2A;
+  /* Darker background for pressed/secondary elements */
+  --quaternary: #333333;
+  /* Intermediate dark for hover states */
+  --quinary: #666666;
+  /* Disabled text color */
+  --senary: #444444;
+  /* Border color for disabled elements */
+  --septenary: #CCCCCC;
+  /* Secondary text color */
+  --octenary: #999999;
+  /* Disabled button text color */
+  --nonary: #1a1a1a;
+  /* Darker background for home elements */
+  --denary: #3E3E3E;
+  /* Button background for home layouts */
+  --undenary: #4f4f4f;
+  /* Button hover for home layouts */
+  --duodenary: #5A5A5A;
+  /* Darker secondary hover */
+  --tredecenary: #2B2B2B;
+  /* Home left layout background */
+  --progress_chunk: #5294e2;
+  /* Progress bar chunk color */
+
+  /* Border radius variables */
+  --border_radius_small: 4px;
+  --border_radius_medium: 15px;
+  --border_radius_large: 20px;
+  --border_radius_xlarge: 25px;
+  --border_radius_xxlarge: 34px;
+  --border_radius_xxxlarge: 35px;
+  --border_radius_xxxxlarge: 50px;
+
+  /* Spacing and sizing variables */
+  --spacing_small: 5px;
+  --spacing_medium: 8px;
+  --spacing_large: 10px;
+  --spacing_xlarge: 12px;
+  --spacing_xxlarge: 15px;
+  --spacing_xxxlarge: 20px;
+  --indicator_size_small: 18px;
+  --indicator_size_medium: 22px;
+  --scrollbar_width: 10px;
+  --scrollbar_handle_min_height: 20px;
+  --indicator_size_checkbox: 16px;
+
+  /* Font sizes */
+  --font_size_small: 14px;
+  --font_size_medium: 16px;
+  --font_size_large: 20px;
+
+  /* Padding variables */
+  --padding_small: 4px;
+  --padding_medium: 5px;
+  --padding_6: 6px;
+  --padding_large: 8px;
+  --padding_xlarge: 10px;
+
+  /* Gradient stops for checkboxes */
+  --gradient_stop_1: #0088EE;
+  --gradient_stop_2: #0099FF;
+}

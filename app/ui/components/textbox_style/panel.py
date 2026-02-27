@@ -8,7 +8,7 @@ from PySide6.QtGui import QColor
 import qtawesome as qta
 from app.ui.components.textbox_style.preset import PresetButton
 # TEXT_BOX_STYLE_PANEL_STYLESHEET is no longer needed here
-from assets import DEFAULT_GRADIENT, TEXT_BOX_STYLE_PANEL_STYLE
+from assets import DEFAULT_GRADIENT, STYLE_PANEL_STYLES
 from app.ui.dialogs.BetterColorDialog.MainDialog import CustomColorDialog
 from .shape_panel import ShapeStylePanel
 from .typography_panel import TypographyStylePanel
@@ -36,7 +36,6 @@ class TextBoxStylePanel(QWidget):
 
     def __init__(self, parent=None, default_style=None):
         super().__init__(parent)
-        self.setObjectName("TextBoxStylePanel")
         self.setMinimumWidth(400)
         self.settings = QSettings("Liiesl", "EasyScanlate")
         self.presets = []
@@ -46,6 +45,7 @@ class TextBoxStylePanel(QWidget):
         self.selected_style_info = None
         
         self.init_ui()
+        self.setStyleSheet(STYLE_PANEL_STYLES)
         self.update_style_panel(self._default_style)
         self._load_presets()
 
@@ -67,90 +67,106 @@ class TextBoxStylePanel(QWidget):
         return style
 
     def init_ui(self):
-        """Initializes the main panel UI, creating and arranging sub-panels."""
+        """Initializes the main panel UI with 2-row layout: style config on top, presets on bottom."""
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(15, 15, 15, 15)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(15, 15, 15, 0)
+        main_layout.setSpacing(0)
         main_layout.setAlignment(Qt.AlignTop)
 
         # --- Header ---
-        header_layout = QHBoxLayout()
-        title_label = QLabel("Text Box Styles")
-        title_label.setObjectName("panelTitle")
-        header_layout.addWidget(title_label)
-        main_layout.addLayout(header_layout)
         header_divider = QFrame()
         header_divider.setObjectName("headerDivider")
         header_divider.setFrameShape(QFrame.HLine)
         header_divider.setFrameShadow(QFrame.Plain)
         main_layout.addWidget(header_divider)
 
-        # --- Scroll Area Setup ---
-        scroll_area = QScrollArea()
-        scroll_area.setObjectName("styleScrollArea")
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QFrame.NoFrame)
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout(scroll_content)
-        scroll_layout.setContentsMargins(0, 5, 5, 5)
-        scroll_layout.setSpacing(12)
+        # --- Main Content Area ---
+        # Row 1: Style Configuration (2 columns: text left, shape right)
+        style_config_widget = QWidget()
+        style_config_layout = QHBoxLayout(style_config_widget)
+        style_config_layout.setContentsMargins(0, 0, 0, 0)
+        style_config_layout.setSpacing(15)
 
-        # --- Instantiate and Add Sub-Panels ---
+        # Instantiate sub-panels
         self.shape_panel = ShapeStylePanel(color_chooser_fn=self.choose_color)
         self.typography_panel = TypographyStylePanel(color_chooser_fn=self.choose_color)
         
         self.shape_panel.style_changed.connect(self.style_changed_handler)
         self.typography_panel.style_changed.connect(self.style_changed_handler)
+
+        # Left column: Typography (Text) with scroll
+        typography_container = QWidget()
+        typography_layout = QVBoxLayout(typography_container)
+        typography_layout.setContentsMargins(0, 0, 0, 0)
+        typography_label = QLabel("Text Style")
+        typography_label.setObjectName("sectionLabel")
+        typography_layout.addWidget(typography_label)
         
-        scroll_layout.addWidget(self.shape_panel)
-        scroll_layout.addWidget(self.typography_panel)
-        # --- Presets Group (Inside Scroll Area) ---
-        presets_group = QGroupBox("Presets")
-        presets_group.setObjectName("styleGroup")
-        presets_main_layout = QHBoxLayout(presets_group)
-        presets_main_layout.setContentsMargins(10, 15, 10, 10)
+        typography_scroll = QScrollArea()
+        typography_scroll.setObjectName("typographyScrollArea")
+        typography_scroll.setWidgetResizable(True)
+        typography_scroll.setFrameShape(QFrame.NoFrame)
+        typography_scroll.setWidget(self.typography_panel)
+        typography_layout.addWidget(typography_scroll)
+        
+        # Right column: Shape with scroll
+        shape_container = QWidget()
+        shape_layout = QVBoxLayout(shape_container)
+        shape_layout.setContentsMargins(0, 0, 0, 0)
+        shape_label = QLabel("Shape Style")
+        shape_label.setObjectName("sectionLabel")
+        shape_layout.addWidget(shape_label)
+        
+        shape_scroll = QScrollArea()
+        shape_scroll.setObjectName("shapeScrollArea")
+        shape_scroll.setWidgetResizable(True)
+        shape_scroll.setFrameShape(QFrame.NoFrame)
+        shape_scroll.setWidget(self.shape_panel)
+        shape_layout.addWidget(shape_scroll)
+
+        style_config_layout.addWidget(typography_container, 1)
+        style_config_layout.addWidget(shape_container, 1)
+        
+        main_layout.addWidget(style_config_widget)
+
+        # Row 2: Presets (minimal layout)
+        presets_widget = QWidget()
+        presets_layout = QVBoxLayout(presets_widget)
+        presets_layout.setContentsMargins(0, 0, 0, 15)
+        presets_layout.setSpacing(5)
+        
+        presets_label = QLabel("Presets")
+        presets_label.setObjectName("sectionLabel")
+        presets_layout.addWidget(presets_label)
+        
         preset_scroll_area = QScrollArea()
+        preset_scroll_area.setObjectName("presetScrollArea")
         preset_scroll_area.setWidgetResizable(True)
         preset_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         preset_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         preset_scroll_area.setFrameShape(QFrame.NoFrame)
-        preset_scroll_area.setStyleSheet("background-color: transparent;")
+        
         self.preset_buttons_container = QWidget()
         self.presets_buttons_layout = QHBoxLayout(self.preset_buttons_container)
         self.presets_buttons_layout.setContentsMargins(0, 0, 0, 0)
         self.presets_buttons_layout.setSpacing(6)
         preset_scroll_area.setWidget(self.preset_buttons_container)
-        presets_main_layout.addWidget(preset_scroll_area)
+        
+        presets_row_layout = QHBoxLayout()
+        presets_row_layout.setContentsMargins(0, 0, 0, 0)
+        presets_row_layout.setSpacing(5)
+        presets_row_layout.addWidget(preset_scroll_area)
         self.btn_add_preset = QPushButton(qta.icon('fa5s.plus'), "")
         self.btn_add_preset.setToolTip("Save current style as a new preset")
-        self.btn_add_preset.setFixedSize(48, 48)
+        self.btn_add_preset.setFixedSize(32, 32)
         self.btn_add_preset.setObjectName("addPresetButton")
         self.btn_add_preset.clicked.connect(self._add_preset)
-        presets_main_layout.addWidget(self.btn_add_preset)
-        scroll_layout.addWidget(presets_group)
-
-        # --- Finish Scroll Area ---
-        scroll_layout.addStretch()
-        scroll_area.setWidget(scroll_content)
-        main_layout.addWidget(scroll_area)
-
-        # --- Button Bar ---
-        button_container = QWidget()
-        button_container.setObjectName("buttonContainer")
-        button_layout = QHBoxLayout(button_container)
-        button_layout.setContentsMargins(0, 10, 0, 0)
-        self.btn_reset = QPushButton("Reset")
-        self.btn_reset.setObjectName("resetButton")
-        self.btn_reset.clicked.connect(self.reset_style)
-        button_layout.addWidget(self.btn_reset)
-        button_layout.addSpacing(10)
-        self.btn_apply = QPushButton("Apply")
-        self.btn_apply.setObjectName("applyButton")
-        self.btn_apply.clicked.connect(self.apply_style)
-        button_layout.addWidget(self.btn_apply)
+        presets_row_layout.addWidget(self.btn_add_preset)
+        
+        presets_layout.addLayout(presets_row_layout)
+        main_layout.addWidget(presets_widget)
 
         # The large stylesheet is removed from here. Only panel-specific styles remain.
-        self.setStyleSheet(TEXT_BOX_STYLE_PANEL_STYLE)
 
     def get_current_style(self):
         """
@@ -189,8 +205,6 @@ class TextBoxStylePanel(QWidget):
         self.typography_panel.set_style(style_dict, DEFAULT_GRADIENT)
 
         self._updating_controls = False
-        if style_dict_in:
-            self.show()
 
     def style_changed_handler(self):
         """Handles the style_changed signal from sub-panels."""
@@ -226,9 +240,9 @@ class TextBoxStylePanel(QWidget):
             button.setStyleSheet(f"background-color: {color.name(QColor.HexArgb)}; border: 1px solid #60666E; border-radius: 3px;")
             self.style_changed_handler()
 
-    def clear_and_hide(self):
+    def clear_selection(self):
+        """Clears the current selection but keeps the panel visible."""
         self.selected_style_info = None
-        self.hide()
 
     # --- PRESET MANAGEMENT (Unchanged from original) ---
     def _rebuild_preset_ui(self):

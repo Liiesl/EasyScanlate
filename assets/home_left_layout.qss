@@ -1,0 +1,18 @@
+#HomeLeftLayout {
+    background-color: var(--tredecenary);
+    padding: var(--spacing_xxxlarge);
+    border: none;
+    border-top-right-radius: var(--border_radius_large);
+}
+#HomeLeftLayout QPushButton {
+    background-color: var(--denary);
+    color: var(--text);
+    border-radius: var(--border_radius_medium);
+    padding: var(--padding_large) var(--padding_xxlarge);
+    border: none;
+    font-size: var(--font_size_small);
+    min-height: 40px;
+}
+#HomeLeftLayout QPushButton:hover {
+    background-color: var(--undenary);
+}

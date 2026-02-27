@@ -69,6 +69,7 @@ class ImportDialog(QDialog):
         layout.addWidget(button_box)
         layout.addStretch()
         
+        self.setObjectName("ImportDialog")
         self.setStyleSheet(IMPORT_EXPORT_STYLES)
         
         # Initialize UI state (new profile field visible by default)
@@ -217,6 +218,7 @@ class ExportDialog(QDialog):
         layout.addWidget(button_box)
         layout.addStretch()
         
+        self.setObjectName("ExportDialog")
         self.setStyleSheet(IMPORT_EXPORT_STYLES)
         self.on_ocr_format_changed()
     

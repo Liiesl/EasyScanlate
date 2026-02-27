@@ -10,12 +10,7 @@ from app.core.translations import TranslationThread, _get_text_for_profile_stati
 from app.ui.dialogs.error_dialog import ErrorDialog
 
 from app.ui.dialogs.settings_dialog import GEMINI_MODELS_WITH_INFO
-from assets import ADVANCED_CHECK_STYLES
 
-# Style constants for row highlighting
-SELECTED_STYLE = "QFrame { background-color: #385675; border: 1px solid #78909c; border-radius: 4px; }"
-DEFAULT_STYLE = "QFrame { background-color: #2E2E2E; border: 1px solid #444; border-radius: 4px; }"
-PLACEHOLDER_STYLE = "QFrame { background-color: #252525; border: 1px solid #444; border-radius: 4px; color: #888; }"
 
 class TranslationWindow(QDialog):
     """ A dialog window to manage the translation process with an integrated,
@@ -149,7 +144,6 @@ class TranslationWindow(QDialog):
         self.chat_scroll_area = QScrollArea()
         self.chat_scroll_area.setWidgetResizable(True)
         self.chat_scroll_area.setFrameShape(QFrame.NoFrame)
-        self.chat_scroll_area.setStyleSheet("QScrollArea { background-color: #2c2c2c; }")
 
         chat_container_widget = QWidget()
         self.chat_container_layout = QVBoxLayout(chat_container_widget)
@@ -158,7 +152,6 @@ class TranslationWindow(QDialog):
 
         input_area_frame = QFrame()
         input_area_frame.setObjectName("inputAreaFrame")
-        input_area_frame.setStyleSheet("#inputAreaFrame { background-color: #2c2c2c; border-top: 1px solid #444; }")
         input_area_layout = QVBoxLayout(input_area_frame)
         input_area_layout.setContentsMargins(10, 10, 10, 10)
         input_area_layout.setSpacing(10)
@@ -166,7 +159,6 @@ class TranslationWindow(QDialog):
         self.prompt_input_edit = QTextEdit(self)
         self.prompt_input_edit.setMaximumHeight(120)
         self.prompt_input_edit.setPlaceholderText("Describe how to translate (e.g., 'Translate formally'). The target language profile is selected below. Ctrl+Enter to send.")
-        self.prompt_input_edit.setStyleSheet("QTextEdit { border: 1px solid #555; border-radius: 18px; padding: 10px; padding-left: 15px; background-color: #383838; }")
 
         bottom_bar = QWidget()
         bottom_bar_layout = QHBoxLayout(bottom_bar)
@@ -181,7 +173,6 @@ class TranslationWindow(QDialog):
         # Icon and tooltip are set dynamically by _update_send_button_state()
         self.send_button.setIconSize(QSize(18, 18))
         self.send_button.setFixedSize(40, 40)
-        self.send_button.setStyleSheet("QPushButton { background-color: #0b57d0; border-radius: 20px; padding: 5px; } QPushButton:hover { background-color: #1c6aeb; } QPushButton:pressed { background-color: #2f79f2; } QPushButton:disabled { background-color: #444; }")
         self.send_button.clicked.connect(self.start_translation_process)
         
         bottom_bar_layout.addWidget(self.attachment_widget)
@@ -347,7 +338,6 @@ class TranslationWindow(QDialog):
 
         # "Select All" checkbox in the header row
         self.select_all_checkbox = QCheckBox()
-        self.select_all_checkbox.setStyleSheet(ADVANCED_CHECK_STYLES)
         self.select_all_checkbox.setTristate(True)
         self.select_all_checkbox.setToolTip("Select/Deselect All Rows")
         self.select_all_checkbox.stateChanged.connect(self._on_select_all_changed)
@@ -383,7 +373,6 @@ class TranslationWindow(QDialog):
 
             # Col 1: CheckBox
             checkbox = QCheckBox()
-            checkbox.setStyleSheet(ADVANCED_CHECK_STYLES)
             checkbox.setChecked(True) # Default to checked
             checkbox.stateChanged.connect(lambda state, k=row_key: self._on_checkbox_state_changed(k))
             self.row_widgets[row_key]['checkbox'] = checkbox
@@ -490,21 +479,15 @@ class TranslationWindow(QDialog):
         is_checked = widgets['checkbox'].isChecked()
 
         if is_checked:
-            style = SELECTED_STYLE
-            widgets['source_box'].setStyleSheet(style)
             for box in widgets['translation_boxes']:
                 box.setStyleSheet(style)
         else:
             # Restore default styles
-            widgets['source_box'].setStyleSheet(DEFAULT_STYLE)
             
             # For translation boxes, style depends on content
             for i, box in enumerate(widgets['translation_boxes']):
                 label = widgets['translation_labels'][i]
-                if label.text() == "...":
-                     box.setStyleSheet(PLACEHOLDER_STYLE)
-                else:
-                     box.setStyleSheet(DEFAULT_STYLE)
+
 
     def _update_send_button_state(self):
         """Updates the send button's icon and tooltip based on row selection."""

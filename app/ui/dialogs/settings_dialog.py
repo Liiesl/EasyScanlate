@@ -8,10 +8,10 @@ from PySide6.QtWidgets import (QDialog, QDoubleSpinBox, QVBoxLayout, QHBoxLayout
                              QWidget, QLineEdit, QKeySequenceEdit, QCheckBox,
                              QGroupBox, QPushButton, QLabel, QProgressBar, QMessageBox)
 from PySide6.QtGui import QKeySequence, QDesktopServices
-from PySide6.QtCore import QSettings, QUrl
-from assets import ADVANCED_CHECK_STYLES
+from PySide6.QtCore import QSettings, QUrl, Qt
 from app.utils.update import UpdateHandler
 from app.ui.dialogs.error_dialog import ErrorDialog
+from app.ui.components.background_settings import AuroraEditorPanel
 GEMINI_MODELS_WITH_INFO = [
     ("gemini-2.5-flash", "250 req/day (free tier)"),
     ("gemini-2.5-pro", "100 req/day (free tier)"),
@@ -40,24 +40,24 @@ class SettingsDialog(QDialog):
         general_layout = QFormLayout()
 
         self.show_delete_warning_check = QCheckBox()
-        self.show_delete_warning_check.setStyleSheet(ADVANCED_CHECK_STYLES)
+        self.show_delete_warning_check.setProperty("class", "AdvancedCheck")
         self.show_delete_warning_check.setChecked(self.settings.value("show_delete_warning", "true") == "true")
         general_layout.addRow("Show delete confirmation dialog:", self.show_delete_warning_check)
 
         self.use_gpu_check = QCheckBox()
-        self.use_gpu_check.setStyleSheet(ADVANCED_CHECK_STYLES)
+        self.use_gpu_check.setProperty("class", "AdvancedCheck")
         self.use_gpu_check.setChecked(self.settings.value("use_gpu", "true").lower() == "true")
         self.use_gpu_check.setToolTip("Requires compatible NVIDIA GPU and CUDA drivers. Restart may be needed.")
         general_layout.addRow("Use GPU for OCR (if available):", self.use_gpu_check)
 
         self.auto_context_fill_check = QCheckBox()
-        self.auto_context_fill_check.setStyleSheet(ADVANCED_CHECK_STYLES)
+        self.auto_context_fill_check.setProperty("class", "AdvancedCheck")
         self.auto_context_fill_check.setChecked(self.settings.value("auto_context_fill", "false") == "true")
         self.auto_context_fill_check.setToolTip("Automatically inpaint background during Batch OCR. Can improve text rendering but may slow processing.")
         general_layout.addRow("Auto Context Fill on Batch OCR:", self.auto_context_fill_check)
         
         self.auto_check_updates_check = QCheckBox()
-        self.auto_check_updates_check.setStyleSheet(ADVANCED_CHECK_STYLES)
+        self.auto_check_updates_check.setProperty("class", "AdvancedCheck")
         self.auto_check_updates_check.setChecked(self.settings.value("auto_check_updates", "true") == "true")
         general_layout.addRow("Auto-check for updates on startup:", self.auto_check_updates_check)
 
@@ -120,6 +120,22 @@ class SettingsDialog(QDialog):
         
         general_tab.setLayout(general_layout)
         self.tab_widget.addTab(general_tab, "General")
+
+        # --- Background / Appearance Tab ---
+        background_tab = QWidget()
+        bg_layout = QVBoxLayout()
+        bg_layout.setAlignment(Qt.AlignCenter)
+        
+        canvas = getattr(parent, 'background_canvas', None)
+        if canvas:
+            self.background_editor = AuroraEditorPanel(canvas)
+            # Center the panel in the tab
+            bg_layout.addWidget(self.background_editor)
+        else:
+            bg_layout.addWidget(QLabel("Background canvas not found."))
+            
+        background_tab.setLayout(bg_layout)
+        self.tab_widget.addTab(background_tab, "Appearance")
 
         # --- OCR Processing Settings Tab (No changes) ---
         processing_tab = QWidget()

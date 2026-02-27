@@ -1,0 +1,57 @@
+/* Simple View Styling */
+
+#SimpleViewScroll {
+    border: none;
+    background-color: transparent;
+}
+
+/* Custom Scrollbar Styling to make it look modern */
+QScrollBar:vertical {
+    border: none;
+    background: #121212;
+    width: 10px;
+    margin: 0px;
+}
+QScrollBar::handle:vertical {
+    background: #333333;
+    min-height: 30px;
+    border-radius: 5px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #444444;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+#CardContainer {
+    background-color: transparent;
+    border-radius: 12px;
+}
+
+#ResultRow {
+    border-bottom: 1px solid #606060;
+    background-color: transparent;
+}
+
+#ResultRow[isLast="true"] {
+    border-bottom: none;
+}
+
+#SimpleViewTextEdit {
+    background-color: transparent;
+    border: none;
+    color: #E0E0E0;
+    font-size: 14px;
+    font-family: 'Segoe UI', sans-serif;
+    padding: 0px;
+}
+
+#ActionButton {
+    background-color: transparent;
+    border-radius: 17px;
+}
+
+#ActionButton:hover {
+    background-color: #333333;
+}

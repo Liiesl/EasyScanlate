@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QMenuBar, QFileDialog
-from PySide6.QtGui import QAction 
+from PySide6.QtGui import QAction, QIcon
 import qtawesome as qta
 from enum import Enum, auto
 
@@ -30,7 +30,7 @@ class MenuBar(QMenuBar):
                 background-color: #4A4A4A;
                 color: #FFFFFF;
             }
-        """)                   
+        """)    
         
         # Only create menu bar contents if the state is not NON_MAIN.
         # This is a safe guard; the parent (CustomTitleBar) should already handle this.
@@ -39,73 +39,227 @@ class MenuBar(QMenuBar):
         # Add other menus here
         
     def create_menu_bar(self):
-        # File menu
-        file_menu = self.addMenu("File")
-        file_menu.setStyleSheet("""
+        # Common Styles
+        menu_style = """
             QMenu {
                 background-color: #3A3A3A;
                 color: #FFFFFF;
-                border: none;
-                border-radius: 4px;
+                border: 1px solid #555555;
+                font-family: "Segoe UI";
             }
             QMenu::item {
-                padding: 8px 16px;
-                border-radius: 4px;
+                padding: 6px 24px;
+                background-color: transparent;
             }
             QMenu::item:selected {
                 background-color: #4A4A4A;
             }
-        """)
-        
-        file_menu_action = file_menu.menuAction()
-        file_menu_action.setIcon(qta.icon('fa5s.file', color="white"))
+            QMenu::separator {
+                height: 1px;
+                background: #555555;
+                margin: 4px 0px;
+            }
+        """
 
-        # --- Actions available in all states (HOME and MAIN_WINDOW) ---
+        # --- 1. HOME (Action) ---
+        # Only show Home button if we are in Main Window
+        if self.state == TitleBarState.MAIN_WINDOW:
+            home_action = QAction("Home", self)
+            home_action.triggered.connect(self.go_to_home)
+            self.addAction(home_action)
+
+        # --- 2. FILES (Menu) ---
+        files_menu = self.addMenu("Files")
+        files_menu.setStyleSheet(menu_style)
+        
+        # Actions
         new_project_action = QAction(qta.icon('fa5s.file-alt', color="white"), "New Project", self)
         new_project_action.setShortcut("Ctrl+N")
         new_project_action.triggered.connect(self.new_project)
-        file_menu.addAction(new_project_action)
+        files_menu.addAction(new_project_action)
         
         open_project_action = QAction(qta.icon('fa5s.folder-open', color="white"), "Open Project", self)
         open_project_action.setShortcut("Ctrl+O")
         open_project_action.triggered.connect(self.open_project)
-        file_menu.addAction(open_project_action)
+        files_menu.addAction(open_project_action)
 
         import_wfwf_action = QAction(qta.icon('fa5s.file-import', color="white"), "Import from WFWF", self)
         import_wfwf_action.triggered.connect(self.import_from_wfwf)
-        file_menu.addAction(import_wfwf_action)
+        files_menu.addAction(import_wfwf_action)
 
-        file_menu.addSeparator()
+        files_menu.addSeparator()
+
+        # Import/Export (Parity with existing button)
+        if self.state == TitleBarState.MAIN_WINDOW:
+            import_trans_action = QAction(qta.icon('fa5s.file-import', color="white"), "Import Translation", self)
+            import_trans_action.triggered.connect(self.main_window.import_translation)
+            files_menu.addAction(import_trans_action)
+
+            export_ocr_action = QAction(qta.icon('fa5s.file-export', color="white"), "Export OCR Results", self)
+            export_ocr_action.triggered.connect(self.main_window.export_ocr_results)
+            files_menu.addAction(export_ocr_action)
+            files_menu.addSeparator()
         
-        # --- Create actions that depend on the state ---
-        # These actions require an active project/main window context.
         save_action = QAction(qta.icon('fa5s.save', color="white"), "Save Project", self)
         save_as_action = QAction(qta.icon('fa5s.download', color="white"), "Save Project As...", self)
         
-        file_menu.addAction(save_action)
-        file_menu.addAction(save_as_action)
+        files_menu.addAction(save_action)
+        files_menu.addAction(save_as_action)
         
-        file_menu.addSeparator()
-        
-        home_action = QAction(qta.icon('fa5s.home', color="white"), "Go to Home", self)
-        file_menu.addAction(home_action)
-
-        # --- Configure state-dependent actions ---
         if self.state == TitleBarState.MAIN_WINDOW:
-            # In MAIN_WINDOW state, actions are fully enabled and connected.
             save_action.setShortcut("Ctrl+S")
             save_action.triggered.connect(self.main_window.save_project)
             
             save_as_action.setShortcut("Ctrl+Shift+S")
             save_as_action.triggered.connect(self.save_project_as)
-            
-            home_action.triggered.connect(self.go_to_home)
         else:
-            # In HOME state, these actions are not applicable and are disabled.
-            # This prevents calling methods that don't exist on the Home window.
             save_action.setEnabled(False)
             save_as_action.setEnabled(False)
-            home_action.setEnabled(False)
+
+        # --- 3. EDIT (Menu) ---
+        if self.state == TitleBarState.MAIN_WINDOW:
+            edit_menu = self.addMenu("Edit")
+            edit_menu.setStyleSheet(menu_style)
+
+            # Find/Replace (Parity with Toolbar/Ctrl+F)
+            find_action = QAction("Find/Replace", self)
+            find_action.setShortcut("Ctrl+F")
+            find_action.triggered.connect(self.main_window.toggle_find_widget)
+            edit_menu.addAction(find_action)
+            
+            # Note: Undo/Redo/Select All are skipped as they don't exist in the current backend.
+
+        # --- 4. PROCESS (Menu) ---
+        if self.state == TitleBarState.MAIN_WINDOW:
+            process_menu = self.addMenu("Process")
+            process_menu.setStyleSheet(menu_style)
+
+            # OCR Process
+            ocr_action = QAction(qta.icon('fa5s.magic', color='white'), "Start/Stop OCR", self)
+            if hasattr(self.main_window, 'toggle_ocr'):
+                ocr_action.triggered.connect(self.main_window.toggle_ocr)
+            process_menu.addAction(ocr_action)
+
+            process_menu.addSeparator()
+
+            # Manual OCR Mode
+            manual_mode_action = QAction(QIcon("assets/icons/manual_ocr.svg"), "Manual OCR Mode", self)
+            manual_mode_action.setCheckable(True)
+            if hasattr(self.main_window, 'btn_manual_ocr'):
+                manual_mode_action.setChecked(self.main_window.btn_manual_ocr.isChecked())
+                manual_mode_action.toggled.connect(self.main_window.btn_manual_ocr.setChecked)
+                self.main_window.btn_manual_ocr.toggled.connect(manual_mode_action.setChecked)
+            process_menu.addAction(manual_mode_action)
+
+            # Context Fill Mode
+            context_fill_action = QAction(qta.icon('fa5s.fill-drip', color="white"), "Context Fill Mode", self)
+            if hasattr(self.main_window, 'scroll_area') and hasattr(self.main_window.scroll_area, 'context_fill_handler'):
+                 context_fill_action.triggered.connect(self.main_window.scroll_area.context_fill_handler.start_mode)
+            process_menu.addAction(context_fill_action)
+
+            # Edit Context Fill
+            edit_context_action = QAction(qta.icon('fa5s.paint-brush', color="white"), "Edit Context Fills", self)
+            edit_context_action.setCheckable(True)
+            if hasattr(self.main_window, 'btn_edit_context_fill'):
+                edit_context_action.setChecked(self.main_window.btn_edit_context_fill.isChecked())
+                edit_context_action.toggled.connect(self.main_window.btn_edit_context_fill.setChecked)
+                self.main_window.btn_edit_context_fill.toggled.connect(edit_context_action.setChecked)
+            process_menu.addAction(edit_context_action)
+            
+            process_menu.addSeparator()
+
+            # Split Images
+            split_action = QAction(QIcon("assets/icons/split.svg"), "Split Images", self)
+            if hasattr(self.main_window, 'btn_split'):
+                 split_action.triggered.connect(self.main_window.btn_split.click)
+            process_menu.addAction(split_action)
+
+            # Stitch Images
+            stitch_action = QAction(QIcon("assets/icons/stitch.svg"), "Stitch Images", self)
+            if hasattr(self.main_window, 'btn_stitch'):
+                 stitch_action.triggered.connect(self.main_window.btn_stitch.click)
+            process_menu.addAction(stitch_action)
+
+
+        # --- 5. VIEW (Menu) ---
+        if self.state == TitleBarState.MAIN_WINDOW:
+            view_menu = self.addMenu("View")
+            view_menu.setStyleSheet(menu_style)
+
+            # Toggle Chat
+            chat_action = QAction("Translation Chat", self)
+            chat_action.setCheckable(True)
+            if hasattr(self.main_window, 'translation_chat'):
+                chat_action.setChecked(self.main_window.translation_chat.isVisible())
+            chat_action.triggered.connect(self.main_window.toggle_chat)
+            view_menu.addAction(chat_action)
+            
+            view_menu.addSeparator()
+
+            # Profiles Submenu
+            self.profiles_menu = view_menu.addMenu("Profiles")
+            # Populate initially (though it might be empty until project loads)
+            self.update_profiles_menu()
+
+            view_menu.addSeparator()
+
+            # Text Visibility
+            toggle_text_action = QAction("Toggle Text Visibility", self)
+            toggle_text_action.setCheckable(True)
+            if hasattr(self.main_window, 'btn_toggle_text'):
+                toggle_text_action.setChecked(self.main_window.btn_toggle_text.isChecked())
+                # Sync: Menu -> Button
+                toggle_text_action.toggled.connect(self.main_window.btn_toggle_text.setChecked)
+                # Sync: Button -> Menu
+                self.main_window.btn_toggle_text.toggled.connect(toggle_text_action.setChecked)
+            view_menu.addAction(toggle_text_action)
+
+            # Inpainting Visibility (Context Fill)
+            toggle_inpainting_action = QAction("Toggle Inpainting Visibility", self)
+            toggle_inpainting_action.setCheckable(True)
+            if hasattr(self.main_window, 'btn_toggle_inpainting'):
+                toggle_inpainting_action.setChecked(self.main_window.btn_toggle_inpainting.isChecked())
+                 # Sync: Menu -> Button
+                toggle_inpainting_action.toggled.connect(self.main_window.btn_toggle_inpainting.setChecked)
+                # Sync: Button -> Menu
+                self.main_window.btn_toggle_inpainting.toggled.connect(toggle_inpainting_action.setChecked)
+            view_menu.addAction(toggle_inpainting_action)
+
+            view_menu.addSeparator()
+
+            # Advanced Mode
+            advanced_action = QAction("(Legacy) Advanced Mode", self)
+            advanced_action.setCheckable(True)
+            # Check state against results_widget if possible, else default false
+            if hasattr(self.main_window, 'results_widget'):
+                 advanced_action.setChecked(self.main_window.results_widget.is_advanced_mode)
+            
+            # Connect directly to toggle_advanced_mode
+            advanced_action.toggled.connect(self.main_window.toggle_advanced_mode)
+            view_menu.addAction(advanced_action)
+            
+    def update_profiles_menu(self):
+        """Updates the Profiles submenu with available profiles."""
+        if not hasattr(self, 'profiles_menu') or self.state != TitleBarState.MAIN_WINDOW:
+            return
+            
+        self.profiles_menu.clear()
+        
+        if not hasattr(self.main_window, 'model'):
+            return
+
+        sorted_profiles = sorted([p for p in self.main_window.model.profiles.keys() if p != "Original"])
+        sorted_profiles.insert(0, "Original")
+        
+        active_profile = self.main_window.model.active_profile_name
+        
+        for profile_name in sorted_profiles:
+            action = QAction(profile_name, self)
+            action.setCheckable(True)
+            action.setChecked(profile_name == active_profile)
+            # Use lambda with default arg to capture variable current value
+            action.triggered.connect(lambda checked=False, p=profile_name: self.main_window.switch_active_profile(p))
+            self.profiles_menu.addAction(action)
 
     def new_project(self):
         from utils.project_processing import new_project

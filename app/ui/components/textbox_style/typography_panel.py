@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QComboBox, QSpinBox
 from PySide6.QtCore import Signal, Qt, QSize
 from PySide6.QtGui import QFontDatabase, QColor, QIcon
 import qtawesome as qta
-from assets import TYPOGRAPHY_PANEL_STYLE
+from assets import STYLE_PANEL_STYLES
 
 class TypographyStylePanel(QWidget):
     """
@@ -23,6 +23,7 @@ class TypographyStylePanel(QWidget):
         """
         super().__init__(parent)
         self.setObjectName("TypographyStylePanel")
+        self.setStyleSheet(STYLE_PANEL_STYLES)
         self._color_chooser_fn = color_chooser_fn
         self._updating_controls = False
         self.font_styles = {} # { "Family Name": ["Style1", "Style2", ...] }
@@ -37,10 +38,6 @@ class TypographyStylePanel(QWidget):
         main_layout.setSpacing(12)
         main_layout.setAlignment(Qt.AlignTop)
 
-        # --- Main Title ---
-        typo_label = QLabel("Typography")
-        typo_label.setObjectName("mainLabel")
-        main_layout.addWidget(typo_label)
 
         # --- Color Type Dropdown ---
         self.combo_text_color_type = QComboBox()
@@ -63,7 +60,7 @@ class TypographyStylePanel(QWidget):
         color_layout.addWidget(color_label)
         self.btn_text_color = QPushButton("")
         self.btn_text_color.setObjectName("colorButton")
-        self.btn_text_color.setFixedSize(48, 28)
+        self.btn_text_color.setFixedSize(48, 38)
         self.btn_text_color.clicked.connect(lambda: self._color_chooser_fn(self.btn_text_color))
         color_layout.addWidget(self.btn_text_color)
         solid_controls_layout.addLayout(color_layout)
@@ -120,12 +117,25 @@ class TypographyStylePanel(QWidget):
         gradient_text_layout.addLayout(text_grad_dir_layout)
         main_layout.addWidget(self.gradient_text_group)
 
-        # --- Font Family Dropdown ---
+        # --- Font Selection Row (Family + Style) ---
+        font_selection_layout = QHBoxLayout()
+        font_selection_layout.setSpacing(5)
+
+        # Font Family
         self.combo_font_family = QComboBox()
         self.combo_font_family.setObjectName("styleCombo")
+        self.combo_font_family.setMinimumWidth(120)
         self.combo_font_family.currentIndexChanged.connect(self._update_font_style_combo)
         self.combo_font_family.currentIndexChanged.connect(self._on_style_changed)
-        main_layout.addWidget(self.combo_font_family)
+        font_selection_layout.addWidget(self.combo_font_family, 65) # Takes 65% of width
+
+        # Font Style (Regular, Bold, etc.)
+        self.combo_font_style = QComboBox()
+        self.combo_font_style.setObjectName("styleCombo")
+        self.combo_font_style.currentIndexChanged.connect(self._on_style_changed)
+        font_selection_layout.addWidget(self.combo_font_style, 35) # Takes 35% of width
+        
+        main_layout.addLayout(font_selection_layout)
 
         # --- Alignment and Style Toggles ---
         props_layout1 = QHBoxLayout()
@@ -205,7 +215,6 @@ class TypographyStylePanel(QWidget):
         self.spin_font_size.setObjectName("styleSpinBox")
         self.spin_font_size.setRange(6, 200)
         self.spin_font_size.setValue(24)
-        self.spin_font_size.setFixedHeight(28)
         self.spin_font_size.valueChanged.connect(self._on_style_changed)
         size_layout.addWidget(self.spin_font_size)
         props_layout2.addLayout(size_layout, 1)
@@ -231,16 +240,9 @@ class TypographyStylePanel(QWidget):
         self.combo_text_alignment.setVisible(False)
         main_layout.addWidget(self.combo_text_alignment)
         
-        self.font_style_widget = QWidget() # Now just a container for logic
-        self.font_style_widget.setVisible(False)
-        self.combo_font_style = QComboBox()
-        self.combo_font_style.setParent(self.font_style_widget)
-
-
         main_layout.addStretch()
         self._toggle_text_gradient_controls()
         
-        self.setStyleSheet(TYPOGRAPHY_PANEL_STYLE)
 
     def _on_style_changed(self):
         if not self._updating_controls:
@@ -327,9 +329,9 @@ class TypographyStylePanel(QWidget):
             self.combo_font_style.addItems(styles)
             if "Regular" in styles:
                 self.combo_font_style.setCurrentText("Regular")
-            self.font_style_widget.setVisible(True)
         else:
-            self.font_style_widget.setVisible(False)
+            # Always show "Regular" as default even when no specific styles available
+            self.combo_font_style.addItem("Regular")
         self._on_style_changed()
 
 
@@ -341,7 +343,7 @@ class TypographyStylePanel(QWidget):
             font_style = default_font_style
         else:
             font_family = selected_family_text
-            if self.font_style_widget.isVisible() and self.combo_font_style.count() > 0:
+            if self.combo_font_style.isVisible() and self.combo_font_style.count() > 0:
                 font_style = self.combo_font_style.currentText()
             else:
                 # Fallback if no specific style is available or widget is hidden
@@ -393,7 +395,7 @@ class TypographyStylePanel(QWidget):
         # This part needs to be called after setting the family to populate the styles
         self._update_font_style_combo() 
 
-        if self.font_style_widget.isVisible():
+        if self.combo_font_style.isVisible():
             style_index = self.combo_font_style.findText(font_style)
             if style_index != -1:
                 self.combo_font_style.setCurrentIndex(style_index)

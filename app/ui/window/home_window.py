@@ -228,6 +228,7 @@ class Home(QMainWindow):
         self.title_bar.setState(TitleBarState.HOME)
 
         report_progress("Applying styles...")
+        self.setObjectName("HomeWindow") 
         self.setStyleSheet(HOME_STYLES)
         
         self.content_widget = QWidget()
@@ -261,6 +262,8 @@ class Home(QMainWindow):
         self.left_layout = QWidget()
         self.left_layout.setLayout(self.left_layout_layout)
         self.left_layout.setMaximumWidth(200)
+        self.left_layout.setObjectName("HomeLeftLayout")
+
         self.left_layout.setStyleSheet(HOME_LEFT_LAYOUT_STYLES)
         
         report_progress("Configuring project list...")

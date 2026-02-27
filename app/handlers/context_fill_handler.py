@@ -13,7 +13,6 @@ from PySide6.QtGui import QImage, QPixmap, QPainterPath, QPolygonF, QPainter
 from PySide6.QtCore import QBuffer, QRectF, QPointF
 from app.ui.components.image_area.label import ResizableImageLabel
 from app.ui.dialogs.error_dialog import ErrorDialog
-from assets import MANUALOCR_STYLES
 
 class ContextFillHandler:
     """Handles the Context Fill (Inpainting) feature, independent of MainWindow."""
@@ -32,7 +31,6 @@ class ContextFillHandler:
         """Creates the overlay widget, parented to the scroll_area."""
         self.overlay_widget = QWidget(self.scroll_area)
         self.overlay_widget.setObjectName("ContextFillOverlay")
-        self.overlay_widget.setStyleSheet(MANUALOCR_STYLES)
         overlay_layout = QVBoxLayout(self.overlay_widget)
         overlay_layout.setContentsMargins(5, 5, 5, 5)
         overlay_layout.addWidget(QLabel("Context Fill Controls"))

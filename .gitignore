@@ -1,5 +1,5 @@
 /downloaded_images/
-/test/
+/prototypes/
 **/__pycache__/
 translated_manhwa.zip
 generate-ascii-tree.py
@@ -22,6 +22,10 @@ test_torch
 minimal_module
 *temp*
 test_updater
+aot.py
+converted_html/
+exported_html/
+tests/
 
 # Exception: GitHub issue templates should be tracked
 !.github/ISSUE_TEMPLATE/
