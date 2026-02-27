@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
-                             QComboBox, QScrollArea, QTextEdit, QFrame, QSplitter,
+                             QComboBox, QScrollArea, QFrame, QSplitter,
                              QProgressBar, QMessageBox, QCheckBox)
 from PySide6.QtCore import Qt, Signal, QTimer, QThread, QSize
 from PySide6.QtGui import QShortcut, QKeySequence
@@ -9,7 +9,7 @@ import traceback
 import sys
 from app.core.translations import TranslationThread, generate_for_translate_content, generate_retranslate_content, import_translation_file_content
 from app.ui.dialogs.error_dialog import ErrorDialog
-from app.ui.dialogs.settings_dialog import GEMINI_MODELS_WITH_INFO
+from app.ui.dialogs.settings_dialog import GEMINI_MODELS_WITH_INFO, MISTRAL_MODELS_WITH_INFO
 
 class TranslationChatWidget(QWidget):
     """A chat-style widget for AI translation functionality."""
@@ -19,14 +19,17 @@ class TranslationChatWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.settings = QSettings("Liiesl", "EasyScanlate")
-        self.api_key = self.settings.value("gemini_api_key", "")
-        self.model_name = self.settings.value("gemini_model", "gemini-1.5-flash-latest")
+        self.provider = self.settings.value("translation_provider", "Gemini")
+        self.gemini_api_key = self.settings.value("gemini_api_key", "")
+        self.gemini_model = self.settings.value("gemini_model", "gemini-1.5-flash-latest")
+        self.mistral_api_key = self.settings.value("mistral_api_key", "")
+        self.mistral_model = self.settings.value("mistral_model", "mistral-small-latest")
         self.ocr_results = []
         self.profiles = []
         self.thread = None
         
         # Chat state
-        self.current_gemini_bubble_label = None
+        self.current_provider_bubble_label = None
         self.target_languages = [
             "English", "Japanese", "Chinese (Simplified)", "Korean", "Spanish", 
             "French", "German", "Bahasa Indonesia", "Vietnamese", "Thai", 
@@ -63,11 +66,18 @@ class TranslationChatWidget(QWidget):
         model_layout = QHBoxLayout(model_selection_bar)
         model_layout.setContentsMargins(0, 0, 0, 0)
         
+        provider_label = QLabel("Provider:")
+        self.provider_combo = QComboBox()
+        self.provider_combo.addItems(["Gemini", "Mistral"])
+        self.provider_combo.setCurrentText(self.provider)
+        self.provider_combo.currentTextChanged.connect(self.on_provider_changed)
+        
         model_label = QLabel("Model:")
         self.model_combo = QComboBox()
-        for model_name, model_info_text in GEMINI_MODELS_WITH_INFO:
-            self.model_combo.addItem(model_name, userData=model_name)
+        self._populate_model_combo(self.provider)
         
+        model_layout.addWidget(provider_label)
+        model_layout.addWidget(self.provider_combo)
         model_layout.addWidget(model_label)
         model_layout.addWidget(self.model_combo, 1)
         
@@ -90,12 +100,6 @@ class TranslationChatWidget(QWidget):
         controls_layout.addWidget(lang_label)
         controls_layout.addWidget(self.target_language_combo, 1)
         controls_layout.addWidget(self.progress_bar)
-        
-        # Prompt input
-        self.prompt_input_edit = QTextEdit()
-        self.prompt_input_edit.setMaximumHeight(120)
-        self.prompt_input_edit.setPlaceholderText("Describe how to translate (e.g., 'Translate formally')...")
-
         
         # Bottom bar with translate button
         bottom_bar = QWidget()
@@ -121,12 +125,11 @@ class TranslationChatWidget(QWidget):
         bottom_bar_layout.addWidget(self.translate_button)
         
         # Keyboard shortcuts
-        shortcut_send = QShortcut(QKeySequence("Ctrl+Return"), self.prompt_input_edit)
+        shortcut_send = QShortcut(QKeySequence("Ctrl+Return"), self)
         shortcut_send.activated.connect(self.translate_button.click)
         
         input_area_layout.addWidget(model_selection_bar)
         input_area_layout.addWidget(controls_bar)
-        input_area_layout.addWidget(self.prompt_input_edit)
         input_area_layout.addWidget(bottom_bar)
         
         main_layout.addWidget(self.chat_scroll_area, 1)
@@ -135,24 +138,50 @@ class TranslationChatWidget(QWidget):
     def set_data(self, api_key=None, model_name=None, ocr_results=None, profiles=None):
         """Set the data needed for translation."""
         # Always refresh from QSettings to ensure we have the latest values
-        if api_key is None:
-            api_key = self.settings.value("gemini_api_key", "")
-        if model_name is None:
-            model_name = self.settings.value("gemini_model", "gemini-1.5-flash-latest")
+        self.provider = self.settings.value("translation_provider", "Gemini")
+        self.gemini_api_key = self.settings.value("gemini_api_key", "")
+        self.gemini_model = self.settings.value("gemini_model", "gemini-1.5-flash-latest")
+        self.mistral_api_key = self.settings.value("mistral_api_key", "")
+        self.mistral_model = self.settings.value("mistral_model", "mistral-small-latest")
         
-        self.api_key = api_key
-        self.model_name = model_name
         if ocr_results is not None:
             self.ocr_results = [res for res in ocr_results if not res.get('is_deleted', False)]
         if profiles is not None:
             self.profiles = profiles
         
-        # Update model selection
-        if model_name:
-            for i in range(self.model_combo.count()):
-                if self.model_combo.itemData(i) == model_name:
-                    self.model_combo.setCurrentIndex(i)
-                    break
+        # Update provider selection
+        self.provider_combo.blockSignals(True)
+        self.provider_combo.setCurrentText(self.provider)
+        self.provider_combo.blockSignals(False)
+        
+        # Update model selection based on provider
+        current_model = self.gemini_model if self.provider == "Gemini" else self.mistral_model
+        for i in range(self.model_combo.count()):
+            if self.model_combo.itemData(i) == current_model:
+                self.model_combo.setCurrentIndex(i)
+                break
+    
+    def _populate_model_combo(self, provider):
+        """Populate model combo based on selected provider."""
+        self.model_combo.clear()
+        if provider == "Mistral":
+            for model_name, model_info_text in MISTRAL_MODELS_WITH_INFO:
+                self.model_combo.addItem(model_name, userData=model_name)
+            current_model = self.settings.value("mistral_model", "mistral-small-latest")
+        else:
+            for model_name, model_info_text in GEMINI_MODELS_WITH_INFO:
+                self.model_combo.addItem(model_name, userData=model_name)
+            current_model = self.settings.value("gemini_model", "gemini-1.5-flash-latest")
+        
+        for i in range(self.model_combo.count()):
+            if self.model_combo.itemData(i) == current_model:
+                self.model_combo.setCurrentIndex(i)
+                break
+    
+    def on_provider_changed(self, provider):
+        """Handle provider selection change."""
+        self.provider = provider
+        self._populate_model_combo(provider)
     
     def _add_chat_bubble(self, sender, text, is_streaming=False):
         """Add a chat bubble to the conversation."""
@@ -179,9 +208,9 @@ class TranslationChatWidget(QWidget):
         if sender == "You":
             message_layout.addStretch()
             message_layout.addWidget(bubble)
-        elif sender == "Gemini":
+        elif sender in ["Gemini", "Mistral"]:
             if is_streaming:
-                self.current_gemini_bubble_label = text_label
+                self.current_provider_bubble_label = text_label
             message_layout.addWidget(bubble)
             message_layout.addStretch()
         elif sender == "Error":
@@ -200,10 +229,17 @@ class TranslationChatWidget(QWidget):
     def start_translation(self):
         """Start the translation process."""
         # Always check current QSettings value
-        api_key = self.settings.value("gemini_api_key", "")
-        if not api_key:
-            QMessageBox.critical(self, "API Key Missing", "Please set your Gemini API key in Settings.")
-            return
+        provider = self.provider_combo.currentText()
+        if provider == "Mistral":
+            api_key = self.settings.value("mistral_api_key", "")
+            if not api_key:
+                QMessageBox.critical(self, "API Key Missing", "Please set your Mistral API key in Settings.")
+                return
+        else:
+            api_key = self.settings.value("gemini_api_key", "")
+            if not api_key:
+                QMessageBox.critical(self, "API Key Missing", "Please set your Gemini API key in Settings.")
+                return
         
         # Update instance variable with current value
         self.api_key = api_key
@@ -212,9 +248,7 @@ class TranslationChatWidget(QWidget):
             QMessageBox.warning(self, "No Data", "There are no OCR results to translate.")
             return
 
-        user_prompt = self.prompt_input_edit.toPlainText().strip()
-        if not user_prompt:
-            user_prompt = f"Translate the Korean text to {self.target_language_combo.currentText()}, keep everything else."
+        user_prompt = f"Translate the Korean text to {self.target_language_combo.currentText()}, keep everything else. response only with the file.."
 
         # Determine if we're translating all or just selected
         retranslate_selected = self.retranslate_selected_check.isChecked()
@@ -238,12 +272,12 @@ class TranslationChatWidget(QWidget):
                 return
                 
             full_prompt = f"{user_prompt}\n\n{content_to_translate}"
-            self._start_translation_thread(full_prompt, user_prompt)
+            self._start_translation_thread(full_prompt)
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to prepare translation: {str(e)}")
 
-    def _start_translation_thread(self, full_prompt, user_prompt):
+    def _start_translation_thread(self, full_prompt):
         """Start the translation thread."""
         self.translate_button.setEnabled(False)
         
@@ -252,17 +286,25 @@ class TranslationChatWidget(QWidget):
             item = self.chat_container_layout.itemAt(i)
             if item.widget():
                 item.widget().deleteLater()
-        self.current_gemini_bubble_label = None
+        self.current_provider_bubble_label = None
         
-        # Add user prompt to chat
-        self._add_chat_bubble("You", user_prompt)
+        # Add start message to chat
+        self._add_chat_bubble("You", f"Translate to {self.target_language_combo.currentText()}")
         
         # Show progress bar
         self.progress_bar.setVisible(True)
         
+        # Get provider and API key
+        provider = self.provider_combo.currentText()
+        if provider == "Mistral":
+            api_key = self.settings.value("mistral_api_key", "")
+            model_name = self.model_combo.currentData() or "mistral-small-latest"
+        else:
+            api_key = self.settings.value("gemini_api_key", "")
+            model_name = self.model_combo.currentData() or "gemini-1.5-flash-latest"
+        
         # Create and start translation thread
-        model_name = self.model_combo.currentData() or self.model_name or "gemini-1.5-flash-latest"
-        self.thread = TranslationThread(self.api_key, full_prompt, model_name, parent=self)
+        self.thread = TranslationThread(api_key, full_prompt, model_name, provider=provider, parent=self)
         
         # Connect thread signals
         self.thread.translation_progress.connect(self.on_progress)
@@ -272,29 +314,30 @@ class TranslationChatWidget(QWidget):
         # Start the thread
         self.thread.start()
         
-        # Add initial Gemini bubble
-        self._add_chat_bubble("Gemini", "", is_streaming=True)
+        # Add initial provider bubble
+        self._add_chat_bubble(provider, "", is_streaming=True)
 
     def on_progress(self, chunk):
         """Handle streaming translation progress."""
-        if self.current_gemini_bubble_label:
-            current_text = self.current_gemini_bubble_label.text()
-            self.current_gemini_bubble_label.setText(current_text + chunk)
+        if self.current_provider_bubble_label:
+            current_text = self.current_provider_bubble_label.text()
+            self.current_provider_bubble_label.setText(current_text + chunk)
             self._scroll_chat_to_bottom()
 
     def on_finished(self, full_text):
         """Handle completed translation."""
         self.progress_bar.setVisible(False)
-        self.current_gemini_bubble_label = None
+        self.current_provider_bubble_label = None
         self.translate_button.setEnabled(True)
         
         try:
             parsed_translations = import_translation_file_content(full_text)
             target_language = self.target_language_combo.currentText()
-            profile_name = f"Gemini Translation ({target_language})"
+            provider = self.provider_combo.currentText()
+            profile_name = f"{provider} Translation ({target_language})"
             
             # Add completion message to chat
-            self._add_chat_bubble("Gemini", f"Translation completed! Profile '{profile_name}' created.")
+            self._add_chat_bubble(provider, f"Translation completed! Profile '{profile_name}' created.")
             
             # Emit signal for main window to handle
             self.translation_complete.emit(profile_name, parsed_translations)
@@ -305,7 +348,7 @@ class TranslationChatWidget(QWidget):
     def on_failed(self, error_message):
         """Handle translation failure."""
         self.progress_bar.setVisible(False)
-        self.current_gemini_bubble_label = None
+        self.current_provider_bubble_label = None
         self.translate_button.setEnabled(True)
         self._add_chat_bubble("Error", error_message)
         ErrorDialog.critical(self, "Translation Error", error_message)

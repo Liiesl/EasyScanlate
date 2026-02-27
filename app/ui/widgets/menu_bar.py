@@ -280,6 +280,7 @@ class MenuBar(QMenuBar):
     def go_to_home(self):
         from app.ui.window.home_window import Home
         self.home = Home()
+        self.home.load_recent_projects_from_settings()
         self.home.show()
         self.main_window.close()
     

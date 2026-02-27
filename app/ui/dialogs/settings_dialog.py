@@ -22,6 +22,12 @@ GEMINI_MODELS_WITH_INFO = [
     ("gemma-3n-e4b-it", "14400 req/day"),
 ]
 
+MISTRAL_MODELS_WITH_INFO = [
+    ("mistral-small-latest", "Fast, cost-effective"),
+    ("mistral-medium-latest", "Balanced"),
+    ("mistral-large-latest", "Most capable"),
+]
+
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -172,6 +178,14 @@ class SettingsDialog(QDialog):
         # --- API Settings Tab (No changes) ---
         api_tab = QWidget()
         api_layout = QFormLayout()
+        
+        # Provider selection
+        self.provider_combo = QComboBox()
+        self.provider_combo.addItems(["Gemini", "Mistral"])
+        self.provider_combo.setCurrentText(self.settings.value("translation_provider", "Gemini"))
+        api_layout.addRow("Provider:", self.provider_combo)
+        
+        # Gemini settings
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setEchoMode(QLineEdit.Password)
         self.api_key_edit.setText(self.settings.value("gemini_api_key", ""))
@@ -184,6 +198,21 @@ class SettingsDialog(QDialog):
             if self.model_combo.itemData(i) == current_model_value:
                 self.model_combo.setCurrentIndex(i); break
         api_layout.addRow("Gemini Model:", self.model_combo)
+        
+        # Mistral settings
+        self.mistral_api_key_edit = QLineEdit()
+        self.mistral_api_key_edit.setEchoMode(QLineEdit.Password)
+        self.mistral_api_key_edit.setText(self.settings.value("mistral_api_key", ""))
+        api_layout.addRow("Mistral API Key:", self.mistral_api_key_edit)
+        self.mistral_model_combo = QComboBox()
+        for model_name, model_info_text in MISTRAL_MODELS_WITH_INFO:
+            self.mistral_model_combo.addItem(f"{model_name} | {model_info_text}", userData=model_name)
+        current_mistral_model = self.settings.value("mistral_model", "mistral-small-latest")
+        for i in range(self.mistral_model_combo.count()):
+            if self.mistral_model_combo.itemData(i) == current_mistral_model:
+                self.mistral_model_combo.setCurrentIndex(i); break
+        api_layout.addRow("Mistral Model:", self.mistral_model_combo)
+        
         self.lang_combo = QComboBox()
         self.lang_combo.addItems(["English", "Japanese", "Chinese (Simplified)", "Korean", "Spanish", "French", "German", "Bahasa Indonesia", "Vietnamese", "Thai", "Russian", "Portuguese"])
         self.lang_combo.setCurrentText(self.settings.value("target_language", "English"))
@@ -290,8 +319,11 @@ class SettingsDialog(QDialog):
         self.settings.setValue("ocr_adjust_contrast", self.contrast_spin.value())
         self.settings.setValue("ocr_resize_threshold", self.resize_threshold_spin.value())
         # API
+        self.settings.setValue("translation_provider", self.provider_combo.currentText())
         self.settings.setValue("gemini_api_key", self.api_key_edit.text())
         self.settings.setValue("gemini_model", self.model_combo.currentData())
+        self.settings.setValue("mistral_api_key", self.mistral_api_key_edit.text())
+        self.settings.setValue("mistral_model", self.mistral_model_combo.currentData())
         self.settings.setValue("target_language", self.lang_combo.currentText())
         # Shortcuts
         self.settings.setValue("combine_shortcut", self.combine_shortcut_edit.keySequence().toString())

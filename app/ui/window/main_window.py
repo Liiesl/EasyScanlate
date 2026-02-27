@@ -24,7 +24,6 @@ from app.handlers.ocr_batch_handler import BatchOCRHandler
 from app.handlers.selection_manager import SelectionManager
 from app.core.project_model import ProjectModel
 from app.ui.dialogs.settings_dialog import SettingsDialog
-from app.ui.window.translation_window import TranslationWindow
 from app.ui.components.background import AuroraCanvas
 from assets import (DEFAULT_TEXT_STYLE, get_style_diff, RIGHT_PANEL_STYLES, UNIVERSAL_STYLES)
 import os, gc, json, traceback
@@ -128,13 +127,6 @@ class MainWindow(QMainWindow):
         self.btn_manual_ocr.toggled.connect(self.scroll_area.manual_ocr_handler.toggle_mode)
         self.btn_manual_ocr.setEnabled(False)  # Keep original enabled state
         vertical_toolbar_layout.addWidget(self.btn_manual_ocr)
-        
-        # Translation button (moved from bottom_controls_layout)
-        self.btn_translate = QPushButton(qta.icon('fa5s.language', color='white'), "")
-        self.btn_translate.setFixedSize(40, 40)
-        self.btn_translate.setToolTip("AI Translation")
-        self.btn_translate.clicked.connect(self.start_translation)
-        vertical_toolbar_layout.addWidget(self.btn_translate)
 
         # --- NEW ACTION BUTTONS ---
 
@@ -900,21 +892,6 @@ class MainWindow(QMainWindow):
 
         self.model.delete_row(row_number_to_delete)
         if self.find_replace_widget.isVisible(): self.find_replace_widget.find_text()
-
-    def start_translation(self):
-        api_key = self.settings.value("gemini_api_key", "")
-        if not api_key:
-            QMessageBox.critical(self, "API Key Missing", "Please set your Gemini API key in Settings.")
-            return
-        if not self.model.ocr_results:
-            QMessageBox.warning(self, "No Data", "There are no OCR results to translate.")
-            return
-        model_name = self.settings.value("gemini_model", "gemini-1.5-flash-latest")
-        dialog = TranslationWindow(
-            api_key, model_name, self.model.ocr_results, list(self.model.profiles.keys()), self
-        )
-        dialog.translation_complete.connect(self.handle_translation_completed)
-        dialog.exec()
 
     def handle_translation_completed(self, profile_name, translated_data):
         try:

@@ -1,31 +1,36 @@
 # translations.py
 import re
 import traceback
-from neverliie_ai_sdk import Google
+from neverliie_ai_sdk import Google, Mistral
 from PySide6.QtCore import QThread, Signal
 from xml.sax.saxutils import escape, unescape
 import xml.etree.ElementTree as ET
 
 class TranslationThread(QThread):
     """
-    Worker thread for performing the Gemini API call.
+    Worker thread for performing AI translation API calls.
+    Supports Gemini (Google) and Mistral providers.
     Streams the translation back to the parent window.
     """
     translation_progress = Signal(str)
     translation_finished = Signal(str)
     translation_failed = Signal(str)
 
-    def __init__(self, api_key, full_prompt, model_name, parent=None):
+    def __init__(self, api_key, full_prompt, model_name, provider="Gemini", parent=None):
         super().__init__(parent)
         self.api_key = api_key
         self.full_prompt = full_prompt
         self.model_name = model_name
+        self.provider = provider
         self._is_running = True
 
     def run(self):
         client = None
         try:
-            client = Google(api_key=self.api_key)
+            if self.provider == "Mistral":
+                client = Mistral(api_key=self.api_key)
+            else:
+                client = Google(api_key=self.api_key)
             
             full_response_text = ""
             
@@ -48,8 +53,8 @@ class TranslationThread(QThread):
                 
         except Exception:
             error_details = traceback.format_exc()
-            print(f"Gemini API Error:\n{error_details}")
-            self.translation_failed.emit(f"Gemini API Error:\n\n{error_details}")
+            print(f"{self.provider} API Error:\n{error_details}")
+            self.translation_failed.emit(f"{self.provider} API Error:\n\n{error_details}")
         finally:
             if client:
                 client.close()

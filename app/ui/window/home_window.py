@@ -410,6 +410,56 @@ class Home(QMainWindow):
         timestamps[project_path] = current_time
         self.settings.setValue("recent_timestamps", timestamps)
 
+    def load_recent_projects_from_settings(self):
+        """Load recent projects directly from QSettings (used when navigating via menu bar)."""
+        projects_data = []
+        try:
+            recent_projects = self.settings.value("recent_projects", [])
+            recent_timestamps = self.settings.value("recent_timestamps", {})
+
+            for path in recent_projects:
+                if os.path.exists(path):
+                    filename = os.path.basename(path)
+                    timestamp = recent_timestamps.get(path, "")
+                    last_opened = self._get_relative_time(timestamp)
+                    projects_data.append({
+                        "name": filename,
+                        "path": path,
+                        "last_opened": last_opened
+                    })
+
+            self.populate_recent_projects(projects_data)
+        except Exception as e:
+            print(f"Could not load recent projects: {e}")
+
+    def _get_relative_time(self, timestamp_str):
+        """Convert ISO timestamp to relative time string."""
+        if not timestamp_str:
+            return ""
+        try:
+            dt = QDateTime.fromString(timestamp_str, Qt.ISODate)
+            if not dt.isValid():
+                return ""
+            seconds = dt.secsTo(QDateTime.currentDateTime())
+            if seconds < 60:
+                return "Just now"
+            minutes = seconds // 60
+            if minutes < 60:
+                return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+            hours = minutes // 60
+            if hours < 24:
+                return f"{hours} hour{'s' if hours > 1 else ''} ago"
+            days = hours // 24
+            if days < 30:
+                return f"{days} day{'s' if days > 1 else ''} ago"
+            months = days // 30
+            if months < 12:
+                return f"{months} month{'s' if months > 1 else ''} ago"
+            years = seconds // 31536000
+            return f"{years} year{'s' if years > 1 else ''} ago"
+        except Exception:
+            return ""
+
     def launch_main_app(self, mmtl_path):
         self.loading_dialog = LoadingDialog(self)
         self.loader_thread = ProjectLoaderThread(mmtl_path)
