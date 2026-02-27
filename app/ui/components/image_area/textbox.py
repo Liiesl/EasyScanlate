@@ -2,13 +2,14 @@
 from PySide6.QtWidgets import QGraphicsTextItem, QGraphicsItem, QGraphicsRectItem
 from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QObject
 from PySide6.QtGui import QPainter, QFont, QBrush, QColor, QPen, QPainterPath, QLinearGradient
+from PySide6.QtWidgets import QGraphicsSceneMouseEvent
 
 from app.ui.components.image_area.textbox_frame import SelectionFrameItem
 
-# --- Signal class remains the same ---
 class TextBoxSignals(QObject):
     rowDeleted = Signal(object)
     selectedChanged = Signal(bool, object)
+    textEdited = Signal(int, str)
 
 class TextBoxItem(QGraphicsRectItem):
     def __init__(self, rect, row_number, text="", original_rect=None, initial_style=None):
@@ -39,8 +40,13 @@ class TextBoxItem(QGraphicsRectItem):
         self.selection_frame = SelectionFrameItem(self)
         self.selection_frame.hide()
 
+        self._is_editing = False
+        self._original_text_before_edit = ""
+        self._event_filter_installed = False
+
         # --- Text Item ---
         self.text_item = QGraphicsTextItem(text, self)
+        self.text_item.setTextInteractionFlags(Qt.NoTextInteraction)
         
         if initial_style: self.apply_styles(initial_style)
         else: self.apply_styles({}) # Apply defaults
@@ -50,6 +56,87 @@ class TextBoxItem(QGraphicsRectItem):
     def request_delete(self):
         """Emits the rowDeleted signal."""
         self.signals.rowDeleted.emit(self.row_number)
+
+    def sceneEventFilter(self, watched, event):
+        from PySide6.QtCore import QEvent
+        if watched == self.text_item and self._is_editing:
+            if event.type() == QEvent.KeyPress:
+                if event.key() in (Qt.Key_Enter, Qt.Key_Return):
+                    if not (event.modifiers() & Qt.ShiftModifier):
+                        self.finish_editing()
+                        return True
+                elif event.key() == Qt.Key_Escape:
+                    self.cancel_editing()
+                    return True
+            elif event.type() == QEvent.FocusOut:
+                self.finish_editing()
+                return False
+        return super().sceneEventFilter(watched, event)
+
+    def enable_editing(self):
+        if self._is_editing:
+            return
+        self._is_editing = True
+        self._original_text_before_edit = self.text_item.toPlainText()
+        
+        if not self._event_filter_installed and self.scene():
+            self.text_item.installSceneEventFilter(self)
+            self._event_filter_installed = True
+        
+        self.setFlag(QGraphicsItem.ItemIsMovable, False)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, False)
+        self.text_item.setTextInteractionFlags(Qt.TextEditorInteraction)
+        self.text_item.setFocus()
+        cursor = self.text_item.textCursor()
+        cursor.select(cursor.SelectionType.Document)
+        self.text_item.setTextCursor(cursor)
+        self.setCursor(Qt.IBeamCursor)
+
+    def finish_editing(self):
+        if not self._is_editing:
+            return
+        new_text = self.text_item.toPlainText()
+        self._exit_edit_mode()
+        if new_text != self._original_text_before_edit:
+            self.adjust_font_size()
+            self.signals.textEdited.emit(self.row_number, new_text)
+        self._original_text_before_edit = ""
+
+    def cancel_editing(self):
+        if not self._is_editing:
+            return
+        self.text_item.setPlainText(self._original_text_before_edit)
+        self._exit_edit_mode()
+        self._original_text_before_edit = ""
+
+    def _exit_edit_mode(self):
+        self._is_editing = False
+        self.text_item.setTextInteractionFlags(Qt.NoTextInteraction)
+        self.clearFocus()
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setCursor(Qt.SizeAllCursor)
+
+    def is_editing(self):
+        return self._is_editing
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
+        if self._is_editing:
+            self.text_item.mousePressEvent(event)
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
+        if self._is_editing:
+            self.text_item.mouseMoveEvent(event)
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
+        if self._is_editing:
+            self.text_item.mouseReleaseEvent(event)
+            return
+        super().mouseReleaseEvent(event)
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemSelectedHasChanged:

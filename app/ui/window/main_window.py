@@ -820,13 +820,10 @@ class MainWindow(QMainWindow):
             result_data, _ = self.model._find_result_by_row_number(row_number)
             if result_data:
                 actual_saved_text = self.model.get_display_text(result_data)
-                # If the saved text is different from what user typed, update the widget to show the saved text
-                if actual_saved_text != new_text:
-                    # The model preserved the user edit - update widget to reflect this
-                    # Update both simple view and table view if visible
-                    if hasattr(self, 'results_widget') and self.results_widget:
-                        self.results_widget._update_simple_view_text_if_visible(row_number, actual_saved_text)
-                        self.results_widget._update_table_cell_if_visible(row_number, 0, actual_saved_text)
+                # Always update results widget with actual saved text
+                if hasattr(self, 'results_widget') and self.results_widget:
+                    self.results_widget._update_simple_view_text_if_visible(row_number, actual_saved_text)
+                    self.results_widget._update_table_cell_if_visible(row_number, 0, actual_saved_text)
                 self.update_image_text_box(row_number, actual_saved_text)
             else:
                 self.update_image_text_box(row_number, new_text)

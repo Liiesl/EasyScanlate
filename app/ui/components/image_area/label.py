@@ -190,6 +190,7 @@ class ResizableImageLabel(QGraphicsView):
                 text_box.setZValue(2) # On top of inpaint patches
                 text_box.signals.rowDeleted.connect(self.handle_text_box_deleted)
                 text_box.signals.selectedChanged.connect(self.on_text_box_selected)
+                text_box.signals.textEdited.connect(self._on_text_box_edited)
                 self.scene().addItem(text_box)
                 self.text_boxes.append(text_box)
         QTimer.singleShot(0, self.update_view_transform)
@@ -305,6 +306,18 @@ class ResizableImageLabel(QGraphicsView):
                 self.setCursor(Qt.ArrowCursor)
 
     def mousePressEvent(self, event):
+        pos_in_scene = self.mapToScene(event.pos())
+        items_at_pos = self.scene().items(pos_in_scene)
+        
+        clicked_on_editing_box = False
+        for item in items_at_pos:
+            if isinstance(item, TextBoxItem) and item.is_editing():
+                clicked_on_editing_box = True
+                break
+        
+        if not clicked_on_editing_box:
+            self._finish_all_editing()
+        
         if event.button() != Qt.LeftButton:
             super().mousePressEvent(event)
             return
@@ -339,6 +352,30 @@ class ResizableImageLabel(QGraphicsView):
             event.accept(); return
         
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() != Qt.LeftButton:
+            super().mouseDoubleClickEvent(event)
+            return
+        
+        pos_in_scene = self.mapToScene(event.pos())
+        items_at_pos = self.scene().items(pos_in_scene)
+        
+        for item in items_at_pos:
+            if isinstance(item, TextBoxItem):
+                item.enable_editing()
+                event.accept()
+                return
+        
+        super().mouseDoubleClickEvent(event)
+
+    def _on_text_box_edited(self, row_number, new_text):
+        self.main_window.update_ocr_text(row_number, new_text)
+
+    def _finish_all_editing(self):
+        for text_box in self.text_boxes:
+            if text_box.is_editing():
+                text_box.finish_editing()
 
     def mouseReleaseEvent(self, event):
         if self._is_dragging_split_line and event.button() == Qt.LeftButton:
