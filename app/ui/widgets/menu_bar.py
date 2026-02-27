@@ -278,7 +278,7 @@ class MenuBar(QMenuBar):
         return correct_filenames(directory)
 
     def go_to_home(self):
-        from main import Home
+        from app.ui.window.home_window import Home
         self.home = Home()
         self.home.show()
         self.main_window.close()
