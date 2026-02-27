@@ -216,8 +216,6 @@ class ManualOCRHandler(QObject):
                 "max_text_height": int(settings.value("max_text_height", 100)),
                 "min_confidence": float(settings.value("min_confidence", 0.2)),
                 "distance_threshold": int(settings.value("distance_threshold", 100)),
-                "batch_size": int(settings.value("ocr_batch_size", 8)),
-                "decoder": settings.value("ocr_decoder", "beamsearch"),
                 "adjust_contrast": float(settings.value("ocr_adjust_contrast", 0.5)),
                 "resize_threshold": int(settings.value("ocr_resize_threshold", 1024)),
                 "auto_context_fill": False
