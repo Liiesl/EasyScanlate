@@ -4,6 +4,8 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QProgressBar, Q
 from PySide6.QtCore import Qt, QPoint, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QIcon
 
+from assets import MENUS_STYLES
+
 class ToggleButton(QPushButton):
     """
     A custom QPushButton that acts as a toggle switch with 'on' and 'off' states.
@@ -64,11 +66,15 @@ class Menu(QWidget):
         super().__init__(parent)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Popup)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.setAttribute(Qt.WA_DeleteOnClose)
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(5, 5, 5, 5)
         self.layout.setSpacing(1)
+
+        # Apply QSS styles
+        self.setStyleSheet(MENUS_STYLES)
 
     def addButton(self, button: QPushButton, close_on_click: bool = True):
         """
@@ -95,7 +101,7 @@ class Menu(QWidget):
             trigger_button: The widget (e.g., a QPushButton) that the menu should
                             appear next to.
             position: A string indicating where the menu should be placed.
-                      Options: 'bottom left', 'bottom right', 'top left', 'top right'.
+                      Options: 'bottom left', 'bottom right', 'top left', 'top right', 'right'.
         """
         self.setFixedSize(self.sizeHint())
         menu_size = self.sizeHint()
@@ -116,6 +122,8 @@ class Menu(QWidget):
             menu_pos = QPoint(button_top_left.x(), button_top_left.y() - menu_size.height())
         elif position == 'top right':
             menu_pos = QPoint(button_top_right.x() - menu_size.width(), button_top_right.y() - menu_size.height())
+        elif position == 'right':
+            menu_pos = QPoint(button_top_right.x(), button_top_right.y())
         else: # Default to bottom left
             menu_pos = button_bottom_left
 
@@ -148,7 +156,6 @@ class ToggleWithProgress(QPushButton):
         # Icon Label 
         self.icon_label = QLabel()
         self.text_label = QLabel(self._start_text)
-        self.text_label.setStyleSheet("font-weight: bold; color: white;")
         
         if self._start_icon:
             self.icon_label.setPixmap(self._start_icon.pixmap(20, 20))
@@ -160,24 +167,10 @@ class ToggleWithProgress(QPushButton):
         self.progress_layout.setSpacing(10)
         
         self.progress_bar = QProgressBar()
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: none;
-                background-color: rgba(255, 255, 255, 0.1);
-                border-radius: 2px;
-                height: 4px;
-                min-width: 100px;
-            }
-            QProgressBar::chunk {
-                background-color: #0b57d0;
-                border-radius: 2px;
-            }
-        """)
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setFixedHeight(4)
         
         self.percent_label = QLabel("0%")
-        self.percent_label.setStyleSheet("color: #aaaaaa; font-size: 11px;")
         
         self.progress_layout.addWidget(self.progress_bar)
         self.progress_layout.addWidget(self.percent_label)

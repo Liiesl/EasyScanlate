@@ -92,7 +92,7 @@ class CustomScrollArea(QScrollArea):
         btn_save_images.clicked.connect(self.main_window.export_manhwa)
         menu.addButton(btn_save_images)
 
-        menu.set_position_and_show(trigger_button, 'top right')
+        menu.set_position_and_show(trigger_button, 'right')
 
     def cancel_active_modes(self, exclude_handler=None):
         """Deactivates any currently running action handler mode."""
