@@ -143,6 +143,7 @@ class TextBoxItem(QGraphicsRectItem):
         self.selection_frame.setPos(self.pos())
         self.selection_frame.setRotation(self.rotation())
         self.selection_frame.setTransform(self.transform())
+        self.selection_frame.setTransformOriginPoint(self.rect().center())  # ADD THIS LINE
         self.selection_frame.prepareGeometryChange()
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):

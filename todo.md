@@ -6,9 +6,11 @@
   - add tool bar on the left
   - add mistral provider
   - add toolbar with edit/delete buttons below textbox selection frame
+  - make it possible to edit straight from textbox
 
   #### fixes
-  - keep textbox handles at constant visual size regardless of zoom
+  - keep selection frame at constant visual size regardless of zoom
+  - make selection frame always appear on top of other textboxes
 
   #### modification
   - unify installer
@@ -19,7 +21,8 @@
 
 ## currently in progress
   - add direct retranslate on main window
-  - deprecate result widgets and table (be replaced by direct text editing on image textbox)
+  - deprecate result widgets and table 
+    - [x] replaced by direct text editing on image textbox
     - it should be merged into translation feature cause it still needed there
 
 ## not yet started
@@ -61,7 +64,6 @@
   - profile improvement:
       - manual creation, deletion, rename
       - two pane view
-  - make it possible to edit straight from textbox
   - advanced inpaint
     - free form selection (pen tools/draw)
     - switch on/off from selection
