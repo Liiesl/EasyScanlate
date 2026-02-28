@@ -134,7 +134,7 @@ class ResultsWidget(QWidget):
         QTimer.singleShot(100, lambda: setattr(self, '_is_updating_views', False))
         
         # Refresh find widget
-        if self.main_window.find_replace_widget.isVisible(): 
+        if hasattr(self.main_window, 'find_replace_widget') and self.main_window.find_replace_widget.isVisible(): 
             QTimer.singleShot(300, lambda: self.main_window.find_replace_widget.find_text())
 
     def on_simple_view_text_changed(self, original_row_number, text):
@@ -213,7 +213,7 @@ class ResultsWidget(QWidget):
         self.update_column_resize_modes()
         # Refresh find widget if visible to update matches for new profile text
         # Use a delay to ensure table is fully updated before searching/highlighting
-        if self.main_window.find_replace_widget.isVisible(): 
+        if hasattr(self.main_window, 'find_replace_widget') and self.main_window.find_replace_widget.isVisible(): 
             from PySide6.QtCore import QTimer
             QTimer.singleShot(300, lambda: self.main_window.find_replace_widget.find_text())
 

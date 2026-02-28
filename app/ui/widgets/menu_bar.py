@@ -123,7 +123,6 @@ class MenuBar(QMenuBar):
 
             # Find/Replace (Parity with Toolbar/Ctrl+F)
             find_action = QAction("Find/Replace", self)
-            find_action.setShortcut("Ctrl+F")
             find_action.triggered.connect(self.main_window.toggle_find_widget)
             edit_menu.addAction(find_action)
             

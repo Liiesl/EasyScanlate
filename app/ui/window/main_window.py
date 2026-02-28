@@ -14,7 +14,6 @@ from app.ui.components.image_area.label import ResizableImageLabel
 from app.ui.components.image_area.scroll_container import CustomScrollArea
 from app.ui.components.results_tables import ResultsWidget
 from app.ui.components.textbox_style.panel import TextBoxStylePanel
-from app.ui.components.find_replace import FindReplaceWidget
 from app.ui.components.translation_chat import TranslationChatWidget
 from app.ui.widgets.menu_bar import MenuBar, TitleBarState
 from app.ui.window.chrome import CustomTitleBar, WindowResizer
@@ -282,10 +281,10 @@ class MainWindow(QMainWindow):
         right_splitter.setStretchFactor(1, 1)
         right_splitter.setHandleWidth(10)
 
-        # Find/replace widget
-        self.find_replace_widget = FindReplaceWidget(self)
-        right_panel.addWidget(self.find_replace_widget)
-        self.find_replace_widget.hide()
+        # Find/replace widget (temporarily disabled)
+        # self.find_replace_widget = FindReplaceWidget(self)
+        # right_panel.addWidget(self.find_replace_widget)
+        # self.find_replace_widget.hide()
         self.style_panel_size = None
 
         # Create translation chat component
@@ -419,11 +418,7 @@ class MainWindow(QMainWindow):
             self.update_shortcut()
 
     def toggle_find_widget(self):
-        if self.find_replace_widget.isVisible():
-            self.find_replace_widget.close_widget()
-        else:
-            self.find_replace_widget.raise_()
-            self.find_replace_widget.show()
+        pass  # Find/replace disabled
 
     def toggle_chat(self):
         """Toggle the visibility of the translation chat widget."""
@@ -856,7 +851,7 @@ class MainWindow(QMainWindow):
         
         message, success = self.model.combine_rows(first_row_number, combined_text, min_confidence, rows_to_delete)
         if success:
-            if self.find_replace_widget.isVisible():
+            if hasattr(self, 'find_replace_widget') and self.find_replace_widget.isVisible():
                 self.find_replace_widget.find_text()
             # Success message - keep QMessageBox.information for non-error cases
             QMessageBox.information(self, "Success", message)
@@ -888,7 +883,8 @@ class MainWindow(QMainWindow):
             self.selection_manager.deselect(self)
 
         self.model.delete_row(row_number_to_delete)
-        if self.find_replace_widget.isVisible(): self.find_replace_widget.find_text()
+        if hasattr(self, 'find_replace_widget') and self.find_replace_widget.isVisible():
+            self.find_replace_widget.find_text()
 
     def handle_translation_completed(self, profile_name, translated_data):
         try:
