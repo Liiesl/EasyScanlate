@@ -7,6 +7,7 @@
   - add mistral provider
   - add toolbar with edit/delete buttons below textbox selection frame
   - make it possible to edit straight from textbox
+  - add stroke to typography
 
   #### fixes
   - keep selection frame at constant visual size regardless of zoom
@@ -31,7 +32,7 @@
   - add manual textbox insertion
   - implement watermarking
   - textbox styles
-    - add stroke to typography
+    - [X] add stroke to typography
     - add directional blur to typography
     - add drop shadow to both
     - add 
