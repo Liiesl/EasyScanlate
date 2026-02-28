@@ -6,11 +6,14 @@ import io
 import numpy as np
 from PIL import Image
 
-from PySide6.QtWidgets import QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtWidgets import QMessageBox, QLabel
 from PySide6.QtCore import QBuffer, Signal, QObject
 from app.ui.components.image_area.label import ResizableImageLabel
 from app.ui.dialogs.error_dialog import ErrorDialog
+from app.ui.widgets.handler_overlay import HandlerOverlay
 from app.core.ocr_processor import OCRProcessor
+from assets.styles import HANDLER_OVERLAY_STYLES
+
 
 class ManualOCRHandler(QObject):
     """Handles all logic for the Manual OCR feature, independent of MainWindow."""
@@ -23,44 +26,39 @@ class ManualOCRHandler(QObject):
         self.is_active = False
         self.active_label = None
         self.selected_rect_scene = None
-        # --- NEW: Add state for the async processor ---
         self.ocr_thread = None
         self.crop_offset = None
 
         self._setup_ui()
 
     def _setup_ui(self):
-        """Creates the overlay widget, parented to the scroll_area."""
-        self.overlay_widget = QWidget(self.scroll_area)
-        self.overlay_widget.setObjectName("ManualOCROverlay")
-        overlay_layout = QVBoxLayout(self.overlay_widget)
-        overlay_layout.setContentsMargins(5, 5, 5, 5)
-        # --- MODIFIED: More descriptive initial text ---
+        """Creates the overlay widget using HandlerOverlay base."""
+        self.overlay_widget = HandlerOverlay(
+            self.scroll_area,
+            "ManualOCROverlay",
+            "",
+            (350, 80)
+        )
+        self.overlay_widget.setStyleSheet(HANDLER_OVERLAY_STYLES)
+
         self.status_label = QLabel("Draw a box on an image to begin.")
-        overlay_layout.addWidget(self.status_label)
-        overlay_buttons = QHBoxLayout()
-        
-        self.btn_ocr_manual_area = QPushButton("OCR This Part")
+        self.overlay_widget.add_widget(self.status_label)
+
+        self.btn_ocr_manual_area = self.overlay_widget.create_confirm_button("OCR This Part")
         self.btn_ocr_manual_area.clicked.connect(self.process_selected_area)
-        # --- MODIFIED: Disabled by default ---
         self.btn_ocr_manual_area.setEnabled(False)
-        overlay_buttons.addWidget(self.btn_ocr_manual_area)
-        
-        self.btn_reset_manual_selection = QPushButton("Reset Selection")
-        self.btn_reset_manual_selection.setObjectName("ResetButton")
+
+        self.btn_reset_manual_selection = self.overlay_widget.create_reset_button("Reset Selection")
         self.btn_reset_manual_selection.clicked.connect(self.reset_selection)
-        # --- MODIFIED: Disabled by default ---
         self.btn_reset_manual_selection.setEnabled(False)
-        overlay_buttons.addWidget(self.btn_reset_manual_selection)
-        
-        self.btn_cancel_manual_ocr = QPushButton("Cancel Manual OCR")
-        self.btn_cancel_manual_ocr.setObjectName("CancelButton")
+
+        self.btn_cancel_manual_ocr = self.overlay_widget.create_cancel_button("Cancel Manual OCR")
         self.btn_cancel_manual_ocr.clicked.connect(self.cancel_mode)
-        overlay_buttons.addWidget(self.btn_cancel_manual_ocr)
-        
-        overlay_layout.addLayout(overlay_buttons)
-        self.overlay_widget.setFixedSize(350, 80)
-        self.overlay_widget.hide()
+
+    def _update_widget_position(self):
+        """Positions the overlay widget at the top-center of the visible scroll area."""
+        if not self.is_active: return
+        self.overlay_widget._update_widget_position()
 
     def toggle_mode(self, checked):
         """Public method called by MainWindow to activate or deactivate the mode."""
@@ -81,10 +79,7 @@ class ManualOCRHandler(QObject):
             self._clear_selection_state()
             self._set_selection_enabled_on_all(True)
 
-            # --- MODIFIED: Show persistent overlay when mode starts ---
-            self._update_widget_position()
-            self.overlay_widget.show()
-            self.overlay_widget.raise_()
+            self.overlay_widget.show_overlay()
             
             # Information message - keep QMessageBox.information for non-error cases
             QMessageBox.information(self.scroll_area, "Manual OCR Mode",
@@ -98,8 +93,7 @@ class ManualOCRHandler(QObject):
         if not self.is_active: return
         print("Cancelling Manual OCR mode...")
         self.is_active = False
-        # --- MODIFIED: Explicitly hide the overlay on cancel ---
-        self.overlay_widget.hide()
+        self.overlay_widget.hide_overlay()
 
         if self.ocr_thread and self.ocr_thread.isRunning():
             self.ocr_thread.stop_requested = True
@@ -118,15 +112,12 @@ class ManualOCRHandler(QObject):
         if self.is_active:
              self._set_selection_enabled_on_all(True)
              print("Selection reset. Ready for new selection.")
-        # --- MODIFIED: Reset buttons to disabled state and update label ---
         self.btn_ocr_manual_area.setEnabled(False)
         self.btn_reset_manual_selection.setEnabled(False)
         self.status_label.setText("Draw a box on an image to begin.")
 
-
     def _clear_selection_state(self):
         """Hides the overlay and clears any graphical selection indicators."""
-        # --- MODIFIED: Do not hide the overlay here; it's persistent ---
         if self.active_label:
             self.active_label.clear_selection_visuals()
         self.active_label = None
@@ -151,7 +142,6 @@ class ManualOCRHandler(QObject):
                     except (TypeError, RuntimeError):
                         pass
 
-    # ... (handle_area_selected and _update_widget_position are unchanged) ...
     def handle_area_selected(self, rect_scene, label_widget):
         """Callback for when a user finishes drawing a selection on an image."""
         if not self.is_active: return
@@ -164,21 +154,10 @@ class ManualOCRHandler(QObject):
         
         label_widget.draw_selections([rect_scene])
 
-        # --- MODIFIED: Enable buttons and update status instead of showing the widget ---
         self.status_label.setText("Area selected. Ready to OCR.")
         self.btn_ocr_manual_area.setEnabled(True)
         self.btn_reset_manual_selection.setEnabled(True)
 
-    def _update_widget_position(self):
-        """Positions the overlay widget at the top-center of the visible scroll area."""
-        if not self.is_active: return
-        viewport = self.scroll_area.viewport()
-        overlay = self.overlay_widget
-        overlay_x = (viewport.width() - overlay.width()) // 2
-        overlay_y = 10 
-        overlay.move(overlay_x, overlay_y)
-
-    # --- REWRITTEN: This method now uses OCRProcessor ---
     def process_selected_area(self):
         """Crops the selected area, runs OCR using the OCRProcessor thread, and adds results."""
         main_window = self.scroll_area.main_window
@@ -221,7 +200,6 @@ class ManualOCRHandler(QObject):
                 "auto_context_fill": False
             }
 
-            # --- MODIFIED: Use the ** operator to unpack the settings dictionary ---
             self.ocr_thread = OCRProcessor(
                 reader=main_window.reader,
                 image_data=pil_image,
@@ -240,7 +218,6 @@ class ManualOCRHandler(QObject):
             ErrorDialog.critical(self.scroll_area, "Manual OCR Error", f"An unexpected error occurred: {str(e)}", traceback_text)
             self.reset_selection()
 
-    # --- NEW: Slot to handle results from the processor thread ---
     def _handle_manual_ocr_results(self, processed_results):
         """
         Receives results, calculates a floating-point row number based on vertical
@@ -312,8 +289,6 @@ class ManualOCRHandler(QObject):
             })
             
             increment += 0.1 # Prepare for the next potential result in the same selection
-
-        # --- IMPORTANT: We DO NOT touch self.model.next_global_row_number here ---
 
         if final_results_for_model:
             self.model.add_new_ocr_results(final_results_for_model)

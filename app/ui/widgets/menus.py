@@ -64,7 +64,7 @@ class Menu(QWidget):
         Initializes the menu as a frameless, popup-style widget.
         """
         super().__init__(parent)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Popup)
+        self.setWindowFlags(Qt.Popup)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setAttribute(Qt.WA_DeleteOnClose)
 

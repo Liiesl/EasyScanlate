@@ -1,14 +1,14 @@
 # app/handlers/stitch_handler.py
 
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QMessageBox
+from PySide6.QtWidgets import QMessageBox, QLabel
 from PySide6.QtCore import QObject, Qt
 from PySide6.QtGui import QPixmap, QPainter
 from app.ui.components.image_area.label import ResizableImageLabel
 from app.ui.dialogs.error_dialog import ErrorDialog
-import qtawesome as qta
+from app.ui.widgets.handler_overlay import HandlerOverlay
+from assets.styles import HANDLER_OVERLAY_STYLES
 import os
-import traceback
-import sys
+
 
 class StitchHandler(QObject):
     """
@@ -24,25 +24,30 @@ class StitchHandler(QObject):
         self._setup_ui()
 
     def _setup_ui(self):
-        """Creates the UI widget, parenting it to the scroll_area."""
-        self.stitch_widget = QWidget(self.scroll_area)
-        self.stitch_widget.setObjectName("StitchWidget")
+        """Creates the UI widget using HandlerOverlay base."""
+        self.stitch_widget = HandlerOverlay(
+            self.scroll_area,
+            "StitchWidget",
+            "",
+            (380, 90)
+        )
+        self.stitch_widget.setStyleSheet(HANDLER_OVERLAY_STYLES)
 
-        
-        layout = QHBoxLayout(self.stitch_widget)
-        
-        self.btn_confirm = QPushButton(qta.icon('fa5s.check', color='white'), " Confirm Stitch")
+        self.info_label = QLabel("Click on images to select them for stitching.")
+        self.info_label.setAlignment(Qt.AlignCenter)
+        self.stitch_widget.add_widget(self.info_label)
+
+        self.btn_confirm = self.stitch_widget.create_confirm_button("Confirm Stitch", "fa5s.check")
         self.btn_confirm.clicked.connect(self.confirm_stitch)
         self.btn_confirm.setEnabled(False)
-        layout.addWidget(self.btn_confirm)
-        
-        self.btn_cancel = QPushButton(qta.icon('fa5s.times', color='white'), " Cancel")
-        self.btn_cancel.setObjectName("CancelButton")
+
+        self.btn_cancel = self.stitch_widget.create_cancel_button("Cancel", "fa5s.times")
         self.btn_cancel.clicked.connect(self.cancel_stitching_mode)
-        layout.addWidget(self.btn_cancel)
-        
-        self.stitch_widget.setFixedSize(320, 60)
-        self.stitch_widget.hide()
+
+    def _update_widget_position(self):
+        """Positions the overlay widget at the top-center of the visible scroll area."""
+        if not self.stitch_widget.isVisible(): return
+        self.stitch_widget._update_widget_position()
 
     def start_stitching_mode(self):
         """Enters the image selection mode for stitching."""
@@ -53,9 +58,8 @@ class StitchHandler(QObject):
         self.btn_confirm.setEnabled(False)
         
         print("Entering stitching selection mode.")
-        self._update_widget_position()
-        self.stitch_widget.show()
-        self.stitch_widget.raise_()
+        self._update_info_label()
+        self.stitch_widget.show_overlay()
 
         for widget in self._get_image_labels():
             widget.enable_stitching_selection(True)
@@ -78,6 +82,17 @@ class StitchHandler(QObject):
         
         print(f"Selected images (in order): {[img.filename for img in self.selected_images]}")
         self.btn_confirm.setEnabled(len(self.selected_images) >= 2)
+        self._update_info_label()
+
+    def _update_info_label(self):
+        num_selected = len(self.selected_images)
+        if num_selected == 0:
+            self.info_label.setText("Click on images to select them for stitching.")
+        elif num_selected == 1:
+            self.info_label.setText(f"<b>{self.selected_images[0].filename}</b> selected.<br>Select at least one more image.")
+        else:
+            filenames = ", ".join([img.filename for img in self.selected_images])
+            self.info_label.setText(f"<b>{num_selected}</b> images selected.<br>Click to reorder. (Top to Bottom)")
 
     def confirm_stitch(self):
         """Combines selected images, updates the data model, and refreshes the UI."""
@@ -186,16 +201,9 @@ class StitchHandler(QObject):
             widget.enable_stitching_selection(False)
         self.is_active = False
         self.selected_images.clear()
-        self.stitch_widget.hide()
+        self.info_label.setText("Click on images to select them for stitching.")
+        self.stitch_widget.hide_overlay()
         print("Exited stitching selection mode.")
-
-    def _update_widget_position(self):
-        """Positions the control widget at the top-center of the scroll area."""
-        if not self.stitch_widget.isVisible(): return
-        scroll_area_width = self.scroll_area.viewport().width()
-        x = (scroll_area_width - self.stitch_widget.width()) / 2
-        y = 10
-        self.stitch_widget.move(int(x), int(y))
 
     def _get_image_labels(self):
         labels = []

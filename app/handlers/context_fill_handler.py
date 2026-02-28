@@ -8,15 +8,19 @@ import numpy as np
 from PIL import Image
 import uuid
 
-from PySide6.QtWidgets import QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtWidgets import QMessageBox, QLabel
 from PySide6.QtGui import QImage, QPixmap, QPainterPath, QPolygonF, QPainter
-from PySide6.QtCore import QBuffer, QRectF, QPointF
+from PySide6.QtCore import QBuffer, QRectF, QPointF, QObject
 from app.ui.components.image_area.label import ResizableImageLabel
 from app.ui.dialogs.error_dialog import ErrorDialog
+from app.ui.widgets.handler_overlay import HandlerOverlay
+from assets.styles import HANDLER_OVERLAY_STYLES
 
-class ContextFillHandler:
+
+class ContextFillHandler(QObject):
     """Handles the Context Fill (Inpainting) feature, independent of MainWindow."""
     def __init__(self, scroll_area, model):
+        super().__init__()
         self.scroll_area = scroll_area
         self.model = model
         self.is_active = False
@@ -26,35 +30,31 @@ class ContextFillHandler:
 
         self._setup_ui()
 
-    # ... (All methods up to _perform_inpainting_logic remain unchanged) ...
     def _setup_ui(self):
-        """Creates the overlay widget, parented to the scroll_area."""
-        self.overlay_widget = QWidget(self.scroll_area)
-        self.overlay_widget.setObjectName("ContextFillOverlay")
-        overlay_layout = QVBoxLayout(self.overlay_widget)
-        overlay_layout.setContentsMargins(5, 5, 5, 5)
-        overlay_layout.addWidget(QLabel("Context Fill Controls"))
-        overlay_buttons = QHBoxLayout()
-        
-        self.btn_process_fill = QPushButton("Fill Selected Areas")
+        """Creates the overlay widget using HandlerOverlay base."""
+        self.overlay_widget = HandlerOverlay(
+            self.scroll_area,
+            "ContextFillOverlay",
+            "Context Fill Controls",
+            (380, 80)
+        )
+        self.overlay_widget.setStyleSheet(HANDLER_OVERLAY_STYLES)
+
+        self.btn_process_fill = self.overlay_widget.create_confirm_button("Fill Selected Areas")
         self.btn_process_fill.clicked.connect(self.process_inpainting)
         self.btn_process_fill.setEnabled(False)
-        overlay_buttons.addWidget(self.btn_process_fill)
 
-        self.btn_reset_selection = QPushButton("Reset All Selections")
-        self.btn_reset_selection.setObjectName("ResetButton")
+        self.btn_reset_selection = self.overlay_widget.create_reset_button("Reset All Selections")
         self.btn_reset_selection.clicked.connect(self.reset_selection)
         self.btn_reset_selection.setEnabled(False)
-        overlay_buttons.addWidget(self.btn_reset_selection)
 
-        self.btn_cancel_fill = QPushButton("Exit Context Fill")
-        self.btn_cancel_fill.setObjectName("CancelButton")
+        self.btn_cancel_fill = self.overlay_widget.create_cancel_button("Exit Context Fill")
         self.btn_cancel_fill.clicked.connect(self.cancel_mode)
-        overlay_buttons.addWidget(self.btn_cancel_fill)
-        
-        overlay_layout.addLayout(overlay_buttons)
-        self.overlay_widget.setFixedSize(380, 80)
-        self.overlay_widget.hide()
+
+    def _update_widget_position(self):
+        """Positions the overlay widget at the top-center of the visible scroll area."""
+        if not self.is_active: return
+        self.overlay_widget._update_widget_position()
 
     def start_mode(self):
         """Activates the context fill mode."""
@@ -65,9 +65,7 @@ class ContextFillHandler:
         self._clear_selection_state()
         self._set_selection_enabled_on_all(True)
         
-        self._update_widget_position()
-        self.overlay_widget.show()
-        self.overlay_widget.raise_()
+        self.overlay_widget.show_overlay()
         
         # Information message - keep QMessageBox.information for non-error cases
         QMessageBox.information(self.scroll_area, "Context Fill Mode",
@@ -120,7 +118,7 @@ class ContextFillHandler:
         if not self.is_active: return
         print("Cancelling Context Fill mode...")
         self.is_active = False
-        self.overlay_widget.hide()
+        self.overlay_widget.hide_overlay()
         self._clear_selection_state()
         self._set_selection_enabled_on_all(False)
         print("Context Fill mode cancelled.")
@@ -142,9 +140,7 @@ class ContextFillHandler:
         self.selection_paths.clear()
 
     def _set_selection_enabled_on_all(self, enabled):
-        """
-        Enables or disables selection on all labels and manages signal connections.
-        """
+        """Enables or disables selection on all labels and manages signal connections."""
         layout = self.scroll_area.widget().layout()
         if not layout: return
 
@@ -192,16 +188,6 @@ class ContextFillHandler:
 
         self.btn_process_fill.setEnabled(True)
         self.btn_reset_selection.setEnabled(True)
-
-    def _update_widget_position(self):
-        """Positions the overlay widget at the top-center of the visible scroll area."""
-        if not self.is_active: return
-        viewport = self.scroll_area.viewport()
-        overlay = self.overlay_widget
-        overlay_x = (viewport.width() - overlay.width()) // 2
-        overlay_y = 10 
-        overlay.move(overlay_x, overlay_y)
-        overlay.raise_()
 
     def process_inpainting(self):
         """
