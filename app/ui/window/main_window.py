@@ -321,6 +321,7 @@ class MainWindow(QMainWindow):
         left_widget.setLayout(left_panel)
         splitter.addWidget(left_widget)
         splitter.addWidget(right_widget)
+        splitter.setSizes([250, 450])
 
         # MODIFIED: Add toolbar and splitter to main layout
         main_layout.addWidget(self.vertical_toolbar)  # Add vertical toolbar first
