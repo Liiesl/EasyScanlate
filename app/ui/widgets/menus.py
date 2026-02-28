@@ -65,7 +65,6 @@ class Menu(QWidget):
         """
         super().__init__(parent)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Popup)
-        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setAttribute(Qt.WA_DeleteOnClose)
 
