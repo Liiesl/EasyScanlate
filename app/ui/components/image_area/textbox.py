@@ -111,6 +111,9 @@ class TextBoxItem(QGraphicsRectItem):
 
     def _exit_edit_mode(self):
         self._is_editing = False
+        cursor = self.text_item.textCursor()
+        cursor.clearSelection()
+        self.text_item.setTextCursor(cursor)
         self.text_item.setTextInteractionFlags(Qt.NoTextInteraction)
         self.clearFocus()
         self.setFlag(QGraphicsItem.ItemIsMovable, True)

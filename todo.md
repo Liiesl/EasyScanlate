@@ -5,6 +5,7 @@
   #### addition
   - add tool bar on the left
   - add mistral provider
+  - add toolbar with edit/delete buttons below textbox selection frame
 
   #### fixes
   - keep textbox handles at constant visual size regardless of zoom
