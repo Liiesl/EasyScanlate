@@ -1,6 +1,6 @@
 # --- START OF FILE image_area_widgets.py ---
 
-from PySide6.QtWidgets import QGraphicsTextItem, QGraphicsItem, QGraphicsRectItem
+from PySide6.QtWidgets import QGraphicsTextItem, QGraphicsItem, QGraphicsRectItem, QToolTip
 from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QObject,QLineF
 from PySide6.QtGui import QPainter, QFont, QBrush, QColor, QPen, QPainterPath, QLinearGradient, QTransform, QPolygonF
 
@@ -23,9 +23,19 @@ class SelectionFrameItem(QGraphicsItem):
         self.handle_size = 10
         self.outline_color = QColor(0, 120, 215)  # Standard blue selection color
         self.handle_fill_color = QColor(255, 255, 255)
-        self.delete_btn_size = 20
+        self.delete_btn_size = 32
+        self.edit_btn_size = 32
         self.rotate_btn_size = 20
         self.control_offset = 15  # How far above the top edge the controls are
+        self.toolbar_offset = 8  # How far below the bottom edge the toolbar is
+        
+        # Toolbar styling
+        self.toolbar_bg_color = QColor(45, 45, 45)  # Dark background
+        self.toolbar_hover_color = QColor(70, 70, 70)  # Hover state
+        self.edit_btn_color = QColor(45, 45, 45)  # Same as toolbar background
+        self.edit_btn_hover = QColor(100, 100, 100)  # Hover state
+        self.delete_btn_color = QColor(45, 45, 45)  # Same as toolbar background
+        self.delete_btn_hover = QColor(100, 100, 100)  # Hover state
 
         # --- State ---
         self.active_handle = None
@@ -36,11 +46,16 @@ class SelectionFrameItem(QGraphicsItem):
         self.drag_start_center = QPointF()
         self.is_free_transform = False  # True if Ctrl is held during a resize drag
         self.initial_scene_quad = None  # Stores the item's corner positions for free transform
+        self._hover_on_edit = False
+        self._hover_on_delete = False
+        self._current_hover_handle = None  # Tracks what we are currently hovering over for tooltips
 
         # --- Caches for hit testing ---
         self._handle_rects = {}
         self._delete_btn_rect = QRectF()
+        self._edit_btn_rect = QRectF()
         self._rotate_handle_rect = QRectF()
+        self._toolbar_rect = QRectF()
 
     def _update_geometry(self):
         """Recalculates positions of all frame elements based on parent's rect."""
@@ -66,20 +81,51 @@ class SelectionFrameItem(QGraphicsItem):
         self._rotate_handle_rect = QRectF(0, 0, self.rotate_btn_size, self.rotate_btn_size)
         self._rotate_handle_rect.moveCenter(rotate_btn_center)
 
-        # Calculate delete button position, shifted right from the rotate handle
-        delete_btn_center_x = self._rotate_handle_rect.center().x() + self._rotate_handle_rect.width() / 2 + self.control_offset
-        delete_btn_center = QPointF(delete_btn_center_x, rotate_btn_center.y())
+        # Calculate toolbar buttons position (below the textbox)
+        bottom_handle_center = self._handle_rects['b'].center()
+        toolbar_center_y = bottom_handle_center.y() + self.toolbar_offset + self.edit_btn_size / 2
+        toolbar_center_x = bottom_handle_center.x()
+        
+        # Edit button on left, delete button on right
+        button_spacing = 0
+        edit_btn_center_x = toolbar_center_x - self.edit_btn_size / 2 - button_spacing / 2
+        delete_btn_center_x = toolbar_center_x + self.delete_btn_size / 2 + button_spacing / 2
+        
+        self._edit_btn_rect = QRectF(0, 0, self.edit_btn_size, self.edit_btn_size)
+        self._edit_btn_rect.moveCenter(QPointF(edit_btn_center_x, toolbar_center_y))
+        
         self._delete_btn_rect = QRectF(0, 0, self.delete_btn_size, self.delete_btn_size)
-        self._delete_btn_rect.moveCenter(delete_btn_center)
+        self._delete_btn_rect.moveCenter(QPointF(delete_btn_center_x, toolbar_center_y))
+        
+        # Store toolbar rect for bounding rect calculation
+        toolbar_padding = 0
+        toolbar_width = self.edit_btn_size + self.delete_btn_size + button_spacing + toolbar_padding * 2
+        toolbar_height = max(self.edit_btn_size, self.delete_btn_size) + toolbar_padding * 2
+        self._toolbar_rect = QRectF(
+            toolbar_center_x - toolbar_width / 2,
+            toolbar_center_y - toolbar_height / 2,
+            toolbar_width,
+            toolbar_height
+        )
 
     def boundingRect(self):
         """The bounding rect must include the parent, handles, and control buttons."""
-        visual_handle_rects, visual_rotate_handle_rect, visual_delete_btn_rect = self._get_visual_rects()
+        visual_handle_rects, visual_rotate_handle_rect, visual_edit_btn_rect, visual_delete_btn_rect = self._get_visual_rects()
         rect = self.parent_item.rect()
         for handle_rect in visual_handle_rects.values():
             rect = rect.united(handle_rect)
         rect = rect.united(visual_delete_btn_rect)
+        rect = rect.united(visual_edit_btn_rect)
         rect = rect.united(visual_rotate_handle_rect)
+        # Include toolbar area to prevent trailing
+        scale = self._get_view_scale()
+        visual_toolbar = QRectF(
+            self._toolbar_rect.left() / scale,
+            self._toolbar_rect.top() / scale,
+            self._toolbar_rect.width() / scale,
+            self._toolbar_rect.height() / scale
+        )
+        rect = rect.united(visual_toolbar)
         return rect
 
     def paint(self, painter, option, widget=None):
@@ -90,8 +136,10 @@ class SelectionFrameItem(QGraphicsItem):
         visual_handle_size = self.handle_size / scale
         visual_hs_half = visual_handle_size / 2.0
         visual_delete_size = self.delete_btn_size / scale
+        visual_edit_size = self.edit_btn_size / scale
         visual_rotate_size = self.rotate_btn_size / scale
         visual_control_offset = self.control_offset / scale
+        visual_toolbar_offset = self.toolbar_offset / scale
         
         # 1. Draw main outline
         outline_pen = QPen(self.outline_color, 1.5 / scale, Qt.SolidLine)
@@ -119,20 +167,14 @@ class SelectionFrameItem(QGraphicsItem):
         painter.drawLine(QPointF(center.x() - cross_size, center.y()), QPointF(center.x() + cross_size, center.y()))
         painter.drawLine(QPointF(center.x(), center.y() - cross_size), QPointF(center.x(), center.y() + cross_size))
 
-        # 4. Draw control buttons and their connecting lines
+        # 4. Draw rotate handle and its connecting line
         top_handle_center = self._handle_rects['t'].center()
         rotate_btn_center_y = top_handle_center.y() - visual_control_offset - visual_rotate_size / 2
         rotate_btn_center = QPointF(top_handle_center.x(), rotate_btn_center_y)
         rotate_handle_rect = QRectF(0, 0, visual_rotate_size, visual_rotate_size)
         rotate_handle_rect.moveCenter(rotate_btn_center)
 
-        delete_btn_center_x = rotate_btn_center.x() + visual_rotate_size / 2 + visual_control_offset
-        delete_btn_center = QPointF(delete_btn_center_x, rotate_btn_center.y())
-        delete_btn_rect = QRectF(0, 0, visual_delete_size, visual_delete_size)
-        delete_btn_rect.moveCenter(delete_btn_center)
-
         painter.drawLine(top_handle_center, rotate_handle_rect.center())
-        painter.drawLine(rotate_handle_rect.center(), delete_btn_rect.center())
 
         # Draw rotate handle
         painter.setPen(QPen(self.outline_color, 1 / scale)); painter.setBrush(self.handle_fill_color)
@@ -148,14 +190,108 @@ class SelectionFrameItem(QGraphicsItem):
         painter.setBrush(Qt.NoBrush); painter.setPen(QPen(self.outline_color, 1.5 / scale))
         painter.drawPath(path)
 
-        # Draw delete button
-        painter.setBrush(QBrush(Qt.red)); painter.setPen(QPen(Qt.black, 1 / scale))
-        painter.drawEllipse(delete_btn_rect)
-        painter.setPen(QPen(Qt.white, 2 / scale))
-        margin = 6 / scale
-        x_rect = delete_btn_rect.adjusted(margin, margin, -margin, -margin)
-        painter.drawLine(x_rect.topLeft(), x_rect.bottomRight())
-        painter.drawLine(x_rect.topRight(), x_rect.bottomLeft())
+        # 5. Draw toolbar (edit and delete buttons below the textbox)
+        bottom_handle_center = self._handle_rects['b'].center()
+        toolbar_center_y = bottom_handle_center.y() + visual_toolbar_offset + visual_edit_size / 2
+        toolbar_center_x = bottom_handle_center.x()
+        
+        # Calculate button positions
+        button_spacing = 0 / scale
+        edit_btn_center_x = toolbar_center_x - visual_edit_size / 2 - button_spacing / 2
+        delete_btn_center_x = toolbar_center_x + visual_delete_size / 2 + button_spacing / 2
+        
+        edit_btn_rect = QRectF(0, 0, visual_edit_size, visual_edit_size)
+        edit_btn_rect.moveCenter(QPointF(edit_btn_center_x, toolbar_center_y))
+        
+        delete_btn_rect = QRectF(0, 0, visual_delete_size, visual_delete_size)
+        delete_btn_rect.moveCenter(QPointF(delete_btn_center_x, toolbar_center_y))
+
+        # Draw toolbar background (dark rounded rectangle)
+        toolbar_padding = 0 / scale
+        toolbar_width = visual_edit_size + visual_delete_size + button_spacing + toolbar_padding * 2
+        toolbar_height = max(visual_edit_size, visual_delete_size) + toolbar_padding * 2
+        toolbar_rect = QRectF(
+            toolbar_center_x - toolbar_width / 2,
+            toolbar_center_y - toolbar_height / 2,
+            toolbar_width,
+            toolbar_height
+        )
+        
+        # Draw toolbar background with dark color
+        toolbar_path = QPainterPath()
+        radius = 6 / scale
+        toolbar_path.addRoundedRect(toolbar_rect, radius, radius)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(self.toolbar_bg_color))
+        painter.drawPath(toolbar_path)
+
+        # --- Draw Edit Button (Actual Pencil Icon) ---
+        edit_btn_color = self.edit_btn_hover if self._hover_on_edit else self.edit_btn_color
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(edit_btn_color))
+        painter.drawRoundedRect(edit_btn_rect, 4 / scale, 4 / scale)
+        
+        painter.save()
+        painter.translate(edit_btn_rect.center())
+        painter.rotate(45)  # Tilt pencil so it points bottom-left
+        icon_pen = QPen(Qt.white, 1.5 / scale, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        painter.setPen(icon_pen)
+        painter.setBrush(Qt.NoBrush)
+        
+        # Pencil body
+        painter.drawRect(QRectF(-3 / scale, -7 / scale, 6 / scale, 10 / scale))
+        # Eraser separation line
+        painter.drawLine(QPointF(-3 / scale, -3 / scale), QPointF(3 / scale, -3 / scale))
+        
+        # Pencil tip shape
+        tip_path = QPainterPath()
+        tip_path.moveTo(-3 / scale, 3 / scale)
+        tip_path.lineTo(0, 8 / scale)
+        tip_path.lineTo(3 / scale, 3 / scale)
+        painter.drawPath(tip_path)
+        
+        # Pencil lead (filled tip)
+        painter.setBrush(Qt.white)
+        painter.setPen(Qt.NoPen)
+        lead_path = QPainterPath()
+        lead_path.moveTo(-1 / scale, 6.3 / scale)
+        lead_path.lineTo(0, 8 / scale)
+        lead_path.lineTo(1 / scale, 6.3 / scale)
+        lead_path.closeSubpath()
+        painter.drawPath(lead_path)
+        painter.restore()
+
+        # --- Draw Delete Button (Trash Bin Icon) ---
+        delete_btn_color = self.delete_btn_hover if self._hover_on_delete else self.delete_btn_color
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(delete_btn_color))
+        painter.drawRoundedRect(delete_btn_rect, 4 / scale, 4 / scale)
+        
+        painter.save()
+        painter.translate(delete_btn_rect.center())
+        painter.setPen(icon_pen)
+        painter.setBrush(Qt.NoBrush)
+        
+        # Lid handle
+        painter.drawRect(QRectF(-2 / scale, -7 / scale, 4 / scale, 2 / scale))
+        # Lid top
+        painter.drawLine(QPointF(-7 / scale, -5 / scale), QPointF(7 / scale, -5 / scale))
+        
+        # Bin body
+        bin_path = QPainterPath()
+        bin_path.moveTo(-5.5 / scale, -3.5 / scale)
+        bin_path.lineTo(5.5 / scale, -3.5 / scale)
+        bin_path.lineTo(4 / scale, 6 / scale)
+        bin_path.lineTo(-4 / scale, 6 / scale)
+        bin_path.closeSubpath()
+        painter.drawPath(bin_path)
+        
+        # Vertical ribs inside the trash bin
+        painter.drawLine(QPointF(-2 / scale, -1 / scale), QPointF(-1.5 / scale, 4 / scale))
+        painter.drawLine(QPointF(2 / scale, -1 / scale), QPointF(1.5 / scale, 4 / scale))
+        painter.drawLine(QPointF(0, -1 / scale), QPointF(0, 4 / scale))
+        painter.restore()
+
 
     def _get_view_scale(self):
         """Returns the scale factor from the graphics view, or 1.0 if no view."""
@@ -173,8 +309,10 @@ class SelectionFrameItem(QGraphicsItem):
         visual_handle_size = self.handle_size / scale
         visual_hs_half = visual_handle_size / 2.0
         visual_delete_size = self.delete_btn_size / scale
+        visual_edit_size = self.edit_btn_size / scale
         visual_rotate_size = self.rotate_btn_size / scale
         visual_control_offset = self.control_offset / scale
+        visual_toolbar_offset = self.toolbar_offset / scale
 
         parent_rect = self.parent_item.rect()
         visual_handle_rects = {
@@ -194,16 +332,27 @@ class SelectionFrameItem(QGraphicsItem):
         visual_rotate_handle_rect = QRectF(0, 0, visual_rotate_size, visual_rotate_size)
         visual_rotate_handle_rect.moveCenter(rotate_btn_center)
 
-        delete_btn_center_x = rotate_btn_center.x() + visual_rotate_size / 2 + visual_control_offset
-        delete_btn_center = QPointF(delete_btn_center_x, rotate_btn_center.y())
+        # Calculate toolbar button positions
+        bottom_handle_center = visual_handle_rects['b'].center()
+        toolbar_center_y = bottom_handle_center.y() + visual_toolbar_offset + visual_edit_size / 2
+        toolbar_center_x = bottom_handle_center.x()
+        
+        button_spacing = 0 / scale
+        edit_btn_center_x = toolbar_center_x - visual_edit_size / 2 - button_spacing / 2
+        delete_btn_center_x = toolbar_center_x + visual_delete_size / 2 + button_spacing / 2
+        
+        visual_edit_btn_rect = QRectF(0, 0, visual_edit_size, visual_edit_size)
+        visual_edit_btn_rect.moveCenter(QPointF(edit_btn_center_x, toolbar_center_y))
+        
         visual_delete_btn_rect = QRectF(0, 0, visual_delete_size, visual_delete_size)
-        visual_delete_btn_rect.moveCenter(delete_btn_center)
+        visual_delete_btn_rect.moveCenter(QPointF(delete_btn_center_x, toolbar_center_y))
 
-        return visual_handle_rects, visual_rotate_handle_rect, visual_delete_btn_rect
+        return visual_handle_rects, visual_rotate_handle_rect, visual_edit_btn_rect, visual_delete_btn_rect
 
     def _get_handle_at(self, pos):
-        visual_handle_rects, visual_rotate_handle_rect, visual_delete_btn_rect = self._get_visual_rects()
+        visual_handle_rects, visual_rotate_handle_rect, visual_edit_btn_rect, visual_delete_btn_rect = self._get_visual_rects()
         if visual_delete_btn_rect.contains(pos): return 'delete'
+        if visual_edit_btn_rect.contains(pos): return 'edit'
         if visual_rotate_handle_rect.contains(pos): return 'rotate'
         for name, rect in visual_handle_rects.items():
             if rect.contains(pos): return name
@@ -211,6 +360,26 @@ class SelectionFrameItem(QGraphicsItem):
 
     def hoverMoveEvent(self, event):
         handle = self._get_handle_at(event.pos())
+        
+        # --- NEW: Dynamic Tooltip Logic ---
+        # Only update the tooltip if the hovered handle changes, 
+        # to prevent flickering or constant resets.
+        if handle != self._current_hover_handle:
+            self._current_hover_handle = handle
+            if handle == 'edit':
+                QToolTip.showText(event.screenPos(), "Edit Text", event.widget())
+            elif handle == 'delete':
+                QToolTip.showText(event.screenPos(), "Delete Textbox", event.widget())
+            elif handle == 'rotate':
+                QToolTip.showText(event.screenPos(), "Rotate", event.widget())
+            else:
+                QToolTip.hideText()
+        # ----------------------------------
+
+        # Track hover state for toolbar buttons
+        self._hover_on_edit = (handle == 'edit')
+        self._hover_on_delete = (handle == 'delete')
+        
         cursor = self.parent_item.cursor()
         if handle:
             if handle == 'rotate' and self.is_dragging:
@@ -219,15 +388,29 @@ class SelectionFrameItem(QGraphicsItem):
                 cursors = {'tl': Qt.SizeFDiagCursor, 'br': Qt.SizeFDiagCursor, 'tr': Qt.SizeBDiagCursor, 
                              'bl': Qt.SizeBDiagCursor, 't': Qt.SizeVerCursor, 'b': Qt.SizeVerCursor,
                              'l': Qt.SizeHorCursor, 'r': Qt.SizeHorCursor, 'delete': Qt.PointingHandCursor,
-                             'rotate': Qt.OpenHandCursor}
+                             'edit': Qt.PointingHandCursor, 'rotate': Qt.OpenHandCursor}
                 cursor = cursors.get(handle)
         self.setCursor(cursor)
+        self.update()  # Trigger repaint for hover effects
         super().hoverMoveEvent(event)
+
+    def hoverLeaveEvent(self, event):
+        self._hover_on_edit = False
+        self._hover_on_delete = False
+        self._current_hover_handle = None
+        QToolTip.hideText()  # Hide the tooltip when mouse leaves the selection frame completely
+        self.update()
+        super().hoverLeaveEvent(event)
 
     def mousePressEvent(self, event):
         self.active_handle = self._get_handle_at(event.pos())
         if not self.active_handle:
             event.ignore()
+            return
+
+        if self.active_handle == 'edit':
+            self.parent_item.enable_editing()
+            event.accept()
             return
 
         self.is_dragging = True
@@ -361,5 +544,17 @@ class SelectionFrameItem(QGraphicsItem):
         self.drag_start_center = None
         self.is_free_transform = False
         self.initial_scene_quad = None
+        
+        # Update hover states based on current mouse position
+        handle = self._get_handle_at(event.pos())
+        self._hover_on_edit = (handle == 'edit')
+        self._hover_on_delete = (handle == 'delete')
+        
+        # In case the mouse ended up somewhere else after a release, make sure to update tooltip
+        if handle != self._current_hover_handle:
+            self._current_hover_handle = handle
+            QToolTip.hideText()
+        
+        self.update()
         self.setCursor(self.parent_item.cursor())
         event.accept()
