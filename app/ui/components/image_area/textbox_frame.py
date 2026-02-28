@@ -1,7 +1,5 @@
 # --- START OF FILE textbox_frame.py ---
 
-# --- START OF FILE image_area_widgets.py ---
-
 from PySide6.QtWidgets import QGraphicsTextItem, QGraphicsItem, QGraphicsRectItem, QToolTip
 from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QObject, QLineF
 from PySide6.QtGui import QPainter, QFont, QBrush, QColor, QPen, QPainterPath, QLinearGradient, QTransform, QPolygonF
@@ -367,46 +365,61 @@ class SelectionFrameItem(QGraphicsItem):
     def hoverMoveEvent(self, event):
         handle = self._get_handle_at(event.pos())
         
-        # --- NEW: Dynamic Tooltip Logic ---
+        # --- MODIFIED: Use native ToolTip property! Only process when state CHANGES. ---
         if handle != self._current_hover_handle:
             self._current_hover_handle = handle
+            
+            # Update internal state for UI coloring
+            self._hover_on_edit = (handle == 'edit')
+            self._hover_on_delete = (handle == 'delete')
+            
+            # Let Qt handle the debounce timer inherently via setToolTip!
             if handle == 'edit':
-                QToolTip.showText(event.screenPos(), "Edit Text", event.widget())
+                self.setToolTip("Edit Text")
             elif handle == 'delete':
-                QToolTip.showText(event.screenPos(), "Delete Textbox", event.widget())
+                self.setToolTip("Delete Textbox")
             elif handle == 'rotate':
-                QToolTip.showText(event.screenPos(), "Rotate", event.widget())
+                self.setToolTip("Rotate")
             else:
-                QToolTip.hideText()
-        # ----------------------------------
+                self.setToolTip("") # Clears the native tooltip
+            
+            # Cursor Handling
+            cursor = self.parent_item.cursor()
+            if handle:
+                if handle == 'rotate' and self.is_dragging:
+                    cursor = Qt.ClosedHandCursor
+                else:
+                    cursors = {
+                        'tl': Qt.SizeFDiagCursor, 'br': Qt.SizeFDiagCursor, 
+                        'tr': Qt.SizeBDiagCursor, 'bl': Qt.SizeBDiagCursor, 
+                        't': Qt.SizeVerCursor, 'b': Qt.SizeVerCursor,
+                        'l': Qt.SizeHorCursor, 'r': Qt.SizeHorCursor, 
+                        'delete': Qt.PointingHandCursor, 'edit': Qt.PointingHandCursor, 
+                        'rotate': Qt.OpenHandCursor
+                    }
+                    cursor = cursors.get(handle, cursor)
+            self.setCursor(cursor)
+            
+            # ONLY call update() when the visual state actually changes to avoid repaints interrupting native tooltips.
+            self.update() 
+        # ------------------------------------------------------------------------------
 
-        # Track hover state for toolbar buttons
-        self._hover_on_edit = (handle == 'edit')
-        self._hover_on_delete = (handle == 'delete')
-        
-        cursor = self.parent_item.cursor()
-        if handle:
-            if handle == 'rotate' and self.is_dragging:
-                cursor = Qt.ClosedHandCursor
-            else:
-                cursors = {'tl': Qt.SizeFDiagCursor, 'br': Qt.SizeFDiagCursor, 'tr': Qt.SizeBDiagCursor, 
-                             'bl': Qt.SizeBDiagCursor, 't': Qt.SizeVerCursor, 'b': Qt.SizeVerCursor,
-                             'l': Qt.SizeHorCursor, 'r': Qt.SizeHorCursor, 'delete': Qt.PointingHandCursor,
-                             'edit': Qt.PointingHandCursor, 'rotate': Qt.OpenHandCursor}
-                cursor = cursors.get(handle)
-        self.setCursor(cursor)
-        self.update()  # Trigger repaint for hover effects
         super().hoverMoveEvent(event)
 
     def hoverLeaveEvent(self, event):
-        self._hover_on_edit = False
-        self._hover_on_delete = False
-        self._current_hover_handle = None
-        QToolTip.hideText()  # Hide the tooltip when mouse leaves the selection frame completely
-        self.update()
+        # Reset state safely when the mouse leaves the frame entirely
+        if self._current_hover_handle is not None:
+            self._hover_on_edit = False
+            self._hover_on_delete = False
+            self._current_hover_handle = None
+            self.setToolTip("")
+            self.update()
+            
         super().hoverLeaveEvent(event)
 
     def mousePressEvent(self, event):
+        self.setToolTip("") # Hide tooltip once we initiate an interaction
+
         self.active_handle = self._get_handle_at(event.pos())
         if not self.active_handle:
             event.ignore()
@@ -535,13 +548,14 @@ class SelectionFrameItem(QGraphicsItem):
         self.is_free_transform = False
         self.initial_scene_quad = None
         
+        # After completing action, evaluate what the mouse is hovering over
         handle = self._get_handle_at(event.pos())
         self._hover_on_edit = (handle == 'edit')
         self._hover_on_delete = (handle == 'delete')
         
         if handle != self._current_hover_handle:
             self._current_hover_handle = handle
-            QToolTip.hideText()
+            self.setToolTip("") # Force reset ToolTip on drop
         
         self.update()
         self.setCursor(self.parent_item.cursor())
