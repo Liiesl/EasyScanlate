@@ -15,10 +15,10 @@ class SelectionFrameItem(QGraphicsItem):
     This item is intended to be a child of the item it frames (e.g., TextBoxItem).
     """
 
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.parent_item = parent
-        self.setZValue(10)  # Ensure it's drawn on top of the parent
+    def __init__(self, parent_item=None):
+        super().__init__()
+        self.parent_item = parent_item
+        self.setZValue(10000)
         self.setAcceptHoverEvents(True)
 
         # --- Configuration ---

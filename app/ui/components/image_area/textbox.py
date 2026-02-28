@@ -120,8 +120,30 @@ class TextBoxItem(QGraphicsRectItem):
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setCursor(Qt.SizeAllCursor)
 
+    def setRotation(self, angle):
+        super().setRotation(angle)
+        if hasattr(self, 'selection_frame') and self.selection_frame.isVisible():
+            self._update_selection_frame_transform()
+
     def is_editing(self):
         return self._is_editing
+
+    def _show_selection_frame(self):
+        if not self.selection_frame.scene():
+            self.scene().addItem(self.selection_frame)
+        self.selection_frame.setVisible(True)
+        self._update_selection_frame_transform()
+
+    def _hide_selection_frame(self):
+        self.selection_frame.setVisible(False)
+        if self.selection_frame.scene():
+            self.scene().removeItem(self.selection_frame)
+
+    def _update_selection_frame_transform(self):
+        self.selection_frame.setPos(self.pos())
+        self.selection_frame.setRotation(self.rotation())
+        self.selection_frame.setTransform(self.transform())
+        self.selection_frame.prepareGeometryChange()
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
         if self._is_editing:
@@ -144,8 +166,18 @@ class TextBoxItem(QGraphicsRectItem):
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemSelectedHasChanged:
             selected = bool(value)
-            self.selection_frame.setVisible(selected)
+            if selected:
+                self._show_selection_frame()
+            else:
+                self._hide_selection_frame()
             self.signals.selectedChanged.emit(selected, self.row_number)
+        
+        elif change == QGraphicsItem.ItemSceneChange:
+            scene = value
+            if scene is None:
+                frame_scene = self.selection_frame.scene()
+                if frame_scene:
+                    frame_scene.removeItem(self.selection_frame)
         
         elif change == QGraphicsItem.ItemPositionChange and self.scene():
             # This logic is complex with rotation. For now, we'll keep it simple.
@@ -166,11 +198,17 @@ class TextBoxItem(QGraphicsRectItem):
             
             if new_pos != value and self.original_rect:
                  self.original_rect = self.rect().translated(new_pos)
+            
+            if self.selection_frame.isVisible():
+                self.selection_frame.setPos(new_pos)
+            
             return new_pos
 
         elif change == QGraphicsItem.ItemScenePositionHasChanged:
             if self.original_rect is not None:
                 self.original_rect = self.sceneBoundingRect()
+            if self.selection_frame.isVisible():
+                self._update_selection_frame_transform()
 
         return super().itemChange(change, value)
 
@@ -258,7 +296,9 @@ class TextBoxItem(QGraphicsRectItem):
         self.text_item.setTextWidth(text_rect_width)
         self.adjust_font_size()
         if hasattr(self, 'selection_frame'):
-            self.selection_frame.prepareGeometryChange() # Inform frame to update
+            self.selection_frame.prepareGeometryChange()
+            if self.selection_frame.isVisible():
+                self._update_selection_frame_transform()
 
     def adjust_font_size(self):
         padding = self.padding
@@ -366,6 +406,9 @@ class TextBoxItem(QGraphicsRectItem):
         for child in reversed(self.childItems()):
             child.setParentItem(None)
             if child.scene(): child.scene().removeItem(child)
+        if hasattr(self, 'selection_frame') and self.selection_frame:
+            if self.selection_frame.scene():
+                self.selection_frame.scene().removeItem(self.selection_frame)
         self.text_item = None
         self.selection_frame = None
         if self.scene(): self.scene().removeItem(self)
