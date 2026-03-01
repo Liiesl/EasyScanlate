@@ -27,6 +27,7 @@ class ContextFillHandler(QObject):
         self.is_edit_mode_active = False
         self.active_label = None
         self.selection_paths = []
+        self.selected_inpaint_record_id = None
 
         self._setup_ui()
 
@@ -82,8 +83,7 @@ class ContextFillHandler(QObject):
         if self.is_edit_mode_active: return
         self.scroll_area.cancel_active_modes(exclude_handler=self)
         self.is_edit_mode_active = True
-        print("Enabling Context Fill Edit Mode.")
-
+        
         layout = self.scroll_area.widget().layout()
         if not layout: return
 
@@ -92,15 +92,28 @@ class ContextFillHandler(QObject):
             if isinstance(widget, ResizableImageLabel):
                 widget.set_text_visibility(False)
                 widget.set_inpaint_edit_mode(True)
+                widget.inpaintVisualSelected.connect(self._handle_inpaint_visual_selected)
         
-        # Information message - keep QMessageBox.information for non-error cases
         QMessageBox.information(self.scroll_area, "Edit Context Fill Mode",
                                 "Inpaint areas are highlighted. Click on a highlight to select it, then press Delete or Backspace to remove it.")
+
+    def _handle_inpaint_visual_selected(self, record_id):
+        """Called when an inpaint visual is clicked in edit mode."""
+        self.selected_inpaint_record_id = record_id
+        self.overlay_widget.show_overlay()
+        
+        self.btn_process_fill.setText("Delete Selected")
+        self.btn_process_fill.setEnabled(True)
+        self.btn_reset_selection.setEnabled(False)
 
     def _disable_edit_mode(self):
         if not self.is_edit_mode_active: return
         self.is_edit_mode_active = False
-        print("Disabling Context Fill Edit Mode.")
+        self.selected_inpaint_record_id = None
+
+        # Reset button text
+        self.btn_process_fill.setText("Fill Selected Areas")
+        self.btn_process_fill.setEnabled(False)
 
         layout = self.scroll_area.widget().layout()
         if not layout: return
@@ -108,6 +121,10 @@ class ContextFillHandler(QObject):
         for i in range(layout.count()):
             widget = layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
+                try:
+                    widget.inpaintVisualSelected.disconnect(self._handle_inpaint_visual_selected)
+                except (TypeError, RuntimeError):
+                    pass
                 widget.set_text_visibility(self.scroll_area._text_is_visible)
                 widget.set_inpaint_edit_mode(False)
 
@@ -194,6 +211,11 @@ class ContextFillHandler(QObject):
         Performs inpainting non-destructively by saving only the patched area
         and its metadata to the project model.
         """
+        # Check if we're in edit mode with a selected inpaint
+        if self.is_edit_mode_active and self.selected_inpaint_record_id:
+            self._delete_inpaint_record(self.selected_inpaint_record_id)
+            return
+
         if not self.selection_paths or not self.active_label:
             QMessageBox.warning(self.scroll_area, "Error", "No area selected.")
             self.reset_selection()
@@ -202,6 +224,19 @@ class ContextFillHandler(QObject):
         print(f"Processing non-destructive inpainting for {self.active_label.filename}")
         self._perform_inpainting_logic(self.active_label, self.selection_paths, show_dialogs=True)
         self.reset_selection()
+
+    def _delete_inpaint_record(self, record_id):
+        """Deletes an inpaint record and updates the UI."""
+        success, error_msg = self.model.remove_inpaint_record(record_id)
+        
+        if success:
+            self.selected_inpaint_record_id = None
+            self.btn_process_fill.setText("Fill Selected Areas")
+            self.btn_process_fill.setEnabled(False)
+            
+            QMessageBox.information(self.scroll_area, "Success", "Inpaint area deleted successfully.")
+        else:
+            QMessageBox.warning(self.scroll_area, "Error", f"Failed to delete inpaint: {error_msg}")
 
     def perform_auto_inpainting(self, target_label, bounding_boxes):
         """

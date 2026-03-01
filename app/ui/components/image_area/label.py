@@ -14,6 +14,7 @@ class ResizableImageLabel(QGraphicsView):
     stitching_selection_changed = Signal(object, bool)
     split_indicator_requested = Signal(object, int)
     inpaintRecordDeleted = Signal(str)
+    inpaintVisualSelected = Signal(str)  # signal emitted when inpaint visual is selected in edit mode
 
     # --- MODIFIED: __init__ now accepts a selection_manager ---
     def __init__(self, pixmap, filename, main_window, selection_manager):
@@ -90,7 +91,7 @@ class ResizableImageLabel(QGraphicsView):
             item = QGraphicsRectItem(rect)
             item.setPen(pen)
             item.setBrush(brush)
-            item.setZValue(1) 
+            item.setZValue(2) 
             item.setData(0, record.get('id')) 
             
             item.setFlag(QGraphicsItem.ItemIsSelectable, self._is_inpaint_edit_mode)
@@ -102,9 +103,18 @@ class ResizableImageLabel(QGraphicsView):
     def set_inpaint_edit_mode(self, enabled):
         """Shows or hides the inpaint patch borders and updates internal state."""
         self._is_inpaint_edit_mode = enabled
+        
+        default_pen = QPen(QColor(255, 165, 0), 2, Qt.DashLine)
+        default_pen.setCosmetic(True)
+        
         for item in self.inpaint_visuals:
-            item.setVisible(enabled)
-            item.setFlag(QGraphicsItem.ItemIsSelectable, enabled)
+            if enabled:
+                item.setVisible(True)
+                item.setFlag(QGraphicsItem.ItemIsSelectable, True)
+            else:
+                item.setVisible(False)
+                item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+                item.setPen(default_pen)
 
     def set_inpaints_applied(self, applied: bool):
         for item in self.inpaint_patch_items:
@@ -350,6 +360,28 @@ class ResizableImageLabel(QGraphicsView):
             self._rubber_band.setGeometry(QRect(self._rubber_band_origin, QSize()))
             self._rubber_band.show()
             event.accept(); return
+        
+        # Check if inpaint visual was clicked in edit mode
+        if self._is_inpaint_edit_mode:
+            for item in items_at_pos:
+                if item in self.inpaint_visuals:
+                    record_id = item.data(0)
+                    if record_id:
+                        # Clear previous selection visuals
+                        for visual in self.inpaint_visuals:
+                            pen = visual.pen()
+                            pen.setColor(QColor(255, 165, 0))  # Orange
+                            pen.setWidth(2)
+                            visual.setPen(pen)
+                        
+                        # Highlight selected item
+                        pen = item.pen()
+                        pen.setColor(QColor(0, 255, 0))  # Green for selected
+                        pen.setWidth(4)
+                        item.setPen(pen)
+                        
+                        self.inpaintVisualSelected.emit(record_id)
+                    event.accept(); return
         
         super().mousePressEvent(event)
 
@@ -597,6 +629,7 @@ class ResizableImageLabel(QGraphicsView):
             self.stitching_selection_changed.disconnect()
             self.split_indicator_requested.disconnect()
             self.inpaintRecordDeleted.disconnect()
+            self.inpaintVisualSelected.disconnect()
         except (TypeError, RuntimeError): pass
         if self.scene():
             for tb in self.text_boxes[:]: tb.cleanup()
