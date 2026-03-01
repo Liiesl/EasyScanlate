@@ -159,10 +159,11 @@ class MenuBar(QMenuBar):
             # Edit Context Fill
             edit_context_action = QAction(qta.icon('fa5s.paint-brush', color="white"), "Edit Context Fills", self)
             edit_context_action.setCheckable(True)
-            if hasattr(self.main_window, 'btn_edit_context_fill'):
-                edit_context_action.setChecked(self.main_window.btn_edit_context_fill.isChecked())
-                edit_context_action.toggled.connect(self.main_window.btn_edit_context_fill.setChecked)
-                self.main_window.btn_edit_context_fill.toggled.connect(edit_context_action.setChecked)
+            if hasattr(self.main_window, 'scroll_area') and hasattr(self.main_window.scroll_area, 'context_fill_handler'):
+                handler = self.main_window.scroll_area.context_fill_handler
+                if hasattr(handler, 'edit_mode') and handler.edit_mode:
+                    edit_context_action.setChecked(True)
+                edit_context_action.toggled.connect(handler.toggle_edit_mode)
             process_menu.addAction(edit_context_action)
             
             process_menu.addSeparator()
@@ -213,15 +214,10 @@ class MenuBar(QMenuBar):
                 self.main_window.btn_toggle_text.toggled.connect(toggle_text_action.setChecked)
             view_menu.addAction(toggle_text_action)
 
-            # Inpainting Visibility (Context Fill)
+            # Inpainting Visibility (Context Fill) - now in Context Fill Menu
             toggle_inpainting_action = QAction("Toggle Inpainting Visibility", self)
-            toggle_inpainting_action.setCheckable(True)
-            if hasattr(self.main_window, 'btn_toggle_inpainting'):
-                toggle_inpainting_action.setChecked(self.main_window.btn_toggle_inpainting.isChecked())
-                 # Sync: Menu -> Button
-                toggle_inpainting_action.toggled.connect(self.main_window.btn_toggle_inpainting.setChecked)
-                # Sync: Button -> Menu
-                self.main_window.btn_toggle_inpainting.toggled.connect(toggle_inpainting_action.setChecked)
+            if hasattr(self.main_window, 'scroll_area'):
+                toggle_inpainting_action.triggered.connect(self.main_window.scroll_area.toggle_inpainting_visibility)
             view_menu.addAction(toggle_inpainting_action)
 
             view_menu.addSeparator()

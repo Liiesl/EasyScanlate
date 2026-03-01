@@ -22,19 +22,17 @@
 
 /* 'On' state styling */
 #ToggleButton[state="on"] {
-    background-color: var(--button_checked_bg);
-    border-color: var(--button_checked_border);
+    background-color: rgba(43, 43, 43, 178);
     color: var(--text);
 }
 
 #ToggleButton[state="on"]:hover {
     background-color: var(--button_hover_bg);
-    border-color: var(--accent_checked);
 }
 
 /* 'Off' state styling (default) */
 #ToggleButton[state="off"] {
-    background-color: var(--tertiary);
+    background-color: rgba(43, 43, 43, 228);
     border-color: var(--senary);
 }
 

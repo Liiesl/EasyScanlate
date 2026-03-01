@@ -24,6 +24,7 @@ class ToggleButton(QPushButton):
         """
         super().__init__(off_text, parent)
         self.setCheckable(True)
+        self.setObjectName("ToggleButton")
 
         self._off_text = off_text
         self._on_text = on_text
@@ -33,6 +34,7 @@ class ToggleButton(QPushButton):
         self.toggled.connect(self._update_state)
         # Set initial state
         self._update_state(self.isChecked())
+        self.setStyleSheet(MENUS_STYLES)
 
     def _update_state(self, checked: bool):
         """Internal slot to update the text, icon, and 'state' property for QSS styling."""

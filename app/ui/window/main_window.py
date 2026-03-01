@@ -141,42 +141,13 @@ class MainWindow(QMainWindow):
         self.btn_toggle_text.setState(False) 
         vertical_toolbar_layout.addWidget(self.btn_toggle_text)
 
-        # Toggle Inpainting
-        self.btn_toggle_inpainting = ToggleButton(
-             off_text="", on_text="",
-             off_icon=qta.icon('fa5s.eye', color='white'), # Using eye for "Inpainting is Visible"
-             on_icon=qta.icon('fa5s.eraser', color='white') # Using eraser/slash for "Inpainting is Hidden"
-        )
-        
-        self.btn_toggle_inpainting = ToggleButton(
-            off_text="", on_text="",
-            off_icon=qta.icon('fa5s.eraser', color='white'), # Hidden state
-            on_icon=qta.icon('fa5s.fill', color='white')   # Visible state
-        )
-        self.btn_toggle_inpainting.setFixedSize(40, 40)
-        self.btn_toggle_inpainting.setToolTip("Toggle Context Fill Visibility")
-        self.btn_toggle_inpainting.setState(True) # Default is visible
-        self.btn_toggle_inpainting.toggled.connect(self.scroll_area.toggle_inpainting_visibility)
-
-        vertical_toolbar_layout.addWidget(self.btn_toggle_inpainting)
-
-        # Context Fill (Normal Button)
-        self.btn_context_fill = QPushButton(qta.icon('fa5s.fill-drip', color='white'), "")
-        self.btn_context_fill.setFixedSize(40, 40)
-        self.btn_context_fill.setToolTip("Context Fill Mode")
-        self.btn_context_fill.clicked.connect(self.scroll_area.context_fill_handler.start_mode)
-        vertical_toolbar_layout.addWidget(self.btn_context_fill)
-
-        # Edit Context Fill (Toggle Button)
-        self.btn_edit_context_fill = ToggleButton(
-            off_text="", on_text="",
-            off_icon=qta.icon('fa5s.paint-brush', color='white'),
-            on_icon=qta.icon('fa5s.check-circle', color='white')
-        )
-        self.btn_edit_context_fill.setFixedSize(40, 40)
-        self.btn_edit_context_fill.setToolTip("Edit Context Fills")
-        self.btn_edit_context_fill.clicked.connect(self.scroll_area.context_fill_handler.toggle_edit_mode)
-        vertical_toolbar_layout.addWidget(self.btn_edit_context_fill)
+        # Toggle Inpainting - now part of Context Fill Menu
+        # Context Fill Menu Button (replaces btn_context_fill, btn_edit_context_fill, btn_toggle_inpainting)
+        self.btn_context_fill_menu = QPushButton(qta.icon('fa5s.fill-drip', color='white'), "")
+        self.btn_context_fill_menu.setFixedSize(40, 40)
+        self.btn_context_fill_menu.setToolTip("Context Fill Options")
+        self.btn_context_fill_menu.clicked.connect(self.show_context_fill_menu)
+        vertical_toolbar_layout.addWidget(self.btn_context_fill_menu)
 
         # Split Images
         self.btn_split = QPushButton(QIcon("assets/icons/split.svg"), "")
@@ -367,6 +338,30 @@ class MainWindow(QMainWindow):
         menu.addButton(btn_export)
 
         menu.set_position_and_show(self.btn_import_export_menu, 'bottom right')
+
+    def show_context_fill_menu(self):
+        """Creates, populates, and shows the Context Fill menu."""
+        menu = Menu(self)
+
+        btn_context_fill_mode = QPushButton(qta.icon('fa5s.fill-drip', color='white'), " Context Fill Mode")
+        btn_context_fill_mode.clicked.connect(self.scroll_area.context_fill_handler.start_mode)
+        menu.addButton(btn_context_fill_mode)
+
+        btn_edit_context_fill = QPushButton(qta.icon('fa5s.paint-brush', color='white'), " Edit Context Fills")
+        btn_edit_context_fill.clicked.connect(self.scroll_area.context_fill_handler.toggle_edit_mode)
+        menu.addButton(btn_edit_context_fill)
+
+        btn_toggle_fill_visibility = ToggleButton(
+            off_text=" Show Fills", on_text=" Hide Fills",
+            off_icon=qta.icon('fa5s.eye', color='white'),
+            on_icon=qta.icon('fa5s.eye-slash', color='white')
+        )
+        btn_toggle_fill_visibility.setToolTip("Toggle Fill Visibility")
+        btn_toggle_fill_visibility.setState(True)
+        btn_toggle_fill_visibility.toggled.connect(self.scroll_area.toggle_inpainting_visibility)
+        menu.addButton(btn_toggle_fill_visibility, close_on_click=False)
+
+        menu.set_position_and_show(self.btn_context_fill_menu, 'right')
 
     def update_profile_selector(self):
         """Syncs the profile dropdown with the profiles from the model."""
