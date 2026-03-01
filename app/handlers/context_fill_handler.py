@@ -60,6 +60,8 @@ class ContextFillHandler(QObject):
     def start_mode(self):
         """Activates the context fill mode."""
         if self.is_active: return
+        if self.is_edit_mode_active:
+            self._disable_edit_mode()
         self.scroll_area.cancel_active_modes(exclude_handler=self)
         self.is_active = True
         
@@ -81,6 +83,8 @@ class ContextFillHandler(QObject):
 
     def _enable_edit_mode(self):
         if self.is_edit_mode_active: return
+        if self.is_active:
+            self.cancel_mode()
         self.scroll_area.cancel_active_modes(exclude_handler=self)
         self.is_edit_mode_active = True
         
@@ -110,6 +114,8 @@ class ContextFillHandler(QObject):
         if not self.is_edit_mode_active: return
         self.is_edit_mode_active = False
         self.selected_inpaint_record_id = None
+
+        self.overlay_widget.hide_overlay()
 
         # Reset button text
         self.btn_process_fill.setText("Fill Selected Areas")

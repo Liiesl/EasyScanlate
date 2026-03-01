@@ -161,7 +161,7 @@ class MenuBar(QMenuBar):
             edit_context_action.setCheckable(True)
             if hasattr(self.main_window, 'scroll_area') and hasattr(self.main_window.scroll_area, 'context_fill_handler'):
                 handler = self.main_window.scroll_area.context_fill_handler
-                if hasattr(handler, 'edit_mode') and handler.edit_mode:
+                if hasattr(handler, 'is_edit_mode_active') and handler.is_edit_mode_active:
                     edit_context_action.setChecked(True)
                 edit_context_action.toggled.connect(handler.toggle_edit_mode)
             process_menu.addAction(edit_context_action)
