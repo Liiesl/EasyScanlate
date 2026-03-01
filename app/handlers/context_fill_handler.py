@@ -241,25 +241,71 @@ class ContextFillHandler(QObject):
     def perform_auto_inpainting(self, target_label, bounding_boxes):
         """
         Performs inpainting based on a list of bounding boxes from OCR.
-        This is a non-interactive, programmatic version of process_inpainting.
+        Groups nearby boxes together to avoid creating one giant inpaint.
         """
         if not target_label or not bounding_boxes:
             return
 
-        paths = []
-        for box in bounding_boxes:
-            path = QPainterPath()
-            try:
-                poly = QPolygonF([QPointF(p[0], p[1]) for p in box])
-                path.addPolygon(poly)
-                paths.append(path)
-            except (TypeError, IndexError):
+        groups = self._group_bounding_boxes_by_proximity(bounding_boxes)
+        
+        for group in groups:
+            paths = []
+            for box in group:
+                path = QPainterPath()
+                try:
+                    poly = QPolygonF([QPointF(p[0], p[1]) for p in box])
+                    path.addPolygon(poly)
+                    paths.append(path)
+                except (TypeError, IndexError):
+                    continue
+
+            if paths:
+                self._perform_inpainting_logic(target_label, paths, show_dialogs=False)
+
+    def _group_bounding_boxes_by_proximity(self, bounding_boxes):
+        """
+        Groups bounding boxes that are within PROXIMITY_MARGIN of each other.
+        Returns a list of groups, where each group is a list of boxes.
+        """
+        PROXIMITY_MARGIN = 20
+        
+        if not bounding_boxes:
+            return []
+
+        def get_bounds(box):
+            xs = [p[0] for p in box]
+            ys = [p[1] for p in box]
+            return min(xs), min(ys), max(xs), max(ys)
+
+        def boxes_overlap_or_close(box1, box2, margin):
+            x1_min, y1_min, x1_max, y1_max = get_bounds(box1)
+            x2_min, y2_min, x2_max, y2_max = get_bounds(box2)
+            
+            expanded1 = x1_min - margin, y1_min - margin, x1_max + margin, y1_max + margin
+            
+            return not (x2_max < expanded1[0] or x2_min > expanded1[2] or
+                        y2_max < expanded1[1] or y2_min > expanded1[3])
+
+        groups = []
+        assigned = set()
+
+        for i, box in enumerate(bounding_boxes):
+            if i in assigned:
                 continue
+            
+            new_group = [box]
+            assigned.add(i)
 
-        if not paths:
-            return
+            for j, other_box in enumerate(bounding_boxes):
+                if j in assigned:
+                    continue
+                if boxes_overlap_or_close(box, other_box, PROXIMITY_MARGIN):
+                    new_group.append(other_box)
+                    assigned.add(j)
 
-        self._perform_inpainting_logic(target_label, paths, show_dialogs=False)
+            groups.append(new_group)
+
+        return groups
         
     def _perform_inpainting_logic(self, target_label, paths, show_dialogs=True):
         """
