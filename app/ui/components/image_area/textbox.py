@@ -263,9 +263,10 @@ class TextBoxItem(QGraphicsRectItem):
         elif change == QGraphicsItem.ItemSceneChange:
             scene = value
             if scene is None:
-                frame_scene = self.selection_frame.scene()
-                if frame_scene:
-                    frame_scene.removeItem(self.selection_frame)
+                if self.selection_frame:
+                    frame_scene = self.selection_frame.scene()
+                    if frame_scene:
+                        frame_scene.removeItem(self.selection_frame)
         
         elif change == QGraphicsItem.ItemPositionChange and self.scene():
             scene_rect = self.scene().sceneRect()
@@ -283,7 +284,7 @@ class TextBoxItem(QGraphicsRectItem):
             if new_pos != value and self.original_rect:
                  self.original_rect = self.rect().translated(new_pos)
             
-            if self.selection_frame.isVisible():
+            if self.selection_frame and self.selection_frame.isVisible():
                 self.selection_frame.setPos(new_pos)
             
             return new_pos
@@ -291,7 +292,7 @@ class TextBoxItem(QGraphicsRectItem):
         elif change == QGraphicsItem.ItemScenePositionHasChanged:
             if self.original_rect is not None:
                 self.original_rect = self.sceneBoundingRect()
-            if self.selection_frame.isVisible():
+            if self.selection_frame and self.selection_frame.isVisible():
                 self._update_selection_frame_transform()
 
         return super().itemChange(change, value)
