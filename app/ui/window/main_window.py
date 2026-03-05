@@ -1,7 +1,7 @@
 # main_window.py - ocr functionality disabled
 
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSizePolicy, QCheckBox, QPushButton,
-                             QMessageBox, QSplitter, QComboBox)
+                             QMessageBox, QSplitter)
 import traceback
 import sys
 import json
@@ -12,9 +12,8 @@ import qtawesome as qta
 from app.utils.file_io import export_ocr_results, import_translation_file, export_rendered_images
 from app.ui.components.image_area.label import ResizableImageLabel
 from app.ui.components.image_area.scroll_container import CustomScrollArea
-from app.ui.components.results_tables import ResultsWidget
+from app.ui.components.translation_panel import TranslationPanel
 from app.ui.components.textbox_style.panel import TextBoxStylePanel
-from app.ui.components.translation_chat import TranslationChatWidget
 from app.ui.widgets.menu_bar import MenuBar, TitleBarState
 from app.ui.window.chrome import CustomTitleBar, WindowResizer
 from app.ui.widgets.progress_bar import CustomProgressBar
@@ -40,14 +39,12 @@ class MainWindow(QMainWindow):
         self.model.project_loaded.connect(self.on_project_loaded)
         self.model.project_load_failed.connect(self.on_project_load_failed)
         self.model.model_updated.connect(self.on_model_updated)
-        self.model.profiles_updated.connect(self.update_profile_selector)
         self.model.profiles_updated.connect(self._on_profile_list_changed)
         self.model.profile_created_for_user_edit.connect(self._on_profile_created_for_user_edit)
 
         self.selection_manager = SelectionManager(self.model, self)
         self.selection_manager.selection_changed.connect(self.on_selection_changed)
 
-        self.combine_action = QAction("Combine Rows", self)
         self.find_action = QAction("Find/Replace", self)
         self.find_action.triggered.connect(self.toggle_find_widget)
         self.addAction(self.find_action)
@@ -56,7 +53,6 @@ class MainWindow(QMainWindow):
         self.language_map = { "Korean": "ko", "Chinese": "ch_sim", "Japanese": "ja" }
 
         self.init_ui()
-        self.combine_action.triggered.connect(self.results_widget.combine_selected_rows)
 
         self.scroll_content = QWidget()
         self.reader = None 
@@ -167,8 +163,6 @@ class MainWindow(QMainWindow):
         vertical_toolbar_layout.addStretch()
 
         # Rest of the UI setup continues...
-        self.update_profile_selector()
-
         left_panel = QVBoxLayout()
         left_panel.setContentsMargins(10, 10, 5, 10)
         left_panel.setSpacing(20)
@@ -214,20 +208,6 @@ class MainWindow(QMainWindow):
         file_button_layout.setAlignment(Qt.AlignRight)
         file_button_layout.setSpacing(20)
 
-        self.profile_selector = QComboBox(self)
-        self.profile_selector.setFixedWidth(220)
-        self.profile_selector.setToolTip("Switch between different text profiles (e.g., Original, User Edits, Translations).")
-        self.profile_selector.activated.connect(self.on_profile_selected)
-        file_button_layout.addWidget(self.profile_selector)
-
-        # Chat toggle button (between profile selector and action menu)
-        self.btn_chat_toggle = QPushButton(qta.icon('fa5s.comments', color='white'), "")
-        self.btn_chat_toggle.setFixedSize(40, 40)
-        self.btn_chat_toggle.setToolTip("Toggle Chat Widget")
-        self.btn_chat_toggle.setCheckable(True)
-        self.btn_chat_toggle.clicked.connect(self.toggle_chat)
-        file_button_layout.addWidget(self.btn_chat_toggle)
-
         self.btn_import_export_menu = QPushButton(qta.icon('fa5s.bars', color='white'), "")
         self.btn_import_export_menu.setFixedWidth(60)
         self.btn_import_export_menu.setToolTip("Open Import/Export Menu")
@@ -236,51 +216,41 @@ class MainWindow(QMainWindow):
         button_layout.addLayout(file_button_layout)
         right_panel.addLayout(button_layout)
 
-        # Create results widget first
-        self.results_widget = ResultsWidget(self, self.combine_action, self.find_action, self.selection_manager)
-        
         # Style panel - always visible above results with resizable splitter
         self.style_panel = TextBoxStylePanel(default_style=DEFAULT_TEXT_STYLE)
         self.style_panel.setMinimumHeight(70)
         self.style_panel.setMaximumHeight(480)
         
+        # Create unified translation panel (replaces ResultsWidget + TranslationChatWidget)
+        self.translation_panel = TranslationPanel()
+        self.translation_panel.text_changed.connect(self.update_ocr_text)
+        self.translation_panel.row_deleted.connect(self.delete_row)
+        self.translation_panel.row_selected.connect(self._on_panel_row_selected)
+        self.translation_panel.translation_complete.connect(self.handle_translation_completed)
+        self.translation_panel.profile_changed.connect(self.switch_active_profile)
+        
         # Create vertical splitter for resizable layout
         right_splitter = QSplitter(Qt.Vertical)
         right_splitter.addWidget(self.style_panel)
-        right_splitter.addWidget(self.results_widget)
+        right_splitter.addWidget(self.translation_panel)
         right_splitter.setStretchFactor(0, 0)
         right_splitter.setStretchFactor(1, 1)
         right_splitter.setHandleWidth(10)
-
+        
         # Find/replace widget (temporarily disabled)
         # self.find_replace_widget = FindReplaceWidget(self)
         # right_panel.addWidget(self.find_replace_widget)
         # self.find_replace_widget.hide()
         self.style_panel_size = None
-
-        # Create translation chat component
-        self.translation_chat = TranslationChatWidget()
-        self.translation_chat.translation_complete.connect(self.handle_translation_completed)
-        self.translation_chat.hide()  # Hide by default
-
-        # Initialize translation chat with current data
-        self._update_translation_chat_data()
         
-        # Create horizontal splitter for results/style panel and translation chat
-        content_splitter = QSplitter(Qt.Horizontal)
-        content_splitter.addWidget(right_splitter)
-        content_splitter.addWidget(self.translation_chat)
-        content_splitter.setStretchFactor(0, 2)
-        content_splitter.setStretchFactor(1, 1)
-        content_splitter.setHandleWidth(5)
-        right_panel.addWidget(content_splitter, 1)
+        right_panel.addWidget(right_splitter, 1)
 
         right_widget = QWidget()
         right_widget.setObjectName("RightWidget")
         right_widget.setLayout(right_panel)
 
         # === APPLY STYLES ===
-        for w in [self.style_panel, self.results_widget, self.translation_chat]:
+        for w in [self.style_panel, self.translation_panel]:
             w.setObjectName("TransparentPanel")
             w.setAttribute(Qt.WA_StyledBackground, True)
         
@@ -319,11 +289,6 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'title_bar'):
                 self.title_bar.update_maximize_icon()
         super().changeEvent(event)
-
-    def on_profile_selected(self, index):
-        profile_name = self.profile_selector.itemText(index)
-        if profile_name:
-            self.switch_active_profile(profile_name)
 
     def show_import_export_menu(self):
         """Creates, populates, and shows the Import/Export menu."""
@@ -364,35 +329,18 @@ class MainWindow(QMainWindow):
         menu.set_position_and_show(self.btn_context_fill_menu, 'right')
 
     def update_profile_selector(self):
-        """Syncs the profile dropdown with the profiles from the model."""
-        if not hasattr(self, 'profile_selector'): return
-        self.profile_selector.blockSignals(True)
-        self.profile_selector.clear()
-        profiles_list = sorted([p for p in self.model.profiles.keys() if p != "Original"])
-        profiles_list.insert(0, "Original")
-        self.profile_selector.addItems(profiles_list)
-        if self.model.active_profile_name in self.model.profiles:
-            index = self.profile_selector.findText(self.model.active_profile_name)
-            if index != -1: self.profile_selector.setCurrentIndex(index)
-        self.profile_selector.blockSignals(False)
-        
+        """Syncs profile UIs (menu bar and translation panel) with the model."""
         # Sync Menu Bar profiles if available
         if hasattr(self, 'title_bar') and hasattr(self.title_bar, 'menu_bar'):
              self.title_bar.menu_bar.update_profiles_menu()
         
-        # Also update translation chat profiles
-        self._update_translation_chat_data()
+        # Also update translation panel profiles
+        self._update_translation_panel_data()
 
     def switch_active_profile(self, profile_name):
         """Tells the model to switch the active profile."""
         if profile_name and profile_name in self.model.profiles and profile_name != self.model.active_profile_name:
             print(f"Switching to active profile: {profile_name}")
-            
-            # Set flag to prevent textChanged events from deleting translations during profile switch
-            # This is crucial because clearing highlighters triggers textChanged events
-            if hasattr(self, 'results_widget') and self.results_widget:
-                self.results_widget._is_updating_views = True
-            
             self.model.active_profile_name = profile_name
             self._on_profile_changed()
             self.on_model_updated(None)
@@ -416,14 +364,9 @@ class MainWindow(QMainWindow):
     def toggle_find_widget(self):
         pass  # Find/replace disabled
 
-    def toggle_chat(self):
-        """Toggle the visibility of the translation chat widget."""
-        if self.translation_chat.isVisible():
-            self.translation_chat.hide()
-            self.btn_chat_toggle.setChecked(False)
-        else:
-            self.translation_chat.show()
-            self.btn_chat_toggle.setChecked(True)
+    def _on_panel_row_selected(self, row_number):
+        """Handle row selection from translation panel."""
+        self.selection_manager.select(row_number, self.translation_panel)
 
     def update_find_shortcut(self):
         shortcut = self.settings.value("find_shortcut", "Ctrl+F")
@@ -471,7 +414,7 @@ class MainWindow(QMainWindow):
 
         self.update_profile_selector()
         self.on_model_updated(None)
-        self._update_translation_chat_data()
+        self._update_translation_panel_data()
         print(f"Project '{self.model.project_name}' loaded and UI populated.")
     
     def handle_inpaint_record_deleted(self, record_id):
@@ -514,7 +457,7 @@ class MainWindow(QMainWindow):
                         break
 
         self.update_all_views(affected_filenames)
-        self._update_translation_chat_data()
+        self._update_translation_panel_data()
 
     def get_display_text(self, result):
         """ DELEGATED: Asks the model for the correct text to display. """
@@ -528,6 +471,10 @@ class MainWindow(QMainWindow):
         if row_number is not None:
             current_style = self.get_style_for_row(row_number)
             self.style_panel.update_style_panel(current_style)
+            # Update translation panel active row (if selection came from elsewhere)
+            if source is not self.translation_panel and hasattr(self, 'translation_panel'):
+                self.translation_panel.set_active_row(row_number)
+                self.translation_panel.scroll_to_row(row_number)
         else:
             # When no textbox is selected, reset to default style
             self.style_panel.update_style_panel(DEFAULT_TEXT_STYLE)
@@ -636,9 +583,12 @@ class MainWindow(QMainWindow):
     def update_all_views(self, affected_filenames=None):
         """
         Refreshes all views that depend on the model's data, including the
-        results table and the text boxes rendered on the images.
+        translation panel and the text boxes rendered on the images.
         """
-        self.results_widget.update_views()
+        # Update translation panel with current OCR results
+        if hasattr(self, 'translation_panel'):
+            self.translation_panel.populate(self.model.ocr_results, self.get_display_text)
+            self.translation_panel.set_profiles(list(self.model.profiles.keys()))
         grouped_results = {}
         for result in self.model.ocr_results:
             filename = result.get('filename')
@@ -811,10 +761,9 @@ class MainWindow(QMainWindow):
             result_data, _ = self.model._find_result_by_row_number(row_number)
             if result_data:
                 actual_saved_text = self.model.get_display_text(result_data)
-                # Always update results widget with actual saved text
-                if hasattr(self, 'results_widget') and self.results_widget:
-                    self.results_widget._update_simple_view_text_if_visible(row_number, actual_saved_text)
-                    self.results_widget._update_table_cell_if_visible(row_number, 0, actual_saved_text)
+                # Update translation panel with actual saved text
+                if hasattr(self, 'translation_panel'):
+                    self.translation_panel.update_row_text(row_number, actual_saved_text)
                 self.update_image_text_box(row_number, actual_saved_text)
             else:
                 self.update_image_text_box(row_number, new_text)
@@ -854,9 +803,6 @@ class MainWindow(QMainWindow):
         else:
             ErrorDialog.critical(self, "Error", message)
     
-    def toggle_advanced_mode(self, state):
-        self.results_widget.toggle_advanced_mode(state)
-
     def delete_row(self, row_number_to_delete):
         show_warning = self.settings.value("show_delete_warning", "true") == "true"
         proceed = True
@@ -884,11 +830,6 @@ class MainWindow(QMainWindow):
 
     def handle_translation_completed(self, profile_name, translated_data):
         try:
-            # Set flag to prevent textChanged events from deleting translations during profile switch
-            # add_profile switches to the new profile and emits signals that clear highlighters
-            if hasattr(self, 'results_widget') and self.results_widget:
-                self.results_widget._is_updating_views = True
-            
             self.model.add_profile(profile_name, translated_data)
             # Success message - keep QMessageBox.information for non-error cases
             QMessageBox.information(self, "Success", 
@@ -904,8 +845,6 @@ class MainWindow(QMainWindow):
         import_translation_file(self)
 
     def update_shortcut(self):
-        combine_shortcut = self.settings.value("combine_shortcut", "Ctrl+G")
-        self.combine_action.setShortcut(QKeySequence(combine_shortcut))
         self.update_find_shortcut()
 
     def export_manhwa(self):
@@ -914,19 +853,11 @@ class MainWindow(QMainWindow):
     def export_ocr_results(self):
         export_ocr_results(self)
 
-    def _update_translation_chat_data(self):
-        """Update the translation chat widget with current OCR results and profiles."""
-        if hasattr(self, 'translation_chat'):
-            api_key = self.settings.value("gemini_api_key", "")
-            model_name = self.settings.value("gemini_model", "gemini-1.5-flash-latest")
-            
-            # Pass current OCR results and profiles to the translation chat
-            self.translation_chat.set_data(
-                api_key=api_key,
-                model_name=model_name,
-                ocr_results=self.model.ocr_results,
-                profiles=list(self.model.profiles.keys())
-            )
+    def _update_translation_panel_data(self):
+        """Update the translation panel with current OCR results and profiles."""
+        if hasattr(self, 'translation_panel'):
+            self.translation_panel.populate(self.model.ocr_results, self.get_display_text)
+            self.translation_panel.set_profiles(list(self.model.profiles.keys()))
 
     def save_project(self):
         result_message = self.model.save_project()
@@ -937,6 +868,10 @@ class MainWindow(QMainWindow):
             ErrorDialog.critical(self, "Save Error", result_message)
 
     def closeEvent(self, event):
+        # Cleanup translation panel
+        if hasattr(self, 'translation_panel'):
+            self.translation_panel.cleanup()
+        
         if hasattr(self.model, 'temp_dir') and self.model.temp_dir and os.path.exists(self.model.temp_dir):
             try:
                 import shutil

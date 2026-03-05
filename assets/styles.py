@@ -161,3 +161,5 @@ SCROLL_OVERLAY_STYLES = _load_stylesheet("scroll_overlay.qss")
 HANDLER_OVERLAY_STYLES = _load_stylesheet("handler_overlay.qss")
 
 MENUS_STYLES = _load_stylesheet("menus.qss")
+
+TRANSLATION_PANEL_STYLES = _load_stylesheet("translation_panel.qss")

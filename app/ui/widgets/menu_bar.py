@@ -187,14 +187,7 @@ class MenuBar(QMenuBar):
             view_menu.setStyleSheet(menu_style)
 
             # Toggle Chat
-            chat_action = QAction("Translation Chat", self)
-            chat_action.setCheckable(True)
-            if hasattr(self.main_window, 'translation_chat'):
-                chat_action.setChecked(self.main_window.translation_chat.isVisible())
-            chat_action.triggered.connect(self.main_window.toggle_chat)
-            view_menu.addAction(chat_action)
-            
-            view_menu.addSeparator()
+
 
             # Profiles Submenu
             self.profiles_menu = view_menu.addMenu("Profiles")
@@ -226,11 +219,12 @@ class MenuBar(QMenuBar):
             advanced_action = QAction("(Legacy) Advanced Mode", self)
             advanced_action.setCheckable(True)
             # Check state against results_widget if possible, else default false
-            if hasattr(self.main_window, 'results_widget'):
-                 advanced_action.setChecked(self.main_window.results_widget.is_advanced_mode)
+            # if hasattr(self.main_window, 'results_widget'):
+            #      advanced_action.setChecked(self.main_window.results_widget.is_advanced_mode)
             
-            # Connect directly to toggle_advanced_mode
-            advanced_action.toggled.connect(self.main_window.toggle_advanced_mode)
+            # Connect directly to toggle_advanced_mode - DISABLED for TranslationPanel
+            # advanced_action.toggled.connect(self.main_window.toggle_advanced_mode)
+            advanced_action.setEnabled(False)
             view_menu.addAction(advanced_action)
             
     def update_profiles_menu(self):

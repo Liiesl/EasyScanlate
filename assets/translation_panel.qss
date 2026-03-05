@@ -1,0 +1,244 @@
+/* Translation Panel Styling */
+
+#TranslationPanel {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+/* Header */
+#TranslationPanelHeader {
+    background-color: var(--primary);
+    border-bottom: 1px solid var(--border);
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+}
+
+#TranslationPanelTitle {
+    color: var(--text);
+    font-weight: 700;
+    font-size: 14px;
+}
+
+#TranslationPanelHeaderLabel {
+    color: var(--octenary);
+    font-size: 11px;
+    font-weight: 600;
+    margin-right: 4px;
+}
+
+#TranslationPanelProfileDropdown {
+    background-color: var(--input_bg);
+    color: var(--text_secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    min-width: 100px;
+}
+#TranslationPanelProfileDropdown:focus {
+    border-color: var(--quinary);
+}
+#TranslationPanelProfileDropdown::drop-down {
+    border: none;
+    width: 20px;
+}
+#TranslationPanelProfileDropdown QAbstractItemView {
+    background-color: var(--input_bg);
+    color: var(--text_secondary);
+    border: 1px solid var(--border);
+    selection-background-color: var(--secondary);
+}
+
+/* Scroll Area */
+#TranslationPanelScroll, #TranslationPanelCardsContainer {
+    background-color: var(--surface);
+    border: none;
+}
+
+/* Translation Card */
+#TranslationCard {
+    background-color: var(--primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+#TranslationCard:hover {
+    background-color: var(--secondary);
+    border: 1px solid var(--quinary);
+}
+
+#TranslationCard[active="true"] {
+    background-color: #1a2636;
+    border: 1px solid var(--accent);
+}
+
+/* ID Badge */
+#TranslationCardIdBadge {
+    background-color: var(--border);
+    color: var(--octenary);
+    border-radius: 12px;
+    min-width: 24px;
+    min-height: 24px;
+    max-width: 24px;
+    max-height: 24px;
+    font-size: 11px;
+    font-weight: bold;
+}
+#TranslationCardIdBadge[active="true"] {
+    background-color: var(--accent);
+    color: var(--text);
+}
+
+/* Language Label */
+#TranslationCardLangLabel {
+    color: var(--quinary);
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    padding-left: 2px;
+}
+
+/* Text Inputs */
+#TranslationCardSourceInput, #TranslationCardTargetInput {
+    background-color: var(--input_bg);
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 6px;
+    color: var(--text);
+    font-size: 13px;
+}
+
+#TranslationCardSourceInput {
+    color: var(--text_secondary);
+    background-color: var(--tertiary);
+}
+
+#TranslationCardTargetInput {
+    color: var(--text);
+}
+
+#TranslationCardTargetInput:hover {
+    background-color: var(--secondary);
+}
+
+#TranslationCardTargetInput:focus {
+    background-color: var(--input_bg);
+    border: 1px solid var(--accent);
+}
+
+/* Action Buttons */
+#TranslationCardRetranslateBtn, #TranslationCardDeleteBtn {
+    background-color: transparent;
+    border-radius: 6px;
+    padding: 4px;
+}
+
+#TranslationCardRetranslateBtn:hover {
+    background-color: var(--secondary);
+}
+
+#TranslationCardDeleteBtn:hover {
+    background-color: var(--secondary);
+}
+
+/* Footer */
+#TranslationPanelFooter {
+    background-color: var(--primary);
+    border-top: 1px solid var(--border);
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+}
+
+#TranslationPanelDropdownLabel {
+    color: var(--octenary);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    padding-left: 2px;
+    margin-bottom: -4px;
+}
+
+/* Standard controls in footer */
+#TranslationPanel QComboBox {
+    background-color: var(--input_bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 12px;
+}
+#TranslationPanel QComboBox:focus {
+    border-color: var(--quinary);
+}
+#TranslationPanel QComboBox::drop-down {
+    border: none;
+    width: 20px;
+}
+#TranslationPanel QComboBox QAbstractItemView {
+    background-color: var(--input_bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    selection-background-color: var(--secondary);
+}
+
+#TranslationPanel QCheckBox {
+    color: var(--text_secondary);
+}
+#TranslationPanel QCheckBox:hover {
+    color: var(--text);
+}
+#TranslationPanel QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    background-color: var(--input_bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+#TranslationPanel QCheckBox::indicator:checked {
+    background-color: var(--accent);
+    border-color: var(--accent);
+}
+
+#TranslationPanelBatchBtn {
+    background-color: var(--accent);
+    color: var(--text);
+    border: none;
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-weight: 600;
+}
+#TranslationPanelBatchBtn:hover {
+    background-color: var(--accent_checked);
+}
+
+/* Scrollbar */
+QScrollBar:vertical {
+    border: none;
+    background: transparent;
+    width: 10px;
+    margin: 0px;
+}
+QScrollBar::handle:vertical {
+    background: #121212;
+    min-height: 30px;
+    border-radius: 5px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #1a1a1a;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+QScrollBar::handle:vertical {
+    background: #121212;
+    min-height: 30px;
+    border-radius: 5px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #1a1a1a;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
