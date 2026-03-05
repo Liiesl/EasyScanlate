@@ -2,7 +2,7 @@
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QTextEdit,
-    QScrollArea, QComboBox, QCheckBox, QPushButton, QSizePolicy, QApplication
+    QScrollArea, QComboBox, QPushButton, QSizePolicy, QApplication
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QThread
 from PySide6.QtCore import QSettings
@@ -309,23 +309,15 @@ class TranslationPanel(QFrame):
         dropdowns_row.addLayout(provider_col, 2)
         dropdowns_row.addLayout(model_col, 3)
         dropdowns_row.addLayout(lang_col, 2)
+        dropdowns_row.addStretch()
 
-        # Footer Actions Row
-        actions_row = QHBoxLayout()
-        self.check_empty_only = QCheckBox("Retranslate empty only")
-        self.check_empty_only.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        self.batch_btn = QPushButton(qta.icon('fa5s.paper-plane', color='#ffffff'), " Batch Translate")
+        self.batch_btn = QPushButton(qta.icon('fa5s.paper-plane', color='#ffffff'), "")
         self.batch_btn.setObjectName("TranslationPanelBatchBtn")
         self.batch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.batch_btn.clicked.connect(self._on_batch_translate)
-
-        actions_row.addWidget(self.check_empty_only)
-        actions_row.addStretch()
-        actions_row.addWidget(self.batch_btn)
+        dropdowns_row.addWidget(self.batch_btn)
 
         footer_layout.addLayout(dropdowns_row)
-        footer_layout.addLayout(actions_row)
 
         # Assemble
         layout.addWidget(header)
@@ -500,26 +492,7 @@ Text: {source_text}"""
         user_prompt = f"Translate the Korean text to {target_lang}, keep everything else. Respond only with the file."
 
         try:
-            # Determine which rows to translate
-            retranslate_empty_only = self.check_empty_only.isChecked()
-
-            if retranslate_empty_only:
-                # Only translate rows with empty target text
-                selected_items = []
-                for r in self.ocr_results:
-                    if not r.get('is_deleted', False):
-                        row_num = str(r.get('row_number', ''))
-                        filename = r.get('filename', '')
-                        text = self.get_display_text_func(r) if self.get_display_text_func else r.get('text', '')
-                        if not text or text.strip() == '':
-                            selected_items.append((filename, row_num))
-
-                if selected_items:
-                    content = generate_retranslate_content(self.ocr_results, "Original", selected_items)
-                else:
-                    content = generate_for_translate_content(self.ocr_results, "Original")
-            else:
-                content = generate_for_translate_content(self.ocr_results, "Original")
+            content = generate_for_translate_content(self.ocr_results, "Original")
 
             if not content.strip() or '<translations>' not in content:
                 ErrorDialog.critical(self, "No Content", "There is no text content to translate.")
@@ -537,8 +510,13 @@ Text: {source_text}"""
 
         # Clean up previous thread
         if self.translation_thread and self.translation_thread.isRunning():
+            self.translation_thread.translation_finished.disconnect()
+            self.translation_thread.translation_failed.disconnect()
             self.translation_thread.stop()
             self.translation_thread.wait(1000)
+            if self.translation_thread.isRunning():
+                # Thread didn't stop, but we've disconnected signals so it's safer
+                pass
 
         # Create and start thread
         self.translation_thread = TranslationThread(api_key, prompt, model_name, provider=provider, parent=self)
