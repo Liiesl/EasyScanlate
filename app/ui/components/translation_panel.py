@@ -5,7 +5,8 @@ from PySide6.QtWidgets import (
     QScrollArea, QComboBox, QPushButton, QSizePolicy, QApplication
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QThread
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, QPropertyAnimation, QEasingCurve, Property
+from PySide6.QtGui import QPainter, QLinearGradient, QColor
 import qtawesome as qta
 import traceback
 
@@ -16,6 +17,79 @@ from app.core.translations import (
 from app.ui.dialogs.error_dialog import ErrorDialog
 from app.ui.dialogs.settings_dialog import GEMINI_MODELS_WITH_INFO, MISTRAL_MODELS_WITH_INFO
 from assets.styles import TRANSLATION_PANEL_STYLES
+
+
+class TranslationProgressIndicator(QWidget):
+    """Indeterminate sliding progress indicator for translation status."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("TranslationProgressIndicator")
+        self.setFixedHeight(3)
+        self._position = 0.0
+        self._animation = None
+        self._is_animating = False
+
+    def _get_position(self):
+        return self._position
+
+    def _set_position(self, value):
+        self._position = value
+        self.update()
+
+    _position_prop = Property(float, _get_position, _set_position)
+
+    def paintEvent(self, event):
+        if not self._is_animating:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        width = self.width()
+        chunk_width = width * 0.3
+
+        gradient = QLinearGradient(0, 0, width, 0)
+        gradient.setColorAt(0, QColor(0, 122, 204, 0))
+        gradient.setColorAt(max(0, self._position - 0.15), QColor(0, 122, 204, 0))
+        gradient.setColorAt(self._position, QColor(0, 122, 204, 255))
+        gradient.setColorAt(min(1, self._position + 0.15), QColor(0, 122, 204, 255))
+        gradient.setColorAt(1, QColor(0, 122, 204, 0))
+
+        painter.fillRect(self.rect(), gradient)
+
+    def start_animation(self):
+        if self._is_animating:
+            return
+        self._is_animating = True
+        self.show()
+
+        self._animation = QPropertyAnimation(self, b"_position_prop")
+        self._animation.setDuration(1500)
+        self._animation.setStartValue(0.0)
+        self._animation.setEndValue(1.0)
+        self._animation.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self._animation.finished.connect(self._on_animation_loop)
+        self._animation.start()
+
+    def _on_animation_loop(self):
+        if self._is_animating:
+            self._animation.setDirection(
+                QPropertyAnimation.Direction.Forward
+                if self._animation.direction() == QPropertyAnimation.Direction.Backward
+                else QPropertyAnimation.Direction.Backward
+            )
+            self._animation.start()
+
+    def stop_animation(self):
+        self._is_animating = False
+        if self._animation:
+            self._animation.stop()
+            self._animation.deleteLater()
+            self._animation = None
+        self.hide()
+        self._position = 0.0
+        self.update()
 
 
 class FocusableTextEdit(QTextEdit):
@@ -267,6 +341,10 @@ class TranslationPanel(QFrame):
         footer_layout.setContentsMargins(20, 15, 20, 20)
         footer_layout.setSpacing(12)
 
+        # Progress indicator (between scroll area and footer)
+        self.progress_indicator = TranslationProgressIndicator()
+        self.progress_indicator.hide()
+
         # Dropdowns Row
         dropdowns_row = QHBoxLayout()
         dropdowns_row.setSpacing(8)
@@ -323,6 +401,7 @@ class TranslationPanel(QFrame):
         # Assemble
         layout.addWidget(header)
         layout.addWidget(self.scroll_area, 1)
+        layout.addWidget(self.progress_indicator)
         layout.addWidget(footer)
 
     def _populate_model_combo(self, provider: str):
@@ -508,6 +587,7 @@ Text: {source_text}"""
     def _start_translation_thread(self, api_key: str, prompt: str, model_name: str, provider: str, is_single: bool):
         """Start the translation thread."""
         self.batch_btn.setEnabled(False)
+        self.progress_indicator.start_animation()
 
         # Clean up previous thread
         if self.translation_thread and self.translation_thread.isRunning():
@@ -531,6 +611,7 @@ Text: {source_text}"""
     def _on_translation_finished(self, full_text: str, provider: str, is_single: bool):
         """Handle completed translation."""
         self.batch_btn.setEnabled(True)
+        self.progress_indicator.stop_animation()
 
         try:
             if is_single and self._pending_retranslate_row is not None:
@@ -562,6 +643,7 @@ Text: {source_text}"""
     def _on_translation_failed(self, error_message: str):
         """Handle translation failure."""
         self.batch_btn.setEnabled(True)
+        self.progress_indicator.stop_animation()
         ErrorDialog.critical(self, "Translation Error", error_message)
         self._pending_retranslate_row = None
 

@@ -8,6 +8,7 @@
   - add toolbar with edit/delete buttons below textbox selection frame
   - make it possible to edit straight from textbox
   - add stroke to typography
+  - welcome dialog for new user
 
   #### fixes
   - keep selection frame at constant visual size regardless of zoom
@@ -18,13 +19,11 @@
   - migrate to neverliie ai sdk
   - migrate to rapidocr as the ocr backend
   - redesign the ui/ux
-  - varius ui/ux improvement
+  - various ui/ux improvement
+  - combine translation window and result list into translation panel 
+  - deprecate result widget
 
 ## currently in progress
-  - add direct retranslate on main window
-  - deprecate result widgets and table 
-    - [x] replaced by direct text editing on image textbox
-    - it should be merged into translation feature cause it still needed there
 
 ## not yet started
 
@@ -51,6 +50,7 @@
 
   #### fixes
   - fix skew/free transform
+  - fix translation panel card styling
 
   #### modification
   - rework how gradient work
@@ -59,7 +59,7 @@
   - dynamic link between import export ocr and translation
   - change how translation Work
     - [X] integrate it into main window
-      - easier retranslate workflow
+      - [X] easier retranslate workflow
     - characters, places, and lore name dictionaries
   - hide textboximage button
   - profile improvement:
