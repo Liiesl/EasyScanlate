@@ -30,7 +30,7 @@ jobs:
           script-name: main.py
           mode: standalone
           windows-console-mode: disable
-          include-data-dir: 'OCR/model=OCR/model'
+          include-data-dir: 'OCR=OCR'
           mingw64: true
           enable-plugins: pyside6
           windows-icon-from-ico: assets/app_icon.ico
