@@ -46,8 +46,7 @@ class MainTextItem(QGraphicsTextItem):
             gradient.setColorAt(midpoint_float, color1)
             gradient.setColorAt(1.0, color2)
             
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QBrush(gradient))
+            painter.setPen(QPen(gradient, 0))
             painter.drawText(text_rect, draw_flags, text)
 
 class TextBoxItem(QGraphicsRectItem):
