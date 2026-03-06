@@ -1,6 +1,6 @@
 import sys
 import ctypes
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QComboBox
 from PySide6.QtCore import Qt, QPoint, QObject, QEvent, QRect
 from PySide6.QtGui import QCursor, QPixmap, QColor
 import qtawesome

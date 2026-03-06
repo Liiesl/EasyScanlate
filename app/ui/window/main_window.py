@@ -1,7 +1,7 @@
 # main_window.py - ocr functionality disabled
 
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSizePolicy, QCheckBox, QPushButton,
-                             QMessageBox, QSplitter)
+                             QMessageBox, QSplitter, QComboBox)
 import traceback
 import sys
 import json
@@ -62,6 +62,7 @@ class MainWindow(QMainWindow):
              self.style_panel.style_changed.connect(self.update_text_box_style)
         
         self.batch_handler = None
+        self._panel_layout_vertical = True  # Track layout state (True = vertical/bottom, False = horizontal/right)
     
     def _load_filter_settings(self):
         self.min_text_height = int(self.settings.value("min_text_height", 40))
@@ -197,6 +198,13 @@ class MainWindow(QMainWindow):
         self.btn_ocr_toggle.setEnabled(False) # Disabled until project loaded
         button_layout.addWidget(self.btn_ocr_toggle)
 
+        # Orientation dropdown for right splitter
+        self.orientation_combo = QComboBox()
+        self.orientation_combo.addItems(["Bottom", "Right"])
+        self.orientation_combo.setFixedWidth(80)
+        self.orientation_combo.currentTextChanged.connect(self._on_orientation_changed)
+        self.orientation_combo.setEnabled(False)  # Enable when project loaded
+
         # Progress Controller (Hidden Logic)
         self.progress_controller = CustomProgressBar()
         self.progress_controller.setVisible(False)
@@ -207,6 +215,9 @@ class MainWindow(QMainWindow):
         file_button_layout = QHBoxLayout()
         file_button_layout.setAlignment(Qt.AlignRight)
         file_button_layout.setSpacing(20)
+
+        file_button_layout.addWidget(self.orientation_combo)
+        file_button_layout.addSpacing(10)
 
         self.btn_import_export_menu = QPushButton(qta.icon('fa5s.bars', color='white'), "")
         self.btn_import_export_menu.setFixedWidth(60)
@@ -390,6 +401,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{self.model.project_name} | ManhwaOCR")
         self.btn_ocr_toggle.setEnabled(bool(image_paths))
         self.btn_manual_ocr.setEnabled(bool(image_paths))
+        self.orientation_combo.setEnabled(bool(image_paths))
         # self.ocr_progress.setValue(0) # Removed
         
         if not image_paths:
@@ -700,6 +712,7 @@ class MainWindow(QMainWindow):
         """OCR functionality disabled - placeholder method"""
         self.btn_ocr_toggle.transition_to_idle()
         self.btn_ocr_toggle.setEnabled(bool(self.model.image_paths))
+        self.orientation_combo.setEnabled(bool(self.model.image_paths))
         self.progress_controller.reset() # Reset controller
         if self.batch_handler:
             self.batch_handler.deleteLater()
@@ -858,6 +871,75 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'translation_panel'):
             self.translation_panel.populate(self.model.ocr_results, self.get_display_text)
             self.translation_panel.set_profiles(list(self.model.profiles.keys()))
+
+    def toggle_panel_layout(self, checked: bool) -> None:
+        """Toggle between vertical (bottom) and horizontal (right) panel layout."""
+        self._panel_layout_vertical = checked
+        
+        # Update menu text
+        if hasattr(self, 'panel_layout_action'):
+            self.panel_layout_action.setText(
+                "Translation Panel: Bottom" if checked else "Translation Panel: Right"
+            )
+        
+        # Update combo box
+        if hasattr(self, 'orientation_combo'):
+            new_text = "Bottom" if checked else "Right"
+            if self.orientation_combo.currentText() != new_text:
+                self.orientation_combo.setCurrentText(new_text)
+        
+        # Get parent widget and layout
+        right_widget = self.findChild(QWidget, "RightWidget")
+        if not right_widget:
+            return
+        
+        right_layout = right_widget.layout()
+        
+        # Remove existing splitter
+        old_splitter = None
+        for i in range(right_layout.count()):
+            item = right_layout.itemAt(i)
+            if item and item.widget() and isinstance(item.widget(), QSplitter):
+                old_splitter = item.widget()
+                break
+        
+        if old_splitter:
+            old_splitter.setParent(None)
+        
+        # Create new splitter with appropriate orientation
+        new_splitter = QSplitter(Qt.Vertical if checked else Qt.Horizontal)
+        new_splitter.addWidget(self.style_panel)
+        new_splitter.addWidget(self.translation_panel)
+        new_splitter.setStretchFactor(0, 0)
+        new_splitter.setStretchFactor(1, 1)
+        new_splitter.setHandleWidth(10)
+        
+        # Update size constraints for panels
+        if checked:
+            # Vertical: constrain height
+            self.style_panel.setMinimumHeight(70)
+            self.style_panel.setMaximumHeight(480)
+            self.style_panel.setMinimumWidth(0)
+            self.style_panel.setMaximumWidth(16777215)
+        else:
+            # Horizontal: constrain width
+            self.style_panel.setMinimumWidth(70)
+            self.style_panel.setMaximumWidth(480)
+            self.style_panel.setMinimumHeight(0)
+            self.style_panel.setMaximumHeight(16777215)
+        
+        # Update internal layout of style panel
+        # When main layout is vertical (checked), use horizontal internal layout (side-by-side)
+        # When main layout is horizontal (unchecked), use vertical internal layout (stacked)
+        if hasattr(self.style_panel, 'set_internal_layout_horizontal'):
+            self.style_panel.set_internal_layout_horizontal(checked)
+        
+        right_layout.addWidget(new_splitter, 1)
+
+    def _on_orientation_changed(self, text: str) -> None:
+        """Handle orientation combo box changes."""
+        checked = (text == "Bottom")
+        self.toggle_panel_layout(checked)
 
     def save_project(self):
         result_message = self.model.save_project()

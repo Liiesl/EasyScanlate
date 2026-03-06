@@ -215,6 +215,16 @@ class MenuBar(QMenuBar):
 
             view_menu.addSeparator()
 
+            # Panel Layout Toggle
+            panel_layout_action = QAction("Translation Panel: Bottom", self)
+            panel_layout_action.setCheckable(True)
+            panel_layout_action.setChecked(True)
+            if hasattr(self.main_window, 'toggle_panel_layout'):
+                panel_layout_action.triggered.connect(self.main_window.toggle_panel_layout)
+                # Store reference for text updates
+                self.main_window.panel_layout_action = panel_layout_action
+            view_menu.addAction(panel_layout_action)
+
             # Advanced Mode
             advanced_action = QAction("(Legacy) Advanced Mode", self)
             advanced_action.setCheckable(True)

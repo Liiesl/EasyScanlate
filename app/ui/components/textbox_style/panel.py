@@ -82,11 +82,9 @@ class TextBoxStylePanel(QWidget):
 
         # --- Main Content Area ---
         # Row 1: Style Configuration (2 columns: text left, shape right)
-        style_config_widget = QWidget()
-        style_config_layout = QHBoxLayout(style_config_widget)
-        style_config_layout.setContentsMargins(0, 0, 0, 0)
-        style_config_layout.setSpacing(15)
-
+        self.style_config_widget = QWidget()
+        self.style_config_widget.setObjectName("styleConfigWidget")
+        
         # Instantiate sub-panels
         self.shape_panel = ShapeStylePanel(color_chooser_fn=self.choose_color)
         self.typography_panel = TypographyStylePanel(color_chooser_fn=self.choose_color)
@@ -94,40 +92,15 @@ class TextBoxStylePanel(QWidget):
         self.shape_panel.style_changed.connect(self.style_changed_handler)
         self.typography_panel.style_changed.connect(self.style_changed_handler)
 
-        # Left column: Typography (Text) with scroll
-        typography_container = QWidget()
-        typography_layout = QVBoxLayout(typography_container)
-        typography_layout.setContentsMargins(0, 0, 0, 0)
-        typography_label = QLabel("Text Style")
-        typography_label.setObjectName("sectionLabel")
-        typography_layout.addWidget(typography_label)
-        
-        typography_scroll = QScrollArea()
-        typography_scroll.setObjectName("typographyScrollArea")
-        typography_scroll.setWidgetResizable(True)
-        typography_scroll.setFrameShape(QFrame.NoFrame)
-        typography_scroll.setWidget(self.typography_panel)
-        typography_layout.addWidget(typography_scroll)
-        
-        # Right column: Shape with scroll
-        shape_container = QWidget()
-        shape_layout = QVBoxLayout(shape_container)
-        shape_layout.setContentsMargins(0, 0, 0, 0)
-        shape_label = QLabel("Shape Style")
-        shape_label.setObjectName("sectionLabel")
-        shape_layout.addWidget(shape_label)
-        
-        shape_scroll = QScrollArea()
-        shape_scroll.setObjectName("shapeScrollArea")
-        shape_scroll.setWidgetResizable(True)
-        shape_scroll.setFrameShape(QFrame.NoFrame)
-        shape_scroll.setWidget(self.shape_panel)
-        shape_layout.addWidget(shape_scroll)
+        # Create containers
+        self.typography_container = self._create_typography_container()
+        self.shape_container = self._create_shape_container()
 
-        style_config_layout.addWidget(typography_container, 1)
-        style_config_layout.addWidget(shape_container, 1)
+        # Set initial layout (horizontal - side by side)
+        self._internal_layout_horizontal = True
+        self._setup_style_config_layout()
         
-        main_layout.addWidget(style_config_widget)
+        main_layout.addWidget(self.style_config_widget)
 
         # Row 2: Presets (minimal layout)
         presets_widget = QWidget()
@@ -167,6 +140,108 @@ class TextBoxStylePanel(QWidget):
         main_layout.addWidget(presets_widget)
 
         # The large stylesheet is removed from here. Only panel-specific styles remain.
+
+    def _create_typography_container(self):
+        """Create the typography container with label and scroll area."""
+        container = QWidget()
+        container.setObjectName("typographyContainer")
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        typography_label = QLabel("Text Style")
+        typography_label.setObjectName("sectionLabel")
+        layout.addWidget(typography_label)
+        
+        typography_scroll = QScrollArea()
+        typography_scroll.setObjectName("typographyScrollArea")
+        typography_scroll.setWidgetResizable(True)
+        typography_scroll.setFrameShape(QFrame.NoFrame)
+        typography_scroll.setWidget(self.typography_panel)
+        layout.addWidget(typography_scroll)
+        
+        return container
+
+    def _create_shape_container(self):
+        """Create the shape container with label and scroll area."""
+        container = QWidget()
+        container.setObjectName("shapeContainer")
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        shape_label = QLabel("Shape Style")
+        shape_label.setObjectName("sectionLabel")
+        layout.addWidget(shape_label)
+        
+        shape_scroll = QScrollArea()
+        shape_scroll.setObjectName("shapeScrollArea")
+        shape_scroll.setWidgetResizable(True)
+        shape_scroll.setFrameShape(QFrame.NoFrame)
+        shape_scroll.setWidget(self.shape_panel)
+        layout.addWidget(shape_scroll)
+        
+        return container
+
+    def _setup_style_config_layout(self):
+        """Setup the style config layout based on current orientation."""
+        # Check if widget has been added to a parent yet
+        parent = self.style_config_widget.parentWidget()
+        
+        if parent is None:
+            # Widget not yet added to parent - just create layout directly
+            if self._internal_layout_horizontal:
+                new_layout = QHBoxLayout(self.style_config_widget)
+            else:
+                new_layout = QVBoxLayout(self.style_config_widget)
+            
+            new_layout.setContentsMargins(0, 0, 0, 0)
+            new_layout.setSpacing(15)
+            
+            new_layout.addWidget(self.typography_container, 1)
+            new_layout.addWidget(self.shape_container, 1)
+        else:
+            # Widget has parent - need to replace in parent layout
+            parent_layout = parent.layout()
+            widget_index = -1
+            for i in range(parent_layout.count()):
+                if parent_layout.itemAt(i).widget() == self.style_config_widget:
+                    widget_index = i
+                    break
+            
+            if widget_index >= 0:
+                parent_layout.takeAt(widget_index)
+            self.style_config_widget.deleteLater()
+            
+            # Create new style_config_widget
+            self.style_config_widget = QWidget()
+            self.style_config_widget.setObjectName("styleConfigWidget")
+            
+            # Create layout on new widget
+            if self._internal_layout_horizontal:
+                new_layout = QHBoxLayout(self.style_config_widget)
+            else:
+                new_layout = QVBoxLayout(self.style_config_widget)
+            
+            new_layout.setContentsMargins(0, 0, 0, 0)
+            new_layout.setSpacing(15)
+            
+            new_layout.addWidget(self.typography_container, 1)
+            new_layout.addWidget(self.shape_container, 1)
+            
+            if widget_index >= 0:
+                parent_layout.insertWidget(widget_index, self.style_config_widget)
+
+    def set_internal_layout_horizontal(self, horizontal: bool) -> None:
+        """
+        Toggle internal layout between horizontal (side-by-side) and vertical (stacked).
+        
+        Args:
+            horizontal: True for side-by-side layout, False for stacked layout
+        """
+        if self._internal_layout_horizontal == horizontal:
+            return
+        
+        self._internal_layout_horizontal = horizontal
+        self._setup_style_config_layout()
 
     def get_current_style(self):
         """
