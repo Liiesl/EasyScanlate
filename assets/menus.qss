@@ -1,5 +1,25 @@
 /* Menu Widget Styles - app/ui/widgets/menus.py */
 
+/* ToggleWithProgress - Progress bar styling */
+#ToggleWithProgress QProgressBar {
+    background-color: var(--tertiary);
+    border: none;
+    border-radius: 4px;
+    height: 8px;
+    text-align: center;
+}
+
+#ToggleWithProgress QProgressBar::chunk {
+    background-color: var(--progress_chunk);
+    border-radius: 4px;
+}
+
+#ToggleWithProgress QLabel {
+    color: var(--text);
+    font-size: var(--font_size_small);
+    padding: 0 5px;
+}
+
 /* ToggleButton - Custom toggle button with on/off states */
 #ToggleButton {
     background-color: var(--tertiary);

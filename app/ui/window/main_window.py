@@ -187,16 +187,16 @@ class MainWindow(QMainWindow):
         
         # ToggleWithProgress Button
         self.btn_ocr_toggle = ToggleWithProgress(
-            start_text="Process OCR", 
-            stop_text="Stop OCR",
+            start_text="Detect Text", 
+            stop_text="Stop detecting",
             start_icon=qta.icon('fa5s.magic', color='white'),
             stop_icon=qta.icon('fa5s.stop', color='white'),
             parent=self
         )
-        self.btn_ocr_toggle.setFixedWidth(200) # Slightly wider to accommodate progress
         self.btn_ocr_toggle.clicked.connect(self.toggle_ocr)
         self.btn_ocr_toggle.setEnabled(False) # Disabled until project loaded
         button_layout.addWidget(self.btn_ocr_toggle)
+        button_layout.addStretch()
 
         # Orientation dropdown for right splitter
         self.orientation_combo = QComboBox()
