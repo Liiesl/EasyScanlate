@@ -1,15 +1,14 @@
 /* Translation Panel Styling */
 
 #TranslationPanel {
-    background-color: var(--surface);
+    background-color: transparent;
     border: 1px solid var(--border);
     border-radius: 10px;
 }
 
 /* Header */
 #TranslationPanelHeader {
-    background-color: var(--primary);
-    border-bottom: 1px solid var(--border);
+    background-color: transparent;
     border-top-left-radius: 10px;
     border-top-right-radius: 10px;
 }
@@ -28,7 +27,7 @@
 }
 
 #TranslationPanelProfileDropdown {
-    background-color: var(--input_bg);
+    background-color: rgba(48, 48, 48, 178);
     color: var(--text_secondary);
     border: 1px solid var(--border);
     border-radius: 12px;
@@ -45,7 +44,7 @@
     width: 20px;
 }
 #TranslationPanelProfileDropdown QAbstractItemView {
-    background-color: var(--input_bg);
+    background-color: rgba(48, 48, 48, 178);
     color: var(--text_secondary);
     border: 1px solid var(--border);
     selection-background-color: var(--secondary);
@@ -53,24 +52,24 @@
 
 /* Scroll Area */
 #TranslationPanelScroll, #TranslationPanelCardsContainer {
-    background-color: var(--surface);
+    background-color: transparent;
     border: none;
 }
 
 /* Translation Card */
 #TranslationCard {
-    background-color: var(--primary);
+    background-color: rgba(58, 58, 58, 178);
     border: 1px solid var(--border);
     border-radius: 8px;
 }
 
 #TranslationCard:hover {
-    background-color: var(--secondary);
+    background-color: rgba(74, 74, 74, 178);
     border: 1px solid var(--quinary);
 }
 
 #TranslationCard[active="true"] {
-    background-color: #1a2636;
+    background-color: rgba(26, 38, 54, 178);
     border: 1px solid var(--accent);
 }
 
@@ -102,7 +101,7 @@
 
 /* Text Inputs */
 #TranslationCardSourceInput, #TranslationCardTargetInput {
-    background-color: var(--input_bg);
+    background-color: rgba(48, 48, 48, 178);
     border: 1px solid transparent;
     border-radius: 6px;
     padding: 6px;
@@ -112,7 +111,7 @@
 
 #TranslationCardSourceInput {
     color: var(--text_secondary);
-    background-color: var(--tertiary);
+    background-color: rgba(38, 38, 38, 178);
 }
 
 #TranslationCardTargetInput {
@@ -120,11 +119,11 @@
 }
 
 #TranslationCardTargetInput:hover {
-    background-color: var(--secondary);
+    background-color: rgba(74, 74, 74, 178);
 }
 
 #TranslationCardTargetInput:focus {
-    background-color: var(--input_bg);
+    background-color: rgba(48, 48, 48, 178);
     border: 1px solid var(--accent);
 }
 
@@ -136,17 +135,16 @@
 }
 
 #TranslationCardRetranslateBtn:hover {
-    background-color: var(--secondary);
+    background-color: rgba(74, 74, 74, 178);
 }
 
 #TranslationCardDeleteBtn:hover {
-    background-color: var(--secondary);
+    background-color: rgba(74, 74, 74, 178);
 }
 
 /* Footer */
 #TranslationPanelFooter {
-    background-color: var(--primary);
-    border-top: 1px solid var(--border);
+    background-color: transparent;
     border-bottom-left-radius: 10px;
     border-bottom-right-radius: 10px;
 }
@@ -163,7 +161,7 @@
 
 /* Standard controls in footer */
 #TranslationPanel QComboBox {
-    background-color: var(--input_bg);
+    background-color: rgba(48, 48, 48, 178);
     border: 1px solid var(--border);
     color: var(--text);
     border-radius: 6px;
@@ -177,7 +175,7 @@
     width: 20px;
 }
 #TranslationPanel QComboBox QAbstractItemView {
-    background-color: var(--input_bg);
+    background-color: rgba(48, 48, 48, 178);
     color: var(--text);
     border: 1px solid var(--border);
     selection-background-color: var(--secondary);
@@ -192,7 +190,7 @@
 #TranslationPanel QCheckBox::indicator {
     width: 16px;
     height: 16px;
-    background-color: var(--input_bg);
+    background-color: rgba(48, 48, 48, 178);
     border: 1px solid var(--border);
     border-radius: 4px;
 }
@@ -205,8 +203,7 @@
     background-color: var(--accent);
     color: var(--text);
     border: none;
-    border-radius: 6px;
-    padding: 8px 18px;
+    border-radius: 18px;
     font-weight: 600;
 }
 #TranslationPanelBatchBtn:hover {
@@ -216,17 +213,17 @@
 /* Scrollbar */
 QScrollBar:vertical {
     border: none;
-    background: transparent;
+    background: #121212;
     width: 10px;
     margin: 0px;
 }
 QScrollBar::handle:vertical {
-    background: #121212;
+    background: #333333;
     min-height: 30px;
     border-radius: 5px;
 }
 QScrollBar::handle:vertical:hover {
-    background: #1a1a1a;
+    background: #444444;
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0px;
