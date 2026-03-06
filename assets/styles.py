@@ -107,6 +107,9 @@ DEFAULT_TEXT_STYLE = {
     'text_color_type': 'solid', # 'solid' or 'linear_gradient'
     'text_color': QColor(0, 0, 0).name(QColor.HexArgb),       # Black solid text
     'text_gradient': DEFAULT_GRADIENT.copy(), # Default gradient text (used if text_color_type='linear_gradient')
+    # Text Stroke
+    'text_stroke_color': QColor(255, 255, 255).name(QColor.HexArgb),  # White stroke
+    'text_stroke_width': 0,  # No stroke by default
     # Font
     'font_family': "Anime Ace", # Default from TextBoxItem init, adjust if needed
     'font_style': "Regular",
@@ -155,4 +158,8 @@ STYLE_PANEL_STYLES = _load_stylesheet("style_panel.qss")
 
 SCROLL_OVERLAY_STYLES = _load_stylesheet("scroll_overlay.qss")
 
+HANDLER_OVERLAY_STYLES = _load_stylesheet("handler_overlay.qss")
+
 MENUS_STYLES = _load_stylesheet("menus.qss")
+
+TRANSLATION_PANEL_STYLES = _load_stylesheet("translation_panel.qss")

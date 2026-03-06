@@ -8,66 +8,67 @@ import numpy as np
 from PIL import Image
 import uuid
 
-from PySide6.QtWidgets import QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtWidgets import QMessageBox, QLabel
 from PySide6.QtGui import QImage, QPixmap, QPainterPath, QPolygonF, QPainter
-from PySide6.QtCore import QBuffer, QRectF, QPointF
+from PySide6.QtCore import QBuffer, QRectF, QPointF, QObject
 from app.ui.components.image_area.label import ResizableImageLabel
 from app.ui.dialogs.error_dialog import ErrorDialog
+from app.ui.widgets.handler_overlay import HandlerOverlay
+from assets.styles import HANDLER_OVERLAY_STYLES
 
-class ContextFillHandler:
+
+class ContextFillHandler(QObject):
     """Handles the Context Fill (Inpainting) feature, independent of MainWindow."""
     def __init__(self, scroll_area, model):
+        super().__init__()
         self.scroll_area = scroll_area
         self.model = model
         self.is_active = False
         self.is_edit_mode_active = False
         self.active_label = None
         self.selection_paths = []
+        self.selected_inpaint_record_id = None
 
         self._setup_ui()
 
-    # ... (All methods up to _perform_inpainting_logic remain unchanged) ...
     def _setup_ui(self):
-        """Creates the overlay widget, parented to the scroll_area."""
-        self.overlay_widget = QWidget(self.scroll_area)
-        self.overlay_widget.setObjectName("ContextFillOverlay")
-        overlay_layout = QVBoxLayout(self.overlay_widget)
-        overlay_layout.setContentsMargins(5, 5, 5, 5)
-        overlay_layout.addWidget(QLabel("Context Fill Controls"))
-        overlay_buttons = QHBoxLayout()
-        
-        self.btn_process_fill = QPushButton("Fill Selected Areas")
+        """Creates the overlay widget using HandlerOverlay base."""
+        self.overlay_widget = HandlerOverlay(
+            self.scroll_area,
+            "ContextFillOverlay",
+            "Context Fill Controls",
+            (380, 80)
+        )
+        self.overlay_widget.setStyleSheet(HANDLER_OVERLAY_STYLES)
+
+        self.btn_process_fill = self.overlay_widget.create_confirm_button("Fill Selected Areas")
         self.btn_process_fill.clicked.connect(self.process_inpainting)
         self.btn_process_fill.setEnabled(False)
-        overlay_buttons.addWidget(self.btn_process_fill)
 
-        self.btn_reset_selection = QPushButton("Reset All Selections")
-        self.btn_reset_selection.setObjectName("ResetButton")
+        self.btn_reset_selection = self.overlay_widget.create_reset_button("Reset All Selections")
         self.btn_reset_selection.clicked.connect(self.reset_selection)
         self.btn_reset_selection.setEnabled(False)
-        overlay_buttons.addWidget(self.btn_reset_selection)
 
-        self.btn_cancel_fill = QPushButton("Exit Context Fill")
-        self.btn_cancel_fill.setObjectName("CancelButton")
+        self.btn_cancel_fill = self.overlay_widget.create_cancel_button("Exit Context Fill")
         self.btn_cancel_fill.clicked.connect(self.cancel_mode)
-        overlay_buttons.addWidget(self.btn_cancel_fill)
-        
-        overlay_layout.addLayout(overlay_buttons)
-        self.overlay_widget.setFixedSize(380, 80)
-        self.overlay_widget.hide()
+
+    def _update_widget_position(self):
+        """Positions the overlay widget at the top-center of the visible scroll area."""
+        if not self.is_active: return
+        self.overlay_widget._update_widget_position()
 
     def start_mode(self):
         """Activates the context fill mode."""
         if self.is_active: return
+        if self.is_edit_mode_active:
+            self._disable_edit_mode()
         self.scroll_area.cancel_active_modes(exclude_handler=self)
         self.is_active = True
         
         self._clear_selection_state()
         self._set_selection_enabled_on_all(True)
         
-        self._update_widget_position()
-        self.overlay_widget.show()
-        self.overlay_widget.raise_()
+        self.overlay_widget.show_overlay()
         
         # Information message - keep QMessageBox.information for non-error cases
         QMessageBox.information(self.scroll_area, "Context Fill Mode",
@@ -82,10 +83,11 @@ class ContextFillHandler:
 
     def _enable_edit_mode(self):
         if self.is_edit_mode_active: return
+        if self.is_active:
+            self.cancel_mode()
         self.scroll_area.cancel_active_modes(exclude_handler=self)
         self.is_edit_mode_active = True
-        print("Enabling Context Fill Edit Mode.")
-
+        
         layout = self.scroll_area.widget().layout()
         if not layout: return
 
@@ -94,15 +96,30 @@ class ContextFillHandler:
             if isinstance(widget, ResizableImageLabel):
                 widget.set_text_visibility(False)
                 widget.set_inpaint_edit_mode(True)
+                widget.inpaintVisualSelected.connect(self._handle_inpaint_visual_selected)
         
-        # Information message - keep QMessageBox.information for non-error cases
         QMessageBox.information(self.scroll_area, "Edit Context Fill Mode",
                                 "Inpaint areas are highlighted. Click on a highlight to select it, then press Delete or Backspace to remove it.")
+
+    def _handle_inpaint_visual_selected(self, record_id):
+        """Called when an inpaint visual is clicked in edit mode."""
+        self.selected_inpaint_record_id = record_id
+        self.overlay_widget.show_overlay()
+        
+        self.btn_process_fill.setText("Delete Selected")
+        self.btn_process_fill.setEnabled(True)
+        self.btn_reset_selection.setEnabled(False)
 
     def _disable_edit_mode(self):
         if not self.is_edit_mode_active: return
         self.is_edit_mode_active = False
-        print("Disabling Context Fill Edit Mode.")
+        self.selected_inpaint_record_id = None
+
+        self.overlay_widget.hide_overlay()
+
+        # Reset button text
+        self.btn_process_fill.setText("Fill Selected Areas")
+        self.btn_process_fill.setEnabled(False)
 
         layout = self.scroll_area.widget().layout()
         if not layout: return
@@ -110,6 +127,10 @@ class ContextFillHandler:
         for i in range(layout.count()):
             widget = layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
+                try:
+                    widget.inpaintVisualSelected.disconnect(self._handle_inpaint_visual_selected)
+                except (TypeError, RuntimeError):
+                    pass
                 widget.set_text_visibility(self.scroll_area._text_is_visible)
                 widget.set_inpaint_edit_mode(False)
 
@@ -120,7 +141,7 @@ class ContextFillHandler:
         if not self.is_active: return
         print("Cancelling Context Fill mode...")
         self.is_active = False
-        self.overlay_widget.hide()
+        self.overlay_widget.hide_overlay()
         self._clear_selection_state()
         self._set_selection_enabled_on_all(False)
         print("Context Fill mode cancelled.")
@@ -142,9 +163,7 @@ class ContextFillHandler:
         self.selection_paths.clear()
 
     def _set_selection_enabled_on_all(self, enabled):
-        """
-        Enables or disables selection on all labels and manages signal connections.
-        """
+        """Enables or disables selection on all labels and manages signal connections."""
         layout = self.scroll_area.widget().layout()
         if not layout: return
 
@@ -193,21 +212,16 @@ class ContextFillHandler:
         self.btn_process_fill.setEnabled(True)
         self.btn_reset_selection.setEnabled(True)
 
-    def _update_widget_position(self):
-        """Positions the overlay widget at the top-center of the visible scroll area."""
-        if not self.is_active: return
-        viewport = self.scroll_area.viewport()
-        overlay = self.overlay_widget
-        overlay_x = (viewport.width() - overlay.width()) // 2
-        overlay_y = 10 
-        overlay.move(overlay_x, overlay_y)
-        overlay.raise_()
-
     def process_inpainting(self):
         """
         Performs inpainting non-destructively by saving only the patched area
         and its metadata to the project model.
         """
+        # Check if we're in edit mode with a selected inpaint
+        if self.is_edit_mode_active and self.selected_inpaint_record_id:
+            self._delete_inpaint_record(self.selected_inpaint_record_id)
+            return
+
         if not self.selection_paths or not self.active_label:
             QMessageBox.warning(self.scroll_area, "Error", "No area selected.")
             self.reset_selection()
@@ -217,28 +231,87 @@ class ContextFillHandler:
         self._perform_inpainting_logic(self.active_label, self.selection_paths, show_dialogs=True)
         self.reset_selection()
 
+    def _delete_inpaint_record(self, record_id):
+        """Deletes an inpaint record and updates the UI."""
+        success, error_msg = self.model.remove_inpaint_record(record_id)
+        
+        if success:
+            self.selected_inpaint_record_id = None
+            self.btn_process_fill.setText("Fill Selected Areas")
+            self.btn_process_fill.setEnabled(False)
+            
+            QMessageBox.information(self.scroll_area, "Success", "Inpaint area deleted successfully.")
+        else:
+            QMessageBox.warning(self.scroll_area, "Error", f"Failed to delete inpaint: {error_msg}")
+
     def perform_auto_inpainting(self, target_label, bounding_boxes):
         """
         Performs inpainting based on a list of bounding boxes from OCR.
-        This is a non-interactive, programmatic version of process_inpainting.
+        Groups nearby boxes together to avoid creating one giant inpaint.
         """
         if not target_label or not bounding_boxes:
             return
 
-        paths = []
-        for box in bounding_boxes:
-            path = QPainterPath()
-            try:
-                poly = QPolygonF([QPointF(p[0], p[1]) for p in box])
-                path.addPolygon(poly)
-                paths.append(path)
-            except (TypeError, IndexError):
+        groups = self._group_bounding_boxes_by_proximity(bounding_boxes)
+        
+        for group in groups:
+            paths = []
+            for box in group:
+                path = QPainterPath()
+                try:
+                    poly = QPolygonF([QPointF(p[0], p[1]) for p in box])
+                    path.addPolygon(poly)
+                    paths.append(path)
+                except (TypeError, IndexError):
+                    continue
+
+            if paths:
+                self._perform_inpainting_logic(target_label, paths, show_dialogs=False)
+
+    def _group_bounding_boxes_by_proximity(self, bounding_boxes):
+        """
+        Groups bounding boxes that are within PROXIMITY_MARGIN of each other.
+        Returns a list of groups, where each group is a list of boxes.
+        """
+        PROXIMITY_MARGIN = 20
+        
+        if not bounding_boxes:
+            return []
+
+        def get_bounds(box):
+            xs = [p[0] for p in box]
+            ys = [p[1] for p in box]
+            return min(xs), min(ys), max(xs), max(ys)
+
+        def boxes_overlap_or_close(box1, box2, margin):
+            x1_min, y1_min, x1_max, y1_max = get_bounds(box1)
+            x2_min, y2_min, x2_max, y2_max = get_bounds(box2)
+            
+            expanded1 = x1_min - margin, y1_min - margin, x1_max + margin, y1_max + margin
+            
+            return not (x2_max < expanded1[0] or x2_min > expanded1[2] or
+                        y2_max < expanded1[1] or y2_min > expanded1[3])
+
+        groups = []
+        assigned = set()
+
+        for i, box in enumerate(bounding_boxes):
+            if i in assigned:
                 continue
+            
+            new_group = [box]
+            assigned.add(i)
 
-        if not paths:
-            return
+            for j, other_box in enumerate(bounding_boxes):
+                if j in assigned:
+                    continue
+                if boxes_overlap_or_close(box, other_box, PROXIMITY_MARGIN):
+                    new_group.append(other_box)
+                    assigned.add(j)
 
-        self._perform_inpainting_logic(target_label, paths, show_dialogs=False)
+            groups.append(new_group)
+
+        return groups
         
     def _perform_inpainting_logic(self, target_label, paths, show_dialogs=True):
         """

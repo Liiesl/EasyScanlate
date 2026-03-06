@@ -123,7 +123,6 @@ class MenuBar(QMenuBar):
 
             # Find/Replace (Parity with Toolbar/Ctrl+F)
             find_action = QAction("Find/Replace", self)
-            find_action.setShortcut("Ctrl+F")
             find_action.triggered.connect(self.main_window.toggle_find_widget)
             edit_menu.addAction(find_action)
             
@@ -160,10 +159,11 @@ class MenuBar(QMenuBar):
             # Edit Context Fill
             edit_context_action = QAction(qta.icon('fa5s.paint-brush', color="white"), "Edit Context Fills", self)
             edit_context_action.setCheckable(True)
-            if hasattr(self.main_window, 'btn_edit_context_fill'):
-                edit_context_action.setChecked(self.main_window.btn_edit_context_fill.isChecked())
-                edit_context_action.toggled.connect(self.main_window.btn_edit_context_fill.setChecked)
-                self.main_window.btn_edit_context_fill.toggled.connect(edit_context_action.setChecked)
+            if hasattr(self.main_window, 'scroll_area') and hasattr(self.main_window.scroll_area, 'context_fill_handler'):
+                handler = self.main_window.scroll_area.context_fill_handler
+                if hasattr(handler, 'is_edit_mode_active') and handler.is_edit_mode_active:
+                    edit_context_action.setChecked(True)
+                edit_context_action.toggled.connect(handler.toggle_edit_mode)
             process_menu.addAction(edit_context_action)
             
             process_menu.addSeparator()
@@ -187,14 +187,7 @@ class MenuBar(QMenuBar):
             view_menu.setStyleSheet(menu_style)
 
             # Toggle Chat
-            chat_action = QAction("Translation Chat", self)
-            chat_action.setCheckable(True)
-            if hasattr(self.main_window, 'translation_chat'):
-                chat_action.setChecked(self.main_window.translation_chat.isVisible())
-            chat_action.triggered.connect(self.main_window.toggle_chat)
-            view_menu.addAction(chat_action)
-            
-            view_menu.addSeparator()
+
 
             # Profiles Submenu
             self.profiles_menu = view_menu.addMenu("Profiles")
@@ -214,28 +207,34 @@ class MenuBar(QMenuBar):
                 self.main_window.btn_toggle_text.toggled.connect(toggle_text_action.setChecked)
             view_menu.addAction(toggle_text_action)
 
-            # Inpainting Visibility (Context Fill)
+            # Inpainting Visibility (Context Fill) - now in Context Fill Menu
             toggle_inpainting_action = QAction("Toggle Inpainting Visibility", self)
-            toggle_inpainting_action.setCheckable(True)
-            if hasattr(self.main_window, 'btn_toggle_inpainting'):
-                toggle_inpainting_action.setChecked(self.main_window.btn_toggle_inpainting.isChecked())
-                 # Sync: Menu -> Button
-                toggle_inpainting_action.toggled.connect(self.main_window.btn_toggle_inpainting.setChecked)
-                # Sync: Button -> Menu
-                self.main_window.btn_toggle_inpainting.toggled.connect(toggle_inpainting_action.setChecked)
+            if hasattr(self.main_window, 'scroll_area'):
+                toggle_inpainting_action.triggered.connect(self.main_window.scroll_area.toggle_inpainting_visibility)
             view_menu.addAction(toggle_inpainting_action)
 
             view_menu.addSeparator()
+
+            # Panel Layout Toggle
+            panel_layout_action = QAction("Translation Panel: Bottom", self)
+            panel_layout_action.setCheckable(True)
+            panel_layout_action.setChecked(True)
+            if hasattr(self.main_window, 'toggle_panel_layout'):
+                panel_layout_action.triggered.connect(self.main_window.toggle_panel_layout)
+                # Store reference for text updates
+                self.main_window.panel_layout_action = panel_layout_action
+            view_menu.addAction(panel_layout_action)
 
             # Advanced Mode
             advanced_action = QAction("(Legacy) Advanced Mode", self)
             advanced_action.setCheckable(True)
             # Check state against results_widget if possible, else default false
-            if hasattr(self.main_window, 'results_widget'):
-                 advanced_action.setChecked(self.main_window.results_widget.is_advanced_mode)
+            # if hasattr(self.main_window, 'results_widget'):
+            #      advanced_action.setChecked(self.main_window.results_widget.is_advanced_mode)
             
-            # Connect directly to toggle_advanced_mode
-            advanced_action.toggled.connect(self.main_window.toggle_advanced_mode)
+            # Connect directly to toggle_advanced_mode - DISABLED for TranslationPanel
+            # advanced_action.toggled.connect(self.main_window.toggle_advanced_mode)
+            advanced_action.setEnabled(False)
             view_menu.addAction(advanced_action)
             
     def update_profiles_menu(self):

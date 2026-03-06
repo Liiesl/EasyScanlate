@@ -1,7 +1,27 @@
 /* Menu Widget Styles - app/ui/widgets/menus.py */
 
+/* ToggleWithProgress - Progress bar styling */
+#ToggleWithProgress QProgressBar {
+    background-color: var(--tertiary);
+    border: none;
+    border-radius: 4px;
+    height: 8px;
+    text-align: center;
+}
+
+#ToggleWithProgress QProgressBar::chunk {
+    background-color: var(--progress_chunk);
+    border-radius: 4px;
+}
+
+#ToggleWithProgress QLabel {
+    color: var(--text);
+    font-size: var(--font_size_small);
+    padding: 0 5px;
+}
+
 /* ToggleButton - Custom toggle button with on/off states */
-ToggleButton {
+#ToggleButton {
     background-color: var(--tertiary);
     color: var(--text);
     border: 1px solid var(--senary);
@@ -11,49 +31,43 @@ ToggleButton {
     font-weight: 500;
 }
 
-ToggleButton:hover {
+#ToggleButton:hover {
     background-color: var(--quaternary);
     border-color: var(--quinary);
 }
 
-ToggleButton:pressed {
+#ToggleButton:pressed {
     background-color: var(--button_pressed);
 }
 
 /* 'On' state styling */
-ToggleButton[state="on"] {
-    background-color: var(--button_checked_bg);
-    border-color: var(--button_checked_border);
+#ToggleButton[state="on"] {
+    background-color: rgba(43, 43, 43, 178);
     color: var(--text);
 }
 
-ToggleButton[state="on"]:hover {
+#ToggleButton[state="on"]:hover {
     background-color: var(--button_hover_bg);
-    border-color: var(--accent_checked);
 }
 
 /* 'Off' state styling (default) */
-ToggleButton[state="off"] {
-    background-color: var(--tertiary);
+#ToggleButton[state="off"] {
+    background-color: rgba(43, 43, 43, 228);
     border-color: var(--senary);
 }
 
-ToggleButton[state="off"]:hover {
+#ToggleButton[state="off"]:hover {
     background-color: var(--quaternary);
 }
 
 /* Menu - Popup menu widget */
-Menu {
+#Menu {
     background-color: rgba(43, 43, 43, 178);
     border: 1px solid var(--border);
     border-radius: var(--border_radius_small);
 }
 
-Menu QWidget {
-    background-color: transparent;
-}
-
-Menu QPushButton {
+#Menu QPushButton {
     background-color: transparent;
     color: var(--text);
     border: none;
@@ -63,10 +77,10 @@ Menu QPushButton {
     font-size: var(--font_size_small);
 }
 
-Menu QPushButton:hover {
+#Menu QPushButton:hover {
     background-color: rgba(69, 69, 69, 178);
 }
 
-Menu QPushButton:pressed {
+#Menu QPushButton:pressed {
     background-color: rgba(37, 37, 37, 178);
 }

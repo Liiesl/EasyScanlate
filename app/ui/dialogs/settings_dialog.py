@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (QDialog, QDoubleSpinBox, QVBoxLayout, QHBoxLayout
                              QWidget, QLineEdit, QKeySequenceEdit, QCheckBox,
                              QGroupBox, QPushButton, QLabel, QProgressBar, QMessageBox)
 from PySide6.QtGui import QKeySequence, QDesktopServices
-from PySide6.QtCore import QSettings, QUrl, Qt
+from PySide6.QtCore import QSettings, QUrl, Qt, QEvent
 from app.utils.update import UpdateHandler
 from app.ui.dialogs.error_dialog import ErrorDialog
 from app.ui.components.background_settings import AuroraEditorPanel
@@ -50,11 +50,10 @@ class SettingsDialog(QDialog):
         self.show_delete_warning_check.setChecked(self.settings.value("show_delete_warning", "true") == "true")
         general_layout.addRow("Show delete confirmation dialog:", self.show_delete_warning_check)
 
-        self.use_gpu_check = QCheckBox()
-        self.use_gpu_check.setProperty("class", "AdvancedCheck")
-        self.use_gpu_check.setChecked(self.settings.value("use_gpu", "true").lower() == "true")
-        self.use_gpu_check.setToolTip("Requires compatible NVIDIA GPU and CUDA drivers. Restart may be needed.")
-        general_layout.addRow("Use GPU for OCR (if available):", self.use_gpu_check)
+        self.show_welcome_dialog_check = QCheckBox()
+        self.show_welcome_dialog_check.setProperty("class", "AdvancedCheck")
+        self.show_welcome_dialog_check.setChecked(self.settings.value("show_welcome_dialog", "true") == "true")
+        general_layout.addRow("Show welcome dialog on startup:", self.show_welcome_dialog_check)
 
         self.auto_context_fill_check = QCheckBox()
         self.auto_context_fill_check.setProperty("class", "AdvancedCheck")
@@ -86,7 +85,7 @@ class SettingsDialog(QDialog):
 
         self.download_update_button = QPushButton("Download Update")
         self.download_update_button.setVisible(False)
-        self.download_update_button.clicked.connect(self.update_handler.download_manifest_and_start_update)
+        self.download_update_button.clicked.connect(self.update_handler.start_update_download)
         update_button_layout.addWidget(self.download_update_button)
 
         self.restart_update_button = QPushButton("Restart & Update")
@@ -246,6 +245,7 @@ class SettingsDialog(QDialog):
         self.update_handler.update_check_finished.connect(self.on_update_check_complete)
         self.update_handler.download_progress.connect(self.on_download_progress)
         self.update_handler.download_finished.connect(self.on_download_complete)
+        self.update_handler.download_cancelled.connect(self.on_download_cancelled)
         self.update_handler.error_occurred.connect(self.on_update_error)
 
     def check_for_existing_download(self):
@@ -281,11 +281,42 @@ class SettingsDialog(QDialog):
         else:
             self.download_update_button.setEnabled(True)
 
+    def on_download_cancelled(self):
+        """Handles when user cancels the download."""
+        self.update_progress_bar.setVisible(False)
+        self.download_update_button.setVisible(True)
+        self.download_update_button.setEnabled(True)
+        self.check_updates_button.setVisible(False)
+        self.restart_update_button.setVisible(False)
+
     def on_update_error(self, message):
         self.update_status_label.setText("Update check failed.")
         ErrorDialog.critical(self, "Update Error", message)
         self.check_updates_button.setEnabled(True)
         self.download_update_button.setEnabled(True)
+
+    def closeEvent(self, event):
+        """Intercepts close attempts when download is in progress."""
+        if self.update_handler.is_download_in_progress():
+            reply = QMessageBox.question(
+                self,
+                "Download in Progress",
+                "An update is currently being downloaded.\n\n"
+                "Do you want to cancel the download and close Settings?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+
+            if reply == QMessageBox.Yes:
+                self.update_handler.cancel_download()
+                # Wait a moment for cancellation to process
+                import time
+                time.sleep(0.5)
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()
 
     def apply_update(self):
         self.update_handler.apply_update(self.downloaded_update_path)
@@ -305,9 +336,9 @@ class SettingsDialog(QDialog):
         # General
         self.settings.setValue("show_delete_warning", 
                                "true" if self.show_delete_warning_check.isChecked() else "false")
-        self.settings.setValue("use_gpu", 
-                               "true" if self.use_gpu_check.isChecked() else "false")
-        self.settings.setValue("auto_context_fill", 
+        self.settings.setValue("show_welcome_dialog", 
+                               "true" if self.show_welcome_dialog_check.isChecked() else "false")
+        self.settings.setValue("auto_context_fill",
                                "true" if self.auto_context_fill_check.isChecked() else "false")
         self.settings.setValue("auto_check_updates", 
                                "true" if self.auto_check_updates_check.isChecked() else "false")

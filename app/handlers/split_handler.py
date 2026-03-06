@@ -1,14 +1,14 @@
 # app/handlers/split_handler.py
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QMessageBox
+from PySide6.QtWidgets import QMessageBox, QLabel
 from PySide6.QtCore import QObject, Qt, QRectF
 from PySide6.QtGui import QPixmap
 from app.ui.components.image_area.label import ResizableImageLabel
 from app.ui.dialogs.error_dialog import ErrorDialog
-import qtawesome as qta
+from app.ui.widgets.handler_overlay import HandlerOverlay
+from assets.styles import HANDLER_OVERLAY_STYLES
 import os
-import traceback
-import sys
+
 
 class SplitHandler(QObject):
     """
@@ -20,38 +20,39 @@ class SplitHandler(QObject):
         self.model = model
         self.is_active = False
         self.selected_label = None
-        self.split_points = [] # Will only ever contain 0 or 1 item
+        self.split_points = []
 
         self._setup_ui()
 
     def _setup_ui(self):
-        """Creates the widget that appears during splitting mode."""
-        self.split_widget = QWidget(self.scroll_area)
-        self.split_widget.setObjectName("SplitWidget")
+        """Creates the widget that appears during splitting mode using HandlerOverlay base."""
+        self.split_widget = HandlerOverlay(
+            self.scroll_area,
+            "SplitWidget",
+            "",
+            (380, 90)
+        )
+        self.split_widget.setStyleSheet(HANDLER_OVERLAY_STYLES)
 
-        layout = QVBoxLayout(self.split_widget)
         self.info_label = QLabel("Click on an image to place a split indicator.")
         self.info_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.info_label)
+        self.split_widget.add_widget(self.info_label)
 
-        button_layout = QHBoxLayout()
-        self.btn_confirm = QPushButton(qta.icon('fa5s.check', color='white'), " Confirm Split")
+        self.btn_confirm = self.split_widget.create_confirm_button("Confirm Split", "fa5s.check")
         self.btn_confirm.clicked.connect(self.confirm_split)
-        button_layout.addWidget(self.btn_confirm)
 
-        self.btn_clear = QPushButton(qta.icon('fa5s.undo', color='white'), " Clear Indicator")
+        self.btn_clear = self.split_widget.create_reset_button("Clear Indicator", "fa5s.undo")
         self.btn_clear.clicked.connect(self.clear_split_points)
-        button_layout.addWidget(self.btn_clear)
 
-        self.btn_cancel = QPushButton(qta.icon('fa5s.times', color='white'), " Cancel")
-        self.btn_cancel.setObjectName("CancelButton")
+        self.btn_cancel = self.split_widget.create_cancel_button("Cancel", "fa5s.times")
         self.btn_cancel.clicked.connect(self.cancel_splitting_mode)
-        button_layout.addWidget(self.btn_cancel)
 
-        layout.addLayout(button_layout)
-        self.split_widget.setFixedSize(380, 90)
-        self.split_widget.hide()
         self._update_button_states()
+
+    def _update_widget_position(self):
+        """Positions the overlay widget at the top-center of the visible scroll area."""
+        if not self.split_widget.isVisible(): return
+        self.split_widget._update_widget_position()
 
     def start_splitting_mode(self):
         """Enters the image splitting mode."""
@@ -61,9 +62,7 @@ class SplitHandler(QObject):
         self.selected_label = None
         self.split_points = []
         
-        self._update_widget_position()
-        self.split_widget.show()
-        self.split_widget.raise_()
+        self.split_widget.show_overlay()
         self._update_info_label()
         self._update_button_states()
 
@@ -170,7 +169,7 @@ class SplitHandler(QObject):
         self.is_active = False
         self.selected_label = None
         self.split_points = []
-        self.split_widget.hide()
+        self.split_widget.hide_overlay()
         print("Exited splitting selection mode.")
     
     def clear_split_points(self):
@@ -181,14 +180,6 @@ class SplitHandler(QObject):
         self.split_points = []
         self._update_info_label()
         self._update_button_states()
-
-    def _update_widget_position(self):
-        """Positions the control widget at the top-center of the scroll area."""
-        if not self.split_widget.isVisible(): return
-        scroll_area_width = self.scroll_area.viewport().width()
-        x = (scroll_area_width - self.split_widget.width()) / 2
-        y = 10
-        self.split_widget.move(int(x), int(y))
 
     def _update_button_states(self):
         has_indicator = self.selected_label is not None and len(self.split_points) > 0

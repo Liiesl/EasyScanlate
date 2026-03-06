@@ -228,6 +228,7 @@ def on_preload_finished(projects_data):
         print("[ENTRY] No project file. Showing Home window.")
         home_window.show()
         splash.finish(home_window)
+        home_window.show_welcome_if_needed()
 
     print("[ENTRY] Initial launch sequence complete.")
 

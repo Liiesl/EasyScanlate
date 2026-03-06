@@ -14,6 +14,7 @@ class ResizableImageLabel(QGraphicsView):
     stitching_selection_changed = Signal(object, bool)
     split_indicator_requested = Signal(object, int)
     inpaintRecordDeleted = Signal(str)
+    inpaintVisualSelected = Signal(str)  # signal emitted when inpaint visual is selected in edit mode
 
     # --- MODIFIED: __init__ now accepts a selection_manager ---
     def __init__(self, pixmap, filename, main_window, selection_manager):
@@ -90,7 +91,7 @@ class ResizableImageLabel(QGraphicsView):
             item = QGraphicsRectItem(rect)
             item.setPen(pen)
             item.setBrush(brush)
-            item.setZValue(1) 
+            item.setZValue(2) 
             item.setData(0, record.get('id')) 
             
             item.setFlag(QGraphicsItem.ItemIsSelectable, self._is_inpaint_edit_mode)
@@ -102,9 +103,18 @@ class ResizableImageLabel(QGraphicsView):
     def set_inpaint_edit_mode(self, enabled):
         """Shows or hides the inpaint patch borders and updates internal state."""
         self._is_inpaint_edit_mode = enabled
+        
+        default_pen = QPen(QColor(255, 165, 0), 2, Qt.DashLine)
+        default_pen.setCosmetic(True)
+        
         for item in self.inpaint_visuals:
-            item.setVisible(enabled)
-            item.setFlag(QGraphicsItem.ItemIsSelectable, enabled)
+            if enabled:
+                item.setVisible(True)
+                item.setFlag(QGraphicsItem.ItemIsSelectable, True)
+            else:
+                item.setVisible(False)
+                item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+                item.setPen(default_pen)
 
     def set_inpaints_applied(self, applied: bool):
         for item in self.inpaint_patch_items:
@@ -190,6 +200,7 @@ class ResizableImageLabel(QGraphicsView):
                 text_box.setZValue(2) # On top of inpaint patches
                 text_box.signals.rowDeleted.connect(self.handle_text_box_deleted)
                 text_box.signals.selectedChanged.connect(self.on_text_box_selected)
+                text_box.signals.textEdited.connect(self._on_text_box_edited)
                 self.scene().addItem(text_box)
                 self.text_boxes.append(text_box)
         QTimer.singleShot(0, self.update_view_transform)
@@ -305,6 +316,18 @@ class ResizableImageLabel(QGraphicsView):
                 self.setCursor(Qt.ArrowCursor)
 
     def mousePressEvent(self, event):
+        pos_in_scene = self.mapToScene(event.pos())
+        items_at_pos = self.scene().items(pos_in_scene)
+        
+        clicked_on_editing_box = False
+        for item in items_at_pos:
+            if isinstance(item, TextBoxItem) and item.is_editing():
+                clicked_on_editing_box = True
+                break
+        
+        if not clicked_on_editing_box:
+            self._finish_all_editing()
+        
         if event.button() != Qt.LeftButton:
             super().mousePressEvent(event)
             return
@@ -338,7 +361,53 @@ class ResizableImageLabel(QGraphicsView):
             self._rubber_band.show()
             event.accept(); return
         
+        # Check if inpaint visual was clicked in edit mode
+        if self._is_inpaint_edit_mode:
+            for item in items_at_pos:
+                if item in self.inpaint_visuals:
+                    record_id = item.data(0)
+                    if record_id:
+                        # Clear previous selection visuals
+                        for visual in self.inpaint_visuals:
+                            pen = visual.pen()
+                            pen.setColor(QColor(255, 165, 0))  # Orange
+                            pen.setWidth(2)
+                            visual.setPen(pen)
+                        
+                        # Highlight selected item
+                        pen = item.pen()
+                        pen.setColor(QColor(0, 255, 0))  # Green for selected
+                        pen.setWidth(4)
+                        item.setPen(pen)
+                        
+                        self.inpaintVisualSelected.emit(record_id)
+                    event.accept(); return
+        
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() != Qt.LeftButton:
+            super().mouseDoubleClickEvent(event)
+            return
+        
+        pos_in_scene = self.mapToScene(event.pos())
+        items_at_pos = self.scene().items(pos_in_scene)
+        
+        for item in items_at_pos:
+            if isinstance(item, TextBoxItem):
+                item.enable_editing()
+                event.accept()
+                return
+        
+        super().mouseDoubleClickEvent(event)
+
+    def _on_text_box_edited(self, row_number, new_text):
+        self.main_window.update_ocr_text(row_number, new_text)
+
+    def _finish_all_editing(self):
+        for text_box in self.text_boxes:
+            if text_box.is_editing():
+                text_box.finish_editing()
 
     def mouseReleaseEvent(self, event):
         if self._is_dragging_split_line and event.button() == Qt.LeftButton:
@@ -561,6 +630,7 @@ class ResizableImageLabel(QGraphicsView):
             self.stitching_selection_changed.disconnect()
             self.split_indicator_requested.disconnect()
             self.inpaintRecordDeleted.disconnect()
+            self.inpaintVisualSelected.disconnect()
         except (TypeError, RuntimeError): pass
         if self.scene():
             for tb in self.text_boxes[:]: tb.cleanup()

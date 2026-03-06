@@ -1,14 +1,53 @@
+# --- START OF FILE textbox.py ---
 
 from PySide6.QtWidgets import QGraphicsTextItem, QGraphicsItem, QGraphicsRectItem
 from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QObject
-from PySide6.QtGui import QPainter, QFont, QBrush, QColor, QPen, QPainterPath, QLinearGradient
+from PySide6.QtGui import QPainter, QFont, QBrush, QColor, QPen, QPainterPath, QLinearGradient, QTextCharFormat, QTextCursor
+from PySide6.QtWidgets import QGraphicsSceneMouseEvent
 
 from app.ui.components.image_area.textbox_frame import SelectionFrameItem
 
-# --- Signal class remains the same ---
 class TextBoxSignals(QObject):
     rowDeleted = Signal(object)
     selectedChanged = Signal(bool, object)
+    textEdited = Signal(int, str)
+
+class MainTextItem(QGraphicsTextItem):
+    """
+    A custom text item that overrides paint solely to draw the text fill as a 
+    linear gradient if configured. For solid colors, it relies on native rendering.
+    """
+    def paint(self, painter, option, widget):
+        # Let standard text render first (solid color or transparent)
+        super().paint(painter, option, widget)
+        
+        # Now overlay gradient if needed
+        parent = self.parentItem()
+        if parent and getattr(parent, '_text_color_type', 'solid') == 'linear_gradient' and getattr(parent, '_text_gradient', None):
+            text = self.toPlainText()
+            if not text: return
+            
+            text_rect = QRectF(0, 0, self.textWidth(), self.document().size().height())
+            draw_flags = int(parent._alignment | Qt.TextWordWrap)
+            painter.setFont(self.font())
+            
+            gradient = QLinearGradient()
+            direction = parent._text_gradient['direction']
+            if direction == 0: gradient.setStart(text_rect.topLeft()); gradient.setFinalStop(text_rect.topRight())
+            elif direction == 1: gradient.setStart(text_rect.topLeft()); gradient.setFinalStop(text_rect.bottomLeft())
+            elif direction == 2: gradient.setStart(text_rect.topLeft()); gradient.setFinalStop(text_rect.bottomRight())
+            elif direction == 3: gradient.setStart(text_rect.bottomLeft()); gradient.setFinalStop(text_rect.topRight())
+            
+            color1 = parent._text_gradient['color1']
+            color2 = parent._text_gradient['color2']
+            midpoint_float = max(0.0, min(1.0, parent._text_gradient['midpoint'] / 100.0))
+            
+            gradient.setColorAt(0.0, color1)
+            gradient.setColorAt(midpoint_float, color1)
+            gradient.setColorAt(1.0, color2)
+            
+            painter.setPen(QPen(gradient, 0))
+            painter.drawText(text_rect, draw_flags, text)
 
 class TextBoxItem(QGraphicsRectItem):
     def __init__(self, rect, row_number, text="", original_rect=None, initial_style=None):
@@ -30,6 +69,8 @@ class TextBoxItem(QGraphicsRectItem):
         self._fill_type, self._bg_color, self._bg_gradient = 'solid', QColor(255, 255, 255), None
         self._border_width, self._border_color = 1, QColor(0, 0, 0)
         self._text_color_type, self._text_color, self._text_gradient = 'solid', QColor(0, 0, 0), None
+        self._text_stroke_color, self._text_stroke_width = QColor(0, 0, 0), 0
+        self._text_char_format_applied = False
         self._font, self._alignment = QFont("Arial", 12), Qt.AlignCenter
         self._original_pen = QPen(self._border_color, self._border_width)
 
@@ -39,31 +80,196 @@ class TextBoxItem(QGraphicsRectItem):
         self.selection_frame = SelectionFrameItem(self)
         self.selection_frame.hide()
 
-        # --- Text Item ---
-        self.text_item = QGraphicsTextItem(text, self)
+        self._is_editing = False
+        self._original_text_before_edit = ""
+        self._event_filter_installed = False
+
+        # --- Text Items ---
+        # 1. Stroke item sits behind the main text to act as the "outside" stroke
+        self.stroke_text_item = QGraphicsTextItem(text, self)
+        self.stroke_text_item.setTextInteractionFlags(Qt.NoTextInteraction)
+        self.stroke_text_item.setZValue(1)
+        
+        # 2. Main item sits in front and overlays its fill exactly on top of the stroke
+        self.text_item = MainTextItem(text, self)
+        self.text_item.setTextInteractionFlags(Qt.NoTextInteraction)
+        self.text_item.setZValue(2)
+        
+        # Connect so outline stroke updates dynamically as the user types
+        self.text_item.document().contentsChanged.connect(self._on_text_changed)
         
         if initial_style: self.apply_styles(initial_style)
         else: self.apply_styles({}) # Apply defaults
 
         self.setCursor(Qt.SizeAllCursor)
 
+    def _on_text_changed(self):
+        if getattr(self, '_is_syncing', False): return
+        self._is_syncing = True
+        self._sync_stroke_text()
+        self._is_syncing = False
+
+    def _sync_stroke_text(self):
+        """Copies layout, font, position, and text from text_item to stroke_text_item, then applies outline."""
+        if not hasattr(self, 'stroke_text_item') or not hasattr(self, 'text_item'):
+            return
+            
+        self.stroke_text_item.setPlainText(self.text_item.toPlainText())
+        self.stroke_text_item.setFont(self.text_item.font())
+        self.stroke_text_item.setPos(self.text_item.pos())
+        self.stroke_text_item.setTextWidth(self.text_item.textWidth())
+        
+        doc_option = self.text_item.document().defaultTextOption()
+        self.stroke_text_item.document().setDefaultTextOption(doc_option)
+
+        if self._text_stroke_width > 0:
+            self.stroke_text_item.setVisible(True)
+            self.stroke_text_item.setDefaultTextColor(self._text_stroke_color)
+            
+            cursor = self.stroke_text_item.textCursor()
+            cursor.select(QTextCursor.Document)
+            char_format = QTextCharFormat()
+            
+            # Double the stroke width! The inner half gets eclipsed by text_item, leaving only the outside half.
+            stroke_pen = QPen(self._text_stroke_color, self._text_stroke_width * 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+            char_format.setTextOutline(stroke_pen)
+            
+            cursor.setCharFormat(char_format)
+            cursor.clearSelection()
+        else:
+            self.stroke_text_item.setVisible(False)
+
     def request_delete(self):
         """Emits the rowDeleted signal."""
         self.signals.rowDeleted.emit(self.row_number)
 
+    def sceneEventFilter(self, watched, event):
+        from PySide6.QtCore import QEvent
+        if watched == self.text_item and self._is_editing:
+            if event.type() == QEvent.KeyPress:
+                if event.key() in (Qt.Key_Enter, Qt.Key_Return):
+                    if not (event.modifiers() & Qt.ShiftModifier):
+                        self.finish_editing()
+                        return True
+                elif event.key() == Qt.Key_Escape:
+                    self.cancel_editing()
+                    return True
+            elif event.type() == QEvent.FocusOut:
+                self.finish_editing()
+                return False
+        return super().sceneEventFilter(watched, event)
+
+    def enable_editing(self):
+        if self._is_editing:
+            return
+        self._is_editing = True
+        self._original_text_before_edit = self.text_item.toPlainText()
+        
+        if not self._event_filter_installed and self.scene():
+            self.text_item.installSceneEventFilter(self)
+            self._event_filter_installed = True
+        
+        self.setFlag(QGraphicsItem.ItemIsMovable, False)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, False)
+        self.text_item.setTextInteractionFlags(Qt.TextEditorInteraction)
+        self.text_item.setFocus()
+        cursor = self.text_item.textCursor()
+        cursor.select(cursor.SelectionType.Document)
+        self.text_item.setTextCursor(cursor)
+        self.setCursor(Qt.IBeamCursor)
+
+    def finish_editing(self):
+        if not self._is_editing:
+            return
+        new_text = self.text_item.toPlainText()
+        self._exit_edit_mode()
+        if new_text != self._original_text_before_edit:
+            self.adjust_font_size()
+            self.signals.textEdited.emit(self.row_number, new_text)
+        self._original_text_before_edit = ""
+
+    def cancel_editing(self):
+        if not self._is_editing:
+            return
+        self.text_item.setPlainText(self._original_text_before_edit)
+        self._exit_edit_mode()
+        self._original_text_before_edit = ""
+
+    def _exit_edit_mode(self):
+        self._is_editing = False
+        cursor = self.text_item.textCursor()
+        cursor.clearSelection()
+        self.text_item.setTextCursor(cursor)
+        self.text_item.setTextInteractionFlags(Qt.NoTextInteraction)
+        self.clearFocus()
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setCursor(Qt.SizeAllCursor)
+
+    def setRotation(self, angle):
+        super().setRotation(angle)
+        if hasattr(self, 'selection_frame') and self.selection_frame.isVisible():
+            self._update_selection_frame_transform()
+
+    def is_editing(self):
+        return self._is_editing
+
+    def _show_selection_frame(self):
+        if not self.selection_frame.scene():
+            self.scene().addItem(self.selection_frame)
+        self.selection_frame.setVisible(True)
+        self._update_selection_frame_transform()
+
+    def _hide_selection_frame(self):
+        self.selection_frame.setVisible(False)
+        if self.selection_frame.scene():
+            self.scene().removeItem(self.selection_frame)
+
+    def _update_selection_frame_transform(self):
+        self.selection_frame.setPos(self.pos())
+        self.selection_frame.setRotation(self.rotation())
+        self.selection_frame.setTransform(self.transform())
+        self.selection_frame.setTransformOriginPoint(self.rect().center())
+        self.selection_frame.prepareGeometryChange()
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
+        if self._is_editing:
+            self.text_item.mousePressEvent(event)
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
+        if self._is_editing:
+            self.text_item.mouseMoveEvent(event)
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
+        if self._is_editing:
+            self.text_item.mouseReleaseEvent(event)
+            return
+        super().mouseReleaseEvent(event)
+
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemSelectedHasChanged:
             selected = bool(value)
-            self.selection_frame.setVisible(selected)
+            if selected:
+                self._show_selection_frame()
+            else:
+                self._hide_selection_frame()
             self.signals.selectedChanged.emit(selected, self.row_number)
         
+        elif change == QGraphicsItem.ItemSceneChange:
+            scene = value
+            if scene is None:
+                if self.selection_frame:
+                    frame_scene = self.selection_frame.scene()
+                    if frame_scene:
+                        frame_scene.removeItem(self.selection_frame)
+        
         elif change == QGraphicsItem.ItemPositionChange and self.scene():
-            # This logic is complex with rotation. For now, we'll keep it simple.
-            # A truly robust solution would need to account for the rotated bounding box.
             scene_rect = self.scene().sceneRect()
-            # Approximate the bounding rect in scene coords
             item_scene_rect = self.sceneBoundingRect()
-            # Calculate future rect
             current_pos = self.pos()
             future_rect_pos = value
             future_rect = item_scene_rect.translated(future_rect_pos - current_pos)
@@ -76,11 +282,17 @@ class TextBoxItem(QGraphicsRectItem):
             
             if new_pos != value and self.original_rect:
                  self.original_rect = self.rect().translated(new_pos)
+            
+            if self.selection_frame and self.selection_frame.isVisible():
+                self.selection_frame.setPos(new_pos)
+            
             return new_pos
 
         elif change == QGraphicsItem.ItemScenePositionHasChanged:
             if self.original_rect is not None:
                 self.original_rect = self.sceneBoundingRect()
+            if self.selection_frame and self.selection_frame.isVisible():
+                self._update_selection_frame_transform()
 
         return super().itemChange(change, value)
 
@@ -90,6 +302,7 @@ class TextBoxItem(QGraphicsRectItem):
         self.corner_radius = style_dict.get('corner_radius', 50)
         self._fill_type = style_dict.get('fill_type', 'solid')
         self._bg_color = QColor(style_dict.get('bg_color', '#ffffffff'))
+        
         if self._fill_type == 'linear_gradient':
             gradient_data = style_dict.get('bg_gradient', {})
             self._bg_gradient = {
@@ -112,6 +325,7 @@ class TextBoxItem(QGraphicsRectItem):
 
         self._text_color_type = style_dict.get('text_color_type', 'solid')
         self._text_color = QColor(style_dict.get('text_color', '#ff000000'))
+        
         if self._text_color_type == 'linear_gradient':
             gradient_data = style_dict.get('text_gradient', {})
             self._text_gradient = {
@@ -120,13 +334,28 @@ class TextBoxItem(QGraphicsRectItem):
                 'direction': gradient_data.get('direction', 0),
                 'midpoint': float(gradient_data.get('midpoint', 50))
             }
-            self.text_item.setVisible(False)
-            self.text_item.setDefaultTextColor(Qt.transparent)
         else:
             self._text_gradient = None
-            self.text_item.setDefaultTextColor(self._text_color)
-            self.text_item.setVisible(True)
 
+        self._text_stroke_color = QColor(style_dict.get('text_stroke_color', '#ff000000'))
+        self._text_stroke_width = int(style_dict.get('text_stroke_width', 0))
+
+        # Handle the primary fill item
+        self.text_item.setVisible(True) # Keep visible for interaction 
+        if self._text_color_type == 'linear_gradient':
+            self.text_item.setDefaultTextColor(Qt.transparent)
+        else:
+            self.text_item.setDefaultTextColor(self._text_color)
+            
+        # Ensure text_item has NO stroke natively so it stays completely unbordered
+        cursor = self.text_item.textCursor()
+        cursor.select(QTextCursor.Document)
+        char_format = QTextCharFormat()
+        char_format.setTextOutline(QPen(Qt.NoPen))
+        cursor.setCharFormat(char_format)
+        cursor.clearSelection()
+
+        # Update styling attributes
         font_family = style_dict.get('font_family', "Arial")
         font_size = style_dict.get('font_size', 12)
         font_bold = style_dict.get('font_bold', False)
@@ -136,6 +365,7 @@ class TextBoxItem(QGraphicsRectItem):
         if font_family != "Default (System Font)": self._font.setFamily(font_family)
         self._font.setPointSize(font_size); self._font.setBold(font_bold); self._font.setItalic(font_italic)
         self.text_item.setFont(self._font)
+        
         alignment_index = style_dict.get('text_alignment', 1)
         if alignment_index == 0: self._alignment = Qt.AlignLeft | Qt.AlignVCenter
         elif alignment_index == 1: self._alignment = Qt.AlignCenter
@@ -147,6 +377,9 @@ class TextBoxItem(QGraphicsRectItem):
         
         self.prepareGeometryChange()
         if self.rect().isValid(): self.setRect(self.rect())
+        
+        # Apply the layout and style data to the background stroke layer
+        self._sync_stroke_text()
         self.update()
 
     def _ensure_style_defaults(self, style_dict):
@@ -168,7 +401,9 @@ class TextBoxItem(QGraphicsRectItem):
         self.text_item.setTextWidth(text_rect_width)
         self.adjust_font_size()
         if hasattr(self, 'selection_frame'):
-            self.selection_frame.prepareGeometryChange() # Inform frame to update
+            self.selection_frame.prepareGeometryChange()
+            if self.selection_frame.isVisible():
+                self._update_selection_frame_transform()
 
     def adjust_font_size(self):
         padding = self.padding
@@ -176,12 +411,16 @@ class TextBoxItem(QGraphicsRectItem):
         available_height = self.rect().height() - 2 * padding
         if available_width <= 0 or available_height <= 0:
             if self.text_item: self.text_item.setPlainText("")
+            self._sync_stroke_text()
             return
+            
         if not self.text_item: return
         text = self.text_item.toPlainText()
         if not text:
             self.text_item.setPos(padding, padding)
+            self._sync_stroke_text()
             return
+            
         font = self.text_item.font()
         if self._auto_font_size:
             min_font_size = 6; max_font_size = 72
@@ -206,6 +445,7 @@ class TextBoxItem(QGraphicsRectItem):
             font.setPointSize(optimal_size)
             self.text_item.setFont(font)
             self._font = QFont(font)
+            
         text_height = self.text_item.boundingRect().height()
         doc_height = self.text_item.document().size().height()
         effective_text_height = max(text_height, doc_height)
@@ -216,8 +456,12 @@ class TextBoxItem(QGraphicsRectItem):
              vertical_offset = self.rect().height() - effective_text_height - padding
         vertical_offset = max(padding, vertical_offset)
         self.text_item.setPos(padding, vertical_offset)
+        
+        # Ensure our changes are synchronized perfectly to the stroke text item
+        self._sync_stroke_text()
 
     def paint(self, painter, option, widget):
+        # Now solely responsible for drawing the bubble container background
         painter.setRenderHint(QPainter.Antialiasing)
         rect = self.rect()
         path = QPainterPath()
@@ -232,6 +476,7 @@ class TextBoxItem(QGraphicsRectItem):
             path.cubicTo(rect.center().x() - tail_width*0.3, control_y, rect.center().x() + tail_width*0.3, control_y, rect.center().x() + tail_width/2, rect.bottom())
             path.closeSubpath()
         else: radius = min(rect.width()/2, rect.height()/2, self.corner_radius); path.addRoundedRect(rect, radius, radius)
+        
         if self._fill_type == 'linear_gradient' and self._bg_gradient:
             gradient = QLinearGradient()
             direction = self._bg_gradient['direction']
@@ -245,27 +490,9 @@ class TextBoxItem(QGraphicsRectItem):
             painter.fillPath(path, gradient)
         elif self._fill_type == 'solid':
             painter.fillPath(path, self.brush())
+            
         if self.pen().style() != Qt.NoPen:
             painter.strokePath(path, self.pen())
-        if self._text_color_type == 'linear_gradient' and self._text_gradient:
-            text = self.text_item.toPlainText()
-            if text:
-                text_pos = self.text_item.pos(); text_width = self.text_item.textWidth()
-                text_height = self.text_item.document().size().height()
-                text_rect = QRectF(text_pos.x(), text_pos.y(), text_width, text_height)
-                if text_rect.isValid():
-                    gradient = QLinearGradient()
-                    direction = self._text_gradient['direction']
-                    if direction == 0: gradient.setStart(text_rect.topLeft()); gradient.setFinalStop(text_rect.topRight())
-                    elif direction == 1: gradient.setStart(text_rect.topLeft()); gradient.setFinalStop(text_rect.bottomLeft())
-                    elif direction == 2: gradient.setStart(text_rect.topLeft()); gradient.setFinalStop(text_rect.bottomRight())
-                    elif direction == 3: gradient.setStart(text_rect.bottomLeft()); gradient.setFinalStop(text_rect.topRight())
-                    color1 = self._text_gradient['color1']; color2 = self._text_gradient['color2']
-                    midpoint_float = max(0.0, min(1.0, self._text_gradient['midpoint'] / 100.0))
-                    gradient.setColorAt(0.0, color1); gradient.setColorAt(midpoint_float, color1); gradient.setColorAt(1.0, color2)
-                    painter.setFont(self._font); painter.setPen(QPen(gradient, 0))
-                    draw_flags = int(self._alignment | Qt.TextWordWrap)
-                    painter.drawText(text_rect, draw_flags, text)
 
     def cleanup(self):
         if hasattr(self, 'signals'):
@@ -273,9 +500,23 @@ class TextBoxItem(QGraphicsRectItem):
                 self.signals.rowDeleted.disconnect()
                 self.signals.selectedChanged.disconnect()
             except (TypeError, RuntimeError): pass
+            
+        if hasattr(self, 'text_item') and self.text_item:
+            try:
+                self.text_item.document().contentsChanged.disconnect()
+            except (TypeError, RuntimeError): pass
+            
         for child in reversed(self.childItems()):
             child.setParentItem(None)
             if child.scene(): child.scene().removeItem(child)
+            
+        if hasattr(self, 'selection_frame') and self.selection_frame:
+            if self.selection_frame.scene():
+                self.selection_frame.scene().removeItem(self.selection_frame)
+                
         self.text_item = None
+        self.stroke_text_item = None
         self.selection_frame = None
         if self.scene(): self.scene().removeItem(self)
+
+# --- END OF FILE textbox.py ---

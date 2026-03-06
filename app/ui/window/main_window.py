@@ -12,10 +12,8 @@ import qtawesome as qta
 from app.utils.file_io import export_ocr_results, import_translation_file, export_rendered_images
 from app.ui.components.image_area.label import ResizableImageLabel
 from app.ui.components.image_area.scroll_container import CustomScrollArea
-from app.ui.components.results_tables import ResultsWidget
+from app.ui.components.translation_panel import TranslationPanel
 from app.ui.components.textbox_style.panel import TextBoxStylePanel
-from app.ui.components.find_replace import FindReplaceWidget
-from app.ui.components.translation_chat import TranslationChatWidget
 from app.ui.widgets.menu_bar import MenuBar, TitleBarState
 from app.ui.window.chrome import CustomTitleBar, WindowResizer
 from app.ui.widgets.progress_bar import CustomProgressBar
@@ -41,14 +39,12 @@ class MainWindow(QMainWindow):
         self.model.project_loaded.connect(self.on_project_loaded)
         self.model.project_load_failed.connect(self.on_project_load_failed)
         self.model.model_updated.connect(self.on_model_updated)
-        self.model.profiles_updated.connect(self.update_profile_selector)
         self.model.profiles_updated.connect(self._on_profile_list_changed)
         self.model.profile_created_for_user_edit.connect(self._on_profile_created_for_user_edit)
 
         self.selection_manager = SelectionManager(self.model, self)
         self.selection_manager.selection_changed.connect(self.on_selection_changed)
 
-        self.combine_action = QAction("Combine Rows", self)
         self.find_action = QAction("Find/Replace", self)
         self.find_action.triggered.connect(self.toggle_find_widget)
         self.addAction(self.find_action)
@@ -57,7 +53,6 @@ class MainWindow(QMainWindow):
         self.language_map = { "Korean": "ko", "Chinese": "ch_sim", "Japanese": "ja" }
 
         self.init_ui()
-        self.combine_action.triggered.connect(self.results_widget.combine_selected_rows)
 
         self.scroll_content = QWidget()
         self.reader = None 
@@ -67,6 +62,7 @@ class MainWindow(QMainWindow):
              self.style_panel.style_changed.connect(self.update_text_box_style)
         
         self.batch_handler = None
+        self._panel_layout_vertical = True  # Track layout state (True = vertical/bottom, False = horizontal/right)
     
     def _load_filter_settings(self):
         self.min_text_height = int(self.settings.value("min_text_height", 40))
@@ -142,42 +138,13 @@ class MainWindow(QMainWindow):
         self.btn_toggle_text.setState(False) 
         vertical_toolbar_layout.addWidget(self.btn_toggle_text)
 
-        # Toggle Inpainting
-        self.btn_toggle_inpainting = ToggleButton(
-             off_text="", on_text="",
-             off_icon=qta.icon('fa5s.eye', color='white'), # Using eye for "Inpainting is Visible"
-             on_icon=qta.icon('fa5s.eraser', color='white') # Using eraser/slash for "Inpainting is Hidden"
-        )
-        
-        self.btn_toggle_inpainting = ToggleButton(
-            off_text="", on_text="",
-            off_icon=qta.icon('fa5s.eraser', color='white'), # Hidden state
-            on_icon=qta.icon('fa5s.fill', color='white')   # Visible state
-        )
-        self.btn_toggle_inpainting.setFixedSize(40, 40)
-        self.btn_toggle_inpainting.setToolTip("Toggle Context Fill Visibility")
-        self.btn_toggle_inpainting.setState(True) # Default is visible
-        self.btn_toggle_inpainting.toggled.connect(self.scroll_area.toggle_inpainting_visibility)
-
-        vertical_toolbar_layout.addWidget(self.btn_toggle_inpainting)
-
-        # Context Fill (Normal Button)
-        self.btn_context_fill = QPushButton(qta.icon('fa5s.fill-drip', color='white'), "")
-        self.btn_context_fill.setFixedSize(40, 40)
-        self.btn_context_fill.setToolTip("Context Fill Mode")
-        self.btn_context_fill.clicked.connect(self.scroll_area.context_fill_handler.start_mode)
-        vertical_toolbar_layout.addWidget(self.btn_context_fill)
-
-        # Edit Context Fill (Toggle Button)
-        self.btn_edit_context_fill = ToggleButton(
-            off_text="", on_text="",
-            off_icon=qta.icon('fa5s.paint-brush', color='white'),
-            on_icon=qta.icon('fa5s.check-circle', color='white')
-        )
-        self.btn_edit_context_fill.setFixedSize(40, 40)
-        self.btn_edit_context_fill.setToolTip("Edit Context Fills")
-        self.btn_edit_context_fill.clicked.connect(self.scroll_area.context_fill_handler.toggle_edit_mode)
-        vertical_toolbar_layout.addWidget(self.btn_edit_context_fill)
+        # Toggle Inpainting - now part of Context Fill Menu
+        # Context Fill Menu Button (replaces btn_context_fill, btn_edit_context_fill, btn_toggle_inpainting)
+        self.btn_context_fill_menu = QPushButton(qta.icon('fa5s.fill-drip', color='white'), "")
+        self.btn_context_fill_menu.setFixedSize(40, 40)
+        self.btn_context_fill_menu.setToolTip("Context Fill Options")
+        self.btn_context_fill_menu.clicked.connect(self.show_context_fill_menu)
+        vertical_toolbar_layout.addWidget(self.btn_context_fill_menu)
 
         # Split Images
         self.btn_split = QPushButton(QIcon("assets/icons/split.svg"), "")
@@ -197,8 +164,6 @@ class MainWindow(QMainWindow):
         vertical_toolbar_layout.addStretch()
 
         # Rest of the UI setup continues...
-        self.update_profile_selector()
-
         left_panel = QVBoxLayout()
         left_panel.setContentsMargins(10, 10, 5, 10)
         left_panel.setSpacing(20)
@@ -222,16 +187,23 @@ class MainWindow(QMainWindow):
         
         # ToggleWithProgress Button
         self.btn_ocr_toggle = ToggleWithProgress(
-            start_text="Process OCR", 
-            stop_text="Stop OCR",
+            start_text="Detect Text", 
+            stop_text="Stop detecting",
             start_icon=qta.icon('fa5s.magic', color='white'),
             stop_icon=qta.icon('fa5s.stop', color='white'),
             parent=self
         )
-        self.btn_ocr_toggle.setFixedWidth(200) # Slightly wider to accommodate progress
         self.btn_ocr_toggle.clicked.connect(self.toggle_ocr)
         self.btn_ocr_toggle.setEnabled(False) # Disabled until project loaded
         button_layout.addWidget(self.btn_ocr_toggle)
+        button_layout.addStretch()
+
+        # Orientation dropdown for right splitter
+        self.orientation_combo = QComboBox()
+        self.orientation_combo.addItems(["Bottom", "Right"])
+        self.orientation_combo.setFixedWidth(80)
+        self.orientation_combo.currentTextChanged.connect(self._on_orientation_changed)
+        self.orientation_combo.setEnabled(False)  # Enable when project loaded
 
         # Progress Controller (Hidden Logic)
         self.progress_controller = CustomProgressBar()
@@ -244,19 +216,8 @@ class MainWindow(QMainWindow):
         file_button_layout.setAlignment(Qt.AlignRight)
         file_button_layout.setSpacing(20)
 
-        self.profile_selector = QComboBox(self)
-        self.profile_selector.setFixedWidth(220)
-        self.profile_selector.setToolTip("Switch between different text profiles (e.g., Original, User Edits, Translations).")
-        self.profile_selector.activated.connect(self.on_profile_selected)
-        file_button_layout.addWidget(self.profile_selector)
-
-        # Chat toggle button (between profile selector and action menu)
-        self.btn_chat_toggle = QPushButton(qta.icon('fa5s.comments', color='white'), "")
-        self.btn_chat_toggle.setFixedSize(40, 40)
-        self.btn_chat_toggle.setToolTip("Toggle Chat Widget")
-        self.btn_chat_toggle.setCheckable(True)
-        self.btn_chat_toggle.clicked.connect(self.toggle_chat)
-        file_button_layout.addWidget(self.btn_chat_toggle)
+        file_button_layout.addWidget(self.orientation_combo)
+        file_button_layout.addSpacing(10)
 
         self.btn_import_export_menu = QPushButton(qta.icon('fa5s.bars', color='white'), "")
         self.btn_import_export_menu.setFixedWidth(60)
@@ -266,51 +227,41 @@ class MainWindow(QMainWindow):
         button_layout.addLayout(file_button_layout)
         right_panel.addLayout(button_layout)
 
-        # Create results widget first
-        self.results_widget = ResultsWidget(self, self.combine_action, self.find_action, self.selection_manager)
-        
         # Style panel - always visible above results with resizable splitter
         self.style_panel = TextBoxStylePanel(default_style=DEFAULT_TEXT_STYLE)
         self.style_panel.setMinimumHeight(70)
         self.style_panel.setMaximumHeight(480)
         
+        # Create unified translation panel (replaces ResultsWidget + TranslationChatWidget)
+        self.translation_panel = TranslationPanel(source_language=self.model.original_language)
+        self.translation_panel.text_changed.connect(self.update_ocr_text)
+        self.translation_panel.row_deleted.connect(self.delete_row)
+        self.translation_panel.row_selected.connect(self._on_panel_row_selected)
+        self.translation_panel.translation_complete.connect(self.handle_translation_completed)
+        self.translation_panel.profile_changed.connect(self.switch_active_profile)
+        
         # Create vertical splitter for resizable layout
         right_splitter = QSplitter(Qt.Vertical)
         right_splitter.addWidget(self.style_panel)
-        right_splitter.addWidget(self.results_widget)
+        right_splitter.addWidget(self.translation_panel)
         right_splitter.setStretchFactor(0, 0)
         right_splitter.setStretchFactor(1, 1)
         right_splitter.setHandleWidth(10)
-
-        # Find/replace widget
-        self.find_replace_widget = FindReplaceWidget(self)
-        right_panel.addWidget(self.find_replace_widget)
-        self.find_replace_widget.hide()
-        self.style_panel_size = None
-
-        # Create translation chat component
-        self.translation_chat = TranslationChatWidget()
-        self.translation_chat.translation_complete.connect(self.handle_translation_completed)
-        self.translation_chat.hide()  # Hide by default
-
-        # Initialize translation chat with current data
-        self._update_translation_chat_data()
         
-        # Create horizontal splitter for results/style panel and translation chat
-        content_splitter = QSplitter(Qt.Horizontal)
-        content_splitter.addWidget(right_splitter)
-        content_splitter.addWidget(self.translation_chat)
-        content_splitter.setStretchFactor(0, 2)
-        content_splitter.setStretchFactor(1, 1)
-        content_splitter.setHandleWidth(5)
-        right_panel.addWidget(content_splitter, 1)
+        # Find/replace widget (temporarily disabled)
+        # self.find_replace_widget = FindReplaceWidget(self)
+        # right_panel.addWidget(self.find_replace_widget)
+        # self.find_replace_widget.hide()
+        self.style_panel_size = None
+        
+        right_panel.addWidget(right_splitter, 1)
 
         right_widget = QWidget()
         right_widget.setObjectName("RightWidget")
         right_widget.setLayout(right_panel)
 
         # === APPLY STYLES ===
-        for w in [self.style_panel, self.results_widget, self.translation_chat]:
+        for w in [self.style_panel, self.translation_panel]:
             w.setObjectName("TransparentPanel")
             w.setAttribute(Qt.WA_StyledBackground, True)
         
@@ -322,6 +273,7 @@ class MainWindow(QMainWindow):
         left_widget.setLayout(left_panel)
         splitter.addWidget(left_widget)
         splitter.addWidget(right_widget)
+        splitter.setSizes([250, 450])
 
         # MODIFIED: Add toolbar and splitter to main layout
         main_layout.addWidget(self.vertical_toolbar)  # Add vertical toolbar first
@@ -349,11 +301,6 @@ class MainWindow(QMainWindow):
                 self.title_bar.update_maximize_icon()
         super().changeEvent(event)
 
-    def on_profile_selected(self, index):
-        profile_name = self.profile_selector.itemText(index)
-        if profile_name:
-            self.switch_active_profile(profile_name)
-
     def show_import_export_menu(self):
         """Creates, populates, and shows the Import/Export menu."""
         menu = Menu(self)
@@ -368,36 +315,43 @@ class MainWindow(QMainWindow):
 
         menu.set_position_and_show(self.btn_import_export_menu, 'bottom right')
 
+    def show_context_fill_menu(self):
+        """Creates, populates, and shows the Context Fill menu."""
+        menu = Menu(self)
+
+        btn_context_fill_mode = QPushButton(qta.icon('fa5s.fill-drip', color='white'), " Context Fill Mode")
+        btn_context_fill_mode.clicked.connect(self.scroll_area.context_fill_handler.start_mode)
+        menu.addButton(btn_context_fill_mode)
+
+        btn_edit_context_fill = QPushButton(qta.icon('fa5s.paint-brush', color='white'), " Edit Context Fills")
+        btn_edit_context_fill.clicked.connect(self.scroll_area.context_fill_handler.toggle_edit_mode)
+        menu.addButton(btn_edit_context_fill)
+
+        btn_toggle_fill_visibility = ToggleButton(
+            off_text=" Show Fills", on_text=" Hide Fills",
+            off_icon=qta.icon('fa5s.eye', color='white'),
+            on_icon=qta.icon('fa5s.eye-slash', color='white')
+        )
+        btn_toggle_fill_visibility.setToolTip("Toggle Fill Visibility")
+        btn_toggle_fill_visibility.setState(True)
+        btn_toggle_fill_visibility.toggled.connect(self.scroll_area.toggle_inpainting_visibility)
+        menu.addButton(btn_toggle_fill_visibility, close_on_click=False)
+
+        menu.set_position_and_show(self.btn_context_fill_menu, 'right')
+
     def update_profile_selector(self):
-        """Syncs the profile dropdown with the profiles from the model."""
-        if not hasattr(self, 'profile_selector'): return
-        self.profile_selector.blockSignals(True)
-        self.profile_selector.clear()
-        profiles_list = sorted([p for p in self.model.profiles.keys() if p != "Original"])
-        profiles_list.insert(0, "Original")
-        self.profile_selector.addItems(profiles_list)
-        if self.model.active_profile_name in self.model.profiles:
-            index = self.profile_selector.findText(self.model.active_profile_name)
-            if index != -1: self.profile_selector.setCurrentIndex(index)
-        self.profile_selector.blockSignals(False)
-        
+        """Syncs profile UIs (menu bar and translation panel) with the model."""
         # Sync Menu Bar profiles if available
         if hasattr(self, 'title_bar') and hasattr(self.title_bar, 'menu_bar'):
              self.title_bar.menu_bar.update_profiles_menu()
         
-        # Also update translation chat profiles
-        self._update_translation_chat_data()
+        # Also update translation panel profiles
+        self._update_translation_panel_data()
 
     def switch_active_profile(self, profile_name):
         """Tells the model to switch the active profile."""
         if profile_name and profile_name in self.model.profiles and profile_name != self.model.active_profile_name:
             print(f"Switching to active profile: {profile_name}")
-            
-            # Set flag to prevent textChanged events from deleting translations during profile switch
-            # This is crucial because clearing highlighters triggers textChanged events
-            if hasattr(self, 'results_widget') and self.results_widget:
-                self.results_widget._is_updating_views = True
-            
             self.model.active_profile_name = profile_name
             self._on_profile_changed()
             self.on_model_updated(None)
@@ -419,20 +373,11 @@ class MainWindow(QMainWindow):
             self.update_shortcut()
 
     def toggle_find_widget(self):
-        if self.find_replace_widget.isVisible():
-            self.find_replace_widget.close_widget()
-        else:
-            self.find_replace_widget.raise_()
-            self.find_replace_widget.show()
+        pass  # Find/replace disabled
 
-    def toggle_chat(self):
-        """Toggle the visibility of the translation chat widget."""
-        if self.translation_chat.isVisible():
-            self.translation_chat.hide()
-            self.btn_chat_toggle.setChecked(False)
-        else:
-            self.translation_chat.show()
-            self.btn_chat_toggle.setChecked(True)
+    def _on_panel_row_selected(self, row_number):
+        """Handle row selection from translation panel."""
+        self.selection_manager.select(row_number, self.translation_panel)
 
     def update_find_shortcut(self):
         shortcut = self.settings.value("find_shortcut", "Ctrl+F")
@@ -451,11 +396,17 @@ class MainWindow(QMainWindow):
         self._clear_layout(self.scroll_layout)
         self.scroll_area.cancel_active_modes()
 
+        # Re-initialize OCR reader if language changed
+        if self.reader and self.reader.language != self.model.original_language:
+            print(f"Re-initializing OCR reader for language: {self.model.original_language}")
+            self.reader = RapidOCREngine(language=self.model.original_language)
+
         image_paths = self.model.image_paths
         self.setWindowTitle(f"{self.model.project_name} | ManhwaOCR")
         self.setWindowTitle(f"{self.model.project_name} | ManhwaOCR")
         self.btn_ocr_toggle.setEnabled(bool(image_paths))
         self.btn_manual_ocr.setEnabled(bool(image_paths))
+        self.orientation_combo.setEnabled(bool(image_paths))
         # self.ocr_progress.setValue(0) # Removed
         
         if not image_paths:
@@ -480,7 +431,7 @@ class MainWindow(QMainWindow):
 
         self.update_profile_selector()
         self.on_model_updated(None)
-        self._update_translation_chat_data()
+        self._update_translation_panel_data()
         print(f"Project '{self.model.project_name}' loaded and UI populated.")
     
     def handle_inpaint_record_deleted(self, record_id):
@@ -523,7 +474,7 @@ class MainWindow(QMainWindow):
                         break
 
         self.update_all_views(affected_filenames)
-        self._update_translation_chat_data()
+        self._update_translation_panel_data()
 
     def get_display_text(self, result):
         """ DELEGATED: Asks the model for the correct text to display. """
@@ -537,6 +488,10 @@ class MainWindow(QMainWindow):
         if row_number is not None:
             current_style = self.get_style_for_row(row_number)
             self.style_panel.update_style_panel(current_style)
+            # Update translation panel active row (if selection came from elsewhere)
+            if source is not self.translation_panel and hasattr(self, 'translation_panel'):
+                self.translation_panel.set_active_row(row_number)
+                self.translation_panel.scroll_to_row(row_number)
         else:
             # When no textbox is selected, reset to default style
             self.style_panel.update_style_panel(DEFAULT_TEXT_STYLE)
@@ -615,8 +570,9 @@ class MainWindow(QMainWindow):
             print("RapidOCR reader already initialized.")
             return True
         try:
-            print(f"Initializing RapidOCR reader for {context}")
-            self.reader = RapidOCREngine()
+            language = getattr(self.model, 'original_language', 'Korean')
+            print(f"Initializing RapidOCR reader for {context} (language: {language})")
+            self.reader = RapidOCREngine(language=language)
             print("RapidOCR reader initialized successfully.")
             return True
         except Exception as e:
@@ -645,9 +601,12 @@ class MainWindow(QMainWindow):
     def update_all_views(self, affected_filenames=None):
         """
         Refreshes all views that depend on the model's data, including the
-        results table and the text boxes rendered on the images.
+        translation panel and the text boxes rendered on the images.
         """
-        self.results_widget.update_views()
+        # Update translation panel with current OCR results
+        if hasattr(self, 'translation_panel'):
+            self.translation_panel.populate(self.model.ocr_results, self.get_display_text)
+            self.translation_panel.set_profiles(list(self.model.profiles.keys()))
         grouped_results = {}
         for result in self.model.ocr_results:
             filename = result.get('filename')
@@ -759,6 +718,7 @@ class MainWindow(QMainWindow):
         """OCR functionality disabled - placeholder method"""
         self.btn_ocr_toggle.transition_to_idle()
         self.btn_ocr_toggle.setEnabled(bool(self.model.image_paths))
+        self.orientation_combo.setEnabled(bool(self.model.image_paths))
         self.progress_controller.reset() # Reset controller
         if self.batch_handler:
             self.batch_handler.deleteLater()
@@ -820,13 +780,9 @@ class MainWindow(QMainWindow):
             result_data, _ = self.model._find_result_by_row_number(row_number)
             if result_data:
                 actual_saved_text = self.model.get_display_text(result_data)
-                # If the saved text is different from what user typed, update the widget to show the saved text
-                if actual_saved_text != new_text:
-                    # The model preserved the user edit - update widget to reflect this
-                    # Update both simple view and table view if visible
-                    if hasattr(self, 'results_widget') and self.results_widget:
-                        self.results_widget._update_simple_view_text_if_visible(row_number, actual_saved_text)
-                        self.results_widget._update_table_cell_if_visible(row_number, 0, actual_saved_text)
+                # Update translation panel with actual saved text
+                if hasattr(self, 'translation_panel'):
+                    self.translation_panel.update_row_text(row_number, actual_saved_text)
                 self.update_image_text_box(row_number, actual_saved_text)
             else:
                 self.update_image_text_box(row_number, new_text)
@@ -859,16 +815,13 @@ class MainWindow(QMainWindow):
         
         message, success = self.model.combine_rows(first_row_number, combined_text, min_confidence, rows_to_delete)
         if success:
-            if self.find_replace_widget.isVisible():
+            if hasattr(self, 'find_replace_widget') and self.find_replace_widget.isVisible():
                 self.find_replace_widget.find_text()
             # Success message - keep QMessageBox.information for non-error cases
             QMessageBox.information(self, "Success", message)
         else:
             ErrorDialog.critical(self, "Error", message)
     
-    def toggle_advanced_mode(self, state):
-        self.results_widget.toggle_advanced_mode(state)
-
     def delete_row(self, row_number_to_delete):
         show_warning = self.settings.value("show_delete_warning", "true") == "true"
         proceed = True
@@ -891,15 +844,11 @@ class MainWindow(QMainWindow):
             self.selection_manager.deselect(self)
 
         self.model.delete_row(row_number_to_delete)
-        if self.find_replace_widget.isVisible(): self.find_replace_widget.find_text()
+        if hasattr(self, 'find_replace_widget') and self.find_replace_widget.isVisible():
+            self.find_replace_widget.find_text()
 
     def handle_translation_completed(self, profile_name, translated_data):
         try:
-            # Set flag to prevent textChanged events from deleting translations during profile switch
-            # add_profile switches to the new profile and emits signals that clear highlighters
-            if hasattr(self, 'results_widget') and self.results_widget:
-                self.results_widget._is_updating_views = True
-            
             self.model.add_profile(profile_name, translated_data)
             # Success message - keep QMessageBox.information for non-error cases
             QMessageBox.information(self, "Success", 
@@ -915,8 +864,6 @@ class MainWindow(QMainWindow):
         import_translation_file(self)
 
     def update_shortcut(self):
-        combine_shortcut = self.settings.value("combine_shortcut", "Ctrl+G")
-        self.combine_action.setShortcut(QKeySequence(combine_shortcut))
         self.update_find_shortcut()
 
     def export_manhwa(self):
@@ -925,19 +872,80 @@ class MainWindow(QMainWindow):
     def export_ocr_results(self):
         export_ocr_results(self)
 
-    def _update_translation_chat_data(self):
-        """Update the translation chat widget with current OCR results and profiles."""
-        if hasattr(self, 'translation_chat'):
-            api_key = self.settings.value("gemini_api_key", "")
-            model_name = self.settings.value("gemini_model", "gemini-1.5-flash-latest")
-            
-            # Pass current OCR results and profiles to the translation chat
-            self.translation_chat.set_data(
-                api_key=api_key,
-                model_name=model_name,
-                ocr_results=self.model.ocr_results,
-                profiles=list(self.model.profiles.keys())
+    def _update_translation_panel_data(self):
+        """Update the translation panel with current OCR results and profiles."""
+        if hasattr(self, 'translation_panel'):
+            self.translation_panel.populate(self.model.ocr_results, self.get_display_text)
+            self.translation_panel.set_profiles(list(self.model.profiles.keys()))
+
+    def toggle_panel_layout(self, checked: bool) -> None:
+        """Toggle between vertical (bottom) and horizontal (right) panel layout."""
+        self._panel_layout_vertical = checked
+        
+        # Update menu text
+        if hasattr(self, 'panel_layout_action'):
+            self.panel_layout_action.setText(
+                "Translation Panel: Bottom" if checked else "Translation Panel: Right"
             )
+        
+        # Update combo box
+        if hasattr(self, 'orientation_combo'):
+            new_text = "Bottom" if checked else "Right"
+            if self.orientation_combo.currentText() != new_text:
+                self.orientation_combo.setCurrentText(new_text)
+        
+        # Get parent widget and layout
+        right_widget = self.findChild(QWidget, "RightWidget")
+        if not right_widget:
+            return
+        
+        right_layout = right_widget.layout()
+        
+        # Remove existing splitter
+        old_splitter = None
+        for i in range(right_layout.count()):
+            item = right_layout.itemAt(i)
+            if item and item.widget() and isinstance(item.widget(), QSplitter):
+                old_splitter = item.widget()
+                break
+        
+        if old_splitter:
+            old_splitter.setParent(None)
+        
+        # Create new splitter with appropriate orientation
+        new_splitter = QSplitter(Qt.Vertical if checked else Qt.Horizontal)
+        new_splitter.addWidget(self.style_panel)
+        new_splitter.addWidget(self.translation_panel)
+        new_splitter.setStretchFactor(0, 0)
+        new_splitter.setStretchFactor(1, 1)
+        new_splitter.setHandleWidth(10)
+        
+        # Update size constraints for panels
+        if checked:
+            # Vertical: constrain height
+            self.style_panel.setMinimumHeight(70)
+            self.style_panel.setMaximumHeight(480)
+            self.style_panel.setMinimumWidth(0)
+            self.style_panel.setMaximumWidth(16777215)
+        else:
+            # Horizontal: constrain width
+            self.style_panel.setMinimumWidth(70)
+            self.style_panel.setMaximumWidth(480)
+            self.style_panel.setMinimumHeight(0)
+            self.style_panel.setMaximumHeight(16777215)
+        
+        # Update internal layout of style panel
+        # When main layout is vertical (checked), use horizontal internal layout (side-by-side)
+        # When main layout is horizontal (unchecked), use vertical internal layout (stacked)
+        if hasattr(self.style_panel, 'set_internal_layout_horizontal'):
+            self.style_panel.set_internal_layout_horizontal(checked)
+        
+        right_layout.addWidget(new_splitter, 1)
+
+    def _on_orientation_changed(self, text: str) -> None:
+        """Handle orientation combo box changes."""
+        checked = (text == "Bottom")
+        self.toggle_panel_layout(checked)
 
     def save_project(self):
         result_message = self.model.save_project()
@@ -948,6 +956,10 @@ class MainWindow(QMainWindow):
             ErrorDialog.critical(self, "Save Error", result_message)
 
     def closeEvent(self, event):
+        # Cleanup translation panel
+        if hasattr(self, 'translation_panel'):
+            self.translation_panel.cleanup()
+        
         if hasattr(self.model, 'temp_dir') and self.model.temp_dir and os.path.exists(self.model.temp_dir):
             try:
                 import shutil

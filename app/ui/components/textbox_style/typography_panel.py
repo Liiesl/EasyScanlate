@@ -64,6 +64,32 @@ class TypographyStylePanel(QWidget):
         self.btn_text_color.clicked.connect(lambda: self._color_chooser_fn(self.btn_text_color))
         color_layout.addWidget(self.btn_text_color)
         solid_controls_layout.addLayout(color_layout)
+
+        stroke_width_layout = QVBoxLayout()
+        stroke_width_layout.setSpacing(2)
+        stroke_width_label = QLabel("Width")
+        stroke_width_label.setObjectName("tinyLabel")
+        stroke_width_layout.addWidget(stroke_width_label)
+        self.spin_stroke_width = QSpinBox()
+        self.spin_stroke_width.setRange(0, 10)
+        self.spin_stroke_width.setValue(0)
+        self.spin_stroke_width.setObjectName("styleSpin")
+        self.spin_stroke_width.valueChanged.connect(self._on_style_changed)
+        stroke_width_layout.addWidget(self.spin_stroke_width)
+        solid_controls_layout.addLayout(stroke_width_layout)
+
+        stroke_color_layout = QVBoxLayout()
+        stroke_color_layout.setSpacing(2)
+        stroke_color_label = QLabel("Stroke")
+        stroke_color_label.setObjectName("tinyLabel")
+        stroke_color_layout.addWidget(stroke_color_label)
+        self.btn_stroke_color = QPushButton("")
+        self.btn_stroke_color.setObjectName("colorButton")
+        self.btn_stroke_color.setFixedSize(48, 38)
+        self.btn_stroke_color.clicked.connect(lambda: self._color_chooser_fn(self.btn_stroke_color))
+        stroke_color_layout.addWidget(self.btn_stroke_color)
+        solid_controls_layout.addLayout(stroke_color_layout)
+
         solid_controls_layout.addStretch()
         main_layout.addWidget(self.solid_controls_widget)
 
@@ -358,6 +384,8 @@ class TypographyStylePanel(QWidget):
                 'direction': self.combo_text_gradient_direction.currentIndex(),
                 'midpoint': self.spin_text_gradient_midpoint.value(),
             },
+            'text_stroke_color': self._get_color_from_button(self.btn_stroke_color).name(QColor.HexArgb),
+            'text_stroke_width': self.spin_stroke_width.value(),
             'font_family': font_family,
             'font_style': font_style,
             'font_size': self.spin_font_size.value(),
@@ -381,6 +409,9 @@ class TypographyStylePanel(QWidget):
             self.set_button_color(self.btn_text_gradient_color2, text_gradient.get('color2'))
             self.combo_text_gradient_direction.setCurrentIndex(text_gradient.get('direction', 0))
             self.spin_text_gradient_midpoint.setValue(int(text_gradient.get('midpoint', 50)))
+
+        self.set_button_color(self.btn_stroke_color, style_dict.get('text_stroke_color', '#ff000000'))
+        self.spin_stroke_width.setValue(int(style_dict.get('text_stroke_width', 0)))
 
         font_family = style_dict.get('font_family', "Arial")
         font_style = style_dict.get('font_style', 'Regular')

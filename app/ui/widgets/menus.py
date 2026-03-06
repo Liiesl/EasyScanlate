@@ -24,6 +24,7 @@ class ToggleButton(QPushButton):
         """
         super().__init__(off_text, parent)
         self.setCheckable(True)
+        self.setObjectName("ToggleButton")
 
         self._off_text = off_text
         self._on_text = on_text
@@ -33,6 +34,7 @@ class ToggleButton(QPushButton):
         self.toggled.connect(self._update_state)
         # Set initial state
         self._update_state(self.isChecked())
+        self.setStyleSheet(MENUS_STYLES)
 
     def _update_state(self, checked: bool):
         """Internal slot to update the text, icon, and 'state' property for QSS styling."""
@@ -64,8 +66,7 @@ class Menu(QWidget):
         Initializes the menu as a frameless, popup-style widget.
         """
         super().__init__(parent)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Popup)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setWindowFlags(Qt.Popup)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setAttribute(Qt.WA_DeleteOnClose)
 
@@ -136,17 +137,22 @@ class ToggleWithProgress(QPushButton):
     It expands to show the progress bar when active (Stop state) 
     and collapses to a normal button when idle (Start state).
     """
-    def __init__(self, start_text="Process OCR", stop_text="Stop OCR", 
+    def __init__(self, start_text="Detect Text", stop_text="Stop detecting", 
                  start_icon=None, stop_icon=None, parent=None):
         super().__init__(parent)
+        self.setObjectName("ToggleWithProgress")
         self.setCheckable(True)
         self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-        self.setMinimumHeight(40) # Match existing buttons
+        self.setMinimumHeight(40)
 
         self._start_text = start_text
         self._stop_text = stop_text
         self._start_icon = start_icon
         self._stop_icon = stop_icon
+        
+        self._idle_width = 180
+        self._active_width = 380
+        self.setFixedWidth(self._idle_width)
         
         # Main Layout
         self.layout = QHBoxLayout(self)
@@ -168,7 +174,8 @@ class ToggleWithProgress(QPushButton):
         
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(False)
-        self.progress_bar.setFixedHeight(4)
+        self.progress_bar.setFixedHeight(8)
+        self.progress_bar.setMinimumWidth(200)
         
         self.percent_label = QLabel("0%")
         
@@ -183,6 +190,7 @@ class ToggleWithProgress(QPushButton):
         # Initial State
         self.progress_container.setVisible(False)
         self.transition_to_idle()
+        self.setStyleSheet(MENUS_STYLES)
 
     def transition_to_active(self):
         """ Switches to 'Stop' state, showing progress bar. """
@@ -193,6 +201,7 @@ class ToggleWithProgress(QPushButton):
         self.progress_container.setVisible(True)
         self.progress_bar.setValue(0)
         self.percent_label.setText("0%")
+        self.setFixedWidth(self._active_width)
         self.update() # Force redraw
 
     def transition_to_idle(self):
@@ -202,6 +211,7 @@ class ToggleWithProgress(QPushButton):
             self.icon_label.setPixmap(self._start_icon.pixmap(20, 20))
         self.text_label.setText(self._start_text)
         self.progress_container.setVisible(False)
+        self.setFixedWidth(self._idle_width)
         self.update()
 
     def set_progress(self, value, total):
