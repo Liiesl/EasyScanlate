@@ -14,6 +14,9 @@ jobs:
       - name: Check-out repository
         uses: actions/checkout@v4
 
+      - name: Update Version File
+        run: echo "${{ github.ref_name }}" > APPVERSION
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -37,8 +40,8 @@ jobs:
           company-name: "Liiesl"
           product-name: "EasyScanlate"
           file-description: "ManhwaOCR"
-          file-version: "0.1.2"
-          product-version: "0.1.2"
+          file-version: "0.3.0"
+          product-version: "0.3.0"
 
       - name: Zip Main Build Output
         run: |
