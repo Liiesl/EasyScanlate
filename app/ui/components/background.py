@@ -14,11 +14,11 @@ class AuroraCanvas(QWidget):
 
     def load_settings(self):
         # Color
-        color_val = self.settings.value("aurora_color", "#00AAFF")
+        color_val = self.settings.value("aurora_color", "#3b0600")
         self.main_color = QColor(color_val)
         
         # Blobs
-        self.blob_count = int(self.settings.value("aurora_blob_count", 1))
+        self.blob_count = int(self.settings.value("aurora_blob_count", 2))
         
         # Mode
         mode_val = self.settings.value("aurora_dark_mode", "true")

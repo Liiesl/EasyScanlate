@@ -50,11 +50,10 @@ class SettingsDialog(QDialog):
         self.show_delete_warning_check.setChecked(self.settings.value("show_delete_warning", "true") == "true")
         general_layout.addRow("Show delete confirmation dialog:", self.show_delete_warning_check)
 
-        self.use_gpu_check = QCheckBox()
-        self.use_gpu_check.setProperty("class", "AdvancedCheck")
-        self.use_gpu_check.setChecked(self.settings.value("use_gpu", "true").lower() == "true")
-        self.use_gpu_check.setToolTip("Requires compatible NVIDIA GPU and CUDA drivers. Restart may be needed.")
-        general_layout.addRow("Use GPU for OCR (if available):", self.use_gpu_check)
+        self.show_welcome_dialog_check = QCheckBox()
+        self.show_welcome_dialog_check.setProperty("class", "AdvancedCheck")
+        self.show_welcome_dialog_check.setChecked(self.settings.value("show_welcome_dialog", "true") == "true")
+        general_layout.addRow("Show welcome dialog on startup:", self.show_welcome_dialog_check)
 
         self.auto_context_fill_check = QCheckBox()
         self.auto_context_fill_check.setProperty("class", "AdvancedCheck")
@@ -305,9 +304,9 @@ class SettingsDialog(QDialog):
         # General
         self.settings.setValue("show_delete_warning", 
                                "true" if self.show_delete_warning_check.isChecked() else "false")
-        self.settings.setValue("use_gpu", 
-                               "true" if self.use_gpu_check.isChecked() else "false")
-        self.settings.setValue("auto_context_fill", 
+        self.settings.setValue("show_welcome_dialog", 
+                               "true" if self.show_welcome_dialog_check.isChecked() else "false")
+        self.settings.setValue("auto_context_fill",
                                "true" if self.auto_context_fill_check.isChecked() else "false")
         self.settings.setValue("auto_check_updates", 
                                "true" if self.auto_check_updates_check.isChecked() else "false")

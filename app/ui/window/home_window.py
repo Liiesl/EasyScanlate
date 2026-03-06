@@ -15,6 +15,7 @@ from app.ui.window.chrome import CustomTitleBar, WindowResizer
 from app.ui.widgets.menu_bar import TitleBarState
 from app.ui.dialogs.settings_dialog import SettingsDialog
 from app.ui.dialogs.error_dialog import ErrorDialog
+from app.ui.dialogs.welcome_dialog import WelcomeDialog
 from app.utils.update import UpdateHandler
 
 
@@ -499,6 +500,10 @@ class Home(QMainWindow):
         self.loading_dialog.accept()
         ErrorDialog.critical(self, "Error", f"Failed to open project:\n{error_msg}")
         print(f"Error loading project: {error_msg}")
+
+    def show_welcome_if_needed(self):
+        """Show welcome dialog if user hasn't disabled it."""
+        QTimer.singleShot(500, lambda: WelcomeDialog.show_if_needed(self))
 
     def closeEvent(self, event):
         QApplication.quit()
