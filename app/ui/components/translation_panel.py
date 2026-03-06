@@ -273,12 +273,13 @@ class TranslationPanel(QFrame):
     translation_complete = Signal(str, dict)
     profile_changed = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, source_language="Korean", parent=None):
         super().__init__(parent)
         self.setObjectName("TranslationPanel")
         self.setStyleSheet(TRANSLATION_PANEL_STYLES)
 
         # Data
+        self.source_language = source_language
         self.cards = {}  # row_number -> TranslationCard
         self.active_card = None
         self.ocr_results = []
@@ -569,7 +570,7 @@ Text: {source_text}"""
             return
 
         target_lang = self.lang_combo.currentText()
-        user_prompt = f"Translate the Korean text to {target_lang}, keep everything else. Respond only with the file."
+        user_prompt = f"Translate the {self.source_language} text to {target_lang}, keep everything else. Respond only with the file."
 
         try:
             content = generate_for_translate_content(self.ocr_results, "Original")

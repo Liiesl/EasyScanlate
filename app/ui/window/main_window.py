@@ -233,7 +233,7 @@ class MainWindow(QMainWindow):
         self.style_panel.setMaximumHeight(480)
         
         # Create unified translation panel (replaces ResultsWidget + TranslationChatWidget)
-        self.translation_panel = TranslationPanel()
+        self.translation_panel = TranslationPanel(source_language=self.model.original_language)
         self.translation_panel.text_changed.connect(self.update_ocr_text)
         self.translation_panel.row_deleted.connect(self.delete_row)
         self.translation_panel.row_selected.connect(self._on_panel_row_selected)
@@ -395,6 +395,11 @@ class MainWindow(QMainWindow):
         """ Populates the UI after the model has loaded a project. """
         self._clear_layout(self.scroll_layout)
         self.scroll_area.cancel_active_modes()
+
+        # Re-initialize OCR reader if language changed
+        if self.reader and self.reader.language != self.model.original_language:
+            print(f"Re-initializing OCR reader for language: {self.model.original_language}")
+            self.reader = RapidOCREngine(language=self.model.original_language)
 
         image_paths = self.model.image_paths
         self.setWindowTitle(f"{self.model.project_name} | ManhwaOCR")
@@ -565,8 +570,9 @@ class MainWindow(QMainWindow):
             print("RapidOCR reader already initialized.")
             return True
         try:
-            print(f"Initializing RapidOCR reader for {context}")
-            self.reader = RapidOCREngine()
+            language = getattr(self.model, 'original_language', 'Korean')
+            print(f"Initializing RapidOCR reader for {context} (language: {language})")
+            self.reader = RapidOCREngine(language=language)
             print("RapidOCR reader initialized successfully.")
             return True
         except Exception as e:
