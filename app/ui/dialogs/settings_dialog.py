@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (QDialog, QDoubleSpinBox, QVBoxLayout, QHBoxLayout
                              QWidget, QLineEdit, QKeySequenceEdit, QCheckBox,
                              QGroupBox, QPushButton, QLabel, QProgressBar, QMessageBox)
 from PySide6.QtGui import QKeySequence, QDesktopServices
-from PySide6.QtCore import QSettings, QUrl, Qt
+from PySide6.QtCore import QSettings, QUrl, Qt, QEvent
 from app.utils.update import UpdateHandler
 from app.ui.dialogs.error_dialog import ErrorDialog
 from app.ui.components.background_settings import AuroraEditorPanel
@@ -85,7 +85,7 @@ class SettingsDialog(QDialog):
 
         self.download_update_button = QPushButton("Download Update")
         self.download_update_button.setVisible(False)
-        self.download_update_button.clicked.connect(self.update_handler.download_manifest_and_start_update)
+        self.download_update_button.clicked.connect(self.update_handler.start_update_download)
         update_button_layout.addWidget(self.download_update_button)
 
         self.restart_update_button = QPushButton("Restart & Update")
@@ -245,6 +245,7 @@ class SettingsDialog(QDialog):
         self.update_handler.update_check_finished.connect(self.on_update_check_complete)
         self.update_handler.download_progress.connect(self.on_download_progress)
         self.update_handler.download_finished.connect(self.on_download_complete)
+        self.update_handler.download_cancelled.connect(self.on_download_cancelled)
         self.update_handler.error_occurred.connect(self.on_update_error)
 
     def check_for_existing_download(self):
@@ -280,11 +281,42 @@ class SettingsDialog(QDialog):
         else:
             self.download_update_button.setEnabled(True)
 
+    def on_download_cancelled(self):
+        """Handles when user cancels the download."""
+        self.update_progress_bar.setVisible(False)
+        self.download_update_button.setVisible(True)
+        self.download_update_button.setEnabled(True)
+        self.check_updates_button.setVisible(False)
+        self.restart_update_button.setVisible(False)
+
     def on_update_error(self, message):
         self.update_status_label.setText("Update check failed.")
         ErrorDialog.critical(self, "Update Error", message)
         self.check_updates_button.setEnabled(True)
         self.download_update_button.setEnabled(True)
+
+    def closeEvent(self, event):
+        """Intercepts close attempts when download is in progress."""
+        if self.update_handler.is_download_in_progress():
+            reply = QMessageBox.question(
+                self,
+                "Download in Progress",
+                "An update is currently being downloaded.\n\n"
+                "Do you want to cancel the download and close Settings?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+
+            if reply == QMessageBox.Yes:
+                self.update_handler.cancel_download()
+                # Wait a moment for cancellation to process
+                import time
+                time.sleep(0.5)
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()
 
     def apply_update(self):
         self.update_handler.apply_update(self.downloaded_update_path)
