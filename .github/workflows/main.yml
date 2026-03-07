@@ -40,7 +40,7 @@ jobs:
             'OCR=OCR'
             'assets/icons=assets/icons'
             'assets/fonts=assets/fonts'
-            'aassets/processed=aassets/processed'
+            'assets/processed=assets/processed'
           mingw64: true
           enable-plugins: pyside6
           windows-icon-from-ico: assets/app_icon.ico
