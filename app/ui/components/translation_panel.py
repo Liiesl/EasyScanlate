@@ -414,7 +414,7 @@ class TranslationPanel(QFrame):
         else:
             for model_name, _ in GEMINI_MODELS_WITH_INFO:
                 self.model_combo.addItem(model_name, userData=model_name)
-            current_model = self.settings.value("gemini_model", "gemini-1.5-flash-latest")
+            current_model = self.settings.value("gemini_model", "gemini-3-flash-preview")
 
         for i in range(self.model_combo.count()):
             if self.model_combo.itemData(i) == current_model:
@@ -523,7 +523,7 @@ class TranslationPanel(QFrame):
             model_name = self.model_combo.currentData() or "mistral-small-latest"
         else:
             api_key = self.settings.value("gemini_api_key", "")
-            model_name = self.model_combo.currentData() or "gemini-1.5-flash-latest"
+            model_name = self.model_combo.currentData() or "gemini-3-flash-latest"
 
         if not api_key:
             ErrorDialog.critical(self, "API Key Missing", f"Please set your {provider} API key in Settings.")
@@ -559,7 +559,7 @@ Text: {source_text}"""
             model_name = self.model_combo.currentData() or "mistral-small-latest"
         else:
             api_key = self.settings.value("gemini_api_key", "")
-            model_name = self.model_combo.currentData() or "gemini-1.5-flash-latest"
+            model_name = self.model_combo.currentData() or "gemini-3-flash-latest"
 
         if not api_key:
             ErrorDialog.critical(self, "API Key Missing", f"Please set your {provider} API key in Settings.")
