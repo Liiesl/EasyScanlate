@@ -42,7 +42,7 @@ jobs:
             'assets/fonts=assets/fonts'
             'assets/processed=assets/processed'
           include-data-files: |
-            'APPVERSION'
+            'APPVERSION=APPVERSION'
           mingw64: true
           enable-plugins: pyside6
           windows-icon-from-ico: assets/app_icon.ico
