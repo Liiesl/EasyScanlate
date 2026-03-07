@@ -26,6 +26,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          
+      - name: compile qss
+        run: python assets\build_prod_qss.py
 
       - name: Build Executable with Nuitka
         uses: Nuitka/Nuitka-Action@main
@@ -33,7 +36,11 @@ jobs:
           script-name: main.py
           mode: standalone
           windows-console-mode: disable
-          include-data-dir: 'OCR=OCR'
+          include-data-dir: |
+            'OCR=OCR'
+            'assets/icons=assets/icons'
+            'assets/fonts=assets/fonts'
+            'aassets/processed=aassets/processed'
           mingw64: true
           enable-plugins: pyside6
           windows-icon-from-ico: assets/app_icon.ico

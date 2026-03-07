@@ -94,7 +94,7 @@ class SettingsDialog(QDialog):
         update_button_layout.addWidget(self.restart_update_button)
         
         # Disable update buttons if running as script
-        is_script = "__nuitka_version__" not in locals()
+        is_script = "__compiled__" in globals()
         if is_script:
             self.check_updates_button.setEnabled(False)
             self.check_updates_button.setToolTip("Updates are only available for compiled versions of the application.")
