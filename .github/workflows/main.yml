@@ -41,6 +41,8 @@ jobs:
             'assets/icons=assets/icons'
             'assets/fonts=assets/fonts'
             'assets/processed=assets/processed'
+          include-data-file: |
+            'APPVERSION'
           mingw64: true
           enable-plugins: pyside6
           windows-icon-from-ico: assets/app_icon.ico
