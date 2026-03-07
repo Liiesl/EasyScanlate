@@ -426,6 +426,7 @@ class ResizableImageLabel(QGraphicsView):
                 self.manual_area_selected.emit(rect_scene, self)
             else:
                  self._rubber_band.hide()
+                 self._is_selection_active = False
             event.accept()
         else:
             super().mouseReleaseEvent(event)
@@ -605,7 +606,7 @@ class ResizableImageLabel(QGraphicsView):
                 if tb.row_number == row_number or float(tb.row_number) == float(row_number):
                      item_to_remove = tb
                      break
-            except (ValueError, TypeError):
+            except (TypeError, ValueError):
                  if str(tb.row_number) == str(row_number):
                       item_to_remove = tb
                       break

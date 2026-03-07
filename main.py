@@ -4,7 +4,7 @@
 import sys, os
 
 # Check if we are running as a normal script.
-IS_RUNNING_AS_SCRIPT = "__nuitka_version__" not in locals()
+IS_RUNNING_AS_SCRIPT = "__compiled__" in globals()
 
 try:
     from PySide6.QtWidgets import QApplication, QSplashScreen, QMessageBox

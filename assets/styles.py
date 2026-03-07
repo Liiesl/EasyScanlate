@@ -23,6 +23,8 @@ _styles_cache = {}
 def _load_stylesheet(qss_filename: str) -> str:
     """
     Load and preprocess a QSS file. Uses caching to avoid reprocessing.
+    Checks for pre-processed files first (production), falls back to
+    runtime preprocessing (development).
 
     Args:
         qss_filename: Name of the QSS file (without path)
@@ -33,6 +35,19 @@ def _load_stylesheet(qss_filename: str) -> str:
     if qss_filename in _styles_cache:
         return _styles_cache[qss_filename]
 
+    # Check for pre-processed file first (production builds)
+    processed_path = os.path.join(ASSETS_DIR, "processed", qss_filename)
+    if os.path.exists(processed_path):
+        try:
+            with open(processed_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            _styles_cache[qss_filename] = content
+            return content
+        except Exception as e:
+            print(f"Warning: Failed to load processed QSS file {processed_path}: {e}")
+            # Fall through to runtime preprocessing
+
+    # Fall back to runtime preprocessing (development)
     qss_path = os.path.join(ASSETS_DIR, qss_filename)
     if not os.path.exists(qss_path):
         print(f"Warning: QSS file not found: {qss_path}")
