@@ -43,6 +43,7 @@ jobs:
             'assets/processed=assets/processed'
           include-data-files: |
             'APPVERSION=APPVERSION'
+          include-package-data: rapidocr
           mingw64: true
           enable-plugins: pyside6
           windows-icon-from-ico: assets/app_icon.ico
