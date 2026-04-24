@@ -13,11 +13,10 @@ from app.utils.update import UpdateHandler
 from app.ui.dialogs.error_dialog import ErrorDialog
 from app.ui.components.background_settings import AuroraEditorPanel
 GEMINI_MODELS_WITH_INFO = [
-    ("gemini-2.5-flash", "250 req/day (free tier)"),
-    ("gemini-2.5-pro", "100 req/day (free tier)"),
-    ("gemini-2.5-flash-lite", "1000 req/day (free tier)"),
-    ("gemini-2.0-flash", "200 req/day (free tier)"),
-    ("gemini-2.0-flash-lite", "200 req/day (free tier)"),
+    ("gemini-3-flash-lite-preview", "20 req/day (free tier)"),
+    ("gemini-3-flash-preview", "20 req/day (free tier)"),
+    ("gemini-2.5-flash", "20 req/day (free tier)"),
+    ("gemini-2.5-pro", "20 req/day (free tier)"),
     ("gemma-3-27b-it", "14400 req/day"),
     ("gemma-3n-e4b-it", "14400 req/day"),
 ]
