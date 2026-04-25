@@ -7,6 +7,7 @@ from app.viewmodels.image_area_viewmodel import ImageAreaViewModel
 from app.viewmodels.translation_viewmodel import TranslationViewModel
 from app.viewmodels.style_viewmodel import StyleViewModel
 from app.viewmodels.batch_ocr_viewmodel import BatchOCRViewModel
+from app.viewmodels.project_viewmodel import ProjectViewModel
 from app.services.ocr_service import OCRService
 
 
@@ -35,17 +36,19 @@ class AppViewModel(BaseViewModel):
         self.translation_vm = TranslationViewModel(model, self.editor_vm, get_settings, app_viewmodel=self, parent=self)
         self.style_vm = StyleViewModel(model, self.editor_vm, self)
         self.batch_ocr_vm = BatchOCRViewModel(model, self.ocr_service, get_settings, self)
+        self.project_vm = ProjectViewModel(model, self)
+
+        # Forward ProjectViewModel.saved signal so existing MainWindow bindings don't break
+        self.project_vm.project_saved.connect(self.project_saved)
 
     # ------------------------------------------------------------------
     # Project / File actions (called by MenuBar)
     # ------------------------------------------------------------------
     def save_project(self):
-        result_message = self._model.save_project()
-        self.project_saved.emit(result_message)
+        self.project_vm.save_project()
 
     def save_project_as(self, file_path):
-        self._model.mmtl_path = file_path
-        self.save_project()
+        self.project_vm.save_project_as(file_path)
 
     def switch_profile(self, profile_name):
         if profile_name and profile_name in self._model.profiles and profile_name != self._model.active_profile_name:

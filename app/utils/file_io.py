@@ -368,19 +368,19 @@ def import_translation_file(self):
             )
             return False
 
-def export_rendered_images(self):
+def export_rendered_images(main_window, scroll_layout):
     """Export images with applied translations directly from QGraphicsView scenes."""
-    if not self.model.image_paths:
-        QMessageBox.warning(self, "Warning", "No images available for export.")
+    if not main_window.model.image_paths:
+        QMessageBox.warning(main_window, "Warning", "No images available for export.")
         return
 
     # Ask user for save location, defaulting to the project's directory.
-    project_directory = os.path.dirname(self.model.mmtl_path) if self.model.mmtl_path else ""
-    default_filename = f"{self.model.project_name}.zip"
+    project_directory = os.path.dirname(main_window.model.mmtl_path) if main_window.model.mmtl_path else ""
+    default_filename = f"{main_window.model.project_name}.zip"
     default_path = os.path.join(project_directory, default_filename)
     
     export_path, _ = QFileDialog.getSaveFileName(
-        self,
+        main_window,
         "Export Rendered Images",
         default_path,
         "ZIP Files (*.zip)"
@@ -390,8 +390,8 @@ def export_rendered_images(self):
         return # User cancelled
         
     # Suspend updates during export
-    for i in range(self.scroll_layout.count()):
-        widget = self.scroll_layout.itemAt(i).widget()
+    for i in range(scroll_layout.count()):
+        widget = scroll_layout.itemAt(i).widget()
         if isinstance(widget, ResizableImageLabel):
             widget.setUpdatesEnabled(False)
 
@@ -403,8 +403,8 @@ def export_rendered_images(self):
     translated_images = []
 
     try:
-        for i in range(self.scroll_layout.count()):
-            widget = self.scroll_layout.itemAt(i).widget()
+        for i in range(scroll_layout.count()):
+            widget = scroll_layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
                 scene = widget.scene()
                 
@@ -442,21 +442,21 @@ def export_rendered_images(self):
 
         if success:
             # Success message - keep QMessageBox.information for non-error cases
-            QMessageBox.information(self, "Success", f"Exported to:\n{saved_path}")
+            QMessageBox.information(main_window, "Success", f"Exported to:\n{saved_path}")
         else:
             from app.ui.dialogs.error_dialog import ErrorDialog
-            ErrorDialog.critical(self, "Export Error", "Failed to export rendered images.", None)
+            ErrorDialog.critical(main_window, "Export Error", "Failed to export rendered images.", None)
     except Exception as e:
         import traceback
         from app.ui.dialogs.error_dialog import ErrorDialog
         ErrorDialog.critical(
-            self, "Render Error", 
+            main_window, "Render Error", 
             f"Failed to render images for export:\n{str(e)}",
             traceback.format_exc()
         )
     finally:
-        for i in range(self.scroll_layout.count()):
-            widget = self.scroll_layout.itemAt(i).widget()
+        for i in range(scroll_layout.count()):
+            widget = scroll_layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
                 widget.setUpdatesEnabled(True)
         shutil.rmtree(temp_dir, ignore_errors=True)

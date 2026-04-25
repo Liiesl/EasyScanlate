@@ -34,12 +34,13 @@ class MainWindow(QMainWindow):
         self._load_filter_settings()
         
         self.model = ProjectModel()
-        self.model.project_loaded.connect(self.on_project_loaded)
-        self.model.project_load_failed.connect(self.on_project_load_failed)
         self.model.model_updated.connect(self.on_model_updated)
         self.model.profiles_updated.connect(self._on_profile_list_changed)
 
         self.app_vm = AppViewModel(self.model, lambda: self.settings, self)
+        self.app_vm.project_vm.project_loaded.connect(self._on_project_loaded)
+        self.app_vm.project_vm.project_load_failed.connect(self.on_project_load_failed)
+        self.app_vm.project_vm.project_name_changed.connect(self._on_project_name_changed)
         self.editor_vm = self.app_vm.editor_vm
         self.translation_vm = self.app_vm.translation_vm
         self.translation_vm.profile_created_for_user_edit.connect(self._on_profile_created_for_user_edit)
@@ -289,8 +290,7 @@ class MainWindow(QMainWindow):
             on_toggle_text_visibility=self.app_vm.image_area_vm.toggle_text_visibility,
             on_toggle_inpainting_visibility=self.app_vm.image_area_vm.toggle_inpaint_visibility,
             get_is_manual_ocr_checked=lambda: self.btn_manual_ocr.isChecked(),
-            on_manual_ocr_toggled=self.btn_manual_ocr.setChecked,
-            model=self.model
+            on_manual_ocr_toggled=self.btn_manual_ocr.setChecked
         )
         # VM-driven sync for text visibility UI state
         self.app_vm.image_area_vm.text_visible_changed.connect(self._on_text_visibility_changed)
@@ -407,14 +407,11 @@ class MainWindow(QMainWindow):
         self.find_action.setShortcut(QKeySequence(shortcut))
         print(f"Find shortcut set to: {shortcut}")
 
-    def process_mmtl(self, mmtl_path, temp_dir):
-        self.model.load_project(mmtl_path, temp_dir)
-
     def on_project_load_failed(self, error_msg):
         ErrorDialog.critical(self, "Project Load Error", error_msg)
         self.close()
 
-    def on_project_loaded(self):
+    def _on_project_loaded(self):
         """ Populates the UI after the model has loaded a project. """
         self.scroll_area.cancel_active_modes()
 
@@ -422,7 +419,6 @@ class MainWindow(QMainWindow):
         self.app_vm.ocr_service.reset()
 
         image_paths = self.model.image_paths
-        self.setWindowTitle(f"{self.model.project_name} | ManhwaOCR")
         self.btn_ocr_toggle.setEnabled(bool(image_paths))
         self.btn_manual_ocr.setEnabled(bool(image_paths))
         self.orientation_combo.setEnabled(bool(image_paths))
@@ -435,6 +431,13 @@ class MainWindow(QMainWindow):
         # Translation panel is reactive via TranslationViewModel.
         self.update_profile_selector()
         print(f"Project '{self.model.project_name}' loaded and UI populated.")
+
+    def _on_project_name_changed(self, name):
+        """Updates the window title when the project name changes."""
+        if name:
+            self.setWindowTitle(f"{name} | ManhwaOCR")
+        else:
+            self.setWindowTitle("Easy Scanlate")
     
     def handle_inpaint_record_deleted(self, record_id):
         """Delegates the inpaint record deletion request to the model."""
@@ -548,7 +551,7 @@ class MainWindow(QMainWindow):
             self.menu_bar._toggle_text_action.setChecked(checked)
 
     def export_manhwa(self):
-        export_rendered_images(self)
+        export_rendered_images(self, self.scroll_area._scroll_layout)
 
     def export_ocr_results(self):
         export_ocr_results(self)
@@ -645,18 +648,15 @@ class MainWindow(QMainWindow):
 
     def on_save_project_triggered(self):
         """Called by CustomScrollArea overlay save button."""
-        self.app_vm.save_project()
+        self.app_vm.project_vm.save_project()
 
     def closeEvent(self, event):
         # Cleanup translation panel
         if hasattr(self, 'translation_panel'):
             self.translation_panel.cleanup()
-        
-        if hasattr(self.model, 'temp_dir') and self.model.temp_dir and os.path.exists(self.model.temp_dir):
-            try:
-                import shutil
-                print(f"Cleaning up temporary directory: {self.model.temp_dir}")
-                shutil.rmtree(self.model.temp_dir)
-            except Exception as e:
-                print(f"Warning: Could not remove temporary directory {self.model.temp_dir}: {e}")
+
+        # Delegate temp-dir cleanup to ProjectViewModel
+        if hasattr(self, 'app_vm') and self.app_vm.project_vm:
+            self.app_vm.project_vm.close_project()
+
         super().closeEvent(event)

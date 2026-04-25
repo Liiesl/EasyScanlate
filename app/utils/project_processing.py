@@ -154,7 +154,7 @@ def launch_project(self, mmtl_path):
                     
                     # Create main window
                     new_window = MainWindow()
-                    new_window.process_mmtl(mmtl_path, temp_dir)
+                    new_window.app_vm.project_vm.load_project(mmtl_path, temp_dir)
                     new_window.show()
                     
                     # Close the old window
