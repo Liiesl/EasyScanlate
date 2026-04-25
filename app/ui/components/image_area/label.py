@@ -16,11 +16,14 @@ class ResizableImageLabel(QGraphicsView):
     inpaintRecordDeleted = Signal(str)
     inpaintVisualSelected = Signal(str)  # signal emitted when inpaint visual is selected in edit mode
 
-    # --- MODIFIED: __init__ now accepts a selection_manager ---
-    def __init__(self, pixmap, filename, main_window, selection_manager):
-        super().__init__()
-        self.main_window = main_window 
+    def __init__(self, pixmap, filename, selection_manager, model, get_display_text, on_text_edited, on_delete_row, scroll_area, parent=None):
+        super().__init__(parent)
         self.selection_manager = selection_manager
+        self.model = model
+        self.get_display_text = get_display_text
+        self.on_text_edited = on_text_edited
+        self.on_delete_row = on_delete_row
+        self.scroll_area = scroll_area
         # --- NEW: Connect to the selection manager's signal ---
         self.selection_manager.selection_changed.connect(self.on_external_selection_changed)
 
@@ -155,7 +158,7 @@ class ResizableImageLabel(QGraphicsView):
                 self.scene().removeItem(item)
         self.inpaint_patch_items.clear()
 
-    def apply_translation(self, main_window, text_entries_by_row, default_style):
+    def apply_translation(self, text_entries_by_row, default_style):
         processed_default_style = self._ensure_gradient_defaults_for_ril(default_style)
         current_entries = {rn: entry for rn, entry in text_entries_by_row.items()
                            if not entry.get('is_deleted', False)}
@@ -168,9 +171,9 @@ class ResizableImageLabel(QGraphicsView):
                 rows_to_remove_from_list.append(row_number)
             else:
                 entry = current_entries[row_number]
-                display_text = main_window.get_display_text(entry)
+                display_text = self.get_display_text(entry)
                 combined_style = self._combine_styles(processed_default_style, entry.get('custom_style', {}))
-                
+
                 text_box.text_item.setPlainText(display_text)
                 text_box.apply_styles(combined_style)
 
@@ -188,10 +191,10 @@ class ResizableImageLabel(QGraphicsView):
                 except Exception as e:
                     print(f"Error processing coords for new row {row_number}: {coords} -> {e}")
                     continue
-                
-                display_text = main_window.get_display_text(entry)
+
+                display_text = self.get_display_text(entry)
                 combined_style = self._combine_styles(processed_default_style, entry.get('custom_style', {}))
-                
+
                 text_box = TextBoxItem (QRectF(x, y, width, height),
                                          row_number,
                                          display_text,
@@ -402,7 +405,7 @@ class ResizableImageLabel(QGraphicsView):
         super().mouseDoubleClickEvent(event)
 
     def _on_text_box_edited(self, row_number, new_text):
-        self.main_window.update_ocr_text(row_number, new_text)
+        self.on_text_edited(row_number, new_text)
 
     def _finish_all_editing(self):
         for text_box in self.text_boxes:
@@ -538,9 +541,9 @@ class ResizableImageLabel(QGraphicsView):
         if row_number is None:
             self.deselect_all_text_boxes()
             return
-            
+
         # Check if the selected row belongs to this image
-        target_result, _ = self.main_window.model._find_result_by_row_number(row_number)
+        target_result, _ = self.model._find_result_by_row_number(row_number)
         if target_result and target_result.get('filename') == self.filename:
             selected_item = self.select_text_box(row_number)
             if selected_item:
@@ -548,25 +551,25 @@ class ResizableImageLabel(QGraphicsView):
         else:
             # The selection is for a different image, so deselect all boxes here
             self.deselect_all_text_boxes()
-    
+
     # --- NEW: Method to scroll the scroll area to a specific text box ---
     def _scroll_to_box(self, selected_box_item):
-        scroll_area = self.main_window.scroll_area
+        scroll_area = self.scroll_area
         scroll_viewport = scroll_area.viewport()
         viewport_height = scroll_viewport.height()
         current_scroll_y = scroll_area.verticalScrollBar().value()
         image_label_y_in_scroll = self.y()
-        
+
         box_rect_scene = selected_box_item.sceneBoundingRect()
         scale = self.transform().m11()
-        
+
         box_center_y_in_image = box_rect_scene.center().y() * scale
         box_global_top = image_label_y_in_scroll + (box_rect_scene.top() * scale)
         box_global_bottom = image_label_y_in_scroll + (box_rect_scene.bottom() * scale)
 
         is_visible = (box_global_top >= current_scroll_y) and \
                      (box_global_bottom <= current_scroll_y + viewport_height)
-        
+
         if not is_visible:
             target_scroll_y = image_label_y_in_scroll + box_center_y_in_image - (viewport_height / 2)
             scrollbar = scroll_area.verticalScrollBar()

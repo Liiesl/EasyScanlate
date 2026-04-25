@@ -65,14 +65,14 @@ class ManualOCRHandler(QObject):
         if checked:
             self.scroll_area.cancel_active_modes(exclude_handler=self)
             self.is_active = True
-            
-            if not self.scroll_area.main_window.reader:
+
+            if not self.scroll_area.get_reader():
                 print("ManualOCRHandler: Reader not found, requesting initialization...")
                 self.reader_initialization_requested.emit()
 
-            if not self.scroll_area.main_window.reader:
+            if not self.scroll_area.get_reader():
                 print("ManualOCRHandler: Reader initialization failed.")
-                self.cancel_mode() 
+                self.cancel_mode()
                 return
 
             print("ManualOCRHandler: Reader is ready. Activating mode.")
@@ -80,7 +80,7 @@ class ManualOCRHandler(QObject):
             self._set_selection_enabled_on_all(True)
 
             self.overlay_widget.show_overlay()
-            
+
             # Information message - keep QMessageBox.information for non-error cases
             QMessageBox.information(self.scroll_area, "Manual OCR Mode",
                                     "Click and drag on an image to select an area for OCR.")
@@ -97,10 +97,9 @@ class ManualOCRHandler(QObject):
 
         if self.ocr_thread and self.ocr_thread.isRunning():
             self.ocr_thread.stop_requested = True
-        
-        main_window_button = self.scroll_area.main_window.btn_manual_ocr
-        if main_window_button.isChecked():
-            main_window_button.setChecked(False)
+
+        if self.scroll_area.on_manual_ocr_cancelled:
+            self.scroll_area.on_manual_ocr_cancelled()
 
         self._clear_selection_state()
         self._set_selection_enabled_on_all(False)
@@ -160,12 +159,12 @@ class ManualOCRHandler(QObject):
 
     def process_selected_area(self):
         """Crops the selected area, runs OCR using the OCRProcessor thread, and adds results."""
-        main_window = self.scroll_area.main_window
-        if not self.selected_rect_scene or not self.active_label or not main_window.reader:
+        reader = self.scroll_area.get_reader()
+        if not self.selected_rect_scene or not self.active_label or not reader:
             QMessageBox.warning(self.scroll_area, "Error", "Missing selection, image, or OCR reader.")
             self.reset_selection()
             return
-        
+
         if self.ocr_thread and self.ocr_thread.isRunning():
             QMessageBox.warning(self.scroll_area, "Busy", "Already processing an area.")
             return
@@ -184,12 +183,12 @@ class ManualOCRHandler(QObject):
                  self.reset_selection(); return
 
             self.crop_offset = (bounded_crop_rect.left(), bounded_crop_rect.top())
-            
+
             cropped_pixmap = pixmap.copy(bounded_crop_rect)
             buffer = QBuffer(); buffer.open(QBuffer.ReadWrite); cropped_pixmap.save(buffer, "PNG")
             pil_image = Image.open(io.BytesIO(buffer.data()))
 
-            settings = main_window.settings
+            settings = self.scroll_area.get_settings()
             ocr_settings = {
                 "min_text_height": int(settings.value("min_text_height", 40)),
                 "max_text_height": int(settings.value("max_text_height", 100)),
@@ -201,7 +200,7 @@ class ManualOCRHandler(QObject):
             }
 
             self.ocr_thread = OCRProcessor(
-                reader=main_window.reader,
+                reader=reader,
                 image_data=pil_image,
                 **ocr_settings
             )

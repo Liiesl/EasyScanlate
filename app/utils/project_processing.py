@@ -131,7 +131,7 @@ def launch_project(self, mmtl_path):
     if hasattr(self, 'launch_main_app'):
         # Called from Home class
         self.launch_main_app(mmtl_path)
-    elif hasattr(self, 'main_window'):
+    elif hasattr(self, '_parent_window'):
         # Called from MenuBar class
         from app.ui.window.home_window import LoadingDialog, ProjectLoaderThread
         

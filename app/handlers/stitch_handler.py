@@ -179,10 +179,7 @@ class StitchHandler(QObject):
             label.cleanup()
             label.deleteLater()
             
-        new_label = ResizableImageLabel(combined_pixmap, new_filename, self.scroll_area.main_window, self.scroll_area.main_window.selection_manager)
-        new_label.textBoxDeleted.connect(self.scroll_area.main_window.delete_row)
-        # Connect to the scroll_area's handlers, not main_window's
-        new_label.manual_area_selected.connect(self.scroll_area.manual_ocr_handler.handle_area_selected)
+        new_label = self.scroll_area.create_image_label(combined_pixmap, new_filename)
         scroll_layout.insertWidget(first_label_index, new_label)
 
         self.model.sort_and_notify()

@@ -19,31 +19,59 @@ class CustomScrollArea(QScrollArea):
     """
     resized = Signal()
 
-    def __init__(self, main_window, parent=None):
+    def __init__(self, model, selection_manager, on_initialize_reader, on_save_project, on_export_manhwa,
+                 get_display_text, on_text_edited, on_delete_row, get_reader, get_settings, on_manual_ocr_cancelled,
+                 parent=None):
         """ The scroll area instantiates its own action handlers, passing only
             the necessary components (self and the model). """
-        super().__init__(parent or main_window)
-        self.main_window = main_window
-        self.model = main_window.model
+        super().__init__(parent)
+        self.model = model
+        self.selection_manager = selection_manager
+        self.on_initialize_reader = on_initialize_reader
+        self.on_save_project = on_save_project
+        self.on_export_manhwa = on_export_manhwa
+        self.get_display_text = get_display_text
+        self.on_text_edited = on_text_edited
+        self.on_delete_row = on_delete_row
+        self.get_reader = get_reader
+        self.get_settings = get_settings
+        self.on_manual_ocr_cancelled = on_manual_ocr_cancelled
         self.overlay_widget = None
         self._text_is_visible = True
         self._inpainting_is_visible = True
-        
+
         # Instantiate all handlers, breaking the MainWindow dependency
         self.manual_ocr_handler = ManualOCRHandler(self, self.model)
-        self.manual_ocr_handler.reader_initialization_requested.connect(self.main_window._initialize_ocr_reader)
+        self.manual_ocr_handler.reader_initialization_requested.connect(self.on_initialize_reader)
         self.stitch_handler = StitchHandler(self, self.model)
         self.split_handler = SplitHandler(self, self.model)
         self.context_fill_handler = ContextFillHandler(self, self.model)
-        
+
         self.action_handlers = [
-            self.manual_ocr_handler, self.stitch_handler, 
+            self.manual_ocr_handler, self.stitch_handler,
             self.split_handler, self.context_fill_handler
         ]
 
         self._init_overlay()
         self.resized.connect(self.update_handler_ui_positions)
         self.verticalScrollBar().valueChanged.connect(self.update_handler_ui_positions)
+
+    def create_image_label(self, pixmap, filename):
+        """Factory to create a ResizableImageLabel wired with all necessary callbacks."""
+        label = ResizableImageLabel(
+            pixmap, filename,
+            self.selection_manager,
+            self.model,
+            self.get_display_text,
+            self.on_text_edited,
+            self.on_delete_row,
+            self
+        )
+        label.textBoxDeleted.connect(self.on_delete_row)
+        label.inpaintRecordDeleted.connect(self.model.remove_inpaint_record)
+        label.manual_area_selected.connect(self.manual_ocr_handler.handle_area_selected)
+        label.manual_area_selected.connect(self.context_fill_handler.handle_area_selected)
+        return label
 
     def _init_overlay(self):
         """ Creates and configures the overlay widget and its buttons. """
@@ -83,13 +111,13 @@ class CustomScrollArea(QScrollArea):
             return
 
         menu = Menu(self)
-        
+
         btn_save_project = QPushButton(qta.icon('fa5s.save', color='white'), " Save Project (.mmtl)")
-        btn_save_project.clicked.connect(self.main_window.save_project)
+        btn_save_project.clicked.connect(self.on_save_project)
         menu.addButton(btn_save_project)
 
         btn_save_images = QPushButton(qta.icon('fa5s.images', color='white'), " Save Rendered Images")
-        btn_save_images.clicked.connect(self.main_window.export_manhwa)
+        btn_save_images.clicked.connect(self.on_export_manhwa)
         menu.addButton(btn_save_images)
 
         menu.set_position_and_show(trigger_button, 'right')
@@ -110,16 +138,18 @@ class CustomScrollArea(QScrollArea):
     def toggle_text_visibility(self):
         """ Toggles the visibility of all text boxes in all image labels. """
         self._text_is_visible = not self._text_is_visible
-        for i in range(self.main_window.scroll_layout.count()):
-            widget = self.main_window.scroll_layout.itemAt(i).widget()
+        layout = self.widget().layout()
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
                 widget.set_text_visibility(self._text_is_visible)
 
     def toggle_inpainting_visibility(self):
         """ Toggles whether the inpainting patches are applied to the images. """
         self._inpainting_is_visible = not self._inpainting_is_visible
-        for i in range(self.main_window.scroll_layout.count()):
-            widget = self.main_window.scroll_layout.itemAt(i).widget()
+        layout = self.widget().layout()
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
                 widget.set_inpaints_applied(self._inpainting_is_visible)
 

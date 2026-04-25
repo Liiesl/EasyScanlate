@@ -95,7 +95,20 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(main_widget)
         self.setCentralWidget(self.background_canvas)
 
-        self.scroll_area = CustomScrollArea(main_window=self)
+        self.scroll_area = CustomScrollArea(
+            model=self.model,
+            selection_manager=self.selection_manager,
+            on_initialize_reader=self._initialize_ocr_reader,
+            on_save_project=self.save_project,
+            on_export_manhwa=self.export_manhwa,
+            get_display_text=self.get_display_text,
+            on_text_edited=self.update_ocr_text,
+            on_delete_row=self.delete_row,
+            get_reader=lambda: self.reader,
+            get_settings=lambda: self.settings,
+            on_manual_ocr_cancelled=self._on_manual_ocr_cancelled,
+            parent=self
+        )
         
         # Create vertical toolbar (VS Code style)
         self.vertical_toolbar = QWidget()
@@ -283,7 +296,34 @@ class MainWindow(QMainWindow):
         self.resizer = WindowResizer(self)
 
         # Initialize Title Bar State (needs all other widgets to be created first)
-        self.title_bar.setState(TitleBarState.MAIN_WINDOW)
+        self.menu_bar = MenuBar(
+            parent=self,
+            state=TitleBarState.MAIN_WINDOW,
+            on_save_project=self.save_project,
+            on_save_project_as=self._save_project_as,
+            on_import_translation=self.import_translation,
+            on_export_ocr_results=self.export_ocr_results,
+            on_toggle_ocr=self.toggle_ocr,
+            on_toggle_find_widget=self.toggle_find_widget,
+            on_toggle_panel_layout=self.toggle_panel_layout,
+            on_switch_profile=self.switch_active_profile,
+            on_context_fill_start=self.scroll_area.context_fill_handler.start_mode,
+            on_context_fill_edit_toggled=self.scroll_area.context_fill_handler.toggle_edit_mode,
+            is_context_fill_edit_active=lambda: getattr(self.scroll_area.context_fill_handler, 'is_edit_mode_active', False),
+            on_split_clicked=self.btn_split.click,
+            on_stitch_clicked=self.btn_stitch.click,
+            on_toggle_text_visibility=self.scroll_area.toggle_text_visibility,
+            on_toggle_inpainting_visibility=self.scroll_area.toggle_inpainting_visibility,
+            get_profiles=lambda: list(self.model.profiles.keys()),
+            get_active_profile=lambda: self.model.active_profile_name,
+            get_is_manual_ocr_checked=lambda: self.btn_manual_ocr.isChecked(),
+            on_manual_ocr_toggled=self.btn_manual_ocr.setChecked,
+            model=self.model
+        )
+        # Bidirectional sync between buttons and menu actions
+        self.menu_bar._toggle_text_action.toggled.connect(self.btn_toggle_text.setChecked)
+        self.btn_toggle_text.toggled.connect(self.menu_bar._toggle_text_action.setChecked)
+        self.title_bar.setState(TitleBarState.MAIN_WINDOW, self.menu_bar)
 
     def nativeEvent(self, eventType, message):
         # Use getattr to safely check if resizer exists and is fully initialized
@@ -417,12 +457,7 @@ class MainWindow(QMainWindow):
                  pixmap = QPixmap(image_path)
                  if pixmap.isNull(): continue
                  filename = os.path.basename(image_path)
-                 label = ResizableImageLabel(pixmap, filename, self, self.selection_manager)
-                 label.textBoxDeleted.connect(self.delete_row)
-
-                 label.inpaintRecordDeleted.connect(self.handle_inpaint_record_deleted)
-                 label.manual_area_selected.connect(self.scroll_area.manual_ocr_handler.handle_area_selected)
-                 label.manual_area_selected.connect(self.scroll_area.context_fill_handler.handle_area_selected)
+                 label = self.scroll_area.create_image_label(pixmap, filename)
                  self.scroll_layout.addWidget(label)
             except Exception as e:
                  print(f"Error creating ResizableImageLabel for {image_path}: {e}")
@@ -627,7 +662,7 @@ class MainWindow(QMainWindow):
                         r for r in self.model.inpaint_data if r.get('target_image') == image_filename
                     ]
                     widget.update_inpaint_data(records_for_this_image)
-                    widget.apply_translation(self, results_for_this_image, DEFAULT_TEXT_STYLE)
+                    widget.apply_translation(results_for_this_image, DEFAULT_TEXT_STYLE)
 
     def toggle_ocr(self):
         if self.btn_ocr_toggle.isChecked():
@@ -883,8 +918,8 @@ class MainWindow(QMainWindow):
         self._panel_layout_vertical = checked
         
         # Update menu text
-        if hasattr(self, 'panel_layout_action'):
-            self.panel_layout_action.setText(
+        if hasattr(self, 'menu_bar') and hasattr(self.menu_bar, '_panel_layout_action'):
+            self.menu_bar._panel_layout_action.setText(
                 "Translation Panel: Bottom" if checked else "Translation Panel: Right"
             )
         
@@ -946,6 +981,14 @@ class MainWindow(QMainWindow):
         """Handle orientation combo box changes."""
         checked = (text == "Bottom")
         self.toggle_panel_layout(checked)
+
+    def _on_manual_ocr_cancelled(self):
+        if self.btn_manual_ocr.isChecked():
+            self.btn_manual_ocr.setChecked(False)
+
+    def _save_project_as(self, file_path):
+        self.model.mmtl_path = file_path
+        self.save_project()
 
     def save_project(self):
         result_message = self.model.save_project()

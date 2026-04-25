@@ -140,12 +140,7 @@ class SplitHandler(QObject):
         source_label.deleteLater()
 
         for i, data in enumerate(new_image_data):
-            # Pass the main_window reference from the scroll_area for signals that still need it
-            new_label = ResizableImageLabel(data['pixmap'], data['filename'], self.scroll_area.main_window, self.scroll_area.main_window.selection_manager)
-            new_label.textBoxDeleted.connect(self.scroll_area.main_window.delete_row)
-            # Connect to handlers owned by the scroll_area
-            new_label.manual_area_selected.connect(self.scroll_area.manual_ocr_handler.handle_area_selected)
-            new_label.manual_area_selected.connect(self.scroll_area.context_fill_handler.handle_area_selected)
+            new_label = self.scroll_area.create_image_label(data['pixmap'], data['filename'])
             scroll_layout.insertWidget(source_label_index + i, new_label)
 
         self.model.sort_and_notify()

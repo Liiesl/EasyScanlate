@@ -126,13 +126,16 @@ class CustomTitleBar(QWidget):
         self.pressing = False
         self.start_pos = QPoint(0,0)
 
-    def setState(self, state):
+    def setState(self, state, menu_bar=None):
         if self.menu_bar:
             self.layout.removeWidget(self.menu_bar)
             self.menu_bar.deleteLater()
             self.menu_bar = None
         if state != TitleBarState.NON_MAIN:
-            self.menu_bar = MenuBar(self.parent, state)
+            if menu_bar is None:
+                self.menu_bar = MenuBar(self.parent, state)
+            else:
+                self.menu_bar = menu_bar
             self.layout.insertWidget(0, self.menu_bar)
 
     def toggle_max(self):
