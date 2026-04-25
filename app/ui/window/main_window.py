@@ -54,7 +54,6 @@ class MainWindow(QMainWindow):
 
         self.init_ui()
 
-        self.scroll_content = QWidget()
         self.reader = None 
         self.ocr_processor = None
         
@@ -181,13 +180,6 @@ class MainWindow(QMainWindow):
         left_panel.setContentsMargins(10, 10, 5, 10)
         left_panel.setSpacing(20)
         
-        self.scroll_content = QWidget()
-        self.scroll_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.scroll_layout = QVBoxLayout(self.scroll_content)
-        self.scroll_layout.setContentsMargins(0, 0, 0, 0)
-        self.scroll_layout.setSpacing(0)
-        self.scroll_area.setWidget(self.scroll_content)
-        self.scroll_area.setWidgetResizable(True)
         left_panel.addWidget(self.scroll_area)
 
         # Right Panel
@@ -423,7 +415,6 @@ class MainWindow(QMainWindow):
 
     def on_project_loaded(self):
         """ Populates the UI after the model has loaded a project. """
-        self._clear_layout(self.scroll_layout)
         self.scroll_area.cancel_active_modes()
 
         # Re-initialize OCR reader if language changed
@@ -432,31 +423,17 @@ class MainWindow(QMainWindow):
             self.reader = RapidOCREngine(language=self.model.original_language)
 
         image_paths = self.model.image_paths
-        self.app_vm.image_area_vm.images = [os.path.basename(p) for p in image_paths]
-        self.setWindowTitle(f"{self.model.project_name} | ManhwaOCR")
         self.setWindowTitle(f"{self.model.project_name} | ManhwaOCR")
         self.btn_ocr_toggle.setEnabled(bool(image_paths))
         self.btn_manual_ocr.setEnabled(bool(image_paths))
         self.orientation_combo.setEnabled(bool(image_paths))
-        # self.ocr_progress.setValue(0) # Removed
-        
+
         if not image_paths:
             QMessageBox.warning(self, "No Images", "The project was loaded, but no images were found inside.")
 
-        for image_path in image_paths:
-            try:
-                 pixmap = QPixmap(image_path)
-                 if pixmap.isNull(): continue
-                 filename = os.path.basename(image_path)
-                 label = self.scroll_area.create_image_label(pixmap, filename)
-                 self.scroll_layout.addWidget(label)
-            except Exception as e:
-                 print(f"Error creating ResizableImageLabel for {image_path}: {e}")
-        
-        self._apply_inpaints()
-
+        # ImageAreaViewModel auto-syncs images from model.image_list_changed;
+        # CustomScrollArea reactively rebuilds labels from images_changed.
         self.update_profile_selector()
-        self.on_model_updated(None)
         self._update_translation_panel_data()
         print(f"Project '{self.model.project_name}' loaded and UI populated.")
     
@@ -464,41 +441,8 @@ class MainWindow(QMainWindow):
         """Delegates the inpaint record deletion request to the model."""
         self.model.remove_inpaint_record(record_id)
     
-    def _apply_inpaints(self):
-        """Iterates through inpaint data and applies patches to the correct image labels."""
-        labels_by_filename = {
-            widget.filename: widget
-            for i in range(self.scroll_layout.count())
-            if isinstance((widget := self.scroll_layout.itemAt(i).widget()), ResizableImageLabel)
-        }
-        
-        inpaint_dir = os.path.join(self.model.temp_dir, 'inpaint')
-
-        for record in self.model.inpaint_data:
-            target_label = labels_by_filename.get(record['target_image'])
-            if target_label:
-                patch_path = os.path.join(inpaint_dir, record['patch_filename'])
-                if os.path.exists(patch_path):
-                    patch_pixmap = QPixmap(patch_path)
-                    coords = record['coordinates']
-                    if not patch_pixmap.isNull():
-                        target_label.apply_inpaint_patch(patch_pixmap, QRectF(coords[0], coords[1], coords[2], coords[3]))
-                    else:
-                        print(f"Warning: Could not load patch pixmap from {patch_path}")
-                else:
-                    print(f"Warning: Inpaint patch file not found: {patch_path}")
-
     def on_model_updated(self, affected_filenames):
         """ SLOT: Handles the model_updated signal. Refreshes all relevant views. """
-        if affected_filenames:
-            for filename in affected_filenames:
-                for i in range(self.scroll_layout.count()):
-                    widget = self.scroll_layout.itemAt(i).widget()
-                    if isinstance(widget, ResizableImageLabel) and widget.filename == filename:
-                        widget.revert_to_original()
-                        self._apply_inpaints()
-                        break
-
         self.update_all_views(affected_filenames)
         self._update_translation_panel_data()
 
@@ -513,8 +457,9 @@ class MainWindow(QMainWindow):
         filename = target_result.get('filename')
         if not filename: return None
 
-        for i in range(self.scroll_layout.count()):
-            widget = self.scroll_layout.itemAt(i).widget()
+        layout = self.scroll_area.widget().layout()
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel) and widget.filename == filename:
                 for tb in widget.get_text_boxes():
                     # Need to handle float vs int comparison carefully
@@ -583,43 +528,14 @@ class MainWindow(QMainWindow):
     def _find_result_by_row_number(self, row_number_to_find):
         return self.model._find_result_by_row_number(row_number_to_find)
 
-    def _clear_layout(self, layout):
-        if layout is not None:
-            while layout.count():
-                item = layout.takeAt(0)
-                widget = item.widget()
-                if widget is not None: widget.deleteLater()
-
     def update_all_views(self, affected_filenames=None):
         """
-        Refreshes all views that depend on the model's data, including the
-        translation panel and the text boxes rendered on the images.
+        Refreshes the translation panel. Image-label updates are handled
+        reactively by CustomScrollArea via model_updated -> refresh_visuals.
         """
-        # Update translation panel with current OCR results
         if hasattr(self, 'translation_panel'):
             self.translation_panel.populate(self.model.ocr_results, self.get_display_text)
             self.translation_panel.set_profiles(list(self.model.profiles.keys()))
-        grouped_results = {}
-        for result in self.model.ocr_results:
-            filename = result.get('filename')
-            if filename:
-                if affected_filenames and filename not in affected_filenames:
-                    continue
-                if filename not in grouped_results:
-                    grouped_results[filename] = {}
-                grouped_results[filename][result.get('row_number')] = result
-
-        for i in range(self.scroll_layout.count()):
-            widget = self.scroll_layout.itemAt(i).widget()
-            if isinstance(widget, ResizableImageLabel):
-                image_filename = widget.filename
-                if not affected_filenames or image_filename in affected_filenames:
-                    results_for_this_image = grouped_results.get(image_filename, {})
-                    records_for_this_image = [
-                        r for r in self.model.inpaint_data if r.get('target_image') == image_filename
-                    ]
-                    widget.update_inpaint_data(records_for_this_image)
-                    widget.apply_translation(results_for_this_image, DEFAULT_TEXT_STYLE)
 
     def toggle_ocr(self):
         if self.btn_ocr_toggle.isChecked():
@@ -732,8 +648,9 @@ class MainWindow(QMainWindow):
         """SLOT: Handles the request from BatchOCRHandler to perform automatic inpainting."""
         """OCR functionality disabled - placeholder method"""
         target_label = None
-        for i in range(self.scroll_layout.count()):
-            widget = self.scroll_layout.itemAt(i).widget()
+        layout = self.scroll_area.widget().layout()
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel) and widget.filename == filename:
                 target_label = widget
                 break

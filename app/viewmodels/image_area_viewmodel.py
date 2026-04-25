@@ -1,5 +1,6 @@
 # app/viewmodels/image_area_viewmodel.py
 
+import os
 from PySide6.QtCore import Signal
 from app.viewmodels.base_viewmodel import BaseViewModel
 
@@ -24,6 +25,12 @@ class ImageAreaViewModel(BaseViewModel):
         self._selected_image = ""
         self._text_visible = True
         self._inpaints_visible = True
+
+        # Auto-sync image list when the model signals a structural change.
+        self._model.image_list_changed.connect(self._on_image_list_changed)
+
+    def _on_image_list_changed(self):
+        self.images = [os.path.basename(p) for p in self._model.image_paths]
 
     # ------------------------------------------------------------------
     # Properties

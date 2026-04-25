@@ -1,8 +1,10 @@
 # scroll_container.py
 
+import os
 from PySide6.QtWidgets import (QScrollArea, QWidget, QVBoxLayout, QPushButton,
-                               QMessageBox, QCheckBox)
+                               QMessageBox, QCheckBox, QSizePolicy)
 from PySide6.QtCore import Signal, QPoint
+from PySide6.QtGui import QPixmap
 import qtawesome as qta
 from app.handlers.stitch_handler import StitchHandler
 from app.handlers.split_handler import SplitHandler
@@ -55,6 +57,19 @@ class CustomScrollArea(QScrollArea):
         self.resized.connect(self.update_handler_ui_positions)
         self.verticalScrollBar().valueChanged.connect(self.update_handler_ui_positions)
 
+        # Internal content widget (owned by CustomScrollArea, not MainWindow)
+        self._scroll_content = QWidget()
+        self._scroll_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._scroll_layout = QVBoxLayout(self._scroll_content)
+        self._scroll_layout.setContentsMargins(0, 0, 0, 0)
+        self._scroll_layout.setSpacing(0)
+        self.setWidget(self._scroll_content)
+        self.setWidgetResizable(True)
+
+        # Reactive rebuild wiring
+        self.image_area_vm.images_changed.connect(self._rebuild_labels)
+        self.model.model_updated.connect(self._on_model_updated)
+
         # Relay VM selection changes to image labels
         self.editor_vm.selected_row_changed.connect(self._on_vm_selection_changed)
 
@@ -80,6 +95,51 @@ class CustomScrollArea(QScrollArea):
         label.manual_area_selected.connect(self.context_fill_handler.handle_area_selected)
         return label
 
+    def _rebuild_labels(self, filenames):
+        """Rebuilds ResizableImageLabels reactively from the ViewModel image list."""
+        self.cancel_active_modes()
+        layout = self._scroll_layout
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                if hasattr(widget, 'cleanup'):
+                    widget.cleanup()
+                widget.deleteLater()
+
+        path_map = {os.path.basename(p): p for p in self.model.image_paths}
+        for filename in filenames:
+            path = path_map.get(filename)
+            if not path:
+                continue
+            try:
+                pixmap = QPixmap(path)
+                if pixmap.isNull():
+                    continue
+                label = self.create_image_label(pixmap, filename)
+                layout.addWidget(label)
+            except Exception as e:
+                print(f"Error creating ResizableImageLabel for {path}: {e}")
+
+        # Apply current visibility states
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
+            if isinstance(widget, ResizableImageLabel):
+                widget.set_text_visibility(self.image_area_vm.text_visible)
+                widget.set_inpaints_applied(self.image_area_vm.inpaints_visible)
+
+    def _on_model_updated(self, affected_filenames):
+        """
+        Phase 2b side effect: CustomScrollArea walks its own widget tree to
+        forward model updates to individual labels. Per-label signal plumbing
+        is deferred to later phases.
+        """
+        layout = self._scroll_layout
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
+            if isinstance(widget, ResizableImageLabel):
+                widget.refresh_visuals(affected_filenames)
+
     def _on_delete_row_confirmed(self, row_number):
         """Shows confirmation dialog (View concern) then delegates to VM."""
         show_warning = self.get_settings().value("show_delete_warning", "true") == "true"
@@ -103,9 +163,7 @@ class CustomScrollArea(QScrollArea):
 
     def _on_vm_selection_changed(self, row_number):
         """Forward VM selection changes to all image labels."""
-        layout = self.widget().layout()
-        if layout is None:
-            return
+        layout = self._scroll_layout
         for i in range(layout.count()):
             widget = layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
@@ -175,9 +233,7 @@ class CustomScrollArea(QScrollArea):
 
     def _on_text_visibility_changed(self, visible):
         """React to ImageAreaViewModel text visibility changes."""
-        layout = self.widget().layout()
-        if layout is None:
-            return
+        layout = self._scroll_layout
         for i in range(layout.count()):
             widget = layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
@@ -185,9 +241,7 @@ class CustomScrollArea(QScrollArea):
 
     def _on_inpaints_visibility_changed(self, visible):
         """React to ImageAreaViewModel inpaint visibility changes."""
-        layout = self.widget().layout()
-        if layout is None:
-            return
+        layout = self._scroll_layout
         for i in range(layout.count()):
             widget = layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):

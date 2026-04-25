@@ -23,6 +23,8 @@ class ProjectModel(QObject):
     profiles_updated = Signal()
     # Emitted when a profile is created for a user edit (not programmatic changes like find/replace).
     profile_created_for_user_edit = Signal()
+    # Emitted when the image list changes structurally (load, stitch, split).
+    image_list_changed = Signal()
 
     def __init__(self):
         super().__init__()
@@ -86,6 +88,7 @@ class ProjectModel(QObject):
 
             print(f"Project '{self.project_name}' loaded successfully into model.")
             self.project_loaded.emit()
+            self.image_list_changed.emit()
 
         except Exception as e:
             error_msg = f"Failed to load project: {e}"

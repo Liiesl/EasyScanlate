@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (QGraphicsScene, QSizePolicy, QGraphicsRectItem, Q
 from PySide6.QtCore import Qt, Signal, QRectF, QPoint, QRect, QSize, QTimer
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QPainterPath
 from app.ui.components.image_area.textbox import TextBoxItem
+from assets import DEFAULT_TEXT_STYLE
 
 class ResizableImageLabel(QGraphicsView):
     # --- MODIFIED: textBoxSelected is no longer needed ---
@@ -70,6 +71,38 @@ class ResizableImageLabel(QGraphicsView):
         self.split_visuals = [] 
         self._is_dragging_split_line = False
         self._dragged_item = None
+
+        # Render initial text boxes and inpaint patches
+        self.refresh_visuals()
+
+    def refresh_visuals(self, affected_filenames=None):
+        """
+        Rebuilds text boxes and reapplies inpaint patches for this image.
+
+        Phase 2b side effect: ResizableImageLabel reads ProjectModel directly
+        for OCR results and inpaint records. Per-label VM mediation is deferred
+        to later phases.
+        """
+        if affected_filenames and self.filename not in affected_filenames:
+            return
+
+        self.revert_to_original()
+
+        # Re-apply inpaint patches
+        records = self.model.get_inpaint_records_for_image(self.filename)
+        self.update_inpaint_data(records)
+        for record in records:
+            patch_pixmap = self.model.get_inpaint_patch_pixmap(record.get('patch_filename'))
+            if patch_pixmap and not patch_pixmap.isNull():
+                coords = record['coordinates']
+                self.apply_inpaint_patch(patch_pixmap, QRectF(coords[0], coords[1], coords[2], coords[3]))
+
+        # Rebuild text boxes
+        results_for_this_image = {}
+        for result in self.model.ocr_results:
+            if result.get('filename') == self.filename and not result.get('is_deleted', False):
+                results_for_this_image[result.get('row_number')] = result
+        self.apply_translation(results_for_this_image, DEFAULT_TEXT_STYLE)
 
     def update_inpaint_data(self, records):
         self.inpaint_records = records
