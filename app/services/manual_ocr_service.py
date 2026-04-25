@@ -21,10 +21,10 @@ class ManualOCRService(QObject):
     ocr_finished = Signal()
     error_occurred = Signal(str)
 
-    def __init__(self, model, get_reader, get_settings, parent=None):
+    def __init__(self, model, ocr_service, get_settings, parent=None):
         super().__init__(parent)
         self.model = model
-        self.get_reader = get_reader
+        self.ocr_service = ocr_service
         self.get_settings = get_settings
         self.ocr_thread = None
         self._current_filename = None
@@ -35,7 +35,7 @@ class ManualOCRService(QObject):
         Validates reader, crops rect from the image, starts OCRProcessor thread.
         Returns: (started, message)
         """
-        reader = self.get_reader() if self.get_reader else None
+        reader = self.ocr_service.reader if self.ocr_service else None
         if not reader:
             return False, "OCR reader not initialized."
 

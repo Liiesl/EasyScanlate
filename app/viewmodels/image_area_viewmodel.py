@@ -40,13 +40,11 @@ class ImageAreaViewModel(BaseViewModel):
 
     # Temporary error signal (Phase 7 TODO: move error dialog ownership to AppViewModel)
     error_occurred = Signal(str, str)
-    # Emitted when manual OCR needs the reader but it isn't initialized yet.
-    reader_initialization_requested = Signal()
 
-    def __init__(self, model, get_reader=None, get_settings=None, parent=None):
+    def __init__(self, model, ocr_service=None, get_settings=None, parent=None):
         super().__init__(parent)
         self._model = model
-        self._get_reader = get_reader
+        self._ocr_service = ocr_service
         self._get_settings = get_settings
 
         self._images = []
@@ -82,7 +80,7 @@ class ImageAreaViewModel(BaseViewModel):
         self._stitch_service = StitchService(model, self)
         self._split_service = SplitService(model, self)
         self._inpaint_service = InpaintService(model, self)
-        self._manual_ocr_service = ManualOCRService(model, get_reader, get_settings, self)
+        self._manual_ocr_service = ManualOCRService(model, ocr_service, get_settings, self)
 
         self._manual_ocr_service.ocr_finished.connect(self._on_manual_ocr_finished)
         self._manual_ocr_service.error_occurred.connect(self._on_manual_ocr_error)
@@ -493,15 +491,14 @@ class ImageAreaViewModel(BaseViewModel):
     # --- Manual OCR ---
 
     def _start_manual_ocr_mode(self):
-        reader = self._get_reader() if self._get_reader else None
-        if not reader:
-            print("ManualOCR: Reader not found, requesting initialization...")
-            self.reader_initialization_requested.emit()
-            reader = self._get_reader() if self._get_reader else None
-            if not reader:
-                print("ManualOCR: Reader initialization failed.")
-                self.cancel_action_mode()
-                return
+        if not self._ocr_service:
+            self.error_occurred.emit("Error", "OCR service not available.")
+            self.cancel_action_mode()
+            return
+        if not self._ocr_service.initialize("Manual OCR"):
+            self.error_occurred.emit("Error", "Failed to initialize OCR reader for Manual OCR.")
+            self.cancel_action_mode()
+            return
         self._manual_ocr_filename = ""
         self._manual_ocr_rect = None
         self._manual_ocr_processing = False

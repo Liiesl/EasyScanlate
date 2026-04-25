@@ -18,14 +18,12 @@ from app.ui.widgets.menu_bar import MenuBar, TitleBarState
 from app.ui.window.chrome import CustomTitleBar, WindowResizer
 from app.ui.widgets.progress_bar import CustomProgressBar
 from app.ui.widgets.menus import Menu, ToggleButton, ToggleWithProgress
-from app.handlers.ocr_batch_handler import BatchOCRHandler
 from app.core.project_model import ProjectModel
 from app.viewmodels import AppViewModel
 from app.ui.dialogs.settings_dialog import SettingsDialog
 from app.ui.components.background import AuroraCanvas
 from assets import (DEFAULT_TEXT_STYLE, RIGHT_PANEL_STYLES, UNIVERSAL_STYLES)
 import os, gc, json, traceback
-from app.core.rapid_ocr_engine import RapidOCREngine
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -41,7 +39,7 @@ class MainWindow(QMainWindow):
         self.model.model_updated.connect(self.on_model_updated)
         self.model.profiles_updated.connect(self._on_profile_list_changed)
 
-        self.app_vm = AppViewModel(self.model, lambda: self.reader, lambda: self.settings, self)
+        self.app_vm = AppViewModel(self.model, lambda: self.settings, self)
         self.editor_vm = self.app_vm.editor_vm
         self.translation_vm = self.app_vm.translation_vm
         self.translation_vm.profile_created_for_user_edit.connect(self._on_profile_created_for_user_edit)
@@ -55,9 +53,6 @@ class MainWindow(QMainWindow):
 
         self.init_ui()
 
-        self.reader = None
-        self.ocr_processor = None
-        self.batch_handler = None
         self._panel_layout_vertical = True  # Track layout state (True = vertical/bottom, False = horizontal/right)
 
     def _load_filter_settings(self):
@@ -95,12 +90,10 @@ class MainWindow(QMainWindow):
             model=self.model,
             editor_viewmodel=self.editor_vm,
             image_area_viewmodel=self.app_vm.image_area_vm,
-            on_initialize_reader=self._initialize_ocr_reader,
             on_save_project=self.on_save_project_triggered,
             on_export_manhwa=self.export_manhwa,
             get_display_text=self.get_display_text,
             on_text_edited=self.translation_vm.update_text,
-            get_reader=lambda: self.reader,
             get_settings=lambda: self.settings,
             on_manual_ocr_cancelled=self._on_manual_ocr_cancelled,
             parent=self
@@ -314,6 +307,17 @@ class MainWindow(QMainWindow):
         self.app_vm.import_translation_requested.connect(self.import_translation)
         self.app_vm.export_ocr_results_requested.connect(self.export_ocr_results)
 
+        # Connect BatchOCRViewModel signals
+        # Note: progress_changed only drives CustomProgressBar; CustomProgressBar.valueChanged
+        # already drives btn_ocr_toggle.setValue via the connection in init_ui.
+        self.app_vm.batch_ocr_vm.is_running_changed.connect(self._on_ocr_running_changed)
+        self.app_vm.batch_ocr_vm.progress_changed.connect(self.progress_controller.update_target_progress)
+        self.app_vm.batch_ocr_vm.can_run_ocr_changed.connect(self.btn_ocr_toggle.setEnabled)
+        self.app_vm.batch_ocr_vm.batch_finished.connect(self._on_batch_finished_dialog)
+        self.app_vm.batch_ocr_vm.error_occurred.connect(self._on_batch_error_dialog)
+        self.app_vm.batch_ocr_vm.processing_stopped.connect(self._on_batch_stopped_dialog)
+        self.app_vm.batch_ocr_vm.auto_inpaint_requested.connect(self.on_auto_inpaint_requested)
+
     def nativeEvent(self, eventType, message):
         # Use getattr to safely check if resizer exists and is fully initialized
         resizer = getattr(self, 'resizer', None)
@@ -414,10 +418,8 @@ class MainWindow(QMainWindow):
         """ Populates the UI after the model has loaded a project. """
         self.scroll_area.cancel_active_modes()
 
-        # Re-initialize OCR reader if language changed
-        if self.reader and self.reader.language != self.model.original_language:
-            print(f"Re-initializing OCR reader for language: {self.model.original_language}")
-            self.reader = RapidOCREngine(language=self.model.original_language)
+        # Reset OCR service so next initialize() picks up new language
+        self.app_vm.ocr_service.reset()
 
         image_paths = self.model.image_paths
         self.setWindowTitle(f"{self.model.project_name} | ManhwaOCR")
@@ -451,136 +453,59 @@ class MainWindow(QMainWindow):
 
 
 
-    def _initialize_ocr_reader(self, context="OCR"):
-        """Initializes the RapidOCR reader if it doesn't exist."""
-        if self.reader:
-            print("RapidOCR reader already initialized.")
-            return True
-        try:
-            language = getattr(self.model, 'original_language', 'Korean')
-            print(f"Initializing RapidOCR reader for {context} (language: {language})")
-            self.reader = RapidOCREngine(language=language)
-            print("RapidOCR reader initialized successfully.")
-            return True
-        except Exception as e:
-            error_msg = f"Failed to initialize OCR reader for {context}: {str(e)}\n\n" \
-                        f"Common causes:\n" \
-                        f"- Missing RapidOCR models (try running initmodels.py).\n" \
-                        f"- ONNX Runtime not properly installed."
-            print(f"Error: {error_msg}")
-            traceback.print_exc()
-            exc_type, exc_value, exc_traceback = sys.exc_info()
-            traceback_text = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-            ErrorDialog.critical(self, "OCR Initialization Error", error_msg, traceback_text)
-            self.reader = None
-        return False
-
     def toggle_ocr(self):
         if self.btn_ocr_toggle.isChecked():
-            self.start_ocr()
+            self._start_ocr_with_validation()
         else:
-            self.stop_ocr()
+            self.app_vm.batch_ocr_vm.stop_ocr()
 
-    def start_ocr(self):
-        """OCR functionality disabled - shows message instead"""
+    def _start_ocr_with_validation(self):
+        """View-level validation before delegating to BatchOCRViewModel."""
         if not self.model.image_paths:
             QMessageBox.warning(self, "Warning", "No images loaded to process.")
+            self.btn_ocr_toggle.setChecked(False)
             return
-        if self.batch_handler:
+        if self.app_vm.batch_ocr_vm.is_running:
             QMessageBox.warning(self, "Warning", "OCR is already running.")
+            self.btn_ocr_toggle.setChecked(False)
             return
         if self.app_vm.image_area_vm.active_action_mode == "manual_ocr":
             QMessageBox.warning(self, "Warning", "Cannot start standard OCR while in Manual OCR mode.")
+            self.btn_ocr_toggle.setChecked(False)
             return
-        
+
         has_existing_results = any(not res.get('is_manual', False) for res in self.model.ocr_results)
         if has_existing_results:
             reply = QMessageBox.question(self, 'Confirm Overwrite',
                                          "This will overwrite all existing OCR data (except for manual entries). Do you want to continue?",
                                          QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.No:
+                self.btn_ocr_toggle.setChecked(False)
                 return
 
-        if not self._initialize_ocr_reader("Standard OCR"):
-            return
+        success = self.app_vm.batch_ocr_vm.start_ocr(self.model.image_paths)
+        if not success:
+            self.btn_ocr_toggle.setChecked(False)
 
-        self.btn_ocr_toggle.transition_to_active()
+    def _on_ocr_running_changed(self, is_running):
+        if is_running:
+            self.btn_ocr_toggle.transition_to_active()
+            self.progress_controller.start_initial_progress()
+        else:
+            self.btn_ocr_toggle.transition_to_idle()
+            self.progress_controller.reset()
+        self.btn_ocr_toggle.setEnabled(self.app_vm.batch_ocr_vm.can_run_ocr)
+        self.orientation_combo.setEnabled(bool(self.model.image_paths))
 
-        self.model.clear_standard_results()
-        self.on_model_updated(None)
-        
-        self._load_filter_settings()
-        ocr_settings = {
-            "min_text_height": self.min_text_height, "max_text_height": self.max_text_height,
-            "min_confidence": self.min_confidence, "distance_threshold": self.distance_threshold,
-            "adjust_contrast": float(self.settings.value("ocr_adjust_contrast", 0.5)), "resize_threshold": int(self.settings.value("ocr_resize_threshold", 1024)),
-            "auto_context_fill": self.settings.value("auto_context_fill", "false").lower() == "true"
-        }
-        self.batch_handler = BatchOCRHandler(
-            image_paths=self.model.image_paths, 
-            reader=self.reader, 
-            settings=ocr_settings, 
-            starting_row_number=self.model.next_global_row_number,
-            model=self.model,
-            progress_bar=self.progress_controller # Use controller for logic
-        )
-        self.progress_controller.start_initial_progress() # Start animation
-        self.batch_handler.batch_finished.connect(self.on_batch_finished)
-        self.batch_handler.error_occurred.connect(self.on_batch_error)
-        self.batch_handler.processing_stopped.connect(self.on_batch_stopped)
-        self.batch_handler.auto_inpaint_requested.connect(self.on_auto_inpaint_requested)
-        self.batch_handler.start_processing()
-
-    def on_image_processed(self, new_results):
-        """ DELEGATED: Adds new OCR results to the model. """
-        """OCR functionality disabled - placeholder method"""
-        self.model.add_new_ocr_results(new_results)
-
-    def on_batch_finished(self, next_row_number):
-        """Handles the successful completion of the entire batch."""
-        """OCR functionality disabled - placeholder method"""
-        print("MainWindow: Batch finished.")
+    def _on_batch_finished_dialog(self, next_row_number):
         self.model.next_global_row_number = next_row_number
-        self.cleanup_ocr_session()
-        # Success message - keep QMessageBox.information for non-error cases
         QMessageBox.information(self, "Finished", "OCR processing completed for all images.")
-    
-    def on_batch_error(self, message):
-        """Handles a critical error during the batch process."""
-        """OCR functionality disabled - placeholder method"""
-        print(f"MainWindow: Batch error received: {message}")
-        self.cleanup_ocr_session()
+
+    def _on_batch_error_dialog(self, message):
         ErrorDialog.critical(self, "OCR Error", message)
 
-    def on_batch_stopped(self):
-        """Handles the UI cleanup after the user manually stops the process."""
-        """OCR functionality disabled - placeholder method"""
-        print("MainWindow: Batch processing was stopped by user.")
-        self.cleanup_ocr_session()
+    def _on_batch_stopped_dialog(self):
         QMessageBox.information(self, "Stopped", "OCR processing was stopped.")
-
-    def cleanup_ocr_session(self):
-        """Resets UI and state after an OCR run (success, error, or stop)."""
-        """OCR functionality disabled - placeholder method"""
-        self.btn_ocr_toggle.transition_to_idle()
-        self.btn_ocr_toggle.setEnabled(bool(self.model.image_paths))
-        self.orientation_combo.setEnabled(bool(self.model.image_paths))
-        self.progress_controller.reset() # Reset controller
-        if self.batch_handler:
-            self.batch_handler.deleteLater()
-            self.batch_handler = None
-        gc.collect()
-        
-    def stop_ocr(self):
-        """Stops the currently running OCR process by signaling the handler."""
-        """OCR functionality disabled - placeholder method"""
-        print("MainWindow: Sending stop request to batch handler...")
-        if self.batch_handler:
-            self.batch_handler.stop()
-        else:
-            print("No active batch handler to stop.")
-            # If no handler, but UI is stuck, reset it
-            self.cleanup_ocr_session()
 
     def on_auto_inpaint_requested(self, filename, bounding_boxes):
         """SLOT: Handles the request from BatchOCRHandler to perform automatic inpainting."""
@@ -734,10 +659,4 @@ class MainWindow(QMainWindow):
                 shutil.rmtree(self.model.temp_dir)
             except Exception as e:
                 print(f"Warning: Could not remove temporary directory {self.model.temp_dir}: {e}")
-        if self.ocr_processor and self.ocr_processor.isRunning():
-            print("Stopping OCR processor on close...")
-            self.ocr_processor.stop_requested = True
-            self.ocr_processor.wait(500)
-            if self.ocr_processor.isRunning():
-                 self.ocr_processor.terminate()
         super().closeEvent(event)

@@ -6,6 +6,8 @@ from app.viewmodels.editor_viewmodel import EditorViewModel
 from app.viewmodels.image_area_viewmodel import ImageAreaViewModel
 from app.viewmodels.translation_viewmodel import TranslationViewModel
 from app.viewmodels.style_viewmodel import StyleViewModel
+from app.viewmodels.batch_ocr_viewmodel import BatchOCRViewModel
+from app.services.ocr_service import OCRService
 
 
 class AppViewModel(BaseViewModel):
@@ -24,13 +26,15 @@ class AppViewModel(BaseViewModel):
     import_translation_requested = Signal()
     export_ocr_results_requested = Signal()
 
-    def __init__(self, model, get_reader=None, get_settings=None, parent=None):
+    def __init__(self, model, get_settings=None, parent=None):
         super().__init__(parent)
         self._model = model
+        self.ocr_service = OCRService(model, self)
         self.editor_vm = EditorViewModel(model, self)
-        self.image_area_vm = ImageAreaViewModel(model, get_reader, get_settings, self)
+        self.image_area_vm = ImageAreaViewModel(model, self.ocr_service, get_settings, self)
         self.translation_vm = TranslationViewModel(model, self.editor_vm, get_settings, app_viewmodel=self, parent=self)
         self.style_vm = StyleViewModel(model, self.editor_vm, self)
+        self.batch_ocr_vm = BatchOCRViewModel(model, self.ocr_service, get_settings, self)
 
     # ------------------------------------------------------------------
     # Project / File actions (called by MenuBar)

@@ -20,19 +20,17 @@ class CustomScrollArea(QScrollArea):
     """
     resized = Signal()
 
-    def __init__(self, model, editor_viewmodel, image_area_viewmodel, on_initialize_reader,
+    def __init__(self, model, editor_viewmodel, image_area_viewmodel,
                  on_save_project, on_export_manhwa, get_display_text, on_text_edited,
-                 get_reader, get_settings, on_manual_ocr_cancelled, parent=None):
+                 get_settings, on_manual_ocr_cancelled, parent=None):
         super().__init__(parent)
         self.model = model
         self.editor_vm = editor_viewmodel
         self.image_area_vm = image_area_viewmodel
-        self.on_initialize_reader = on_initialize_reader
         self.on_save_project = on_save_project
         self.on_export_manhwa = on_export_manhwa
         self.get_display_text = get_display_text
         self.on_text_edited = on_text_edited
-        self.get_reader = get_reader
         self.get_settings = get_settings
         self.on_manual_ocr_cancelled = on_manual_ocr_cancelled
         self.overlay_widget = None
@@ -73,7 +71,6 @@ class CustomScrollArea(QScrollArea):
         self.image_area_vm.selected_inpaint_record_id_changed.connect(self._on_inpaint_record_selected)
         self.image_area_vm.manual_ocr_rect_changed.connect(self._on_manual_ocr_rect_changed)
         self.image_area_vm.manual_ocr_processing_changed.connect(self._on_manual_ocr_processing_changed)
-        self.image_area_vm.reader_initialization_requested.connect(self.on_initialize_reader)
 
     # ------------------------------------------------------------------
     # Label factory
