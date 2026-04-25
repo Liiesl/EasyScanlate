@@ -98,6 +98,7 @@ class MainWindow(QMainWindow):
         self.scroll_area = CustomScrollArea(
             model=self.model,
             editor_viewmodel=self.editor_vm,
+            image_area_viewmodel=self.app_vm.image_area_vm,
             on_initialize_reader=self._initialize_ocr_reader,
             on_save_project=self.on_save_project_triggered,
             on_export_manhwa=self.export_manhwa,
@@ -146,8 +147,8 @@ class MainWindow(QMainWindow):
         )
         self.btn_toggle_text.setFixedSize(40, 40)
         self.btn_toggle_text.setToolTip("Toggle Text Visibility")
-        self.btn_toggle_text.toggled.connect(self.scroll_area.toggle_text_visibility)
-        self.btn_toggle_text.setState(False) 
+        self.btn_toggle_text.clicked.connect(self.app_vm.image_area_vm.toggle_text_visibility)
+        self.btn_toggle_text.setState(False)
         vertical_toolbar_layout.addWidget(self.btn_toggle_text)
 
         # Toggle Inpainting - now part of Context Fill Menu
@@ -302,15 +303,14 @@ class MainWindow(QMainWindow):
             is_context_fill_edit_active=lambda: getattr(self.scroll_area.context_fill_handler, 'is_edit_mode_active', False),
             on_split_clicked=self.btn_split.click,
             on_stitch_clicked=self.btn_stitch.click,
-            on_toggle_text_visibility=self.scroll_area.toggle_text_visibility,
-            on_toggle_inpainting_visibility=self.scroll_area.toggle_inpainting_visibility,
+            on_toggle_text_visibility=self.app_vm.image_area_vm.toggle_text_visibility,
+            on_toggle_inpainting_visibility=self.app_vm.image_area_vm.toggle_inpaint_visibility,
             get_is_manual_ocr_checked=lambda: self.btn_manual_ocr.isChecked(),
             on_manual_ocr_toggled=self.btn_manual_ocr.setChecked,
             model=self.model
         )
-        # Bidirectional sync between buttons and menu actions
-        self.menu_bar._toggle_text_action.toggled.connect(self.btn_toggle_text.setChecked)
-        self.btn_toggle_text.toggled.connect(self.menu_bar._toggle_text_action.setChecked)
+        # VM-driven sync for text visibility UI state
+        self.app_vm.image_area_vm.text_visible_changed.connect(self._on_text_visibility_changed)
         self.title_bar.setState(TitleBarState.MAIN_WINDOW, self.menu_bar)
 
         # Connect AppViewModel signals
@@ -370,8 +370,8 @@ class MainWindow(QMainWindow):
             on_icon=qta.icon('fa5s.eye-slash', color='white')
         )
         btn_toggle_fill_visibility.setToolTip("Toggle Fill Visibility")
-        btn_toggle_fill_visibility.setState(True)
-        btn_toggle_fill_visibility.toggled.connect(self.scroll_area.toggle_inpainting_visibility)
+        btn_toggle_fill_visibility.setState(self.app_vm.image_area_vm.inpaints_visible)
+        btn_toggle_fill_visibility.clicked.connect(self.app_vm.image_area_vm.toggle_inpaint_visibility)
         menu.addButton(btn_toggle_fill_visibility, close_on_click=False)
 
         menu.set_position_and_show(self.btn_context_fill_menu, 'right')
@@ -432,6 +432,7 @@ class MainWindow(QMainWindow):
             self.reader = RapidOCREngine(language=self.model.original_language)
 
         image_paths = self.model.image_paths
+        self.app_vm.image_area_vm.images = [os.path.basename(p) for p in image_paths]
         self.setWindowTitle(f"{self.model.project_name} | ManhwaOCR")
         self.setWindowTitle(f"{self.model.project_name} | ManhwaOCR")
         self.btn_ocr_toggle.setEnabled(bool(image_paths))
@@ -831,6 +832,14 @@ class MainWindow(QMainWindow):
 
     def update_shortcut(self):
         self.update_find_shortcut()
+
+    def _on_text_visibility_changed(self, visible):
+        """Sync text visibility UI state (button + menu action) from VM."""
+        # Button/action checked = hidden (eye-slash)
+        checked = not visible
+        self.btn_toggle_text.setChecked(checked)
+        if hasattr(self, 'menu_bar') and hasattr(self.menu_bar, '_toggle_text_action'):
+            self.menu_bar._toggle_text_action.setChecked(checked)
 
     def export_manhwa(self):
         export_rendered_images(self)

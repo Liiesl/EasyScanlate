@@ -3,6 +3,7 @@
 from PySide6.QtCore import Signal
 from app.viewmodels.base_viewmodel import BaseViewModel
 from app.viewmodels.editor_viewmodel import EditorViewModel
+from app.viewmodels.image_area_viewmodel import ImageAreaViewModel
 
 class AppViewModel(BaseViewModel):
     """
@@ -24,6 +25,7 @@ class AppViewModel(BaseViewModel):
         super().__init__(parent)
         self._model = model
         self.editor_vm = EditorViewModel(model, self)
+        self.image_area_vm = ImageAreaViewModel(model, self)
 
     # ------------------------------------------------------------------
     # Project / File actions (called by MenuBar)

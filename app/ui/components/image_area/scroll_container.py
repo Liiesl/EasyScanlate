@@ -20,7 +20,7 @@ class CustomScrollArea(QScrollArea):
     """
     resized = Signal()
 
-    def __init__(self, model, editor_viewmodel, on_initialize_reader, on_save_project, on_export_manhwa,
+    def __init__(self, model, editor_viewmodel, image_area_viewmodel, on_initialize_reader, on_save_project, on_export_manhwa,
                  get_display_text, on_text_edited, get_reader, get_settings, on_manual_ocr_cancelled,
                  parent=None):
         """ The scroll area instantiates its own action handlers, passing only
@@ -28,6 +28,7 @@ class CustomScrollArea(QScrollArea):
         super().__init__(parent)
         self.model = model
         self.editor_vm = editor_viewmodel
+        self.image_area_vm = image_area_viewmodel
         self.on_initialize_reader = on_initialize_reader
         self.on_save_project = on_save_project
         self.on_export_manhwa = on_export_manhwa
@@ -37,8 +38,6 @@ class CustomScrollArea(QScrollArea):
         self.get_settings = get_settings
         self.on_manual_ocr_cancelled = on_manual_ocr_cancelled
         self.overlay_widget = None
-        self._text_is_visible = True
-        self._inpainting_is_visible = True
 
         # Instantiate all handlers, breaking the MainWindow dependency
         self.manual_ocr_handler = ManualOCRHandler(self, self.model)
@@ -58,6 +57,10 @@ class CustomScrollArea(QScrollArea):
 
         # Relay VM selection changes to image labels
         self.editor_vm.selected_row_changed.connect(self._on_vm_selection_changed)
+
+        # React to ImageAreaViewModel visibility changes
+        self.image_area_vm.text_visible_changed.connect(self._on_text_visibility_changed)
+        self.image_area_vm.inpaints_visible_changed.connect(self._on_inpaints_visibility_changed)
 
     def create_image_label(self, pixmap, filename):
         """Factory to create a ResizableImageLabel wired with all necessary callbacks."""
@@ -170,23 +173,25 @@ class CustomScrollArea(QScrollArea):
                 elif hasattr(handler, 'cancel_splitting_mode'):
                     handler.cancel_splitting_mode()
 
-    def toggle_text_visibility(self):
-        """ Toggles the visibility of all text boxes in all image labels. """
-        self._text_is_visible = not self._text_is_visible
+    def _on_text_visibility_changed(self, visible):
+        """React to ImageAreaViewModel text visibility changes."""
         layout = self.widget().layout()
+        if layout is None:
+            return
         for i in range(layout.count()):
             widget = layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
-                widget.set_text_visibility(self._text_is_visible)
+                widget.set_text_visibility(visible)
 
-    def toggle_inpainting_visibility(self):
-        """ Toggles whether the inpainting patches are applied to the images. """
-        self._inpainting_is_visible = not self._inpainting_is_visible
+    def _on_inpaints_visibility_changed(self, visible):
+        """React to ImageAreaViewModel inpaint visibility changes."""
         layout = self.widget().layout()
+        if layout is None:
+            return
         for i in range(layout.count()):
             widget = layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
-                widget.set_inpaints_applied(self._inpainting_is_visible)
+                widget.set_inpaints_applied(visible)
 
     def update_handler_ui_positions(self):
         """ Updates the position of any active handler UI overlays. """

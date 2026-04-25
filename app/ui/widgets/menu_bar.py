@@ -217,6 +217,8 @@ class MenuBar(QMenuBar):
             # Text Visibility
             toggle_text_action = QAction("Toggle Text Visibility", self)
             toggle_text_action.setCheckable(True)
+            if self.on_toggle_text_visibility:
+                toggle_text_action.triggered.connect(self.on_toggle_text_visibility)
             view_menu.addAction(toggle_text_action)
             self._toggle_text_action = toggle_text_action
 
