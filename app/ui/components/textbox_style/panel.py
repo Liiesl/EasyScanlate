@@ -34,7 +34,7 @@ class TextBoxStylePanel(QWidget):
     """
     style_changed = Signal(dict)
 
-    def __init__(self, parent=None, default_style=None):
+    def __init__(self, parent=None, default_style=None, editor_viewmodel=None):
         super().__init__(parent)
         self.setMinimumWidth(400)
         self.settings = QSettings("Liiesl", "EasyScanlate")
@@ -43,11 +43,15 @@ class TextBoxStylePanel(QWidget):
         self._default_style = self._ensure_gradient_defaults(self._original_default_style)
         self._updating_controls = False
         self.selected_style_info = None
-        
+        self.editor_vm = editor_viewmodel
+
         self.init_ui()
         self.setStyleSheet(STYLE_PANEL_STYLES)
         self.update_style_panel(self._default_style)
         self._load_presets()
+
+        if self.editor_vm:
+            self.editor_vm.selected_row_style_changed.connect(self.update_style_panel)
 
     def _ensure_gradient_defaults(self, style_dict):
         """Ensures a style dictionary has default gradient fields."""

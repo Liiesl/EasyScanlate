@@ -1,6 +1,7 @@
 # scroll_container.py
 
-from PySide6.QtWidgets import QScrollArea, QWidget, QVBoxLayout, QPushButton
+from PySide6.QtWidgets import (QScrollArea, QWidget, QVBoxLayout, QPushButton,
+                               QMessageBox, QCheckBox)
 from PySide6.QtCore import Signal, QPoint
 import qtawesome as qta
 from app.handlers.stitch_handler import StitchHandler
@@ -11,7 +12,7 @@ from app.handlers.manual_ocr_handler import ManualOCRHandler
 from app.ui.widgets.menus import Menu
 from app.ui.components.image_area.label import ResizableImageLabel
 from assets.styles import SCROLL_OVERLAY_STYLES
-    
+
 class CustomScrollArea(QScrollArea):
     """
     A custom QScrollArea that now owns and manages all action handlers,
@@ -19,20 +20,19 @@ class CustomScrollArea(QScrollArea):
     """
     resized = Signal()
 
-    def __init__(self, model, selection_manager, on_initialize_reader, on_save_project, on_export_manhwa,
-                 get_display_text, on_text_edited, on_delete_row, get_reader, get_settings, on_manual_ocr_cancelled,
+    def __init__(self, model, editor_viewmodel, on_initialize_reader, on_save_project, on_export_manhwa,
+                 get_display_text, on_text_edited, get_reader, get_settings, on_manual_ocr_cancelled,
                  parent=None):
         """ The scroll area instantiates its own action handlers, passing only
             the necessary components (self and the model). """
         super().__init__(parent)
         self.model = model
-        self.selection_manager = selection_manager
+        self.editor_vm = editor_viewmodel
         self.on_initialize_reader = on_initialize_reader
         self.on_save_project = on_save_project
         self.on_export_manhwa = on_export_manhwa
         self.get_display_text = get_display_text
         self.on_text_edited = on_text_edited
-        self.on_delete_row = on_delete_row
         self.get_reader = get_reader
         self.get_settings = get_settings
         self.on_manual_ocr_cancelled = on_manual_ocr_cancelled
@@ -56,22 +56,57 @@ class CustomScrollArea(QScrollArea):
         self.resized.connect(self.update_handler_ui_positions)
         self.verticalScrollBar().valueChanged.connect(self.update_handler_ui_positions)
 
+        # Relay VM selection changes to image labels
+        self.editor_vm.selected_row_changed.connect(self._on_vm_selection_changed)
+
     def create_image_label(self, pixmap, filename):
         """Factory to create a ResizableImageLabel wired with all necessary callbacks."""
         label = ResizableImageLabel(
             pixmap, filename,
-            self.selection_manager,
             self.model,
             self.get_display_text,
             self.on_text_edited,
-            self.on_delete_row,
+            self._on_delete_row_confirmed,
             self
         )
-        label.textBoxDeleted.connect(self.on_delete_row)
+        label.textBoxDeleted.connect(self._on_delete_row_confirmed)
+        label.row_selected.connect(self.editor_vm.select_row)
+        label.row_deselected.connect(self.editor_vm.maybe_deselect)
         label.inpaintRecordDeleted.connect(self.model.remove_inpaint_record)
         label.manual_area_selected.connect(self.manual_ocr_handler.handle_area_selected)
         label.manual_area_selected.connect(self.context_fill_handler.handle_area_selected)
         return label
+
+    def _on_delete_row_confirmed(self, row_number):
+        """Shows confirmation dialog (View concern) then delegates to VM."""
+        show_warning = self.get_settings().value("show_delete_warning", "true") == "true"
+        proceed = True
+        if show_warning:
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Warning)
+            msg.setWindowTitle("Confirm Deletion Marking")
+            msg.setText("<b>Mark for Deletion Warning</b>")
+            msg.setInformativeText("Mark this entry for deletion? It will be hidden and excluded from exports.")
+            dont_show_cb = QCheckBox("Remember choice", msg)
+            msg.setCheckBox(dont_show_cb)
+            msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            msg.setDefaultButton(QMessageBox.No)
+            response = msg.exec()
+            if dont_show_cb.isChecked():
+                self.get_settings().setValue("show_delete_warning", "false")
+            proceed = response == QMessageBox.Yes
+        if proceed:
+            self.editor_vm.delete_row(row_number)
+
+    def _on_vm_selection_changed(self, row_number):
+        """Forward VM selection changes to all image labels."""
+        layout = self.widget().layout()
+        if layout is None:
+            return
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
+            if isinstance(widget, ResizableImageLabel):
+                widget.on_external_selection_changed(row_number)
 
     def _init_overlay(self):
         """ Creates and configures the overlay widget and its buttons. """
@@ -103,7 +138,7 @@ class CustomScrollArea(QScrollArea):
         btn_scroll_bottom.setFixedSize(40, 40)
         btn_scroll_bottom.clicked.connect(lambda: self.verticalScrollBar().setValue(self.verticalScrollBar().maximum()))
         layout.addWidget(btn_scroll_bottom)
-    
+
     def _show_save_menu(self):
         """Creates, populates, and shows the Save menu."""
         trigger_button = self.sender()

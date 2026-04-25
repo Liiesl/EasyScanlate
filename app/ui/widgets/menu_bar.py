@@ -11,27 +11,16 @@ class TitleBarState(Enum):
 
 class MenuBar(QMenuBar):
     def __init__(self, parent=None, state=TitleBarState.HOME,
-                 on_save_project=None, on_save_project_as=None,
-                 on_import_translation=None, on_export_ocr_results=None,
-                 on_toggle_ocr=None, on_toggle_find_widget=None,
-                 on_toggle_panel_layout=None, on_switch_profile=None,
+                 app_viewmodel=None,
                  on_context_fill_start=None, on_context_fill_edit_toggled=None,
                  is_context_fill_edit_active=None,
                  on_split_clicked=None, on_stitch_clicked=None,
                  on_toggle_text_visibility=None, on_toggle_inpainting_visibility=None,
-                 get_profiles=None, get_active_profile=None,
                  get_is_manual_ocr_checked=None, on_manual_ocr_toggled=None,
                  model=None):
         super().__init__(parent)
         self.state = state
-        self.on_save_project = on_save_project
-        self.on_save_project_as = on_save_project_as
-        self.on_import_translation = on_import_translation
-        self.on_export_ocr_results = on_export_ocr_results
-        self.on_toggle_ocr = on_toggle_ocr
-        self.on_toggle_find_widget = on_toggle_find_widget
-        self.on_toggle_panel_layout = on_toggle_panel_layout
-        self.on_switch_profile = on_switch_profile
+        self.app_vm = app_viewmodel
         self.on_context_fill_start = on_context_fill_start
         self.on_context_fill_edit_toggled = on_context_fill_edit_toggled
         self.is_context_fill_edit_active = is_context_fill_edit_active
@@ -39,8 +28,6 @@ class MenuBar(QMenuBar):
         self.on_stitch_clicked = on_stitch_clicked
         self.on_toggle_text_visibility = on_toggle_text_visibility
         self.on_toggle_inpainting_visibility = on_toggle_inpainting_visibility
-        self.get_profiles = get_profiles
-        self.get_active_profile = get_active_profile
         self.get_is_manual_ocr_checked = get_is_manual_ocr_checked
         self.on_manual_ocr_toggled = on_manual_ocr_toggled
         self.model = model
@@ -119,13 +106,13 @@ class MenuBar(QMenuBar):
         # Import/Export (Parity with existing button)
         if self.state == TitleBarState.MAIN_WINDOW:
             import_trans_action = QAction(qta.icon('fa5s.file-import', color="white"), "Import Translation", self)
-            if self.on_import_translation:
-                import_trans_action.triggered.connect(self.on_import_translation)
+            if self.app_vm:
+                import_trans_action.triggered.connect(self.app_vm.import_translation)
             files_menu.addAction(import_trans_action)
 
             export_ocr_action = QAction(qta.icon('fa5s.file-export', color="white"), "Export OCR Results", self)
-            if self.on_export_ocr_results:
-                export_ocr_action.triggered.connect(self.on_export_ocr_results)
+            if self.app_vm:
+                export_ocr_action.triggered.connect(self.app_vm.export_ocr_results)
             files_menu.addAction(export_ocr_action)
             files_menu.addSeparator()
 
@@ -137,12 +124,12 @@ class MenuBar(QMenuBar):
 
         if self.state == TitleBarState.MAIN_WINDOW:
             save_action.setShortcut("Ctrl+S")
-            if self.on_save_project:
-                save_action.triggered.connect(self.on_save_project)
+            if self.app_vm:
+                save_action.triggered.connect(self.app_vm.save_project)
 
             save_as_action.setShortcut("Ctrl+Shift+S")
-            if self.on_save_project_as:
-                save_as_action.triggered.connect(self.on_save_project_as)
+            if self.app_vm:
+                save_as_action.triggered.connect(self.save_project_as)
         else:
             save_action.setEnabled(False)
             save_as_action.setEnabled(False)
@@ -154,8 +141,8 @@ class MenuBar(QMenuBar):
 
             # Find/Replace (Parity with Toolbar/Ctrl+F)
             find_action = QAction("Find/Replace", self)
-            if self.on_toggle_find_widget:
-                find_action.triggered.connect(self.on_toggle_find_widget)
+            if self.app_vm:
+                find_action.triggered.connect(self.app_vm.toggle_find_widget)
             edit_menu.addAction(find_action)
 
             # Note: Undo/Redo/Select All are skipped as they don't exist in the current backend.
@@ -167,8 +154,8 @@ class MenuBar(QMenuBar):
 
             # OCR Process
             ocr_action = QAction(qta.icon('fa5s.magic', color='white'), "Start/Stop OCR", self)
-            if self.on_toggle_ocr:
-                ocr_action.triggered.connect(self.on_toggle_ocr)
+            if self.app_vm:
+                ocr_action.triggered.connect(self.app_vm.toggle_ocr)
             process_menu.addAction(ocr_action)
 
             process_menu.addSeparator()
@@ -245,8 +232,8 @@ class MenuBar(QMenuBar):
             panel_layout_action = QAction("Translation Panel: Bottom", self)
             panel_layout_action.setCheckable(True)
             panel_layout_action.setChecked(True)
-            if self.on_toggle_panel_layout:
-                panel_layout_action.triggered.connect(self.on_toggle_panel_layout)
+            if self.app_vm:
+                panel_layout_action.triggered.connect(self.app_vm.toggle_panel_layout)
             view_menu.addAction(panel_layout_action)
             self._panel_layout_action = panel_layout_action
 
@@ -263,25 +250,24 @@ class MenuBar(QMenuBar):
 
         self.profiles_menu.clear()
 
-        if self.get_profiles is None or self.get_active_profile is None:
+        if self.app_vm is None:
             return
 
-        profiles = self.get_profiles()
+        profiles = self.app_vm.get_profiles()
         if not profiles:
             return
 
         sorted_profiles = sorted([p for p in profiles if p != "Original"])
         sorted_profiles.insert(0, "Original")
 
-        active_profile = self.get_active_profile()
+        active_profile = self.app_vm.get_active_profile()
 
         for profile_name in sorted_profiles:
             action = QAction(profile_name, self)
             action.setCheckable(True)
             action.setChecked(profile_name == active_profile)
             # Use lambda with default arg to capture variable current value
-            if self.on_switch_profile:
-                action.triggered.connect(lambda checked=False, p=profile_name: self.on_switch_profile(p))
+            action.triggered.connect(lambda checked=False, p=profile_name: self.app_vm.switch_profile(p))
             self.profiles_menu.addAction(action)
 
     def new_project(self):
@@ -322,5 +308,5 @@ class MenuBar(QMenuBar):
         if file_path:
             if not file_path.endswith('.mmtl'):
                 file_path += '.mmtl'
-            if self.on_save_project_as:
-                self.on_save_project_as(file_path)
+            if self.app_vm:
+                self.app_vm.save_project_as(file_path)

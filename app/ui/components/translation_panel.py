@@ -268,12 +268,10 @@ class TranslationPanel(QFrame):
     """
     # Signals
     text_changed = Signal(int, str)
-    row_deleted = Signal(int)
-    row_selected = Signal(int)
     translation_complete = Signal(str, dict)
     profile_changed = Signal(str)
 
-    def __init__(self, source_language="Korean", parent=None):
+    def __init__(self, source_language="Korean", editor_viewmodel=None, parent=None):
         super().__init__(parent)
         self.setObjectName("TranslationPanel")
         self.setStyleSheet(TRANSLATION_PANEL_STYLES)
@@ -284,6 +282,7 @@ class TranslationPanel(QFrame):
         self.active_card = None
         self.ocr_results = []
         self.get_display_text_func = None
+        self.editor_vm = editor_viewmodel
 
         # Translation state
         self.settings = QSettings("Liiesl", "EasyScanlate")
@@ -291,6 +290,9 @@ class TranslationPanel(QFrame):
         self._pending_retranslate_row = None
 
         self._init_ui()
+
+        if self.editor_vm:
+            self.editor_vm.selected_row_changed.connect(self._on_editor_selection_changed)
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -456,7 +458,7 @@ class TranslationPanel(QFrame):
             card = TranslationCard(row_number, source_text, target_text)
             card.clicked.connect(self._on_card_clicked)
             card.text_changed.connect(self._on_card_text_changed)
-            card.delete_requested.connect(self.row_deleted.emit)
+            card.delete_requested.connect(self._on_card_delete_requested)
             card.retranslate_requested.connect(self._on_single_retranslate)
 
             self.cards_layout.addWidget(card)
@@ -500,17 +502,49 @@ class TranslationPanel(QFrame):
         return self.profile_dropdown.currentText()
 
     # Internal handlers
+    def _on_editor_selection_changed(self, row_number):
+        """React to EditorViewModel selection changes."""
+        if row_number is not None and row_number in self.cards:
+            self.set_active_row(row_number)
+            self.scroll_to_row(row_number)
+        elif row_number is None and self.active_card:
+            self.active_card.set_active(False)
+            self.active_card = None
+
     def _on_card_clicked(self, card: TranslationCard):
         """Handle card selection."""
         if self.active_card and self.active_card != card:
             self.active_card.set_active(False)
         self.active_card = card
         card.set_active(True)
-        self.row_selected.emit(card.row_number)
+        if self.editor_vm:
+            self.editor_vm.select_row(card.row_number)
 
     def _on_card_text_changed(self, row_number: int, text: str):
         """Handle text edit in a card."""
         self.text_changed.emit(row_number, text)
+
+    def _on_card_delete_requested(self, row_number: int):
+        """Show confirmation dialog and delegate deletion to EditorViewModel."""
+        show_warning = self.settings.value("show_delete_warning", "true") == "true"
+        proceed = True
+        if show_warning:
+            from PySide6.QtWidgets import QMessageBox, QCheckBox
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Warning)
+            msg.setWindowTitle("Confirm Deletion Marking")
+            msg.setText("<b>Mark for Deletion Warning</b>")
+            msg.setInformativeText("Mark this entry for deletion? It will be hidden and excluded from exports.")
+            dont_show_cb = QCheckBox("Remember choice", msg)
+            msg.setCheckBox(dont_show_cb)
+            msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            msg.setDefaultButton(QMessageBox.No)
+            response = msg.exec()
+            if dont_show_cb.isChecked():
+                self.settings.setValue("show_delete_warning", "false")
+            proceed = response == QMessageBox.Yes
+        if proceed and self.editor_vm:
+            self.editor_vm.delete_row(row_number)
 
     def _on_single_retranslate(self, row_number: int):
         """Handle retranslate request for a single row."""

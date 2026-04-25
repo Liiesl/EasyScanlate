@@ -19,8 +19,8 @@ from app.ui.window.chrome import CustomTitleBar, WindowResizer
 from app.ui.widgets.progress_bar import CustomProgressBar
 from app.ui.widgets.menus import Menu, ToggleButton, ToggleWithProgress
 from app.handlers.ocr_batch_handler import BatchOCRHandler
-from app.handlers.selection_manager import SelectionManager
 from app.core.project_model import ProjectModel
+from app.viewmodels import AppViewModel
 from app.ui.dialogs.settings_dialog import SettingsDialog
 from app.ui.components.background import AuroraCanvas
 from assets import (DEFAULT_TEXT_STYLE, get_style_diff, RIGHT_PANEL_STYLES, UNIVERSAL_STYLES)
@@ -42,8 +42,8 @@ class MainWindow(QMainWindow):
         self.model.profiles_updated.connect(self._on_profile_list_changed)
         self.model.profile_created_for_user_edit.connect(self._on_profile_created_for_user_edit)
 
-        self.selection_manager = SelectionManager(self.model, self)
-        self.selection_manager.selection_changed.connect(self.on_selection_changed)
+        self.app_vm = AppViewModel(self.model, self)
+        self.editor_vm = self.app_vm.editor_vm
 
         self.find_action = QAction("Find/Replace", self)
         self.find_action.triggered.connect(self.toggle_find_widget)
@@ -97,13 +97,12 @@ class MainWindow(QMainWindow):
 
         self.scroll_area = CustomScrollArea(
             model=self.model,
-            selection_manager=self.selection_manager,
+            editor_viewmodel=self.editor_vm,
             on_initialize_reader=self._initialize_ocr_reader,
-            on_save_project=self.save_project,
+            on_save_project=self.on_save_project_triggered,
             on_export_manhwa=self.export_manhwa,
             get_display_text=self.get_display_text,
             on_text_edited=self.update_ocr_text,
-            on_delete_row=self.delete_row,
             get_reader=lambda: self.reader,
             get_settings=lambda: self.settings,
             on_manual_ocr_cancelled=self._on_manual_ocr_cancelled,
@@ -241,17 +240,15 @@ class MainWindow(QMainWindow):
         right_panel.addLayout(button_layout)
 
         # Style panel - always visible above results with resizable splitter
-        self.style_panel = TextBoxStylePanel(default_style=DEFAULT_TEXT_STYLE)
+        self.style_panel = TextBoxStylePanel(default_style=DEFAULT_TEXT_STYLE, editor_viewmodel=self.editor_vm)
         self.style_panel.setMinimumHeight(70)
         self.style_panel.setMaximumHeight(480)
-        
+
         # Create unified translation panel (replaces ResultsWidget + TranslationChatWidget)
-        self.translation_panel = TranslationPanel(source_language=self.model.original_language)
+        self.translation_panel = TranslationPanel(source_language=self.model.original_language, editor_viewmodel=self.editor_vm)
         self.translation_panel.text_changed.connect(self.update_ocr_text)
-        self.translation_panel.row_deleted.connect(self.delete_row)
-        self.translation_panel.row_selected.connect(self._on_panel_row_selected)
         self.translation_panel.translation_complete.connect(self.handle_translation_completed)
-        self.translation_panel.profile_changed.connect(self.switch_active_profile)
+        self.translation_panel.profile_changed.connect(self.app_vm.switch_profile)
         
         # Create vertical splitter for resizable layout
         right_splitter = QSplitter(Qt.Vertical)
@@ -299,14 +296,7 @@ class MainWindow(QMainWindow):
         self.menu_bar = MenuBar(
             parent=self,
             state=TitleBarState.MAIN_WINDOW,
-            on_save_project=self.save_project,
-            on_save_project_as=self._save_project_as,
-            on_import_translation=self.import_translation,
-            on_export_ocr_results=self.export_ocr_results,
-            on_toggle_ocr=self.toggle_ocr,
-            on_toggle_find_widget=self.toggle_find_widget,
-            on_toggle_panel_layout=self.toggle_panel_layout,
-            on_switch_profile=self.switch_active_profile,
+            app_viewmodel=self.app_vm,
             on_context_fill_start=self.scroll_area.context_fill_handler.start_mode,
             on_context_fill_edit_toggled=self.scroll_area.context_fill_handler.toggle_edit_mode,
             is_context_fill_edit_active=lambda: getattr(self.scroll_area.context_fill_handler, 'is_edit_mode_active', False),
@@ -314,8 +304,6 @@ class MainWindow(QMainWindow):
             on_stitch_clicked=self.btn_stitch.click,
             on_toggle_text_visibility=self.scroll_area.toggle_text_visibility,
             on_toggle_inpainting_visibility=self.scroll_area.toggle_inpainting_visibility,
-            get_profiles=lambda: list(self.model.profiles.keys()),
-            get_active_profile=lambda: self.model.active_profile_name,
             get_is_manual_ocr_checked=lambda: self.btn_manual_ocr.isChecked(),
             on_manual_ocr_toggled=self.btn_manual_ocr.setChecked,
             model=self.model
@@ -324,6 +312,15 @@ class MainWindow(QMainWindow):
         self.menu_bar._toggle_text_action.toggled.connect(self.btn_toggle_text.setChecked)
         self.btn_toggle_text.toggled.connect(self.menu_bar._toggle_text_action.setChecked)
         self.title_bar.setState(TitleBarState.MAIN_WINDOW, self.menu_bar)
+
+        # Connect AppViewModel signals
+        self.app_vm.profile_switched.connect(self._on_profile_switched)
+        self.app_vm.project_saved.connect(self.on_project_saved)
+        self.app_vm.ocr_toggled.connect(self.toggle_ocr)
+        self.app_vm.panel_layout_toggled.connect(self.toggle_panel_layout)
+        self.app_vm.find_widget_toggled.connect(self.toggle_find_widget)
+        self.app_vm.import_translation_requested.connect(self.import_translation)
+        self.app_vm.export_ocr_results_requested.connect(self.export_ocr_results)
 
     def nativeEvent(self, eventType, message):
         # Use getattr to safely check if resizer exists and is fully initialized
@@ -384,23 +381,20 @@ class MainWindow(QMainWindow):
         # Sync Menu Bar profiles if available
         if hasattr(self, 'title_bar') and hasattr(self.title_bar, 'menu_bar'):
              self.title_bar.menu_bar.update_profiles_menu()
-        
+
         # Also update translation panel profiles
         self._update_translation_panel_data()
 
-    def switch_active_profile(self, profile_name):
-        """Tells the model to switch the active profile."""
-        if profile_name and profile_name in self.model.profiles and profile_name != self.model.active_profile_name:
-            print(f"Switching to active profile: {profile_name}")
-            self.model.active_profile_name = profile_name
-            self._on_profile_changed()
-            self.on_model_updated(None)
-    
+    def _on_profile_switched(self, profile_name):
+        """React to AppViewModel profile switch."""
+        self._on_profile_changed()
+        self.on_model_updated(None)
+
     def _on_profile_changed(self):
         """Handles profile changes by notifying find widget."""
         if hasattr(self, 'find_replace_widget'):
             self.find_replace_widget.on_profile_changed()
-    
+
     def _on_profile_list_changed(self):
         """Handles profile list changes (additions/deletions)."""
         if hasattr(self, 'find_replace_widget'):
@@ -414,10 +408,6 @@ class MainWindow(QMainWindow):
 
     def toggle_find_widget(self):
         pass  # Find/replace disabled
-
-    def _on_panel_row_selected(self, row_number):
-        """Handle row selection from translation panel."""
-        self.selection_manager.select(row_number, self.translation_panel)
 
     def update_find_shortcut(self):
         shortcut = self.settings.value("find_shortcut", "Ctrl+F")
@@ -515,40 +505,6 @@ class MainWindow(QMainWindow):
         """ DELEGATED: Asks the model for the correct text to display. """
         return self.model.get_display_text(result)
 
-    def on_selection_changed(self, row_number, source):
-        """
-        Updates the style panel based on the currently selected row.
-        The style panel is always visible, but its content changes based on selection.
-        """
-        if row_number is not None:
-            current_style = self.get_style_for_row(row_number)
-            self.style_panel.update_style_panel(current_style)
-            # Update translation panel active row (if selection came from elsewhere)
-            if source is not self.translation_panel and hasattr(self, 'translation_panel'):
-                self.translation_panel.set_active_row(row_number)
-                self.translation_panel.scroll_to_row(row_number)
-        else:
-            # When no textbox is selected, reset to default style
-            self.style_panel.update_style_panel(DEFAULT_TEXT_STYLE)
-
-    def get_style_for_row(self, row_number):
-        style = {}
-        for k, v in DEFAULT_TEXT_STYLE.items():
-             if k in ['bg_color', 'border_color', 'text_color']:
-                 style[k] = QColor(v)
-             else:
-                 style[k] = v
-
-        target_result, _ = self.model._find_result_by_row_number(row_number)
-        if target_result:
-            custom_style = target_result.get('custom_style', {})
-            for k, v in custom_style.items():
-                 if k in ['bg_color', 'border_color', 'text_color']:
-                     style[k] = QColor(v)
-                 else:
-                     style[k] = v
-        return style
-
     def find_textbox_item(self, row_number):
         """Finds and returns the TextBoxItem widget for a given row number."""
         target_result, _ = self.model._find_result_by_row_number(row_number)
@@ -570,7 +526,7 @@ class MainWindow(QMainWindow):
         return None
 
     def update_text_box_style(self, new_style_dict):
-        row_number = self.selection_manager.get_current_selection()
+        row_number = self.editor_vm.selected_row
         if row_number is None:
             print("Style changed but no text box selected.")
             return
@@ -857,31 +813,6 @@ class MainWindow(QMainWindow):
         else:
             ErrorDialog.critical(self, "Error", message)
     
-    def delete_row(self, row_number_to_delete):
-        show_warning = self.settings.value("show_delete_warning", "true") == "true"
-        proceed = True
-        if show_warning:
-            msg = QMessageBox(self)
-            msg.setIcon(QMessageBox.Warning)
-            msg.setWindowTitle("Confirm Deletion Marking")
-            msg.setText("<b>Mark for Deletion Warning</b>")
-            msg.setInformativeText("Mark this entry for deletion? It will be hidden and excluded from exports.")
-            dont_show_cb = QCheckBox("Remember choice", msg)
-            msg.setCheckBox(dont_show_cb)
-            msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No) 
-            msg.setDefaultButton(QMessageBox.No)
-            response = msg.exec()
-            if dont_show_cb.isChecked(): self.settings.setValue("show_delete_warning", "false")
-            proceed = response == QMessageBox.Yes
-        if not proceed: return
-
-        if self.selection_manager.get_current_selection() == row_number_to_delete:
-            self.selection_manager.deselect(self)
-
-        self.model.delete_row(row_number_to_delete)
-        if hasattr(self, 'find_replace_widget') and self.find_replace_widget.isVisible():
-            self.find_replace_widget.find_text()
-
     def handle_translation_completed(self, profile_name, translated_data):
         try:
             self.model.add_profile(profile_name, translated_data)
@@ -986,17 +917,15 @@ class MainWindow(QMainWindow):
         if self.btn_manual_ocr.isChecked():
             self.btn_manual_ocr.setChecked(False)
 
-    def _save_project_as(self, file_path):
-        self.model.mmtl_path = file_path
-        self.save_project()
-
-    def save_project(self):
-        result_message = self.model.save_project()
+    def on_project_saved(self, result_message):
         if "successfully" in result_message:
-            # Success message - keep QMessageBox.information for non-error cases
             QMessageBox.information(self, "Saved", result_message)
         else:
             ErrorDialog.critical(self, "Save Error", result_message)
+
+    def on_save_project_triggered(self):
+        """Called by CustomScrollArea overlay save button."""
+        self.app_vm.save_project()
 
     def closeEvent(self, event):
         # Cleanup translation panel

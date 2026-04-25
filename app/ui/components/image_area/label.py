@@ -10,22 +10,21 @@ from app.ui.components.image_area.textbox import TextBoxItem
 class ResizableImageLabel(QGraphicsView):
     # --- MODIFIED: textBoxSelected is no longer needed ---
     textBoxDeleted = Signal(object)
+    row_selected = Signal(int)
+    row_deselected = Signal(int)
     manual_area_selected = Signal(QRectF, object)
     stitching_selection_changed = Signal(object, bool)
     split_indicator_requested = Signal(object, int)
     inpaintRecordDeleted = Signal(str)
     inpaintVisualSelected = Signal(str)  # signal emitted when inpaint visual is selected in edit mode
 
-    def __init__(self, pixmap, filename, selection_manager, model, get_display_text, on_text_edited, on_delete_row, scroll_area, parent=None):
+    def __init__(self, pixmap, filename, model, get_display_text, on_text_edited, on_delete_row, scroll_area, parent=None):
         super().__init__(parent)
-        self.selection_manager = selection_manager
         self.model = model
         self.get_display_text = get_display_text
         self.on_text_edited = on_text_edited
         self.on_delete_row = on_delete_row
         self.scroll_area = scroll_area
-        # --- NEW: Connect to the selection manager's signal ---
-        self.selection_manager.selection_changed.connect(self.on_external_selection_changed)
 
         self.setScene(QGraphicsScene())
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
@@ -517,26 +516,19 @@ class ResizableImageLabel(QGraphicsView):
                      combined[key] = value
         return combined
 
-    # --- MODIFIED: This now reports to the selection manager ---
+    # --- MODIFIED: This now emits signals instead of talking to selection_manager ---
     def on_text_box_selected(self, selected, row_number):
         if selected:
-            # Tell the manager about the new selection
-            self.selection_manager.select(row_number, self)
+            self.row_selected.emit(row_number)
             # Locally deselect other boxes on this image
             for tb in self.text_boxes:
                  if tb.row_number != row_number and tb.isSelected():
                      tb.setSelected(False)
         else:
-            # If the currently selected box is deselected, clear the global selection
-            if self.selection_manager.get_current_selection() == row_number:
-                self.selection_manager.deselect(self)
-    
-    # --- NEW: Slot to handle external selection changes ---
-    def on_external_selection_changed(self, row_number, source):
-        # Ignore signals from self to prevent loops
-        if source is self:
-            return
+            self.row_deselected.emit(row_number)
 
+    # --- NEW: Slot to handle external selection changes (called by CustomScrollArea) ---
+    def on_external_selection_changed(self, row_number):
         # If selection is cleared, deselect everything on this image
         if row_number is None:
             self.deselect_all_text_boxes()
@@ -628,7 +620,8 @@ class ResizableImageLabel(QGraphicsView):
     def cleanup(self):
         try:
             self.textBoxDeleted.disconnect()
-            self.selection_manager.selection_changed.disconnect(self.on_external_selection_changed)
+            self.row_selected.disconnect()
+            self.row_deselected.disconnect()
             self.manual_area_selected.disconnect()
             self.stitching_selection_changed.disconnect()
             self.split_indicator_requested.disconnect()

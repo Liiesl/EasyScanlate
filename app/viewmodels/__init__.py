@@ -2,3 +2,4 @@
 
 from .base_viewmodel import BaseViewModel
 from .app_viewmodel import AppViewModel
+from .editor_viewmodel import EditorViewModel
