@@ -5,6 +5,7 @@ from app.viewmodels.base_viewmodel import BaseViewModel
 from app.viewmodels.editor_viewmodel import EditorViewModel
 from app.viewmodels.image_area_viewmodel import ImageAreaViewModel
 
+
 class AppViewModel(BaseViewModel):
     """
     Top-level coordinator ViewModel.
@@ -21,11 +22,11 @@ class AppViewModel(BaseViewModel):
     import_translation_requested = Signal()
     export_ocr_results_requested = Signal()
 
-    def __init__(self, model, parent=None):
+    def __init__(self, model, get_reader=None, get_settings=None, parent=None):
         super().__init__(parent)
         self._model = model
         self.editor_vm = EditorViewModel(model, self)
-        self.image_area_vm = ImageAreaViewModel(model, self)
+        self.image_area_vm = ImageAreaViewModel(model, get_reader, get_settings, self)
 
     # ------------------------------------------------------------------
     # Project / File actions (called by MenuBar)

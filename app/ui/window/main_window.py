@@ -42,7 +42,7 @@ class MainWindow(QMainWindow):
         self.model.profiles_updated.connect(self._on_profile_list_changed)
         self.model.profile_created_for_user_edit.connect(self._on_profile_created_for_user_edit)
 
-        self.app_vm = AppViewModel(self.model, self)
+        self.app_vm = AppViewModel(self.model, lambda: self.reader, lambda: self.settings, self)
         self.editor_vm = self.app_vm.editor_vm
 
         self.find_action = QAction("Find/Replace", self)
@@ -132,7 +132,7 @@ class MainWindow(QMainWindow):
         self.btn_manual_ocr.setFixedSize(40, 40)
         self.btn_manual_ocr.setToolTip("Manual OCR Mode")
         self.btn_manual_ocr.setCheckable(True)
-        self.btn_manual_ocr.toggled.connect(self.scroll_area.manual_ocr_handler.toggle_mode)
+        self.btn_manual_ocr.toggled.connect(self._on_manual_ocr_toggled)
         self.btn_manual_ocr.setEnabled(False)  # Keep original enabled state
         vertical_toolbar_layout.addWidget(self.btn_manual_ocr)
 
@@ -162,14 +162,14 @@ class MainWindow(QMainWindow):
         self.btn_split = QPushButton(QIcon("assets/icons/split.svg"), "")
         self.btn_split.setFixedSize(40, 40)
         self.btn_split.setToolTip("Split Images")
-        self.btn_split.clicked.connect(self.scroll_area.split_handler.start_splitting_mode)
+        self.btn_split.clicked.connect(lambda: self.scroll_area.image_area_vm.start_action_mode("split"))
         vertical_toolbar_layout.addWidget(self.btn_split)
 
         # Stitch Images
         self.btn_stitch = QPushButton(QIcon("assets/icons/stitch.svg"), "")
         self.btn_stitch.setFixedSize(40, 40)
         self.btn_stitch.setToolTip("Stitch Images")
-        self.btn_stitch.clicked.connect(self.scroll_area.stitch_handler.start_stitching_mode)
+        self.btn_stitch.clicked.connect(lambda: self.scroll_area.image_area_vm.start_action_mode("stitch"))
         vertical_toolbar_layout.addWidget(self.btn_stitch)
 
         # Add stretch to push buttons to top
@@ -290,9 +290,9 @@ class MainWindow(QMainWindow):
             parent=self,
             state=TitleBarState.MAIN_WINDOW,
             app_viewmodel=self.app_vm,
-            on_context_fill_start=self.scroll_area.context_fill_handler.start_mode,
-            on_context_fill_edit_toggled=self.scroll_area.context_fill_handler.toggle_edit_mode,
-            is_context_fill_edit_active=lambda: getattr(self.scroll_area.context_fill_handler, 'is_edit_mode_active', False),
+            on_context_fill_start=lambda: self.scroll_area.image_area_vm.start_action_mode("inpaint"),
+            on_context_fill_edit_toggled=lambda checked: self.scroll_area.image_area_vm.toggle_inpaint_edit_mode(),
+            is_context_fill_edit_active=lambda: self.scroll_area.image_area_vm.inpaint_edit_mode_active,
             on_split_clicked=self.btn_split.click,
             on_stitch_clicked=self.btn_stitch.click,
             on_toggle_text_visibility=self.app_vm.image_area_vm.toggle_text_visibility,
@@ -303,6 +303,8 @@ class MainWindow(QMainWindow):
         )
         # VM-driven sync for text visibility UI state
         self.app_vm.image_area_vm.text_visible_changed.connect(self._on_text_visibility_changed)
+        # Phase 7 TODO: action_mode_cancelled should drive button states via VM, not MainWindow slot
+        self.app_vm.image_area_vm.action_mode_cancelled.connect(self._on_action_mode_cancelled)
         self.title_bar.setState(TitleBarState.MAIN_WINDOW, self.menu_bar)
 
         # Connect AppViewModel signals
@@ -349,11 +351,11 @@ class MainWindow(QMainWindow):
         menu = Menu(self)
 
         btn_context_fill_mode = QPushButton(qta.icon('fa5s.fill-drip', color='white'), " Context Fill Mode")
-        btn_context_fill_mode.clicked.connect(self.scroll_area.context_fill_handler.start_mode)
+        btn_context_fill_mode.clicked.connect(lambda: self.scroll_area.image_area_vm.start_action_mode("inpaint"))
         menu.addButton(btn_context_fill_mode)
 
         btn_edit_context_fill = QPushButton(qta.icon('fa5s.paint-brush', color='white'), " Edit Context Fills")
-        btn_edit_context_fill.clicked.connect(self.scroll_area.context_fill_handler.toggle_edit_mode)
+        btn_edit_context_fill.clicked.connect(self.scroll_area.image_area_vm.toggle_inpaint_edit_mode)
         menu.addButton(btn_edit_context_fill)
 
         btn_toggle_fill_visibility = ToggleButton(
@@ -556,7 +558,7 @@ class MainWindow(QMainWindow):
         if self.batch_handler:
             QMessageBox.warning(self, "Warning", "OCR is already running.")
             return
-        if self.scroll_area.manual_ocr_handler.is_active:
+        if self.app_vm.image_area_vm.active_action_mode == "manual_ocr":
             QMessageBox.warning(self, "Warning", "Cannot start standard OCR while in Manual OCR mode.")
             return
         
@@ -652,16 +654,7 @@ class MainWindow(QMainWindow):
     def on_auto_inpaint_requested(self, filename, bounding_boxes):
         """SLOT: Handles the request from BatchOCRHandler to perform automatic inpainting."""
         """OCR functionality disabled - placeholder method"""
-        target_label = None
-        layout = self.scroll_area.widget().layout()
-        for i in range(layout.count()):
-            widget = layout.itemAt(i).widget()
-            if isinstance(widget, ResizableImageLabel) and widget.filename == filename:
-                target_label = widget
-                break
-        
-        if target_label:
-            self.scroll_area.context_fill_handler.perform_auto_inpainting(target_label, bounding_boxes)
+        self.app_vm.image_area_vm.perform_auto_inpainting(filename, bounding_boxes)
  
     def update_image_text_box(self, row_number, new_text):
         target_item = self.find_textbox_item(row_number)
@@ -846,6 +839,17 @@ class MainWindow(QMainWindow):
 
     def _on_manual_ocr_cancelled(self):
         if self.btn_manual_ocr.isChecked():
+            self.btn_manual_ocr.setChecked(False)
+
+    def _on_manual_ocr_toggled(self, checked):
+        if checked:
+            self.scroll_area.image_area_vm.start_action_mode("manual_ocr")
+        else:
+            self.scroll_area.image_area_vm.cancel_action_mode()
+
+    def _on_action_mode_cancelled(self, mode):
+        """Phase 7 TODO: VM should drive button checked states directly."""
+        if mode == "manual_ocr" and self.btn_manual_ocr.isChecked():
             self.btn_manual_ocr.setChecked(False)
 
     def on_project_saved(self, result_message):

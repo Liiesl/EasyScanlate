@@ -349,9 +349,10 @@ class ProjectModel(QObject):
                     print(f"Error processing inpaint record for split: {e} - Record: {record}")
 
     def sort_and_notify(self):
-        """Sorts all OCR results and emits the model_updated signal for a full refresh."""
+        """Sorts all OCR results and emits signals for a full refresh."""
         self._sort_ocr_results()
         self.model_updated.emit([])
+        self.image_list_changed.emit()
 
     def _find_result_by_row_number(self, row_number_to_find):
         """Internal helper to find an OCR result and its index by its row number."""
@@ -406,6 +407,8 @@ class ProjectModel(QObject):
                 except: pass
         self.next_global_row_number = max_existing_base + 1
         print(f"Standard OCR results cleared. Next global row number will start from: {self.next_global_row_number}")
+        # Notify views so image labels refresh (batch OCR clear was leaving stale text boxes).
+        self.model_updated.emit([])
 
 
     def add_new_ocr_results(self, new_results: list[dict]):
