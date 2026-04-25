@@ -23,7 +23,7 @@ from app.core.project_model import ProjectModel
 from app.viewmodels import AppViewModel
 from app.ui.dialogs.settings_dialog import SettingsDialog
 from app.ui.components.background import AuroraCanvas
-from assets import (DEFAULT_TEXT_STYLE, get_style_diff, RIGHT_PANEL_STYLES, UNIVERSAL_STYLES)
+from assets import (DEFAULT_TEXT_STYLE, RIGHT_PANEL_STYLES, UNIVERSAL_STYLES)
 import os, gc, json, traceback
 from app.core.rapid_ocr_engine import RapidOCREngine
 
@@ -55,15 +55,11 @@ class MainWindow(QMainWindow):
 
         self.init_ui()
 
-        self.reader = None 
+        self.reader = None
         self.ocr_processor = None
-        
-        if hasattr(self, 'style_panel'):
-             self.style_panel.style_changed.connect(self.update_text_box_style)
-        
         self.batch_handler = None
         self._panel_layout_vertical = True  # Track layout state (True = vertical/bottom, False = horizontal/right)
-    
+
     def _load_filter_settings(self):
         self.min_text_height = int(self.settings.value("min_text_height", 40))
         self.max_text_height = int(self.settings.value("max_text_height", 100))
@@ -234,7 +230,7 @@ class MainWindow(QMainWindow):
         right_panel.addLayout(button_layout)
 
         # Style panel - always visible above results with resizable splitter
-        self.style_panel = TextBoxStylePanel(default_style=DEFAULT_TEXT_STYLE, editor_viewmodel=self.editor_vm)
+        self.style_panel = TextBoxStylePanel(default_style=DEFAULT_TEXT_STYLE, editor_viewmodel=self.editor_vm, style_viewmodel=self.app_vm.style_vm)
         self.style_panel.setMinimumHeight(70)
         self.style_panel.setMaximumHeight(480)
 
@@ -452,55 +448,7 @@ class MainWindow(QMainWindow):
         """ DELEGATED: Asks the model for the correct text to display. """
         return self.model.get_display_text(result)
 
-    def find_textbox_item(self, row_number):
-        """Finds and returns the TextBoxItem widget for a given row number."""
-        target_result, _ = self.model._find_result_by_row_number(row_number)
-        if not target_result: return None
-        filename = target_result.get('filename')
-        if not filename: return None
 
-        layout = self.scroll_area.widget().layout()
-        for i in range(layout.count()):
-            widget = layout.itemAt(i).widget()
-            if isinstance(widget, ResizableImageLabel) and widget.filename == filename:
-                for tb in widget.get_text_boxes():
-                    # Need to handle float vs int comparison carefully
-                    try:
-                        if float(tb.row_number) == float(row_number):
-                            return tb
-                    except (ValueError, TypeError):
-                        if str(tb.row_number) == str(row_number):
-                            return tb
-        return None
-
-    def update_text_box_style(self, new_style_dict):
-        row_number = self.editor_vm.selected_row
-        if row_number is None:
-            print("Style changed but no text box selected.")
-            return
-
-        target_result, _ = self.model._find_result_by_row_number(row_number)
-        if not target_result:
-            print(f"Error: Could not find result for row {row_number} to apply style.")
-            return
-
-        if target_result.get('is_deleted', False):
-             print(f"Warning: Attempting to style a deleted row ({row_number}). Ignoring.")
-             return
-        
-        style_diff = get_style_diff(new_style_dict, DEFAULT_TEXT_STYLE)
-
-        if style_diff:
-            target_result['custom_style'] = style_diff
-        elif 'custom_style' in target_result:
-            del target_result['custom_style']
-
-        # Find the UI item and apply style visually
-        target_item = self.find_textbox_item(row_number)
-        if target_item:
-            target_item.apply_styles(new_style_dict)
-        else:
-            print(f"Warning: Could not find visual text box for row {row_number} to apply style.")
 
 
     def _initialize_ocr_reader(self, context="OCR"):
@@ -526,9 +474,6 @@ class MainWindow(QMainWindow):
             ErrorDialog.critical(self, "OCR Initialization Error", error_msg, traceback_text)
             self.reader = None
         return False
-
-    def _find_result_by_row_number(self, row_number_to_find):
-        return self.model._find_result_by_row_number(row_number_to_find)
 
     def toggle_ocr(self):
         if self.btn_ocr_toggle.isChecked():

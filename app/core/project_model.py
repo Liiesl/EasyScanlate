@@ -369,6 +369,20 @@ class ProjectModel(QObject):
                 continue
         return None, -1
 
+    def update_style(self, row_number, style_diff):
+        """Updates the custom_style for a given row and emits model_updated."""
+        target_result, _ = self._find_result_by_row_number(row_number)
+        if not target_result:
+            return False
+        if target_result.get('is_deleted', False):
+            return False
+        if style_diff:
+            target_result['custom_style'] = style_diff
+        elif 'custom_style' in target_result:
+            del target_result['custom_style']
+        self.model_updated.emit([target_result.get('filename')])
+        return True
+
     def _sort_ocr_results(self):
         """Sorts OCR results primarily by filename, then by row number."""
         try:

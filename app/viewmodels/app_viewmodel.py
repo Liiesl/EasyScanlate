@@ -5,6 +5,7 @@ from app.viewmodels.base_viewmodel import BaseViewModel
 from app.viewmodels.editor_viewmodel import EditorViewModel
 from app.viewmodels.image_area_viewmodel import ImageAreaViewModel
 from app.viewmodels.translation_viewmodel import TranslationViewModel
+from app.viewmodels.style_viewmodel import StyleViewModel
 
 
 class AppViewModel(BaseViewModel):
@@ -29,6 +30,7 @@ class AppViewModel(BaseViewModel):
         self.editor_vm = EditorViewModel(model, self)
         self.image_area_vm = ImageAreaViewModel(model, get_reader, get_settings, self)
         self.translation_vm = TranslationViewModel(model, self.editor_vm, get_settings, app_viewmodel=self, parent=self)
+        self.style_vm = StyleViewModel(model, self.editor_vm, self)
 
     # ------------------------------------------------------------------
     # Project / File actions (called by MenuBar)
