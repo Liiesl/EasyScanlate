@@ -271,11 +271,10 @@ def import_translation_file(self):
                     print(f"Warning: Active profile '{self.model.active_profile_name}' not found in imported data. Defaulting to 'Original'.")
                     self.model.active_profile_name = "Original"
                 
-                # Emit signal to update UI (profile selector, etc.)
+                # Emit signals to update UI reactively via ViewModels
                 self.model.profiles_updated.emit()
-                
-                if hasattr(self, 'update_all_views'):
-                    self.update_all_views()
+                self.model.model_updated.emit([])
+                self.model.image_list_changed.emit()
                 
                 QMessageBox.information(self, "Success", 
                                       f"Master file imported successfully!\n"
@@ -340,10 +339,6 @@ def import_translation_file(self):
                     
                     # Apply translation to profile
                     self.model.add_profile(profile_name, translation_data)
-                    
-                    # Refresh UI
-                    if hasattr(self, 'update_all_views'):
-                        self.update_all_views()
                     
                     QMessageBox.information(self, "Success", 
                                           f"Translation successfully applied to profile:\n'{profile_name}'")

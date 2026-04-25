@@ -2,7 +2,8 @@
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QTextEdit,
-    QScrollArea, QComboBox, QPushButton, QSizePolicy, QApplication
+    QScrollArea, QComboBox, QPushButton, QSizePolicy, QApplication,
+    QMessageBox, QCheckBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QThread
 from PySide6.QtCore import QSettings, QPropertyAnimation, QEasingCurve, Property
@@ -10,10 +11,6 @@ from PySide6.QtGui import QPainter, QLinearGradient, QColor
 import qtawesome as qta
 import traceback
 
-from app.core.translations import (
-    TranslationThread, generate_for_translate_content,
-    generate_retranslate_content, import_translation_file_content
-)
 from app.ui.dialogs.error_dialog import ErrorDialog
 from app.ui.dialogs.settings_dialog import GEMINI_MODELS_WITH_INFO, MISTRAL_MODELS_WITH_INFO
 from assets.styles import TRANSLATION_PANEL_STYLES
@@ -265,13 +262,13 @@ class TranslationPanel(QFrame):
     """
     Unified panel combining OCR results display and translation controls.
     Replaces ResultsWidget and TranslationChatWidget.
-    """
-    # Signals
-    text_changed = Signal(int, str)
-    translation_complete = Signal(str, dict)
-    profile_changed = Signal(str)
 
-    def __init__(self, source_language="Korean", editor_viewmodel=None, parent=None):
+    Phase 3: Now binds to TranslationViewModel. All model mediation, thread
+    orchestration, and API-key handling live in the ViewModel.
+    """
+
+    def __init__(self, source_language="Korean", editor_viewmodel=None,
+                 translation_viewmodel=None, parent=None):
         super().__init__(parent)
         self.setObjectName("TranslationPanel")
         self.setStyleSheet(TRANSLATION_PANEL_STYLES)
@@ -283,16 +280,29 @@ class TranslationPanel(QFrame):
         self.ocr_results = []
         self.get_display_text_func = None
         self.editor_vm = editor_viewmodel
+        self.translation_vm = translation_viewmodel
 
-        # Translation state
+        # View-level settings only (delete warning, model defaults)
         self.settings = QSettings("Liiesl", "EasyScanlate")
-        self.translation_thread = None
-        self._pending_retranslate_row = None
 
         self._init_ui()
 
         if self.editor_vm:
             self.editor_vm.selected_row_changed.connect(self._on_editor_selection_changed)
+
+        if self.translation_vm:
+            self._bind_viewmodel()
+
+    def _bind_viewmodel(self):
+        """Wire reactive VM signals to panel updates."""
+        vm = self.translation_vm
+        vm.profiles_changed.connect(self.set_profiles)
+        vm.active_profile_changed.connect(self._on_vm_active_profile_changed)
+        vm.ocr_results_changed.connect(self._on_vm_ocr_results_changed)
+        vm.row_text_updated.connect(self.update_row_text)
+        vm.is_translating_changed.connect(self._on_vm_is_translating_changed)
+        vm.translation_error_occurred.connect(self._on_vm_translation_error)
+        vm.translation_complete_message.connect(self._on_vm_translation_complete)
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -427,10 +437,44 @@ class TranslationPanel(QFrame):
         self._populate_model_combo(provider)
 
     def _on_profile_changed(self, profile_name: str):
-        if profile_name:
-            self.profile_changed.emit(profile_name)
+        if profile_name and self.translation_vm:
+            self.translation_vm.set_active_profile(profile_name)
 
+    # ------------------------------------------------------------------
+    # VM reactive handlers
+    # ------------------------------------------------------------------
+    def _on_vm_active_profile_changed(self, profile_name: str):
+        """Sync dropdown and repopulate because all display texts changed."""
+        self.profile_dropdown.blockSignals(True)
+        idx = self.profile_dropdown.findText(profile_name)
+        if idx >= 0:
+            self.profile_dropdown.setCurrentIndex(idx)
+        self.profile_dropdown.blockSignals(False)
+        # Repopulate cards with new profile's texts
+        if self.translation_vm:
+            self.populate(self.translation_vm.ocr_results, self.translation_vm.get_display_text)
+
+    def _on_vm_ocr_results_changed(self, ocr_results: list):
+        """Structural change: rebuild all cards."""
+        if self.translation_vm:
+            self.populate(ocr_results, self.translation_vm.get_display_text)
+
+    def _on_vm_is_translating_changed(self, is_translating: bool):
+        self.batch_btn.setEnabled(not is_translating)
+        if is_translating:
+            self.progress_indicator.start_animation()
+        else:
+            self.progress_indicator.stop_animation()
+
+    def _on_vm_translation_error(self, title: str, message: str):
+        ErrorDialog.critical(self, title, message)
+
+    def _on_vm_translation_complete(self, message: str):
+        QMessageBox.information(self, "Success", message)
+
+    # ------------------------------------------------------------------
     # Public API
+    # ------------------------------------------------------------------
     def populate(self, ocr_results: list, get_display_text_func):
         """Populate the panel with OCR results."""
         self.ocr_results = ocr_results
@@ -501,7 +545,9 @@ class TranslationPanel(QFrame):
         """Get currently selected profile name."""
         return self.profile_dropdown.currentText()
 
+    # ------------------------------------------------------------------
     # Internal handlers
+    # ------------------------------------------------------------------
     def _on_editor_selection_changed(self, row_number):
         """React to EditorViewModel selection changes."""
         if row_number is not None and row_number in self.cards:
@@ -521,15 +567,15 @@ class TranslationPanel(QFrame):
             self.editor_vm.select_row(card.row_number)
 
     def _on_card_text_changed(self, row_number: int, text: str):
-        """Handle text edit in a card."""
-        self.text_changed.emit(row_number, text)
+        """Forward text edit to the ViewModel."""
+        if self.translation_vm:
+            self.translation_vm.update_text(row_number, text)
 
     def _on_card_delete_requested(self, row_number: int):
         """Show confirmation dialog and delegate deletion to EditorViewModel."""
         show_warning = self.settings.value("show_delete_warning", "true") == "true"
         proceed = True
         if show_warning:
-            from PySide6.QtWidgets import QMessageBox, QCheckBox
             msg = QMessageBox(self)
             msg.setIcon(QMessageBox.Warning)
             msg.setWindowTitle("Confirm Deletion Marking")
@@ -547,143 +593,26 @@ class TranslationPanel(QFrame):
             self.editor_vm.delete_row(row_number)
 
     def _on_single_retranslate(self, row_number: int):
-        """Handle retranslate request for a single row."""
-        self._pending_retranslate_row = row_number
-
-        # Get API key
+        """Forward retranslate request to the ViewModel."""
+        if not self.translation_vm:
+            return
         provider = self.provider_combo.currentText()
-        if provider == "Mistral":
-            api_key = self.settings.value("mistral_api_key", "")
-            model_name = self.model_combo.currentData() or "mistral-small-latest"
-        else:
-            api_key = self.settings.value("gemini_api_key", "")
-            model_name = self.model_combo.currentData() or "gemini-3-flash-latest"
-
-        if not api_key:
-            ErrorDialog.critical(self, "API Key Missing", f"Please set your {provider} API key in Settings.")
-            return
-
-        # Find the result
-        result = None
-        for r in self.ocr_results:
-            if int(r.get('row_number', 0)) == row_number:
-                result = r
-                break
-
-        if not result:
-            return
-
-        # Generate prompt for single item
-        filename = result.get('filename', '')
-        source_text = result.get('text', '')
+        model_name = self.model_combo.currentData() or ""
         target_lang = self.lang_combo.currentText()
-
-        prompt = f"""Translate the following text to {target_lang}. Respond ONLY with the translation, no explanation.
-
-Text: {source_text}"""
-
-        # Start translation
-        self._start_translation_thread(api_key, prompt, model_name, provider, is_single=True)
+        self.translation_vm.start_single_translation(row_number, provider, model_name, target_lang)
 
     def _on_batch_translate(self):
-        """Handle batch translate request."""
+        """Forward batch translate request to the ViewModel."""
+        if not self.translation_vm:
+            return
         provider = self.provider_combo.currentText()
-        if provider == "Mistral":
-            api_key = self.settings.value("mistral_api_key", "")
-            model_name = self.model_combo.currentData() or "mistral-small-latest"
-        else:
-            api_key = self.settings.value("gemini_api_key", "")
-            model_name = self.model_combo.currentData() or "gemini-3-flash-latest"
-
-        if not api_key:
-            ErrorDialog.critical(self, "API Key Missing", f"Please set your {provider} API key in Settings.")
-            return
-
-        if not self.ocr_results:
-            ErrorDialog.critical(self, "No Data", "There are no OCR results to translate.")
-            return
-
+        model_name = self.model_combo.currentData() or ""
         target_lang = self.lang_combo.currentText()
-        user_prompt = f"Translate the {self.source_language} text to {target_lang}, keep everything else. Respond only with the file."
-
-        try:
-            content = generate_for_translate_content(self.ocr_results, "Original")
-
-            if not content.strip() or '<translations>' not in content:
-                ErrorDialog.critical(self, "No Content", "There is no text content to translate.")
-                return
-
-            full_prompt = f"{user_prompt}\n\n{content}"
-            self._start_translation_thread(api_key, full_prompt, model_name, provider, is_single=False)
-
-        except Exception as e:
-            ErrorDialog.critical(self, "Error", f"Failed to prepare translation: {str(e)}")
-
-    def _start_translation_thread(self, api_key: str, prompt: str, model_name: str, provider: str, is_single: bool):
-        """Start the translation thread."""
-        self.batch_btn.setEnabled(False)
-        self.progress_indicator.start_animation()
-
-        # Clean up previous thread
-        if self.translation_thread and self.translation_thread.isRunning():
-            self.translation_thread.translation_finished.disconnect()
-            self.translation_thread.translation_failed.disconnect()
-            self.translation_thread.stop()
-            self.translation_thread.wait(1000)
-            if self.translation_thread.isRunning():
-                # Thread didn't stop, but we've disconnected signals so it's safer
-                pass
-
-        # Create and start thread
-        self.translation_thread = TranslationThread(api_key, prompt, model_name, provider=provider, parent=self)
-        self.translation_thread.translation_finished.connect(
-            lambda text: self._on_translation_finished(text, provider, is_single)
+        self.translation_vm.start_batch_translation(
+            provider, model_name, target_lang, self.source_language
         )
-        self.translation_thread.translation_failed.connect(self._on_translation_failed)
-
-        self.translation_thread.start()
-
-    def _on_translation_finished(self, full_text: str, provider: str, is_single: bool):
-        """Handle completed translation."""
-        self.batch_btn.setEnabled(True)
-        self.progress_indicator.stop_animation()
-
-        try:
-            if is_single and self._pending_retranslate_row is not None:
-                # Extract translation for single row
-                # Parse the response - it should just be the translated text
-                translated_text = full_text.strip()
-                # Remove any quotes if present
-                if translated_text.startswith('"') and translated_text.endswith('"'):
-                    translated_text = translated_text[1:-1]
-                if translated_text.startswith("'") and translated_text.endswith("'"):
-                    translated_text = translated_text[1:-1]
-
-                # Update the card directly
-                if self._pending_retranslate_row in self.cards:
-                    self.cards[self._pending_retranslate_row].set_target_text(translated_text)
-                    self.text_changed.emit(self._pending_retranslate_row, translated_text)
-
-                self._pending_retranslate_row = None
-            else:
-                # Batch translation - parse XML
-                parsed = import_translation_file_content(full_text)
-                target_lang = self.lang_combo.currentText()
-                profile_name = f"{provider} Translation ({target_lang})"
-                self.translation_complete.emit(profile_name, parsed)
-
-        except Exception as e:
-            self._on_translation_failed(f"Failed to parse translation: {str(e)}")
-
-    def _on_translation_failed(self, error_message: str):
-        """Handle translation failure."""
-        self.batch_btn.setEnabled(True)
-        self.progress_indicator.stop_animation()
-        ErrorDialog.critical(self, "Translation Error", error_message)
-        self._pending_retranslate_row = None
 
     def cleanup(self):
         """Clean up resources."""
-        if self.translation_thread and self.translation_thread.isRunning():
-            self.translation_thread.stop()
-            self.translation_thread.wait(500)
+        if self.translation_vm:
+            self.translation_vm.cleanup()

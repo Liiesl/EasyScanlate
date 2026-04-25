@@ -40,10 +40,11 @@ class MainWindow(QMainWindow):
         self.model.project_load_failed.connect(self.on_project_load_failed)
         self.model.model_updated.connect(self.on_model_updated)
         self.model.profiles_updated.connect(self._on_profile_list_changed)
-        self.model.profile_created_for_user_edit.connect(self._on_profile_created_for_user_edit)
 
         self.app_vm = AppViewModel(self.model, lambda: self.reader, lambda: self.settings, self)
         self.editor_vm = self.app_vm.editor_vm
+        self.translation_vm = self.app_vm.translation_vm
+        self.translation_vm.profile_created_for_user_edit.connect(self._on_profile_created_for_user_edit)
 
         self.find_action = QAction("Find/Replace", self)
         self.find_action.triggered.connect(self.toggle_find_widget)
@@ -102,7 +103,7 @@ class MainWindow(QMainWindow):
             on_save_project=self.on_save_project_triggered,
             on_export_manhwa=self.export_manhwa,
             get_display_text=self.get_display_text,
-            on_text_edited=self.update_ocr_text,
+            on_text_edited=self.translation_vm.update_text,
             get_reader=lambda: self.reader,
             get_settings=lambda: self.settings,
             on_manual_ocr_cancelled=self._on_manual_ocr_cancelled,
@@ -238,10 +239,11 @@ class MainWindow(QMainWindow):
         self.style_panel.setMaximumHeight(480)
 
         # Create unified translation panel (replaces ResultsWidget + TranslationChatWidget)
-        self.translation_panel = TranslationPanel(source_language=self.model.original_language, editor_viewmodel=self.editor_vm)
-        self.translation_panel.text_changed.connect(self.update_ocr_text)
-        self.translation_panel.translation_complete.connect(self.handle_translation_completed)
-        self.translation_panel.profile_changed.connect(self.app_vm.switch_profile)
+        self.translation_panel = TranslationPanel(
+            source_language=self.model.original_language,
+            editor_viewmodel=self.editor_vm,
+            translation_viewmodel=self.translation_vm
+        )
         
         # Create vertical splitter for resizable layout
         right_splitter = QSplitter(Qt.Vertical)
@@ -371,21 +373,13 @@ class MainWindow(QMainWindow):
         menu.set_position_and_show(self.btn_context_fill_menu, 'right')
 
     def update_profile_selector(self):
-        """Syncs profile UIs (menu bar and translation panel) with the model."""
-        # Sync Menu Bar profiles if available
+        """Syncs MenuBar profiles with the model.
+        Translation panel profiles are reactive via TranslationViewModel."""
         if hasattr(self, 'title_bar') and hasattr(self.title_bar, 'menu_bar'):
              self.title_bar.menu_bar.update_profiles_menu()
 
-        # Also update translation panel profiles
-        self._update_translation_panel_data()
-
     def _on_profile_switched(self, profile_name):
-        """React to AppViewModel profile switch.
-
-        Phase 3 TODO: Profile switching moves into TranslationViewModel.
-        This method (and the manual label refresh) will be replaced by a
-        reactive VM -> View binding. Do not add more logic here.
-        """
+        """React to AppViewModel profile switch."""
         self._on_profile_changed()
         self.scroll_area.refresh_all_labels()
 
@@ -440,8 +434,8 @@ class MainWindow(QMainWindow):
 
         # ImageAreaViewModel auto-syncs images from model.image_list_changed;
         # CustomScrollArea reactively rebuilds labels from images_changed.
+        # Translation panel is reactive via TranslationViewModel.
         self.update_profile_selector()
-        self._update_translation_panel_data()
         print(f"Project '{self.model.project_name}' loaded and UI populated.")
     
     def handle_inpaint_record_deleted(self, record_id):
@@ -449,9 +443,10 @@ class MainWindow(QMainWindow):
         self.model.remove_inpaint_record(record_id)
     
     def on_model_updated(self, affected_filenames):
-        """ SLOT: Handles the model_updated signal. Refreshes all relevant views. """
-        self.update_all_views(affected_filenames)
-        self._update_translation_panel_data()
+        """SLOT: Handles the model_updated signal.
+        Image-label and translation-panel updates are now reactive via VMs.
+        """
+        pass
 
     def get_display_text(self, result):
         """ DELEGATED: Asks the model for the correct text to display. """
@@ -534,15 +529,6 @@ class MainWindow(QMainWindow):
 
     def _find_result_by_row_number(self, row_number_to_find):
         return self.model._find_result_by_row_number(row_number_to_find)
-
-    def update_all_views(self, affected_filenames=None):
-        """
-        Refreshes the translation panel. Image-label updates are handled
-        reactively by CustomScrollArea via model_updated -> refresh_visuals.
-        """
-        if hasattr(self, 'translation_panel'):
-            self.translation_panel.populate(self.model.ocr_results, self.get_display_text)
-            self.translation_panel.set_profiles(list(self.model.profiles.keys()))
 
     def toggle_ocr(self):
         if self.btn_ocr_toggle.isChecked():
@@ -656,59 +642,6 @@ class MainWindow(QMainWindow):
         """OCR functionality disabled - placeholder method"""
         self.app_vm.image_area_vm.perform_auto_inpainting(filename, bounding_boxes)
  
-    def update_image_text_box(self, row_number, new_text):
-        target_item = self.find_textbox_item(row_number)
-        if target_item:
-            if target_item.text_item and target_item.text_item.toPlainText() != new_text:
-                target_item.text_item.setPlainText(new_text)
-                target_item.adjust_font_size()
-
-    def update_ocr_text(self, row_number, new_text):
-        # Temporarily block signals to avoid triggering model_updated during the update
-        was_blocked = self.model.blockSignals(True)
-        profile_created_for_user = False
-        was_original_before = self.model.active_profile_name == "Original"
-        try:
-            result = self.model.update_text(row_number, new_text, is_user_edit=True)
-            # Handle both old return format (error, success) and new format (error, success, profile_created, should_show_message)
-            if len(result) >= 3:
-                if len(result) == 4:
-                    _, _, _, should_show_message = result
-                    profile_created_for_user = should_show_message
-                else:
-                    # Old 3-value format
-                    _, _, profile_created_for_user = result
-            
-            # Check if profile was routed (switched from Original to user edit)
-            # This happens when we route to an existing user edit profile
-            profile_routed = was_original_before and self.model.active_profile_name != "Original"
-            
-            # Get the actual text that was saved (might be different from new_text if deleted content was preserved)
-            result_data, _ = self.model._find_result_by_row_number(row_number)
-            if result_data:
-                actual_saved_text = self.model.get_display_text(result_data)
-                # Update translation panel with actual saved text
-                if hasattr(self, 'translation_panel'):
-                    self.translation_panel.update_row_text(row_number, actual_saved_text)
-                self.update_image_text_box(row_number, actual_saved_text)
-            else:
-                self.update_image_text_box(row_number, new_text)
-        finally:
-            # Restore previous signal blocking state
-            self.model.blockSignals(was_blocked)
-            # Emit signals after unblocking if profile was created for user edit
-            if profile_created_for_user:
-                self.model.profiles_updated.emit()
-                self.model.profile_created_for_user_edit.emit()
-            # If profile was routed to existing user edit, update UI to reflect the switch
-            elif profile_routed:
-                # Update profile selector to show we're now on user edit profile
-                # This ensures the UI reflects that we're editing in user edit profile, not Original
-                self.update_profile_selector()
-                # Note: We don't do a full view update here to avoid interrupting the user's editing session
-                # The widget already has the correct text (the edited/deleted text), and other widgets
-                # will update naturally when model_updated is emitted from update_text
-    
     def _on_profile_created_for_user_edit(self):
         """Shows message when a profile is created for a user edit."""
         QMessageBox.information(self, "Edit Profile Created",
@@ -729,18 +662,6 @@ class MainWindow(QMainWindow):
         else:
             ErrorDialog.critical(self, "Error", message)
     
-    def handle_translation_completed(self, profile_name, translated_data):
-        try:
-            self.model.add_profile(profile_name, translated_data)
-            # Success message - keep QMessageBox.information for non-error cases
-            QMessageBox.information(self, "Success", 
-                f"Translation successfully applied to profile:\n'{profile_name}'")
-        except Exception as e:
-            exc_type, exc_value, exc_traceback = sys.exc_info()
-            traceback_text = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-            ErrorDialog.critical(self, "Import Error", f"Failed to apply translation: {str(e)}", traceback_text)
-            traceback.print_exc()
-
     def import_translation(self):
         """Import translation file - delegates to file_io handler."""
         import_translation_file(self)
@@ -761,12 +682,6 @@ class MainWindow(QMainWindow):
 
     def export_ocr_results(self):
         export_ocr_results(self)
-
-    def _update_translation_panel_data(self):
-        """Update the translation panel with current OCR results and profiles."""
-        if hasattr(self, 'translation_panel'):
-            self.translation_panel.populate(self.model.ocr_results, self.get_display_text)
-            self.translation_panel.set_profiles(list(self.model.profiles.keys()))
 
     def toggle_panel_layout(self, checked: bool) -> None:
         """Toggle between vertical (bottom) and horizontal (right) panel layout."""
