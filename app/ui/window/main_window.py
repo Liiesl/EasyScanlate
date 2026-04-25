@@ -378,9 +378,14 @@ class MainWindow(QMainWindow):
         self._update_translation_panel_data()
 
     def _on_profile_switched(self, profile_name):
-        """React to AppViewModel profile switch."""
+        """React to AppViewModel profile switch.
+
+        Phase 3 TODO: Profile switching moves into TranslationViewModel.
+        This method (and the manual label refresh) will be replaced by a
+        reactive VM -> View binding. Do not add more logic here.
+        """
         self._on_profile_changed()
-        self.on_model_updated(None)
+        self.scroll_area.refresh_all_labels()
 
     def _on_profile_changed(self):
         """Handles profile changes by notifying find widget."""

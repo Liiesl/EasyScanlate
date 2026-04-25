@@ -140,6 +140,19 @@ class CustomScrollArea(QScrollArea):
             if isinstance(widget, ResizableImageLabel):
                 widget.refresh_visuals(affected_filenames)
 
+    def refresh_all_labels(self):
+        """Force refresh of all image labels (used on profile switch).
+
+        Phase 3 TODO: When TranslationViewModel owns profile switching, replace
+        this ad-hoc call with a reactive binding (e.g. TranslationViewModel
+        active_profile_changed -> CustomScrollArea.refresh_all_labels).
+        """
+        layout = self._scroll_layout
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
+            if isinstance(widget, ResizableImageLabel):
+                widget.refresh_visuals()
+
     def _on_delete_row_confirmed(self, row_number):
         """Shows confirmation dialog (View concern) then delegates to VM."""
         show_warning = self.get_settings().value("show_delete_warning", "true") == "true"
