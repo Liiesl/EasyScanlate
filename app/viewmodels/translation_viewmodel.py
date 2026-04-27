@@ -207,8 +207,7 @@ class TranslationViewModel(BaseViewModel):
         """Called by the panel when the user switches profile via dropdown."""
         if self._app_vm:
             self._app_vm.switch_profile(name)
-        elif name in self._model.profiles and name != self._model.active_profile_name:
-            self._model.active_profile_name = name
+        elif self._model.set_active_profile(name):
             self.active_profile = name
             self._refresh_current_text()
             self.ocr_results_changed.emit(self._ocr_results)

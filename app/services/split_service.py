@@ -67,26 +67,5 @@ class SplitService(QObject):
             new_image_data.append({'filename': new_filename, 'pixmap': pixmap, 'path': new_filepath})
             new_filenames.append(new_filename)
 
-        # Record the original position *before* redistribute_ocr_for_split mutates image_paths.
-        original_index = None
-        for i, p in enumerate(self.model.image_paths):
-            if os.path.basename(p) == filename:
-                original_index = i
-                break
-
-        self.model.redistribute_inpaint_for_split(filename, new_image_data, [split_y])
-        self.model.redistribute_ocr_for_split(filename, new_image_data, [split_y])
-
-        # redistribute_ocr_for_split removes the source and appends new pieces at the end.
-        # We need to move them back to the original position.
-        new_paths = [data['path'] for data in new_image_data]
-        for np in new_paths:
-            if np in self.model.image_paths:
-                self.model.image_paths.remove(np)
-
-        insert_at = original_index if original_index is not None else len(self.model.image_paths)
-        for i, np in enumerate(new_paths):
-            self.model.image_paths.insert(insert_at + i, np)
-
-        self.model.sort_and_notify()
+        new_filenames = self.model.split_image_update(filename, new_image_data, [split_y])
         return True, f"Image split into {len(new_pixmaps)} parts.", new_filenames

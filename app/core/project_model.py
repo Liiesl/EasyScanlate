@@ -87,8 +87,10 @@ class ProjectModel(QObject):
                     print(f"Loaded {len(self.inpaint_data)} inpaint records.")
 
             print(f"Project '{self.project_name}' loaded successfully into model.")
-            self.project_loaded.emit()
+            # Emit image_list_changed BEFORE project_loaded so reactive ViewModels
+            # (e.g. ImageAreaViewModel) have synced their state before Views react.
             self.image_list_changed.emit()
+            self.project_loaded.emit()
 
         except Exception as e:
             error_msg = f"Failed to load project: {e}"
@@ -268,7 +270,7 @@ class ProjectModel(QObject):
             print(f"Warning: Inpaint patch pixmap not found at {patch_path}")
             return None
 
-    def redistribute_ocr_for_split(self, source_filename: str, new_image_data: list[dict], split_y_coords: list[int]):
+    def _redistribute_ocr_for_split(self, source_filename: str, new_image_data: list[dict], split_y_coords: list[int]):
         """
         Reassigns OCR results from a source image to newly created split images.
         """
@@ -312,7 +314,7 @@ class ProjectModel(QObject):
         for data in new_image_data:
             self.image_paths.append(data['path'])
 
-    def redistribute_inpaint_for_split(self, source_filename: str, new_image_data: list[dict], split_y_coords: list[int]):
+    def _redistribute_inpaint_for_split(self, source_filename: str, new_image_data: list[dict], split_y_coords: list[int]):
         """
         Reassigns inpaint records from a source image to newly created split images.
         """
@@ -348,11 +350,138 @@ class ProjectModel(QObject):
                 except Exception as e:
                     print(f"Error processing inpaint record for split: {e} - Record: {record}")
 
-    def sort_and_notify(self):
-        """Sorts all OCR results and emits signals for a full refresh."""
+    # --- Rich, self-notifying model methods ---
+
+    def set_active_profile(self, name: str) -> bool:
+        """Sets the active profile if it exists. Returns True if changed."""
+        if name in self.profiles and name != self.active_profile_name:
+            self.active_profile_name = name
+            return True
+        return False
+
+    def set_next_global_row_number(self, value: int):
+        """Sets the next global row number."""
+        self.next_global_row_number = value
+
+    def set_mmtl_path(self, path: str):
+        """Sets the project's .mmtl file path."""
+        self.mmtl_path = path
+
+    def import_master_data(self, new_ocr_results: list[dict]):
+        """
+        Replaces OCR results with imported master data.
+        Rebuilds profiles, recalculates next_global_row_number,
+        resets active profile if invalid, and emits all necessary signals.
+        """
+        self.ocr_results = new_ocr_results
+
+        loaded_profiles = set(["Original"])
+        max_row_num = -1
+
+        for res in self.ocr_results:
+            if 'row_number' in res:
+                try:
+                    max_row_num = max(max_row_num, int(float(res['row_number'])))
+                except (ValueError, TypeError):
+                    pass
+            if 'translations' in res and isinstance(res['translations'], dict):
+                for profile_name in res['translations']:
+                    loaded_profiles.add(profile_name)
+
+        if max_row_num >= 0:
+            self.next_global_row_number = max_row_num + 1
+
+        self.profiles = {name: {} for name in loaded_profiles}
+
+        if self.active_profile_name not in self.profiles:
+            print(f"Warning: Active profile '{self.active_profile_name}' not found in imported data. Defaulting to 'Original'.")
+            self.active_profile_name = "Original"
+
+        self.profiles_updated.emit()
+        self.model_updated.emit([])
+        self.image_list_changed.emit()
+
+    def stitch_images_update(self, filenames: list[str], new_filename: str, offsets: dict[str, int]):
+        """
+        Reassigns OCR results and inpaint data for stitched images.
+        Removes old images from image_paths, sorts results, and emits signals.
+        """
+        # Update OCR results
+        for result in self.ocr_results:
+            old_filename = result.get('filename')
+            if old_filename in offsets:
+                result['filename'] = new_filename
+                height_offset = offsets[old_filename]
+                if height_offset > 0:
+                    coords = result.get('coordinates', [])
+                    if coords:
+                        result['coordinates'] = [[p[0], p[1] + height_offset] for p in coords]
+
+        # Update inpaint data
+        for record in self.inpaint_data:
+            old_filename = record.get('target_image')
+            if old_filename in offsets:
+                record['target_image'] = new_filename
+                height_offset = offsets[old_filename]
+                if height_offset > 0:
+                    coords = record.get('coordinates', [])
+                    if coords and len(coords) == 4:
+                        record['coordinates'][1] += height_offset
+
+        # Remove old images from image_paths
+        images_dir = os.path.join(self.temp_dir, 'images')
+        filenames_to_remove = [f for f in filenames if f != new_filename]
+        for fname in filenames_to_remove:
+            path = next((p for p in self.image_paths if os.path.basename(p) == fname), None)
+            if path and path in self.image_paths:
+                self.image_paths.remove(path)
+            full_path = os.path.join(images_dir, fname)
+            try:
+                if os.path.exists(full_path):
+                    os.remove(full_path)
+            except Exception as e:
+                print(f"Warning: Could not delete old image file {full_path}. Error: {e}")
+
         self._sort_ocr_results()
         self.model_updated.emit([])
         self.image_list_changed.emit()
+
+    def split_image_update(self, source_filename: str, new_image_data: list[dict], split_y_coords: list[int]) -> list[str]:
+        """
+        Reassigns OCR results and inpaint data for a split image.
+        Replaces the source image path with new split image paths at the correct index.
+        Sorts results and emits signals.
+        Returns the list of new filenames.
+        """
+        # Record original position before mutation
+        original_index = None
+        for i, p in enumerate(self.image_paths):
+            if os.path.basename(p) == source_filename:
+                original_index = i
+                break
+
+        self._redistribute_inpaint_for_split(source_filename, new_image_data, split_y_coords)
+        self._redistribute_ocr_for_split(source_filename, new_image_data, split_y_coords)
+
+        # Reorder image_paths: remove newly appended paths and insert at original index
+        new_paths = [data['path'] for data in new_image_data]
+        for np in new_paths:
+            if np in self.image_paths:
+                self.image_paths.remove(np)
+
+        insert_at = original_index if original_index is not None else len(self.image_paths)
+        for i, np in enumerate(new_paths):
+            self.image_paths.insert(insert_at + i, np)
+
+        affected_filenames = {source_filename}
+        for data in new_image_data:
+            affected_filenames.add(data['filename'])
+
+        self._sort_ocr_results()
+        self.model_updated.emit(list(filter(None, affected_filenames)))
+        self.image_list_changed.emit()
+
+        return [data['filename'] for data in new_image_data]
 
     def _find_result_by_row_number(self, row_number_to_find):
         """Internal helper to find an OCR result and its index by its row number."""

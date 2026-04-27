@@ -242,39 +242,7 @@ def import_translation_file(self):
         new_ocr_results = import_master_file(self, file_path, skip_confirmation=False)
         if new_ocr_results is not None:
             try:
-                # Always replace existing OCR results
-                self.model.ocr_results = new_ocr_results
-                
-                # Reload profiles from the OCR results
-                loaded_profiles = set(["Original"])
-                max_row_num = -1
-                
-                for res in self.model.ocr_results:
-                    if 'row_number' in res:
-                        try:
-                            max_row_num = max(max_row_num, int(float(res['row_number'])))
-                        except (ValueError, TypeError):
-                            pass
-                    if 'translations' in res and isinstance(res['translations'], dict):
-                        for profile_name in res['translations']:
-                            loaded_profiles.add(profile_name)
-                
-                # Update next_global_row_number
-                if max_row_num >= 0:
-                    self.model.next_global_row_number = max_row_num + 1
-                
-                # Replace profiles
-                self.model.profiles = {name: {} for name in loaded_profiles}
-                
-                # Check if current active profile still exists, if not default to "Original"
-                if self.model.active_profile_name not in self.model.profiles:
-                    print(f"Warning: Active profile '{self.model.active_profile_name}' not found in imported data. Defaulting to 'Original'.")
-                    self.model.active_profile_name = "Original"
-                
-                # Emit signals to update UI reactively via ViewModels
-                self.model.profiles_updated.emit()
-                self.model.model_updated.emit([])
-                self.model.image_list_changed.emit()
+                self.model.import_master_data(new_ocr_results)
                 
                 QMessageBox.information(self, "Success", 
                                       f"Master file imported successfully!\n"

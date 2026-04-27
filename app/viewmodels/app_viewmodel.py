@@ -64,9 +64,8 @@ class AppViewModel(BaseViewModel):
         self.project_vm.save_project_as(file_path)
 
     def switch_profile(self, profile_name):
-        if profile_name and profile_name in self._model.profiles and profile_name != self._model.active_profile_name:
+        if self._model.set_active_profile(profile_name):
             print(f"Switching to active profile: {profile_name}")
-            self._model.active_profile_name = profile_name
             self.profile_switched.emit(profile_name)
 
     # ------------------------------------------------------------------

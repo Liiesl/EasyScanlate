@@ -53,42 +53,13 @@ class StitchService(QObject):
         if not combined_pixmap.save(new_filepath):
             return False, "Failed to save stitched image."
 
-        # Update OCR results and inpaint data with new filename and y-offsets
+        # Build offsets map: each filename -> cumulative y-offset
+        offsets = {}
         height_offset = 0
         for i, filename in enumerate(filenames):
-            if i > 0:
-                height_offset += pixmaps[i - 1].height()
+            offsets[filename] = height_offset
+            if i < len(pixmaps):
+                height_offset += pixmaps[i].height()
 
-            for result in self.model.ocr_results:
-                if result.get('filename') == filename:
-                    result['filename'] = new_filename
-                    if height_offset > 0:
-                        coords = result.get('coordinates', [])
-                        if coords:
-                            result['coordinates'] = [[p[0], p[1] + height_offset] for p in coords]
-
-            for record in self.model.inpaint_data:
-                if record.get('target_image') == filename:
-                    record['target_image'] = new_filename
-                    if height_offset > 0:
-                        coords = record.get('coordinates', [])
-                        if coords and len(coords) == 4:
-                            record['coordinates'][1] += height_offset
-
-        # Remove old images from model and disk.
-        # The first image file was overwritten in-place, so its path in image_paths
-        # is already correct — we only need to remove the other stitched images.
-        filenames_to_remove = filenames[1:]
-        for fname in filenames_to_remove:
-            path = next((p for p in self.model.image_paths if os.path.basename(p) == fname), None)
-            if path and path in self.model.image_paths:
-                self.model.image_paths.remove(path)
-            full_path = os.path.join(images_dir, fname)
-            try:
-                if os.path.exists(full_path):
-                    os.remove(full_path)
-            except Exception as e:
-                print(f"Warning: Could not delete old image file {full_path}. Error: {e}")
-
-        self.model.sort_and_notify()
+        self.model.stitch_images_update(filenames, new_filename, offsets)
         return True, f"{len(filenames)} images stitched into one."

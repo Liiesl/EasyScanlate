@@ -82,7 +82,7 @@ class ProjectViewModel(BaseViewModel):
 
     def save_project_as(self, file_path: str):
         """Updates the model path and saves."""
-        self._model.mmtl_path = file_path
+        self._model.set_mmtl_path(file_path)
         self.save_project()
 
     def close_project(self):

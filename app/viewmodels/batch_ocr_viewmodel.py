@@ -156,7 +156,7 @@ class BatchOCRViewModel(BaseViewModel):
 
     def _on_batch_finished(self, next_row_number):
         print("BatchOCRViewModel: Batch finished.")
-        self._model.next_global_row_number = next_row_number
+        self._model.set_next_global_row_number(next_row_number)
         self._cleanup()
         self.batch_finished.emit(next_row_number)
 
