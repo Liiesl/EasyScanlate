@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, Q
                              QMessageBox, QSplitter, QComboBox)
 from app.ui.dialogs.error_dialog import ErrorDialog
 from PySide6.QtCore import Qt, QSettings, QEvent
-from PySide6.QtGui import QKeySequence, QAction, QIcon
+from PySide6.QtGui import QKeySequence, QAction
 import qtawesome as qta
 from app.utils.file_io import export_ocr_results, import_translation_file, export_rendered_images
 from app.ui.components.image_area.scroll_container import CustomScrollArea
@@ -13,10 +13,11 @@ from app.ui.components.textbox_style.panel import TextBoxStylePanel
 from app.ui.widgets.menu_bar import MenuBar, TitleBarState
 from app.ui.window.chrome import CustomTitleBar, WindowResizer
 from app.ui.widgets.progress_bar import CustomProgressBar
-from app.ui.widgets.menus import Menu, ToggleButton, ToggleWithProgress
+from app.ui.widgets.menus import Menu, ToggleWithProgress
 from app.viewmodels import AppViewModel
 from app.ui.dialogs.settings_dialog import SettingsDialog
 from app.ui.components.background import AuroraCanvas
+from app.ui.components.vertical_toolbar import VerticalToolbar
 from assets import (DEFAULT_TEXT_STYLE, RIGHT_PANEL_STYLES, UNIVERSAL_STYLES)
 import os
 
@@ -92,70 +93,11 @@ class MainWindow(QMainWindow):
         )
         
         # Create vertical toolbar (VS Code style)
-        self.vertical_toolbar = QWidget()
-        self.vertical_toolbar.setObjectName("VerticalToolBar")
-        self.vertical_toolbar.setFixedWidth(50)  # Fixed width like VS Code
-        vertical_toolbar_layout = QVBoxLayout(self.vertical_toolbar)
-        vertical_toolbar_layout.setContentsMargins(5, 10, 5, 10)
-        vertical_toolbar_layout.setSpacing(10)
-        
-        # Settings button (moved from settings_layout)
-        self.btn_settings = QPushButton(qta.icon('fa5s.cog', color='white'), "")
-        self.btn_settings.setFixedSize(40, 40)
-        self.btn_settings.setToolTip("Settings")
-        self.btn_settings.clicked.connect(self.show_settings_dialog)
-        vertical_toolbar_layout.addWidget(self.btn_settings)
-        
-        # Spacer after settings for visual separation
-        vertical_toolbar_layout.addSpacing(10)
-        
-        # Manual OCR button (moved from button_layout)
-        self.btn_manual_ocr = QPushButton(QIcon("assets/icons/manual_ocr.svg"), "")
-        self.btn_manual_ocr.setFixedSize(40, 40)
-        self.btn_manual_ocr.setToolTip("Manual OCR Mode")
-        self.btn_manual_ocr.setCheckable(True)
-        self.btn_manual_ocr.toggled.connect(self._on_manual_ocr_toggled)
-        self.btn_manual_ocr.setEnabled(False)  # Keep original enabled state
-        vertical_toolbar_layout.addWidget(self.btn_manual_ocr)
-
-        # --- NEW ACTION BUTTONS ---
-
-        # Toggle Text Visibility
-        self.btn_toggle_text = ToggleButton(
-            off_text="", on_text="",
-            off_icon=qta.icon('fa5s.eye', color='white'),
-            on_icon=qta.icon('fa5s.eye-slash', color='white')
+        self.vertical_toolbar = VerticalToolbar(
+            image_area_vm=self.app_vm.image_area_vm,
+            parent=self
         )
-        self.btn_toggle_text.setFixedSize(40, 40)
-        self.btn_toggle_text.setToolTip("Toggle Text Visibility")
-        self.btn_toggle_text.clicked.connect(self.app_vm.image_area_vm.toggle_text_visibility)
-        self.btn_toggle_text.setState(False)
-        vertical_toolbar_layout.addWidget(self.btn_toggle_text)
-
-        # Toggle Inpainting - now part of Context Fill Menu
-        # Context Fill Menu Button (replaces btn_context_fill, btn_edit_context_fill, btn_toggle_inpainting)
-        self.btn_context_fill_menu = QPushButton(qta.icon('fa5s.fill-drip', color='white'), "")
-        self.btn_context_fill_menu.setFixedSize(40, 40)
-        self.btn_context_fill_menu.setToolTip("Context Fill Options")
-        self.btn_context_fill_menu.clicked.connect(self.show_context_fill_menu)
-        vertical_toolbar_layout.addWidget(self.btn_context_fill_menu)
-
-        # Split Images
-        self.btn_split = QPushButton(QIcon("assets/icons/split.svg"), "")
-        self.btn_split.setFixedSize(40, 40)
-        self.btn_split.setToolTip("Split Images")
-        self.btn_split.clicked.connect(lambda: self.scroll_area.image_area_vm.start_action_mode("split"))
-        vertical_toolbar_layout.addWidget(self.btn_split)
-
-        # Stitch Images
-        self.btn_stitch = QPushButton(QIcon("assets/icons/stitch.svg"), "")
-        self.btn_stitch.setFixedSize(40, 40)
-        self.btn_stitch.setToolTip("Stitch Images")
-        self.btn_stitch.clicked.connect(lambda: self.scroll_area.image_area_vm.start_action_mode("stitch"))
-        vertical_toolbar_layout.addWidget(self.btn_stitch)
-
-        # Add stretch to push buttons to top
-        vertical_toolbar_layout.addStretch()
+        self.vertical_toolbar.settings_requested.connect(self.show_settings_dialog)
 
         # Rest of the UI setup continues...
         left_panel = QVBoxLayout()
@@ -276,15 +218,13 @@ class MainWindow(QMainWindow):
             on_context_fill_start=lambda: self.scroll_area.image_area_vm.start_action_mode("inpaint"),
             on_context_fill_edit_toggled=lambda checked: self.scroll_area.image_area_vm.toggle_inpaint_edit_mode(),
             is_context_fill_edit_active=lambda: self.scroll_area.image_area_vm.inpaint_edit_mode_active,
-            on_split_clicked=self.btn_split.click,
-            on_stitch_clicked=self.btn_stitch.click,
+            on_split_clicked=self.vertical_toolbar.btn_split.click,
+            on_stitch_clicked=self.vertical_toolbar.btn_stitch.click,
             on_toggle_text_visibility=self.app_vm.image_area_vm.toggle_text_visibility,
             on_toggle_inpainting_visibility=self.app_vm.image_area_vm.toggle_inpaint_visibility,
         )
-        # VM-driven sync for text visibility UI state
+        # VM-driven sync for text visibility UI state (menu bar only; toolbar handles its own button)
         self.app_vm.image_area_vm.text_visible_changed.connect(self._on_text_visibility_changed)
-        # VM-driven sync for manual OCR button/menu state
-        self.app_vm.image_area_vm.manual_ocr_mode_active_changed.connect(self._on_manual_ocr_mode_active_changed)
         self.title_bar.setState(TitleBarState.MAIN_WINDOW, self.menu_bar)
 
         # Connect AppViewModel signals
@@ -336,29 +276,7 @@ class MainWindow(QMainWindow):
 
         menu.set_position_and_show(self.btn_import_export_menu, 'bottom right')
 
-    def show_context_fill_menu(self):
-        """Creates, populates, and shows the Context Fill menu."""
-        menu = Menu(self)
 
-        btn_context_fill_mode = QPushButton(qta.icon('fa5s.fill-drip', color='white'), " Context Fill Mode")
-        btn_context_fill_mode.clicked.connect(lambda: self.scroll_area.image_area_vm.start_action_mode("inpaint"))
-        menu.addButton(btn_context_fill_mode)
-
-        btn_edit_context_fill = QPushButton(qta.icon('fa5s.paint-brush', color='white'), " Edit Context Fills")
-        btn_edit_context_fill.clicked.connect(self.scroll_area.image_area_vm.toggle_inpaint_edit_mode)
-        menu.addButton(btn_edit_context_fill)
-
-        btn_toggle_fill_visibility = ToggleButton(
-            off_text=" Show Fills", on_text=" Hide Fills",
-            off_icon=qta.icon('fa5s.eye', color='white'),
-            on_icon=qta.icon('fa5s.eye-slash', color='white')
-        )
-        btn_toggle_fill_visibility.setToolTip("Toggle Fill Visibility")
-        btn_toggle_fill_visibility.setState(self.app_vm.image_area_vm.inpaints_visible)
-        btn_toggle_fill_visibility.clicked.connect(self.app_vm.image_area_vm.toggle_inpaint_visibility)
-        menu.addButton(btn_toggle_fill_visibility, close_on_click=False)
-
-        menu.set_position_and_show(self.btn_context_fill_menu, 'right')
 
     def update_profile_selector(self):
         """Syncs MenuBar profiles with the model.
@@ -403,7 +321,6 @@ class MainWindow(QMainWindow):
 
         has_images = bool(self.app_vm.image_area_vm.images)
         self.btn_ocr_toggle.setEnabled(has_images)
-        self.btn_manual_ocr.setEnabled(has_images)
         self.orientation_combo.setEnabled(has_images)
 
         if not has_images:
@@ -422,11 +339,6 @@ class MainWindow(QMainWindow):
         else:
             self.setWindowTitle("Easy Scanlate")
     
-
-
-
-
-
     def toggle_ocr(self):
         if self.btn_ocr_toggle.isChecked():
             self._start_ocr_with_validation()
@@ -501,10 +413,9 @@ class MainWindow(QMainWindow):
         self.update_find_shortcut()
 
     def _on_text_visibility_changed(self, visible):
-        """Sync text visibility UI state (button + menu action) from VM."""
-        # Button/action checked = hidden (eye-slash)
+        """Sync text visibility menu action from VM. Toolbar handles its own button."""
+        # Menu action checked = hidden (eye-slash)
         checked = not visible
-        self.btn_toggle_text.setChecked(checked)
         if hasattr(self, 'menu_bar') and hasattr(self.menu_bar, '_toggle_text_action'):
             self.menu_bar._toggle_text_action.setChecked(checked)
 
@@ -582,18 +493,6 @@ class MainWindow(QMainWindow):
         """Handle orientation combo box changes."""
         checked = (text == "Bottom")
         self.toggle_panel_layout(checked)
-
-    def _on_manual_ocr_toggled(self, checked):
-        if checked:
-            self.scroll_area.image_area_vm.start_action_mode("manual_ocr")
-        else:
-            self.scroll_area.image_area_vm.cancel_action_mode()
-
-    def _on_manual_ocr_mode_active_changed(self, active):
-        """VM-driven sync: update toolbar button without re-emitting toggled."""
-        self.btn_manual_ocr.blockSignals(True)
-        self.btn_manual_ocr.setChecked(active)
-        self.btn_manual_ocr.blockSignals(False)
 
     def on_project_saved(self, result_message):
         if "successfully" in result_message:
