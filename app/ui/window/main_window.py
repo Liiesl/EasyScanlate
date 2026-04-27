@@ -1,16 +1,12 @@
 # main_window.py - ocr functionality disabled
 
-from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSizePolicy, QCheckBox, QPushButton,
+from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QMessageBox, QSplitter, QComboBox)
-import traceback
-import sys
-import json
 from app.ui.dialogs.error_dialog import ErrorDialog
-from PySide6.QtCore import Qt, QSettings, QPoint, QRectF, QEvent
-from PySide6.QtGui import QPixmap, QKeySequence, QAction, QColor, QIcon
+from PySide6.QtCore import Qt, QSettings, QEvent
+from PySide6.QtGui import QKeySequence, QAction, QIcon
 import qtawesome as qta
 from app.utils.file_io import export_ocr_results, import_translation_file, export_rendered_images
-from app.ui.components.image_area.label import ResizableImageLabel
 from app.ui.components.image_area.scroll_container import CustomScrollArea
 from app.ui.components.translation_panel import TranslationPanel
 from app.ui.components.textbox_style.panel import TextBoxStylePanel
@@ -22,7 +18,7 @@ from app.viewmodels import AppViewModel
 from app.ui.dialogs.settings_dialog import SettingsDialog
 from app.ui.components.background import AuroraCanvas
 from assets import (DEFAULT_TEXT_STYLE, RIGHT_PANEL_STYLES, UNIVERSAL_STYLES)
-import os, gc, json, traceback
+import os
 
 class MainWindow(QMainWindow):
     def __init__(self):
