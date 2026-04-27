@@ -1,31 +1,25 @@
 # main_window.py - ocr functionality disabled
 
-from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSizePolicy, QCheckBox, QPushButton,
+from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QMessageBox, QSplitter, QComboBox)
-import traceback
-import sys
-import json
 from app.ui.dialogs.error_dialog import ErrorDialog
-from PySide6.QtCore import Qt, QSettings, QPoint, QRectF, QEvent
-from PySide6.QtGui import QPixmap, QKeySequence, QAction, QColor, QIcon
+from PySide6.QtCore import Qt, QSettings, QEvent
+from PySide6.QtGui import QKeySequence, QAction
 import qtawesome as qta
 from app.utils.file_io import export_ocr_results, import_translation_file, export_rendered_images
-from app.ui.components.image_area.label import ResizableImageLabel
 from app.ui.components.image_area.scroll_container import CustomScrollArea
 from app.ui.components.translation_panel import TranslationPanel
 from app.ui.components.textbox_style.panel import TextBoxStylePanel
 from app.ui.widgets.menu_bar import MenuBar, TitleBarState
 from app.ui.window.chrome import CustomTitleBar, WindowResizer
 from app.ui.widgets.progress_bar import CustomProgressBar
-from app.ui.widgets.menus import Menu, ToggleButton, ToggleWithProgress
-from app.handlers.ocr_batch_handler import BatchOCRHandler
-from app.handlers.selection_manager import SelectionManager
-from app.core.project_model import ProjectModel
+from app.ui.widgets.menus import Menu, ToggleWithProgress
+from app.viewmodels import AppViewModel
 from app.ui.dialogs.settings_dialog import SettingsDialog
 from app.ui.components.background import AuroraCanvas
-from assets import (DEFAULT_TEXT_STYLE, get_style_diff, RIGHT_PANEL_STYLES, UNIVERSAL_STYLES)
-import os, gc, json, traceback
-from app.core.rapid_ocr_engine import RapidOCREngine
+from app.ui.components.vertical_toolbar import VerticalToolbar
+from assets import (DEFAULT_TEXT_STYLE, RIGHT_PANEL_STYLES, UNIVERSAL_STYLES)
+import os
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -34,16 +28,15 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 1200, 600)
         self.settings = QSettings("Liiesl", "EasyScanlate")
         self._load_filter_settings()
-        
-        self.model = ProjectModel()
-        self.model.project_loaded.connect(self.on_project_loaded)
-        self.model.project_load_failed.connect(self.on_project_load_failed)
-        self.model.model_updated.connect(self.on_model_updated)
-        self.model.profiles_updated.connect(self._on_profile_list_changed)
-        self.model.profile_created_for_user_edit.connect(self._on_profile_created_for_user_edit)
 
-        self.selection_manager = SelectionManager(self.model, self)
-        self.selection_manager.selection_changed.connect(self.on_selection_changed)
+        self.app_vm = AppViewModel(lambda: self.settings, self)
+        self.app_vm.project_vm.project_loaded.connect(self._on_project_loaded)
+        self.app_vm.project_vm.project_load_failed.connect(self.on_project_load_failed)
+        self.app_vm.project_vm.project_name_changed.connect(self._on_project_name_changed)
+        self.app_vm.error_occurred.connect(self._on_app_error_occurred)
+        self.editor_vm = self.app_vm.editor_vm
+        self.translation_vm = self.app_vm.translation_vm
+        self.translation_vm.profile_created_for_user_edit.connect(self._on_profile_created_for_user_edit)
 
         self.find_action = QAction("Find/Replace", self)
         self.find_action.triggered.connect(self.toggle_find_widget)
@@ -54,16 +47,8 @@ class MainWindow(QMainWindow):
 
         self.init_ui()
 
-        self.scroll_content = QWidget()
-        self.reader = None 
-        self.ocr_processor = None
-        
-        if hasattr(self, 'style_panel'):
-             self.style_panel.style_changed.connect(self.update_text_box_style)
-        
-        self.batch_handler = None
         self._panel_layout_vertical = True  # Track layout state (True = vertical/bottom, False = horizontal/right)
-    
+
     def _load_filter_settings(self):
         self.min_text_height = int(self.settings.value("min_text_height", 40))
         self.max_text_height = int(self.settings.value("max_text_height", 100))
@@ -95,86 +80,30 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(main_widget)
         self.setCentralWidget(self.background_canvas)
 
-        self.scroll_area = CustomScrollArea(main_window=self)
+        self.scroll_area = CustomScrollArea(
+            model=self.app_vm.model,  # Phase 9 TODO: remove once CustomScrollArea is fully VM-driven
+            editor_viewmodel=self.editor_vm,
+            image_area_viewmodel=self.app_vm.image_area_vm,
+            on_save_project=self.on_save_project_triggered,
+            on_export_manhwa=self.export_manhwa,
+            get_display_text=self.translation_vm.get_display_text,
+            on_text_edited=self.translation_vm.update_text,
+            get_settings=lambda: self.settings,
+            parent=self
+        )
         
         # Create vertical toolbar (VS Code style)
-        self.vertical_toolbar = QWidget()
-        self.vertical_toolbar.setObjectName("VerticalToolBar")
-        self.vertical_toolbar.setFixedWidth(50)  # Fixed width like VS Code
-        vertical_toolbar_layout = QVBoxLayout(self.vertical_toolbar)
-        vertical_toolbar_layout.setContentsMargins(5, 10, 5, 10)
-        vertical_toolbar_layout.setSpacing(10)
-        
-        # Settings button (moved from settings_layout)
-        self.btn_settings = QPushButton(qta.icon('fa5s.cog', color='white'), "")
-        self.btn_settings.setFixedSize(40, 40)
-        self.btn_settings.setToolTip("Settings")
-        self.btn_settings.clicked.connect(self.show_settings_dialog)
-        vertical_toolbar_layout.addWidget(self.btn_settings)
-        
-        # Spacer after settings for visual separation
-        vertical_toolbar_layout.addSpacing(10)
-        
-        # Manual OCR button (moved from button_layout)
-        self.btn_manual_ocr = QPushButton(QIcon("assets/icons/manual_ocr.svg"), "")
-        self.btn_manual_ocr.setFixedSize(40, 40)
-        self.btn_manual_ocr.setToolTip("Manual OCR Mode")
-        self.btn_manual_ocr.setCheckable(True)
-        self.btn_manual_ocr.toggled.connect(self.scroll_area.manual_ocr_handler.toggle_mode)
-        self.btn_manual_ocr.setEnabled(False)  # Keep original enabled state
-        vertical_toolbar_layout.addWidget(self.btn_manual_ocr)
-
-        # --- NEW ACTION BUTTONS ---
-
-        # Toggle Text Visibility
-        self.btn_toggle_text = ToggleButton(
-            off_text="", on_text="",
-            off_icon=qta.icon('fa5s.eye', color='white'),
-            on_icon=qta.icon('fa5s.eye-slash', color='white')
+        self.vertical_toolbar = VerticalToolbar(
+            image_area_vm=self.app_vm.image_area_vm,
+            parent=self
         )
-        self.btn_toggle_text.setFixedSize(40, 40)
-        self.btn_toggle_text.setToolTip("Toggle Text Visibility")
-        self.btn_toggle_text.toggled.connect(self.scroll_area.toggle_text_visibility)
-        self.btn_toggle_text.setState(False) 
-        vertical_toolbar_layout.addWidget(self.btn_toggle_text)
-
-        # Toggle Inpainting - now part of Context Fill Menu
-        # Context Fill Menu Button (replaces btn_context_fill, btn_edit_context_fill, btn_toggle_inpainting)
-        self.btn_context_fill_menu = QPushButton(qta.icon('fa5s.fill-drip', color='white'), "")
-        self.btn_context_fill_menu.setFixedSize(40, 40)
-        self.btn_context_fill_menu.setToolTip("Context Fill Options")
-        self.btn_context_fill_menu.clicked.connect(self.show_context_fill_menu)
-        vertical_toolbar_layout.addWidget(self.btn_context_fill_menu)
-
-        # Split Images
-        self.btn_split = QPushButton(QIcon("assets/icons/split.svg"), "")
-        self.btn_split.setFixedSize(40, 40)
-        self.btn_split.setToolTip("Split Images")
-        self.btn_split.clicked.connect(self.scroll_area.split_handler.start_splitting_mode)
-        vertical_toolbar_layout.addWidget(self.btn_split)
-
-        # Stitch Images
-        self.btn_stitch = QPushButton(QIcon("assets/icons/stitch.svg"), "")
-        self.btn_stitch.setFixedSize(40, 40)
-        self.btn_stitch.setToolTip("Stitch Images")
-        self.btn_stitch.clicked.connect(self.scroll_area.stitch_handler.start_stitching_mode)
-        vertical_toolbar_layout.addWidget(self.btn_stitch)
-
-        # Add stretch to push buttons to top
-        vertical_toolbar_layout.addStretch()
+        self.vertical_toolbar.settings_requested.connect(self.show_settings_dialog)
 
         # Rest of the UI setup continues...
         left_panel = QVBoxLayout()
         left_panel.setContentsMargins(10, 10, 5, 10)
         left_panel.setSpacing(20)
         
-        self.scroll_content = QWidget()
-        self.scroll_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.scroll_layout = QVBoxLayout(self.scroll_content)
-        self.scroll_layout.setContentsMargins(0, 0, 0, 0)
-        self.scroll_layout.setSpacing(0)
-        self.scroll_area.setWidget(self.scroll_content)
-        self.scroll_area.setWidgetResizable(True)
         left_panel.addWidget(self.scroll_area)
 
         # Right Panel
@@ -228,17 +157,16 @@ class MainWindow(QMainWindow):
         right_panel.addLayout(button_layout)
 
         # Style panel - always visible above results with resizable splitter
-        self.style_panel = TextBoxStylePanel(default_style=DEFAULT_TEXT_STYLE)
+        self.style_panel = TextBoxStylePanel(default_style=DEFAULT_TEXT_STYLE, editor_viewmodel=self.editor_vm, style_viewmodel=self.app_vm.style_vm)
         self.style_panel.setMinimumHeight(70)
         self.style_panel.setMaximumHeight(480)
-        
+
         # Create unified translation panel (replaces ResultsWidget + TranslationChatWidget)
-        self.translation_panel = TranslationPanel(source_language=self.model.original_language)
-        self.translation_panel.text_changed.connect(self.update_ocr_text)
-        self.translation_panel.row_deleted.connect(self.delete_row)
-        self.translation_panel.row_selected.connect(self._on_panel_row_selected)
-        self.translation_panel.translation_complete.connect(self.handle_translation_completed)
-        self.translation_panel.profile_changed.connect(self.switch_active_profile)
+        self.translation_panel = TranslationPanel(
+            source_language=self.translation_vm.original_language,
+            editor_viewmodel=self.editor_vm,
+            translation_viewmodel=self.translation_vm
+        )
         
         # Create vertical splitter for resizable layout
         right_splitter = QSplitter(Qt.Vertical)
@@ -283,7 +211,40 @@ class MainWindow(QMainWindow):
         self.resizer = WindowResizer(self)
 
         # Initialize Title Bar State (needs all other widgets to be created first)
-        self.title_bar.setState(TitleBarState.MAIN_WINDOW)
+        self.menu_bar = MenuBar(
+            parent=self,
+            state=TitleBarState.MAIN_WINDOW,
+            app_viewmodel=self.app_vm,
+            on_context_fill_start=lambda: self.scroll_area.image_area_vm.start_action_mode("inpaint"),
+            on_context_fill_edit_toggled=lambda checked: self.scroll_area.image_area_vm.toggle_inpaint_edit_mode(),
+            is_context_fill_edit_active=lambda: self.scroll_area.image_area_vm.inpaint_edit_mode_active,
+            on_split_clicked=self.vertical_toolbar.btn_split.click,
+            on_stitch_clicked=self.vertical_toolbar.btn_stitch.click,
+            on_toggle_text_visibility=self.app_vm.image_area_vm.toggle_text_visibility,
+            on_toggle_inpainting_visibility=self.app_vm.image_area_vm.toggle_inpaint_visibility,
+        )
+        # VM-driven sync for text visibility UI state (menu bar only; toolbar handles its own button)
+        self.app_vm.image_area_vm.text_visible_changed.connect(self._on_text_visibility_changed)
+        self.title_bar.setState(TitleBarState.MAIN_WINDOW, self.menu_bar)
+
+        # Connect AppViewModel signals
+        self.app_vm.profile_switched.connect(self._on_profile_switched)
+        self.app_vm.project_saved.connect(self.on_project_saved)
+        self.app_vm.ocr_toggled.connect(self.toggle_ocr)
+        self.app_vm.panel_layout_toggled.connect(self.toggle_panel_layout)
+        self.app_vm.find_widget_toggled.connect(self.toggle_find_widget)
+        self.app_vm.import_translation_requested.connect(self.import_translation)
+        self.app_vm.export_ocr_results_requested.connect(self.export_ocr_results)
+
+        # Connect BatchOCRViewModel signals
+        # Note: progress_changed only drives CustomProgressBar; CustomProgressBar.valueChanged
+        # already drives btn_ocr_toggle.setValue via the connection in init_ui.
+        self.app_vm.batch_ocr_vm.is_running_changed.connect(self._on_ocr_running_changed)
+        self.app_vm.batch_ocr_vm.progress_changed.connect(self.progress_controller.update_target_progress)
+        self.app_vm.batch_ocr_vm.can_run_ocr_changed.connect(self.btn_ocr_toggle.setEnabled)
+        self.app_vm.batch_ocr_vm.batch_finished.connect(self._on_batch_finished_dialog)
+        self.app_vm.batch_ocr_vm.processing_stopped.connect(self._on_batch_stopped_dialog)
+        self.app_vm.batch_ocr_vm.auto_inpaint_requested.connect(self.on_auto_inpaint_requested)
 
     def nativeEvent(self, eventType, message):
         # Use getattr to safely check if resizer exists and is fully initialized
@@ -315,54 +276,21 @@ class MainWindow(QMainWindow):
 
         menu.set_position_and_show(self.btn_import_export_menu, 'bottom right')
 
-    def show_context_fill_menu(self):
-        """Creates, populates, and shows the Context Fill menu."""
-        menu = Menu(self)
 
-        btn_context_fill_mode = QPushButton(qta.icon('fa5s.fill-drip', color='white'), " Context Fill Mode")
-        btn_context_fill_mode.clicked.connect(self.scroll_area.context_fill_handler.start_mode)
-        menu.addButton(btn_context_fill_mode)
-
-        btn_edit_context_fill = QPushButton(qta.icon('fa5s.paint-brush', color='white'), " Edit Context Fills")
-        btn_edit_context_fill.clicked.connect(self.scroll_area.context_fill_handler.toggle_edit_mode)
-        menu.addButton(btn_edit_context_fill)
-
-        btn_toggle_fill_visibility = ToggleButton(
-            off_text=" Show Fills", on_text=" Hide Fills",
-            off_icon=qta.icon('fa5s.eye', color='white'),
-            on_icon=qta.icon('fa5s.eye-slash', color='white')
-        )
-        btn_toggle_fill_visibility.setToolTip("Toggle Fill Visibility")
-        btn_toggle_fill_visibility.setState(True)
-        btn_toggle_fill_visibility.toggled.connect(self.scroll_area.toggle_inpainting_visibility)
-        menu.addButton(btn_toggle_fill_visibility, close_on_click=False)
-
-        menu.set_position_and_show(self.btn_context_fill_menu, 'right')
 
     def update_profile_selector(self):
-        """Syncs profile UIs (menu bar and translation panel) with the model."""
-        # Sync Menu Bar profiles if available
+        """Syncs MenuBar profiles with the model.
+        Translation panel profiles are reactive via TranslationViewModel."""
         if hasattr(self, 'title_bar') and hasattr(self.title_bar, 'menu_bar'):
              self.title_bar.menu_bar.update_profiles_menu()
-        
-        # Also update translation panel profiles
-        self._update_translation_panel_data()
 
-    def switch_active_profile(self, profile_name):
-        """Tells the model to switch the active profile."""
-        if profile_name and profile_name in self.model.profiles and profile_name != self.model.active_profile_name:
-            print(f"Switching to active profile: {profile_name}")
-            self.model.active_profile_name = profile_name
-            self._on_profile_changed()
-            self.on_model_updated(None)
-    
+    def _on_profile_switched(self, profile_name):
+        """React to AppViewModel profile switch."""
+        self._on_profile_changed()
+        self.scroll_area.refresh_all_labels()
+
     def _on_profile_changed(self):
         """Handles profile changes by notifying find widget."""
-        if hasattr(self, 'find_replace_widget'):
-            self.find_replace_widget.on_profile_changed()
-    
-    def _on_profile_list_changed(self):
-        """Handles profile list changes (additions/deletions)."""
         if hasattr(self, 'find_replace_widget'):
             self.find_replace_widget.on_profile_changed()
 
@@ -375,433 +303,91 @@ class MainWindow(QMainWindow):
     def toggle_find_widget(self):
         pass  # Find/replace disabled
 
-    def _on_panel_row_selected(self, row_number):
-        """Handle row selection from translation panel."""
-        self.selection_manager.select(row_number, self.translation_panel)
-
     def update_find_shortcut(self):
         shortcut = self.settings.value("find_shortcut", "Ctrl+F")
         self.find_action.setShortcut(QKeySequence(shortcut))
         print(f"Find shortcut set to: {shortcut}")
 
-    def process_mmtl(self, mmtl_path, temp_dir):
-        self.model.load_project(mmtl_path, temp_dir)
-
     def on_project_load_failed(self, error_msg):
         ErrorDialog.critical(self, "Project Load Error", error_msg)
         self.close()
 
-    def on_project_loaded(self):
+    def _on_project_loaded(self):
         """ Populates the UI after the model has loaded a project. """
-        self._clear_layout(self.scroll_layout)
         self.scroll_area.cancel_active_modes()
 
-        # Re-initialize OCR reader if language changed
-        if self.reader and self.reader.language != self.model.original_language:
-            print(f"Re-initializing OCR reader for language: {self.model.original_language}")
-            self.reader = RapidOCREngine(language=self.model.original_language)
+        # Reset OCR service so next initialize() picks up new language
+        self.app_vm.ocr_service.reset()
 
-        image_paths = self.model.image_paths
-        self.setWindowTitle(f"{self.model.project_name} | ManhwaOCR")
-        self.setWindowTitle(f"{self.model.project_name} | ManhwaOCR")
-        self.btn_ocr_toggle.setEnabled(bool(image_paths))
-        self.btn_manual_ocr.setEnabled(bool(image_paths))
-        self.orientation_combo.setEnabled(bool(image_paths))
-        # self.ocr_progress.setValue(0) # Removed
-        
-        if not image_paths:
+        has_images = bool(self.app_vm.image_area_vm.images)
+        self.btn_ocr_toggle.setEnabled(has_images)
+        self.orientation_combo.setEnabled(has_images)
+
+        if not has_images:
             QMessageBox.warning(self, "No Images", "The project was loaded, but no images were found inside.")
 
-        for image_path in image_paths:
-            try:
-                 pixmap = QPixmap(image_path)
-                 if pixmap.isNull(): continue
-                 filename = os.path.basename(image_path)
-                 label = ResizableImageLabel(pixmap, filename, self, self.selection_manager)
-                 label.textBoxDeleted.connect(self.delete_row)
-
-                 label.inpaintRecordDeleted.connect(self.handle_inpaint_record_deleted)
-                 label.manual_area_selected.connect(self.scroll_area.manual_ocr_handler.handle_area_selected)
-                 label.manual_area_selected.connect(self.scroll_area.context_fill_handler.handle_area_selected)
-                 self.scroll_layout.addWidget(label)
-            except Exception as e:
-                 print(f"Error creating ResizableImageLabel for {image_path}: {e}")
-        
-        self._apply_inpaints()
-
+        # ImageAreaViewModel auto-syncs images from model.image_list_changed;
+        # CustomScrollArea reactively rebuilds labels from images_changed.
+        # Translation panel is reactive via TranslationViewModel.
         self.update_profile_selector()
-        self.on_model_updated(None)
-        self._update_translation_panel_data()
-        print(f"Project '{self.model.project_name}' loaded and UI populated.")
-    
-    def handle_inpaint_record_deleted(self, record_id):
-        """Delegates the inpaint record deletion request to the model."""
-        self.model.remove_inpaint_record(record_id)
-    
-    def _apply_inpaints(self):
-        """Iterates through inpaint data and applies patches to the correct image labels."""
-        labels_by_filename = {
-            widget.filename: widget
-            for i in range(self.scroll_layout.count())
-            if isinstance((widget := self.scroll_layout.itemAt(i).widget()), ResizableImageLabel)
-        }
-        
-        inpaint_dir = os.path.join(self.model.temp_dir, 'inpaint')
+        print(f"Project '{self.app_vm.project_vm.project_name}' loaded and UI populated.")
 
-        for record in self.model.inpaint_data:
-            target_label = labels_by_filename.get(record['target_image'])
-            if target_label:
-                patch_path = os.path.join(inpaint_dir, record['patch_filename'])
-                if os.path.exists(patch_path):
-                    patch_pixmap = QPixmap(patch_path)
-                    coords = record['coordinates']
-                    if not patch_pixmap.isNull():
-                        target_label.apply_inpaint_patch(patch_pixmap, QRectF(coords[0], coords[1], coords[2], coords[3]))
-                    else:
-                        print(f"Warning: Could not load patch pixmap from {patch_path}")
-                else:
-                    print(f"Warning: Inpaint patch file not found: {patch_path}")
-
-    def on_model_updated(self, affected_filenames):
-        """ SLOT: Handles the model_updated signal. Refreshes all relevant views. """
-        if affected_filenames:
-            for filename in affected_filenames:
-                for i in range(self.scroll_layout.count()):
-                    widget = self.scroll_layout.itemAt(i).widget()
-                    if isinstance(widget, ResizableImageLabel) and widget.filename == filename:
-                        widget.revert_to_original()
-                        self._apply_inpaints()
-                        break
-
-        self.update_all_views(affected_filenames)
-        self._update_translation_panel_data()
-
-    def get_display_text(self, result):
-        """ DELEGATED: Asks the model for the correct text to display. """
-        return self.model.get_display_text(result)
-
-    def on_selection_changed(self, row_number, source):
-        """
-        Updates the style panel based on the currently selected row.
-        The style panel is always visible, but its content changes based on selection.
-        """
-        if row_number is not None:
-            current_style = self.get_style_for_row(row_number)
-            self.style_panel.update_style_panel(current_style)
-            # Update translation panel active row (if selection came from elsewhere)
-            if source is not self.translation_panel and hasattr(self, 'translation_panel'):
-                self.translation_panel.set_active_row(row_number)
-                self.translation_panel.scroll_to_row(row_number)
+    def _on_project_name_changed(self, name):
+        """Updates the window title when the project name changes."""
+        if name:
+            self.setWindowTitle(f"{name} | ManhwaOCR")
         else:
-            # When no textbox is selected, reset to default style
-            self.style_panel.update_style_panel(DEFAULT_TEXT_STYLE)
-
-    def get_style_for_row(self, row_number):
-        style = {}
-        for k, v in DEFAULT_TEXT_STYLE.items():
-             if k in ['bg_color', 'border_color', 'text_color']:
-                 style[k] = QColor(v)
-             else:
-                 style[k] = v
-
-        target_result, _ = self.model._find_result_by_row_number(row_number)
-        if target_result:
-            custom_style = target_result.get('custom_style', {})
-            for k, v in custom_style.items():
-                 if k in ['bg_color', 'border_color', 'text_color']:
-                     style[k] = QColor(v)
-                 else:
-                     style[k] = v
-        return style
-
-    def find_textbox_item(self, row_number):
-        """Finds and returns the TextBoxItem widget for a given row number."""
-        target_result, _ = self.model._find_result_by_row_number(row_number)
-        if not target_result: return None
-        filename = target_result.get('filename')
-        if not filename: return None
-
-        for i in range(self.scroll_layout.count()):
-            widget = self.scroll_layout.itemAt(i).widget()
-            if isinstance(widget, ResizableImageLabel) and widget.filename == filename:
-                for tb in widget.get_text_boxes():
-                    # Need to handle float vs int comparison carefully
-                    try:
-                        if float(tb.row_number) == float(row_number):
-                            return tb
-                    except (ValueError, TypeError):
-                        if str(tb.row_number) == str(row_number):
-                            return tb
-        return None
-
-    def update_text_box_style(self, new_style_dict):
-        row_number = self.selection_manager.get_current_selection()
-        if row_number is None:
-            print("Style changed but no text box selected.")
-            return
-
-        target_result, _ = self.model._find_result_by_row_number(row_number)
-        if not target_result:
-            print(f"Error: Could not find result for row {row_number} to apply style.")
-            return
-
-        if target_result.get('is_deleted', False):
-             print(f"Warning: Attempting to style a deleted row ({row_number}). Ignoring.")
-             return
-        
-        style_diff = get_style_diff(new_style_dict, DEFAULT_TEXT_STYLE)
-
-        if style_diff:
-            target_result['custom_style'] = style_diff
-        elif 'custom_style' in target_result:
-            del target_result['custom_style']
-
-        # Find the UI item and apply style visually
-        target_item = self.find_textbox_item(row_number)
-        if target_item:
-            target_item.apply_styles(new_style_dict)
-        else:
-            print(f"Warning: Could not find visual text box for row {row_number} to apply style.")
-
-
-    def _initialize_ocr_reader(self, context="OCR"):
-        """Initializes the RapidOCR reader if it doesn't exist."""
-        if self.reader:
-            print("RapidOCR reader already initialized.")
-            return True
-        try:
-            language = getattr(self.model, 'original_language', 'Korean')
-            print(f"Initializing RapidOCR reader for {context} (language: {language})")
-            self.reader = RapidOCREngine(language=language)
-            print("RapidOCR reader initialized successfully.")
-            return True
-        except Exception as e:
-            error_msg = f"Failed to initialize OCR reader for {context}: {str(e)}\n\n" \
-                        f"Common causes:\n" \
-                        f"- Missing RapidOCR models (try running initmodels.py).\n" \
-                        f"- ONNX Runtime not properly installed."
-            print(f"Error: {error_msg}")
-            traceback.print_exc()
-            exc_type, exc_value, exc_traceback = sys.exc_info()
-            traceback_text = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-            ErrorDialog.critical(self, "OCR Initialization Error", error_msg, traceback_text)
-            self.reader = None
-        return False
-
-    def _find_result_by_row_number(self, row_number_to_find):
-        return self.model._find_result_by_row_number(row_number_to_find)
-
-    def _clear_layout(self, layout):
-        if layout is not None:
-            while layout.count():
-                item = layout.takeAt(0)
-                widget = item.widget()
-                if widget is not None: widget.deleteLater()
-
-    def update_all_views(self, affected_filenames=None):
-        """
-        Refreshes all views that depend on the model's data, including the
-        translation panel and the text boxes rendered on the images.
-        """
-        # Update translation panel with current OCR results
-        if hasattr(self, 'translation_panel'):
-            self.translation_panel.populate(self.model.ocr_results, self.get_display_text)
-            self.translation_panel.set_profiles(list(self.model.profiles.keys()))
-        grouped_results = {}
-        for result in self.model.ocr_results:
-            filename = result.get('filename')
-            if filename:
-                if affected_filenames and filename not in affected_filenames:
-                    continue
-                if filename not in grouped_results:
-                    grouped_results[filename] = {}
-                grouped_results[filename][result.get('row_number')] = result
-
-        for i in range(self.scroll_layout.count()):
-            widget = self.scroll_layout.itemAt(i).widget()
-            if isinstance(widget, ResizableImageLabel):
-                image_filename = widget.filename
-                if not affected_filenames or image_filename in affected_filenames:
-                    results_for_this_image = grouped_results.get(image_filename, {})
-                    records_for_this_image = [
-                        r for r in self.model.inpaint_data if r.get('target_image') == image_filename
-                    ]
-                    widget.update_inpaint_data(records_for_this_image)
-                    widget.apply_translation(self, results_for_this_image, DEFAULT_TEXT_STYLE)
-
+            self.setWindowTitle("Easy Scanlate")
+    
     def toggle_ocr(self):
         if self.btn_ocr_toggle.isChecked():
-            self.start_ocr()
+            self._start_ocr_with_validation()
         else:
-            self.stop_ocr()
+            self.app_vm.batch_ocr_vm.stop_ocr()
 
-    def start_ocr(self):
-        """OCR functionality disabled - shows message instead"""
-        if not self.model.image_paths:
-            QMessageBox.warning(self, "Warning", "No images loaded to process.")
-            return
-        if self.batch_handler:
-            QMessageBox.warning(self, "Warning", "OCR is already running.")
-            return
-        if self.scroll_area.manual_ocr_handler.is_active:
+    def _start_ocr_with_validation(self):
+        """View-level validation before delegating to BatchOCRViewModel."""
+        if self.app_vm.image_area_vm.active_action_mode == "manual_ocr":
             QMessageBox.warning(self, "Warning", "Cannot start standard OCR while in Manual OCR mode.")
+            self.btn_ocr_toggle.setChecked(False)
             return
-        
-        has_existing_results = any(not res.get('is_manual', False) for res in self.model.ocr_results)
-        if has_existing_results:
+
+        if self.app_vm.batch_ocr_vm.has_existing_standard_results:
             reply = QMessageBox.question(self, 'Confirm Overwrite',
                                          "This will overwrite all existing OCR data (except for manual entries). Do you want to continue?",
                                          QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.No:
+                self.btn_ocr_toggle.setChecked(False)
                 return
 
-        if not self._initialize_ocr_reader("Standard OCR"):
-            return
+        success = self.app_vm.batch_ocr_vm.start_ocr()
+        if not success:
+            self.btn_ocr_toggle.setChecked(False)
 
-        self.btn_ocr_toggle.transition_to_active()
-
-        self.model.clear_standard_results()
-        self.on_model_updated(None)
-        
-        self._load_filter_settings()
-        ocr_settings = {
-            "min_text_height": self.min_text_height, "max_text_height": self.max_text_height,
-            "min_confidence": self.min_confidence, "distance_threshold": self.distance_threshold,
-            "adjust_contrast": float(self.settings.value("ocr_adjust_contrast", 0.5)), "resize_threshold": int(self.settings.value("ocr_resize_threshold", 1024)),
-            "auto_context_fill": self.settings.value("auto_context_fill", "false").lower() == "true"
-        }
-        self.batch_handler = BatchOCRHandler(
-            image_paths=self.model.image_paths, 
-            reader=self.reader, 
-            settings=ocr_settings, 
-            starting_row_number=self.model.next_global_row_number,
-            model=self.model,
-            progress_bar=self.progress_controller # Use controller for logic
-        )
-        self.progress_controller.start_initial_progress() # Start animation
-        self.batch_handler.batch_finished.connect(self.on_batch_finished)
-        self.batch_handler.error_occurred.connect(self.on_batch_error)
-        self.batch_handler.processing_stopped.connect(self.on_batch_stopped)
-        self.batch_handler.auto_inpaint_requested.connect(self.on_auto_inpaint_requested)
-        self.batch_handler.start_processing()
-
-    def on_image_processed(self, new_results):
-        """ DELEGATED: Adds new OCR results to the model. """
-        """OCR functionality disabled - placeholder method"""
-        self.model.add_new_ocr_results(new_results)
-
-    def on_batch_finished(self, next_row_number):
-        """Handles the successful completion of the entire batch."""
-        """OCR functionality disabled - placeholder method"""
-        print("MainWindow: Batch finished.")
-        self.model.next_global_row_number = next_row_number
-        self.cleanup_ocr_session()
-        # Success message - keep QMessageBox.information for non-error cases
-        QMessageBox.information(self, "Finished", "OCR processing completed for all images.")
-    
-    def on_batch_error(self, message):
-        """Handles a critical error during the batch process."""
-        """OCR functionality disabled - placeholder method"""
-        print(f"MainWindow: Batch error received: {message}")
-        self.cleanup_ocr_session()
-        ErrorDialog.critical(self, "OCR Error", message)
-
-    def on_batch_stopped(self):
-        """Handles the UI cleanup after the user manually stops the process."""
-        """OCR functionality disabled - placeholder method"""
-        print("MainWindow: Batch processing was stopped by user.")
-        self.cleanup_ocr_session()
-        QMessageBox.information(self, "Stopped", "OCR processing was stopped.")
-
-    def cleanup_ocr_session(self):
-        """Resets UI and state after an OCR run (success, error, or stop)."""
-        """OCR functionality disabled - placeholder method"""
-        self.btn_ocr_toggle.transition_to_idle()
-        self.btn_ocr_toggle.setEnabled(bool(self.model.image_paths))
-        self.orientation_combo.setEnabled(bool(self.model.image_paths))
-        self.progress_controller.reset() # Reset controller
-        if self.batch_handler:
-            self.batch_handler.deleteLater()
-            self.batch_handler = None
-        gc.collect()
-        
-    def stop_ocr(self):
-        """Stops the currently running OCR process by signaling the handler."""
-        """OCR functionality disabled - placeholder method"""
-        print("MainWindow: Sending stop request to batch handler...")
-        if self.batch_handler:
-            self.batch_handler.stop()
+    def _on_ocr_running_changed(self, is_running):
+        if is_running:
+            self.btn_ocr_toggle.transition_to_active()
+            self.progress_controller.start_initial_progress()
         else:
-            print("No active batch handler to stop.")
-            # If no handler, but UI is stuck, reset it
-            self.cleanup_ocr_session()
+            self.btn_ocr_toggle.transition_to_idle()
+            self.progress_controller.reset()
+        self.btn_ocr_toggle.setEnabled(self.app_vm.batch_ocr_vm.can_run_ocr)
+        self.orientation_combo.setEnabled(bool(self.app_vm.image_area_vm.images))
+
+    def _on_batch_finished_dialog(self, next_row_number):
+        QMessageBox.information(self, "Finished", "OCR processing completed for all images.")
+
+    def _on_app_error_occurred(self, title, message):
+        ErrorDialog.critical(self, title, message)
+
+    def _on_batch_stopped_dialog(self):
+        QMessageBox.information(self, "Stopped", "OCR processing was stopped.")
 
     def on_auto_inpaint_requested(self, filename, bounding_boxes):
         """SLOT: Handles the request from BatchOCRHandler to perform automatic inpainting."""
         """OCR functionality disabled - placeholder method"""
-        target_label = None
-        for i in range(self.scroll_layout.count()):
-            widget = self.scroll_layout.itemAt(i).widget()
-            if isinstance(widget, ResizableImageLabel) and widget.filename == filename:
-                target_label = widget
-                break
-        
-        if target_label:
-            self.scroll_area.context_fill_handler.perform_auto_inpainting(target_label, bounding_boxes)
+        self.app_vm.image_area_vm.perform_auto_inpainting(filename, bounding_boxes)
  
-    def update_image_text_box(self, row_number, new_text):
-        target_item = self.find_textbox_item(row_number)
-        if target_item:
-            if target_item.text_item and target_item.text_item.toPlainText() != new_text:
-                target_item.text_item.setPlainText(new_text)
-                target_item.adjust_font_size()
-
-    def update_ocr_text(self, row_number, new_text):
-        # Temporarily block signals to avoid triggering model_updated during the update
-        was_blocked = self.model.blockSignals(True)
-        profile_created_for_user = False
-        was_original_before = self.model.active_profile_name == "Original"
-        try:
-            result = self.model.update_text(row_number, new_text, is_user_edit=True)
-            # Handle both old return format (error, success) and new format (error, success, profile_created, should_show_message)
-            if len(result) >= 3:
-                if len(result) == 4:
-                    _, _, _, should_show_message = result
-                    profile_created_for_user = should_show_message
-                else:
-                    # Old 3-value format
-                    _, _, profile_created_for_user = result
-            
-            # Check if profile was routed (switched from Original to user edit)
-            # This happens when we route to an existing user edit profile
-            profile_routed = was_original_before and self.model.active_profile_name != "Original"
-            
-            # Get the actual text that was saved (might be different from new_text if deleted content was preserved)
-            result_data, _ = self.model._find_result_by_row_number(row_number)
-            if result_data:
-                actual_saved_text = self.model.get_display_text(result_data)
-                # Update translation panel with actual saved text
-                if hasattr(self, 'translation_panel'):
-                    self.translation_panel.update_row_text(row_number, actual_saved_text)
-                self.update_image_text_box(row_number, actual_saved_text)
-            else:
-                self.update_image_text_box(row_number, new_text)
-        finally:
-            # Restore previous signal blocking state
-            self.model.blockSignals(was_blocked)
-            # Emit signals after unblocking if profile was created for user edit
-            if profile_created_for_user:
-                self.model.profiles_updated.emit()
-                self.model.profile_created_for_user_edit.emit()
-            # If profile was routed to existing user edit, update UI to reflect the switch
-            elif profile_routed:
-                # Update profile selector to show we're now on user edit profile
-                # This ensures the UI reflects that we're editing in user edit profile, not Original
-                self.update_profile_selector()
-                # Note: We don't do a full view update here to avoid interrupting the user's editing session
-                # The widget already has the correct text (the edited/deleted text), and other widgets
-                # will update naturally when model_updated is emitted from update_text
-    
     def _on_profile_created_for_user_edit(self):
         """Shows message when a profile is created for a user edit."""
         QMessageBox.information(self, "Edit Profile Created",
@@ -809,56 +395,16 @@ class MainWindow(QMainWindow):
                                 "Your original OCR text is preserved.")
 
     def combine_rows_in_model(self, first_row_number, combined_text, min_confidence, rows_to_delete):
-        if self.model.active_profile_name == "Original":
-             QMessageBox.information(self, "Edit Profile Created",
-                                     f"First combination edit detected. A new profile 'User Edit 1' has been created and set as active.")
-        
-        message, success = self.model.combine_rows(first_row_number, combined_text, min_confidence, rows_to_delete)
+        success, message = self.editor_vm.combine_rows(
+            first_row_number, combined_text, min_confidence, rows_to_delete
+        )
         if success:
             if hasattr(self, 'find_replace_widget') and self.find_replace_widget.isVisible():
                 self.find_replace_widget.find_text()
-            # Success message - keep QMessageBox.information for non-error cases
             QMessageBox.information(self, "Success", message)
         else:
             ErrorDialog.critical(self, "Error", message)
     
-    def delete_row(self, row_number_to_delete):
-        show_warning = self.settings.value("show_delete_warning", "true") == "true"
-        proceed = True
-        if show_warning:
-            msg = QMessageBox(self)
-            msg.setIcon(QMessageBox.Warning)
-            msg.setWindowTitle("Confirm Deletion Marking")
-            msg.setText("<b>Mark for Deletion Warning</b>")
-            msg.setInformativeText("Mark this entry for deletion? It will be hidden and excluded from exports.")
-            dont_show_cb = QCheckBox("Remember choice", msg)
-            msg.setCheckBox(dont_show_cb)
-            msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No) 
-            msg.setDefaultButton(QMessageBox.No)
-            response = msg.exec()
-            if dont_show_cb.isChecked(): self.settings.setValue("show_delete_warning", "false")
-            proceed = response == QMessageBox.Yes
-        if not proceed: return
-
-        if self.selection_manager.get_current_selection() == row_number_to_delete:
-            self.selection_manager.deselect(self)
-
-        self.model.delete_row(row_number_to_delete)
-        if hasattr(self, 'find_replace_widget') and self.find_replace_widget.isVisible():
-            self.find_replace_widget.find_text()
-
-    def handle_translation_completed(self, profile_name, translated_data):
-        try:
-            self.model.add_profile(profile_name, translated_data)
-            # Success message - keep QMessageBox.information for non-error cases
-            QMessageBox.information(self, "Success", 
-                f"Translation successfully applied to profile:\n'{profile_name}'")
-        except Exception as e:
-            exc_type, exc_value, exc_traceback = sys.exc_info()
-            traceback_text = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-            ErrorDialog.critical(self, "Import Error", f"Failed to apply translation: {str(e)}", traceback_text)
-            traceback.print_exc()
-
     def import_translation(self):
         """Import translation file - delegates to file_io handler."""
         import_translation_file(self)
@@ -866,25 +412,26 @@ class MainWindow(QMainWindow):
     def update_shortcut(self):
         self.update_find_shortcut()
 
+    def _on_text_visibility_changed(self, visible):
+        """Sync text visibility menu action from VM. Toolbar handles its own button."""
+        # Menu action checked = hidden (eye-slash)
+        checked = not visible
+        if hasattr(self, 'menu_bar') and hasattr(self.menu_bar, '_toggle_text_action'):
+            self.menu_bar._toggle_text_action.setChecked(checked)
+
     def export_manhwa(self):
-        export_rendered_images(self)
+        export_rendered_images(self, self.scroll_area._scroll_layout)
 
     def export_ocr_results(self):
         export_ocr_results(self)
-
-    def _update_translation_panel_data(self):
-        """Update the translation panel with current OCR results and profiles."""
-        if hasattr(self, 'translation_panel'):
-            self.translation_panel.populate(self.model.ocr_results, self.get_display_text)
-            self.translation_panel.set_profiles(list(self.model.profiles.keys()))
 
     def toggle_panel_layout(self, checked: bool) -> None:
         """Toggle between vertical (bottom) and horizontal (right) panel layout."""
         self._panel_layout_vertical = checked
         
         # Update menu text
-        if hasattr(self, 'panel_layout_action'):
-            self.panel_layout_action.setText(
+        if hasattr(self, 'menu_bar') and hasattr(self.menu_bar, '_panel_layout_action'):
+            self.menu_bar._panel_layout_action.setText(
                 "Translation Panel: Bottom" if checked else "Translation Panel: Right"
             )
         
@@ -947,30 +494,23 @@ class MainWindow(QMainWindow):
         checked = (text == "Bottom")
         self.toggle_panel_layout(checked)
 
-    def save_project(self):
-        result_message = self.model.save_project()
+    def on_project_saved(self, result_message):
         if "successfully" in result_message:
-            # Success message - keep QMessageBox.information for non-error cases
             QMessageBox.information(self, "Saved", result_message)
         else:
             ErrorDialog.critical(self, "Save Error", result_message)
+
+    def on_save_project_triggered(self):
+        """Called by CustomScrollArea overlay save button."""
+        self.app_vm.project_vm.save_project()
 
     def closeEvent(self, event):
         # Cleanup translation panel
         if hasattr(self, 'translation_panel'):
             self.translation_panel.cleanup()
-        
-        if hasattr(self.model, 'temp_dir') and self.model.temp_dir and os.path.exists(self.model.temp_dir):
-            try:
-                import shutil
-                print(f"Cleaning up temporary directory: {self.model.temp_dir}")
-                shutil.rmtree(self.model.temp_dir)
-            except Exception as e:
-                print(f"Warning: Could not remove temporary directory {self.model.temp_dir}: {e}")
-        if self.ocr_processor and self.ocr_processor.isRunning():
-            print("Stopping OCR processor on close...")
-            self.ocr_processor.stop_requested = True
-            self.ocr_processor.wait(500)
-            if self.ocr_processor.isRunning():
-                 self.ocr_processor.terminate()
+
+        # Delegate temp-dir cleanup to ProjectViewModel
+        if hasattr(self, 'app_vm') and self.app_vm.project_vm:
+            self.app_vm.project_vm.close_project()
+
         super().closeEvent(event)

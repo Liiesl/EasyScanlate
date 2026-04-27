@@ -34,7 +34,7 @@ class TextBoxStylePanel(QWidget):
     """
     style_changed = Signal(dict)
 
-    def __init__(self, parent=None, default_style=None):
+    def __init__(self, parent=None, default_style=None, editor_viewmodel=None, style_viewmodel=None):
         super().__init__(parent)
         self.setMinimumWidth(400)
         self.settings = QSettings("Liiesl", "EasyScanlate")
@@ -43,11 +43,20 @@ class TextBoxStylePanel(QWidget):
         self._default_style = self._ensure_gradient_defaults(self._original_default_style)
         self._updating_controls = False
         self.selected_style_info = None
-        
+        self.editor_vm = editor_viewmodel
+        self.style_vm = style_viewmodel
+
         self.init_ui()
         self.setStyleSheet(STYLE_PANEL_STYLES)
         self.update_style_panel(self._default_style)
         self._load_presets()
+
+        if self.editor_vm:
+            self.editor_vm.selected_row_style_changed.connect(self.update_style_panel)
+
+        if self.style_vm:
+            self.style_changed.connect(self.style_vm.apply_style)
+            self.style_vm.current_style_changed.connect(self.update_style_panel)
 
     def _ensure_gradient_defaults(self, style_dict):
         """Ensures a style dictionary has default gradient fields."""
@@ -293,8 +302,12 @@ class TextBoxStylePanel(QWidget):
 
     def reset_style(self):
         """Resets the style to the initial default and updates the UI."""
-        self.update_style_panel(self._default_style)
-        self.style_changed_handler()
+        if self.style_vm:
+            self.style_vm.load_preset({})
+            self.style_vm.apply_style(self.get_current_style())
+        else:
+            self.update_style_panel(self._default_style)
+            self.style_changed_handler()
 
     def choose_color(self, button):
         """
@@ -365,14 +378,18 @@ class TextBoxStylePanel(QWidget):
         if not (0 <= index < len(self.presets)): return
         style_diff = self.presets[index]
         if style_diff is None: return
-        full_style = json.loads(json.dumps(self._default_style))
-        for key, value in style_diff.items():
-            if isinstance(value, dict) and key in full_style:
-                full_style[key].update(value)
-            else:
-                full_style[key] = value
-        self.update_style_panel(full_style)
-        self.style_changed_handler()
+        if self.style_vm:
+            self.style_vm.load_preset(style_diff)
+            self.style_vm.apply_style(self.get_current_style())
+        else:
+            full_style = json.loads(json.dumps(self._default_style))
+            for key, value in style_diff.items():
+                if isinstance(value, dict) and key in full_style:
+                    full_style[key].update(value)
+                else:
+                    full_style[key] = value
+            self.update_style_panel(full_style)
+            self.style_changed_handler()
 
     def _add_preset(self):
         current_style = self.get_current_style()

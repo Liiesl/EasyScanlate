@@ -482,7 +482,7 @@ class Home(QMainWindow):
             self.loading_dialog.accept()
 
             self.main_window.show()
-            self.main_window.process_mmtl(mmtl_path, temp_dir)
+            self.main_window.app_vm.project_vm.load_project(mmtl_path, temp_dir)
 
             self.hide()
         except Exception as e:

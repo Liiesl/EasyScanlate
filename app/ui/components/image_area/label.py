@@ -6,23 +6,26 @@ from PySide6.QtWidgets import (QGraphicsScene, QSizePolicy, QGraphicsRectItem, Q
 from PySide6.QtCore import Qt, Signal, QRectF, QPoint, QRect, QSize, QTimer
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QPainterPath
 from app.ui.components.image_area.textbox import TextBoxItem
+from assets import DEFAULT_TEXT_STYLE
 
 class ResizableImageLabel(QGraphicsView):
     # --- MODIFIED: textBoxSelected is no longer needed ---
     textBoxDeleted = Signal(object)
+    row_selected = Signal(int)
+    row_deselected = Signal(int)
     manual_area_selected = Signal(QRectF, object)
     stitching_selection_changed = Signal(object, bool)
     split_indicator_requested = Signal(object, int)
     inpaintRecordDeleted = Signal(str)
     inpaintVisualSelected = Signal(str)  # signal emitted when inpaint visual is selected in edit mode
 
-    # --- MODIFIED: __init__ now accepts a selection_manager ---
-    def __init__(self, pixmap, filename, main_window, selection_manager):
-        super().__init__()
-        self.main_window = main_window 
-        self.selection_manager = selection_manager
-        # --- NEW: Connect to the selection manager's signal ---
-        self.selection_manager.selection_changed.connect(self.on_external_selection_changed)
+    def __init__(self, pixmap, filename, model, get_display_text, on_text_edited, on_delete_row, scroll_area, parent=None):
+        super().__init__(parent)
+        self.model = model
+        self.get_display_text = get_display_text
+        self.on_text_edited = on_text_edited
+        self.on_delete_row = on_delete_row
+        self.scroll_area = scroll_area
 
         self.setScene(QGraphicsScene())
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
@@ -68,6 +71,38 @@ class ResizableImageLabel(QGraphicsView):
         self.split_visuals = [] 
         self._is_dragging_split_line = False
         self._dragged_item = None
+
+        # Render initial text boxes and inpaint patches
+        self.refresh_visuals()
+
+    def refresh_visuals(self, affected_filenames=None):
+        """
+        Rebuilds text boxes and reapplies inpaint patches for this image.
+
+        Phase 2b side effect: ResizableImageLabel reads ProjectModel directly
+        for OCR results and inpaint records. Per-label VM mediation is deferred
+        to later phases.
+        """
+        if affected_filenames and self.filename not in affected_filenames:
+            return
+
+        self.revert_to_original()
+
+        # Re-apply inpaint patches
+        records = self.model.get_inpaint_records_for_image(self.filename)
+        self.update_inpaint_data(records)
+        for record in records:
+            patch_pixmap = self.model.get_inpaint_patch_pixmap(record.get('patch_filename'))
+            if patch_pixmap and not patch_pixmap.isNull():
+                coords = record['coordinates']
+                self.apply_inpaint_patch(patch_pixmap, QRectF(coords[0], coords[1], coords[2], coords[3]))
+
+        # Rebuild text boxes
+        results_for_this_image = {}
+        for result in self.model.ocr_results:
+            if result.get('filename') == self.filename and not result.get('is_deleted', False):
+                results_for_this_image[result.get('row_number')] = result
+        self.apply_translation(results_for_this_image, DEFAULT_TEXT_STYLE)
 
     def update_inpaint_data(self, records):
         self.inpaint_records = records
@@ -155,7 +190,7 @@ class ResizableImageLabel(QGraphicsView):
                 self.scene().removeItem(item)
         self.inpaint_patch_items.clear()
 
-    def apply_translation(self, main_window, text_entries_by_row, default_style):
+    def apply_translation(self, text_entries_by_row, default_style):
         processed_default_style = self._ensure_gradient_defaults_for_ril(default_style)
         current_entries = {rn: entry for rn, entry in text_entries_by_row.items()
                            if not entry.get('is_deleted', False)}
@@ -168,9 +203,9 @@ class ResizableImageLabel(QGraphicsView):
                 rows_to_remove_from_list.append(row_number)
             else:
                 entry = current_entries[row_number]
-                display_text = main_window.get_display_text(entry)
+                display_text = self.get_display_text(entry)
                 combined_style = self._combine_styles(processed_default_style, entry.get('custom_style', {}))
-                
+
                 text_box.text_item.setPlainText(display_text)
                 text_box.apply_styles(combined_style)
 
@@ -188,10 +223,10 @@ class ResizableImageLabel(QGraphicsView):
                 except Exception as e:
                     print(f"Error processing coords for new row {row_number}: {coords} -> {e}")
                     continue
-                
-                display_text = main_window.get_display_text(entry)
+
+                display_text = self.get_display_text(entry)
                 combined_style = self._combine_styles(processed_default_style, entry.get('custom_style', {}))
-                
+
                 text_box = TextBoxItem (QRectF(x, y, width, height),
                                          row_number,
                                          display_text,
@@ -402,7 +437,7 @@ class ResizableImageLabel(QGraphicsView):
         super().mouseDoubleClickEvent(event)
 
     def _on_text_box_edited(self, row_number, new_text):
-        self.main_window.update_ocr_text(row_number, new_text)
+        self.on_text_edited(row_number, new_text)
 
     def _finish_all_editing(self):
         for text_box in self.text_boxes:
@@ -514,33 +549,26 @@ class ResizableImageLabel(QGraphicsView):
                      combined[key] = value
         return combined
 
-    # --- MODIFIED: This now reports to the selection manager ---
+    # --- MODIFIED: This now emits signals instead of talking to selection_manager ---
     def on_text_box_selected(self, selected, row_number):
         if selected:
-            # Tell the manager about the new selection
-            self.selection_manager.select(row_number, self)
+            self.row_selected.emit(row_number)
             # Locally deselect other boxes on this image
             for tb in self.text_boxes:
                  if tb.row_number != row_number and tb.isSelected():
                      tb.setSelected(False)
         else:
-            # If the currently selected box is deselected, clear the global selection
-            if self.selection_manager.get_current_selection() == row_number:
-                self.selection_manager.deselect(self)
-    
-    # --- NEW: Slot to handle external selection changes ---
-    def on_external_selection_changed(self, row_number, source):
-        # Ignore signals from self to prevent loops
-        if source is self:
-            return
+            self.row_deselected.emit(row_number)
 
+    # --- NEW: Slot to handle external selection changes (called by CustomScrollArea) ---
+    def on_external_selection_changed(self, row_number):
         # If selection is cleared, deselect everything on this image
         if row_number is None:
             self.deselect_all_text_boxes()
             return
-            
+
         # Check if the selected row belongs to this image
-        target_result, _ = self.main_window.model._find_result_by_row_number(row_number)
+        target_result, _ = self.model._find_result_by_row_number(row_number)
         if target_result and target_result.get('filename') == self.filename:
             selected_item = self.select_text_box(row_number)
             if selected_item:
@@ -548,25 +576,25 @@ class ResizableImageLabel(QGraphicsView):
         else:
             # The selection is for a different image, so deselect all boxes here
             self.deselect_all_text_boxes()
-    
+
     # --- NEW: Method to scroll the scroll area to a specific text box ---
     def _scroll_to_box(self, selected_box_item):
-        scroll_area = self.main_window.scroll_area
+        scroll_area = self.scroll_area
         scroll_viewport = scroll_area.viewport()
         viewport_height = scroll_viewport.height()
         current_scroll_y = scroll_area.verticalScrollBar().value()
         image_label_y_in_scroll = self.y()
-        
+
         box_rect_scene = selected_box_item.sceneBoundingRect()
         scale = self.transform().m11()
-        
+
         box_center_y_in_image = box_rect_scene.center().y() * scale
         box_global_top = image_label_y_in_scroll + (box_rect_scene.top() * scale)
         box_global_bottom = image_label_y_in_scroll + (box_rect_scene.bottom() * scale)
 
         is_visible = (box_global_top >= current_scroll_y) and \
                      (box_global_bottom <= current_scroll_y + viewport_height)
-        
+
         if not is_visible:
             target_scroll_y = image_label_y_in_scroll + box_center_y_in_image - (viewport_height / 2)
             scrollbar = scroll_area.verticalScrollBar()
@@ -625,7 +653,8 @@ class ResizableImageLabel(QGraphicsView):
     def cleanup(self):
         try:
             self.textBoxDeleted.disconnect()
-            self.selection_manager.selection_changed.disconnect(self.on_external_selection_changed)
+            self.row_selected.disconnect()
+            self.row_deselected.disconnect()
             self.manual_area_selected.disconnect()
             self.stitching_selection_changed.disconnect()
             self.split_indicator_requested.disconnect()

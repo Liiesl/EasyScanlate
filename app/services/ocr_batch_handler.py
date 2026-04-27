@@ -1,40 +1,47 @@
-# --- START OF FILE ocr_batch_handler.py ---
+# app/services/ocr_batch_handler.py
 
-import os, gc
+import os
+import gc
 from PySide6.QtCore import QObject, Signal, Slot
 from app.core.ocr_processor import OCRProcessor
 from app.core.project_model import ProjectModel
-from app.ui.widgets.progress_bar import CustomProgressBar # Import the progress bar
+
 
 class BatchOCRHandler(QObject):
     """
     Manages the entire batch OCR process for multiple images.
     This object lives in the main thread but orchestrates worker QThreads.
+    No QtWidgets imports.
     """
+
     batch_finished = Signal(int)
     error_occurred = Signal(str)
     processing_stopped = Signal()
     auto_inpaint_requested = Signal(str, list)
 
-    def __init__(self, image_paths, reader, settings, starting_row_number, model: ProjectModel, progress_bar: CustomProgressBar):
+    # De-QtWidget'd progress signals
+    progress_changed = Signal(int)
+    status_message_changed = Signal(str)
+
+    def __init__(self, image_paths, reader, settings, starting_row_number, model: ProjectModel):
         super().__init__()
         self.image_paths = image_paths
         self.reader = reader
         self.settings = settings
         self.starting_row_number = starting_row_number
         self.model = model
-        self.progress_bar = progress_bar
 
         self.current_image_index = 0
         self.next_global_row_number = self.starting_row_number
         self._is_stopped = False
-        self.ocr_thread = None # Keep a persistent reference to the thread
+        self.ocr_thread = None  # Keep a persistent reference to the thread
 
     def start_processing(self):
         """Starts the batch process."""
         print("Batch Handler: Starting processing...")
         self._is_stopped = False
-        self.progress_bar.start_initial_progress()
+        self.progress_changed.emit(0)
+        self.status_message_changed.emit("Starting batch OCR...")
         self._process_next_image()
 
     def stop(self):
@@ -43,7 +50,6 @@ class BatchOCRHandler(QObject):
         self._is_stopped = True
         if self.ocr_thread and self.ocr_thread.isRunning():
             self.ocr_thread.stop_requested = True
-            # The finished signal connection will handle cleanup
 
     def _process_next_image(self):
         """Processes a single image or finishes the batch if all are done."""
@@ -62,13 +68,17 @@ class BatchOCRHandler(QObject):
             return
 
         image_path = self.image_paths[self.current_image_index]
-        print(f"Batch Handler: Creating thread for image {self.current_image_index + 1}/{len(self.image_paths)}: {os.path.basename(image_path)}")
+        filename = os.path.basename(image_path)
+        total = len(self.image_paths)
+        current = self.current_image_index + 1
+        print(f"Batch Handler: Creating thread for image {current}/{total}: {filename}")
+        self.status_message_changed.emit(f"Processing image {current}/{total}: {filename}")
 
         # Create the new worker thread
         self.ocr_thread = OCRProcessor(
             image_path=image_path,
             reader=self.reader,
-            **self.settings # Unpack the settings dictionary
+            **self.settings  # Unpack the settings dictionary
         )
 
         # Connect signals
@@ -76,19 +86,17 @@ class BatchOCRHandler(QObject):
         self.ocr_thread.ocr_finished.connect(self._handle_image_results)
         self.ocr_thread.error_occurred.connect(self._handle_image_error)
         self.ocr_thread.auto_inpaint_requested.connect(self.auto_inpaint_requested)
-        # --- NEW: Connect the thread's finished signal for robust cleanup ---
         self.ocr_thread.finished.connect(self._on_thread_finished)
 
         self.ocr_thread.start()
 
-    @Slot() # Explicitly mark as a slot
+    @Slot()
     def _on_thread_finished(self):
         """
         This slot is called when the QThread.run() method has returned.
         It's the safest place to clean up and start the next image.
         """
         print(f"Batch Handler: Thread for image {self.current_image_index + 1} has officially finished.")
-        # We can now safely discard the old thread reference and proceed
         self.ocr_thread = None
         gc.collect()
 
@@ -97,15 +105,15 @@ class BatchOCRHandler(QObject):
         self._process_next_image()
 
     def _handle_image_progress(self, progress):
-        """Calculates and updates the overall batch progress directly."""
+        """Calculates and updates the overall batch progress."""
         total_images = len(self.image_paths)
-        if total_images == 0: return
+        if total_images == 0:
+            return
         per_image_contribution = 80.0 / total_images
         current_image_progress = progress / 100.0
-        # Calculate progress based on the image that is *currently processing*
         progress_base = 20 + (self.current_image_index * per_image_contribution)
         overall_progress = progress_base + (current_image_progress * per_image_contribution)
-        self.progress_bar.update_target_progress(int(overall_progress))
+        self.progress_changed.emit(int(overall_progress))
 
     def _handle_image_results(self, processed_results):
         """Receives results from a single image and updates the model directly."""
@@ -135,23 +143,16 @@ class BatchOCRHandler(QObject):
             self.model.add_new_ocr_results(newly_numbered_results)
             print(f"Batch Handler: Added {len(newly_numbered_results)} blocks from {filename} to model.")
 
-        # --- REMOVED ---
-        # The logic to move to the next image is now handled by _on_thread_finished
-        # self.current_image_index += 1
-        # self.ocr_thread = None
-        # gc.collect()
-        # self._process_next_image()
-
     def _handle_image_error(self, message):
         """Handles an error from a worker thread."""
         print(f"Batch Handler: An error occurred: {message}")
         self._is_stopped = True
         self.error_occurred.emit(message)
-        # The thread will still call 'finished', which will trigger cleanup.
 
     def _finish_batch(self):
         """Cleans up and signals that the entire batch is complete."""
         print("Batch Handler: Finishing run.")
-        self.progress_bar.update_target_progress(100)
+        self.progress_changed.emit(100)
+        self.status_message_changed.emit("Batch complete")
         self.batch_finished.emit(self.next_global_row_number)
         gc.collect()

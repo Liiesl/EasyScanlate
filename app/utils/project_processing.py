@@ -131,7 +131,7 @@ def launch_project(self, mmtl_path):
     if hasattr(self, 'launch_main_app'):
         # Called from Home class
         self.launch_main_app(mmtl_path)
-    elif hasattr(self, 'main_window'):
+    elif hasattr(self, '_parent_window'):
         # Called from MenuBar class
         from app.ui.window.home_window import LoadingDialog, ProjectLoaderThread
         
@@ -154,7 +154,7 @@ def launch_project(self, mmtl_path):
                     
                     # Create main window
                     new_window = MainWindow()
-                    new_window.process_mmtl(mmtl_path, temp_dir)
+                    new_window.app_vm.project_vm.load_project(mmtl_path, temp_dir)
                     new_window.show()
                     
                     # Close the old window

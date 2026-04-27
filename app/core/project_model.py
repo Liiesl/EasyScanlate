@@ -16,13 +16,21 @@ class ProjectModel(QObject):
     project_loaded = Signal()
     # Emitted with an error message if project loading fails.
     project_load_failed = Signal(str)
-    # Emitted after any data change (e.g., text edit, deletion, new OCR results).
-    # The payload is a list of affected filenames for targeted UI updates.
-    model_updated = Signal(list)
     # Emitted when the list of profiles changes (new profile added).
     profiles_updated = Signal()
     # Emitted when a profile is created for a user edit (not programmatic changes like find/replace).
     profile_created_for_user_edit = Signal()
+    # Emitted when the image list changes structurally (load, stitch, split).
+    image_list_changed = Signal()
+
+    # --- Granular data-change signals ---
+    # Each carries a list of affected filenames (empty list means "all").
+    text_updated = Signal(list)          # text/translation edits, combine rows
+    style_updated = Signal(list)         # custom style diff applied
+    rows_deleted = Signal(list)          # row soft-deleted
+    ocr_results_added = Signal(list)     # new OCR results added or standard results cleared
+    inpaint_updated = Signal(list)       # inpaint record added/removed
+    structural_updated = Signal(list)    # import, stitch, split (bulk structural changes)
 
     def __init__(self):
         super().__init__()
@@ -85,6 +93,9 @@ class ProjectModel(QObject):
                     print(f"Loaded {len(self.inpaint_data)} inpaint records.")
 
             print(f"Project '{self.project_name}' loaded successfully into model.")
+            # Emit image_list_changed BEFORE project_loaded so reactive ViewModels
+            # (e.g. ImageAreaViewModel) have synced their state before Views react.
+            self.image_list_changed.emit()
             self.project_loaded.emit()
 
         except Exception as e:
@@ -191,8 +202,8 @@ class ProjectModel(QObject):
             self.inpaint_data.append(record)
             print(f"Added and saved inpaint record for '{record['target_image']}'.")
 
-            # Signal that the model has changed, affecting one specific image.
-            self.model_updated.emit([record['target_image']])
+            # Signal that inpaint data changed, affecting one specific image.
+            self.inpaint_updated.emit([record['target_image']])
             return True, None
         except Exception as e:
             error_msg = f"Failed to add inpaint record: {e}"
@@ -229,10 +240,10 @@ class ProjectModel(QObject):
             self.inpaint_data.remove(record_to_remove)
             print(f"Removed inpaint record ID '{record_id}' from model.")
 
-            # 3. Signal that the model has updated, affecting the target image
+            # 3. Signal that inpaint data changed, affecting the target image
             # This will trigger a UI refresh, causing the patch to disappear.
             target_image = record_to_remove['target_image']
-            self.model_updated.emit([target_image])
+            self.inpaint_updated.emit([target_image])
             return True, None
         except Exception as e:
             error_msg = f"Failed to remove inpaint record: {e}"
@@ -265,7 +276,7 @@ class ProjectModel(QObject):
             print(f"Warning: Inpaint patch pixmap not found at {patch_path}")
             return None
 
-    def redistribute_ocr_for_split(self, source_filename: str, new_image_data: list[dict], split_y_coords: list[int]):
+    def _redistribute_ocr_for_split(self, source_filename: str, new_image_data: list[dict], split_y_coords: list[int]):
         """
         Reassigns OCR results from a source image to newly created split images.
         """
@@ -309,7 +320,7 @@ class ProjectModel(QObject):
         for data in new_image_data:
             self.image_paths.append(data['path'])
 
-    def redistribute_inpaint_for_split(self, source_filename: str, new_image_data: list[dict], split_y_coords: list[int]):
+    def _redistribute_inpaint_for_split(self, source_filename: str, new_image_data: list[dict], split_y_coords: list[int]):
         """
         Reassigns inpaint records from a source image to newly created split images.
         """
@@ -345,10 +356,138 @@ class ProjectModel(QObject):
                 except Exception as e:
                     print(f"Error processing inpaint record for split: {e} - Record: {record}")
 
-    def sort_and_notify(self):
-        """Sorts all OCR results and emits the model_updated signal for a full refresh."""
+    # --- Rich, self-notifying model methods ---
+
+    def set_active_profile(self, name: str) -> bool:
+        """Sets the active profile if it exists. Returns True if changed."""
+        if name in self.profiles and name != self.active_profile_name:
+            self.active_profile_name = name
+            return True
+        return False
+
+    def set_next_global_row_number(self, value: int):
+        """Sets the next global row number."""
+        self.next_global_row_number = value
+
+    def set_mmtl_path(self, path: str):
+        """Sets the project's .mmtl file path."""
+        self.mmtl_path = path
+
+    def import_master_data(self, new_ocr_results: list[dict]):
+        """
+        Replaces OCR results with imported master data.
+        Rebuilds profiles, recalculates next_global_row_number,
+        resets active profile if invalid, and emits all necessary signals.
+        """
+        self.ocr_results = new_ocr_results
+
+        loaded_profiles = set(["Original"])
+        max_row_num = -1
+
+        for res in self.ocr_results:
+            if 'row_number' in res:
+                try:
+                    max_row_num = max(max_row_num, int(float(res['row_number'])))
+                except (ValueError, TypeError):
+                    pass
+            if 'translations' in res and isinstance(res['translations'], dict):
+                for profile_name in res['translations']:
+                    loaded_profiles.add(profile_name)
+
+        if max_row_num >= 0:
+            self.next_global_row_number = max_row_num + 1
+
+        self.profiles = {name: {} for name in loaded_profiles}
+
+        if self.active_profile_name not in self.profiles:
+            print(f"Warning: Active profile '{self.active_profile_name}' not found in imported data. Defaulting to 'Original'.")
+            self.active_profile_name = "Original"
+
+        self.profiles_updated.emit()
+        self.structural_updated.emit([])
+        self.image_list_changed.emit()
+
+    def stitch_images_update(self, filenames: list[str], new_filename: str, offsets: dict[str, int]):
+        """
+        Reassigns OCR results and inpaint data for stitched images.
+        Removes old images from image_paths, sorts results, and emits signals.
+        """
+        # Update OCR results
+        for result in self.ocr_results:
+            old_filename = result.get('filename')
+            if old_filename in offsets:
+                result['filename'] = new_filename
+                height_offset = offsets[old_filename]
+                if height_offset > 0:
+                    coords = result.get('coordinates', [])
+                    if coords:
+                        result['coordinates'] = [[p[0], p[1] + height_offset] for p in coords]
+
+        # Update inpaint data
+        for record in self.inpaint_data:
+            old_filename = record.get('target_image')
+            if old_filename in offsets:
+                record['target_image'] = new_filename
+                height_offset = offsets[old_filename]
+                if height_offset > 0:
+                    coords = record.get('coordinates', [])
+                    if coords and len(coords) == 4:
+                        record['coordinates'][1] += height_offset
+
+        # Remove old images from image_paths
+        images_dir = os.path.join(self.temp_dir, 'images')
+        filenames_to_remove = [f for f in filenames if f != new_filename]
+        for fname in filenames_to_remove:
+            path = next((p for p in self.image_paths if os.path.basename(p) == fname), None)
+            if path and path in self.image_paths:
+                self.image_paths.remove(path)
+            full_path = os.path.join(images_dir, fname)
+            try:
+                if os.path.exists(full_path):
+                    os.remove(full_path)
+            except Exception as e:
+                print(f"Warning: Could not delete old image file {full_path}. Error: {e}")
+
         self._sort_ocr_results()
-        self.model_updated.emit([])
+        self.structural_updated.emit([])
+        self.image_list_changed.emit()
+
+    def split_image_update(self, source_filename: str, new_image_data: list[dict], split_y_coords: list[int]) -> list[str]:
+        """
+        Reassigns OCR results and inpaint data for a split image.
+        Replaces the source image path with new split image paths at the correct index.
+        Sorts results and emits signals.
+        Returns the list of new filenames.
+        """
+        # Record original position before mutation
+        original_index = None
+        for i, p in enumerate(self.image_paths):
+            if os.path.basename(p) == source_filename:
+                original_index = i
+                break
+
+        self._redistribute_inpaint_for_split(source_filename, new_image_data, split_y_coords)
+        self._redistribute_ocr_for_split(source_filename, new_image_data, split_y_coords)
+
+        # Reorder image_paths: remove newly appended paths and insert at original index
+        new_paths = [data['path'] for data in new_image_data]
+        for np in new_paths:
+            if np in self.image_paths:
+                self.image_paths.remove(np)
+
+        insert_at = original_index if original_index is not None else len(self.image_paths)
+        for i, np in enumerate(new_paths):
+            self.image_paths.insert(insert_at + i, np)
+
+        affected_filenames = {source_filename}
+        for data in new_image_data:
+            affected_filenames.add(data['filename'])
+
+        self._sort_ocr_results()
+        self.structural_updated.emit(list(filter(None, affected_filenames)))
+        self.image_list_changed.emit()
+
+        return [data['filename'] for data in new_image_data]
 
     def _find_result_by_row_number(self, row_number_to_find):
         """Internal helper to find an OCR result and its index by its row number."""
@@ -364,6 +503,20 @@ class ProjectModel(QObject):
             except (ValueError, TypeError):
                 continue
         return None, -1
+
+    def update_style(self, row_number, style_diff):
+        """Updates the custom_style for a given row and emits style_updated."""
+        target_result, _ = self._find_result_by_row_number(row_number)
+        if not target_result:
+            return False
+        if target_result.get('is_deleted', False):
+            return False
+        if style_diff:
+            target_result['custom_style'] = style_diff
+        elif 'custom_style' in target_result:
+            del target_result['custom_style']
+        self.style_updated.emit([target_result.get('filename')])
+        return True
 
     def _sort_ocr_results(self):
         """Sorts OCR results primarily by filename, then by row number."""
@@ -403,6 +556,8 @@ class ProjectModel(QObject):
                 except: pass
         self.next_global_row_number = max_existing_base + 1
         print(f"Standard OCR results cleared. Next global row number will start from: {self.next_global_row_number}")
+        # Notify views so image labels refresh (batch OCR clear was leaving stale text boxes).
+        self.ocr_results_added.emit([])
 
 
     def add_new_ocr_results(self, new_results: list[dict]):
@@ -412,9 +567,9 @@ class ProjectModel(QObject):
         
         self.ocr_results.extend(new_results)
         self._sort_ocr_results()
-        
+
         affected_filename = new_results[0].get('filename')
-        self.model_updated.emit([affected_filename] if affected_filename else [])
+        self.ocr_results_added.emit([affected_filename] if affected_filename else [])
 
     def _find_existing_user_edit_profile(self):
         """Finds the first existing user edit profile, or None if none exists.
@@ -513,7 +668,7 @@ class ProjectModel(QObject):
         else:
             target_result['translations'][self.active_profile_name] = new_text
 
-        self.model_updated.emit([target_result.get('filename')])
+        self.text_updated.emit([target_result.get('filename')])
         return None, True, profile_created, profile_created and is_user_edit
 
     def delete_row(self, row_number_to_delete):
@@ -524,9 +679,9 @@ class ProjectModel(QObject):
 
         self.ocr_results[target_index]['is_deleted'] = True
         print(f"Marked row {row_number_to_delete} as deleted in model.")
-        
+
         affected_filename = target_result.get('filename')
-        self.model_updated.emit([affected_filename] if affected_filename else [])
+        self.rows_deleted.emit([affected_filename] if affected_filename else [])
 
     def combine_rows(self, first_row_number, combined_text, min_confidence, rows_to_delete):
         """Combines multiple rows into a single entry."""
@@ -561,7 +716,7 @@ class ProjectModel(QObject):
                 self.ocr_results[delete_index]['is_deleted'] = True
                 affected_filenames.add(result_to_delete.get('filename'))
 
-        self.model_updated.emit(list(filter(None, affected_filenames)))
+        self.text_updated.emit(list(filter(None, affected_filenames)))
         return f"Combined rows into row {first_row_number} in profile '{self.active_profile_name}'", True
 
     def add_profile(self, profile_name, translation_data=None):
@@ -589,4 +744,4 @@ class ProjectModel(QObject):
         print(f"Added profile '{profile_name}'. Applied {applied_count} translations.")
         self.active_profile_name = profile_name
         self.profiles_updated.emit()
-        self.model_updated.emit([])
+        self.text_updated.emit([])

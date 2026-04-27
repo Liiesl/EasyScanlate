@@ -10,11 +10,25 @@ class TitleBarState(Enum):
     NON_MAIN = auto()    # For dialogs, settings, etc. that shouldn't have a menu bar
 
 class MenuBar(QMenuBar):
-    # MODIFIED: __init__ now accepts a state to control its contents, defaulting to HOME.
-    def __init__(self, parent, state=TitleBarState.HOME):
+    def __init__(self, parent=None, state=TitleBarState.HOME,
+                 app_viewmodel=None,
+                 on_context_fill_start=None, on_context_fill_edit_toggled=None,
+                 is_context_fill_edit_active=None,
+                 on_split_clicked=None, on_stitch_clicked=None,
+                 on_toggle_text_visibility=None, on_toggle_inpainting_visibility=None,
+                 model=None):
         super().__init__(parent)
-        self.main_window = parent  # Reference to the parent window (e.g., MainWindow, Home)
-        self.state = state         # Store the current state
+        self.state = state
+        self.app_vm = app_viewmodel
+        self.on_context_fill_start = on_context_fill_start
+        self.on_context_fill_edit_toggled = on_context_fill_edit_toggled
+        self.is_context_fill_edit_active = is_context_fill_edit_active
+        self.on_split_clicked = on_split_clicked
+        self.on_stitch_clicked = on_stitch_clicked
+        self.on_toggle_text_visibility = on_toggle_text_visibility
+        self.on_toggle_inpainting_visibility = on_toggle_inpainting_visibility
+        self.model = model
+        self._parent_window = parent
         self.setStyleSheet("""
             QMenuBar {
                 background-color: transparent;
@@ -30,13 +44,10 @@ class MenuBar(QMenuBar):
                 background-color: #4A4A4A;
                 color: #FFFFFF;
             }
-        """)    
-        
-        # Only create menu bar contents if the state is not NON_MAIN.
-        # This is a safe guard; the parent (CustomTitleBar) should already handle this.
+        """)
+
         if self.state != TitleBarState.NON_MAIN:
             self.create_menu_bar()
-        # Add other menus here
         
     def create_menu_bar(self):
         # Common Styles
@@ -92,26 +103,30 @@ class MenuBar(QMenuBar):
         # Import/Export (Parity with existing button)
         if self.state == TitleBarState.MAIN_WINDOW:
             import_trans_action = QAction(qta.icon('fa5s.file-import', color="white"), "Import Translation", self)
-            import_trans_action.triggered.connect(self.main_window.import_translation)
+            if self.app_vm:
+                import_trans_action.triggered.connect(self.app_vm.import_translation)
             files_menu.addAction(import_trans_action)
 
             export_ocr_action = QAction(qta.icon('fa5s.file-export', color="white"), "Export OCR Results", self)
-            export_ocr_action.triggered.connect(self.main_window.export_ocr_results)
+            if self.app_vm:
+                export_ocr_action.triggered.connect(self.app_vm.export_ocr_results)
             files_menu.addAction(export_ocr_action)
             files_menu.addSeparator()
-        
+
         save_action = QAction(qta.icon('fa5s.save', color="white"), "Save Project", self)
         save_as_action = QAction(qta.icon('fa5s.download', color="white"), "Save Project As...", self)
-        
+
         files_menu.addAction(save_action)
         files_menu.addAction(save_as_action)
-        
+
         if self.state == TitleBarState.MAIN_WINDOW:
             save_action.setShortcut("Ctrl+S")
-            save_action.triggered.connect(self.main_window.save_project)
-            
+            if self.app_vm:
+                save_action.triggered.connect(self.app_vm.save_project)
+
             save_as_action.setShortcut("Ctrl+Shift+S")
-            save_as_action.triggered.connect(self.save_project_as)
+            if self.app_vm:
+                save_as_action.triggered.connect(self.save_project_as)
         else:
             save_action.setEnabled(False)
             save_as_action.setEnabled(False)
@@ -123,9 +138,10 @@ class MenuBar(QMenuBar):
 
             # Find/Replace (Parity with Toolbar/Ctrl+F)
             find_action = QAction("Find/Replace", self)
-            find_action.triggered.connect(self.main_window.toggle_find_widget)
+            if self.app_vm:
+                find_action.triggered.connect(self.app_vm.toggle_find_widget)
             edit_menu.addAction(find_action)
-            
+
             # Note: Undo/Redo/Select All are skipped as they don't exist in the current backend.
 
         # --- 4. PROCESS (Menu) ---
@@ -135,49 +151,49 @@ class MenuBar(QMenuBar):
 
             # OCR Process
             ocr_action = QAction(qta.icon('fa5s.magic', color='white'), "Start/Stop OCR", self)
-            if hasattr(self.main_window, 'toggle_ocr'):
-                ocr_action.triggered.connect(self.main_window.toggle_ocr)
+            if self.app_vm:
+                ocr_action.triggered.connect(self.app_vm.toggle_ocr)
             process_menu.addAction(ocr_action)
 
             process_menu.addSeparator()
 
             # Manual OCR Mode
-            manual_mode_action = QAction(QIcon("assets/icons/manual_ocr.svg"), "Manual OCR Mode", self)
-            manual_mode_action.setCheckable(True)
-            if hasattr(self.main_window, 'btn_manual_ocr'):
-                manual_mode_action.setChecked(self.main_window.btn_manual_ocr.isChecked())
-                manual_mode_action.toggled.connect(self.main_window.btn_manual_ocr.setChecked)
-                self.main_window.btn_manual_ocr.toggled.connect(manual_mode_action.setChecked)
-            process_menu.addAction(manual_mode_action)
+            self._manual_mode_action = QAction(QIcon("assets/icons/manual_ocr.svg"), "Manual OCR Mode", self)
+            self._manual_mode_action.setCheckable(True)
+            self._manual_mode_action.toggled.connect(self._on_manual_ocr_toggled)
+            if self.app_vm:
+                self.app_vm.image_area_vm.manual_ocr_mode_active_changed.connect(
+                    self._on_manual_ocr_mode_active_changed
+                )
+            process_menu.addAction(self._manual_mode_action)
 
             # Context Fill Mode
             context_fill_action = QAction(qta.icon('fa5s.fill-drip', color="white"), "Context Fill Mode", self)
-            if hasattr(self.main_window, 'scroll_area') and hasattr(self.main_window.scroll_area, 'context_fill_handler'):
-                 context_fill_action.triggered.connect(self.main_window.scroll_area.context_fill_handler.start_mode)
+            if self.on_context_fill_start:
+                 context_fill_action.triggered.connect(self.on_context_fill_start)
             process_menu.addAction(context_fill_action)
 
             # Edit Context Fill
             edit_context_action = QAction(qta.icon('fa5s.paint-brush', color="white"), "Edit Context Fills", self)
             edit_context_action.setCheckable(True)
-            if hasattr(self.main_window, 'scroll_area') and hasattr(self.main_window.scroll_area, 'context_fill_handler'):
-                handler = self.main_window.scroll_area.context_fill_handler
-                if hasattr(handler, 'is_edit_mode_active') and handler.is_edit_mode_active:
-                    edit_context_action.setChecked(True)
-                edit_context_action.toggled.connect(handler.toggle_edit_mode)
+            if self.is_context_fill_edit_active:
+                edit_context_action.setChecked(self.is_context_fill_edit_active())
+            if self.on_context_fill_edit_toggled:
+                edit_context_action.toggled.connect(self.on_context_fill_edit_toggled)
             process_menu.addAction(edit_context_action)
-            
+
             process_menu.addSeparator()
 
             # Split Images
             split_action = QAction(QIcon("assets/icons/split.svg"), "Split Images", self)
-            if hasattr(self.main_window, 'btn_split'):
-                 split_action.triggered.connect(self.main_window.btn_split.click)
+            if self.on_split_clicked:
+                 split_action.triggered.connect(self.on_split_clicked)
             process_menu.addAction(split_action)
 
             # Stitch Images
             stitch_action = QAction(QIcon("assets/icons/stitch.svg"), "Stitch Images", self)
-            if hasattr(self.main_window, 'btn_stitch'):
-                 stitch_action.triggered.connect(self.main_window.btn_stitch.click)
+            if self.on_stitch_clicked:
+                 stitch_action.triggered.connect(self.on_stitch_clicked)
             process_menu.addAction(stitch_action)
 
 
@@ -199,18 +215,15 @@ class MenuBar(QMenuBar):
             # Text Visibility
             toggle_text_action = QAction("Toggle Text Visibility", self)
             toggle_text_action.setCheckable(True)
-            if hasattr(self.main_window, 'btn_toggle_text'):
-                toggle_text_action.setChecked(self.main_window.btn_toggle_text.isChecked())
-                # Sync: Menu -> Button
-                toggle_text_action.toggled.connect(self.main_window.btn_toggle_text.setChecked)
-                # Sync: Button -> Menu
-                self.main_window.btn_toggle_text.toggled.connect(toggle_text_action.setChecked)
+            if self.on_toggle_text_visibility:
+                toggle_text_action.triggered.connect(self.on_toggle_text_visibility)
             view_menu.addAction(toggle_text_action)
+            self._toggle_text_action = toggle_text_action
 
             # Inpainting Visibility (Context Fill) - now in Context Fill Menu
             toggle_inpainting_action = QAction("Toggle Inpainting Visibility", self)
-            if hasattr(self.main_window, 'scroll_area'):
-                toggle_inpainting_action.triggered.connect(self.main_window.scroll_area.toggle_inpainting_visibility)
+            if self.on_toggle_inpainting_visibility:
+                toggle_inpainting_action.triggered.connect(self.on_toggle_inpainting_visibility)
             view_menu.addAction(toggle_inpainting_action)
 
             view_menu.addSeparator()
@@ -219,21 +232,14 @@ class MenuBar(QMenuBar):
             panel_layout_action = QAction("Translation Panel: Bottom", self)
             panel_layout_action.setCheckable(True)
             panel_layout_action.setChecked(True)
-            if hasattr(self.main_window, 'toggle_panel_layout'):
-                panel_layout_action.triggered.connect(self.main_window.toggle_panel_layout)
-                # Store reference for text updates
-                self.main_window.panel_layout_action = panel_layout_action
+            if self.app_vm:
+                panel_layout_action.triggered.connect(self.app_vm.toggle_panel_layout)
             view_menu.addAction(panel_layout_action)
+            self._panel_layout_action = panel_layout_action
 
             # Advanced Mode
             advanced_action = QAction("(Legacy) Advanced Mode", self)
             advanced_action.setCheckable(True)
-            # Check state against results_widget if possible, else default false
-            # if hasattr(self.main_window, 'results_widget'):
-            #      advanced_action.setChecked(self.main_window.results_widget.is_advanced_mode)
-            
-            # Connect directly to toggle_advanced_mode - DISABLED for TranslationPanel
-            # advanced_action.toggled.connect(self.main_window.toggle_advanced_mode)
             advanced_action.setEnabled(False)
             view_menu.addAction(advanced_action)
             
@@ -241,23 +247,27 @@ class MenuBar(QMenuBar):
         """Updates the Profiles submenu with available profiles."""
         if not hasattr(self, 'profiles_menu') or self.state != TitleBarState.MAIN_WINDOW:
             return
-            
+
         self.profiles_menu.clear()
-        
-        if not hasattr(self.main_window, 'model'):
+
+        if self.app_vm is None:
             return
 
-        sorted_profiles = sorted([p for p in self.main_window.model.profiles.keys() if p != "Original"])
+        profiles = self.app_vm.get_profiles()
+        if not profiles:
+            return
+
+        sorted_profiles = sorted([p for p in profiles if p != "Original"])
         sorted_profiles.insert(0, "Original")
-        
-        active_profile = self.main_window.model.active_profile_name
-        
+
+        active_profile = self.app_vm.get_active_profile()
+
         for profile_name in sorted_profiles:
             action = QAction(profile_name, self)
             action.setCheckable(True)
             action.setChecked(profile_name == active_profile)
             # Use lambda with default arg to capture variable current value
-            action.triggered.connect(lambda checked=False, p=profile_name: self.main_window.switch_active_profile(p))
+            action.triggered.connect(lambda checked=False, p=profile_name: self.app_vm.switch_profile(p))
             self.profiles_menu.addAction(action)
 
     def new_project(self):
@@ -281,21 +291,37 @@ class MenuBar(QMenuBar):
         self.home = Home()
         self.home.load_recent_projects_from_settings()
         self.home.show()
-        self.main_window.close()
-    
+        if self._parent_window:
+            self._parent_window.close()
+
     def save_project_as(self):
         """Handle Save As functionality"""
         options = QFileDialog.Options()
         file_path, _ = QFileDialog.getSaveFileName(
-            self, 
-            "Save Project As", 
-            "", 
-            "Manga Translation Project (*.mmtl)", 
+            self,
+            "Save Project As",
+            "",
+            "Manga Translation Project (*.mmtl)",
             options=options
         )
-        
+
         if file_path:
             if not file_path.endswith('.mmtl'):
                 file_path += '.mmtl'
-            self.main_window.mmtl_path = file_path
-            self.main_window.save_project()  # Reuse existing save logic with new path
+            if self.app_vm:
+                self.app_vm.save_project_as(file_path)
+
+    def _on_manual_ocr_toggled(self, checked):
+        """User toggled the menu action; delegate to VM."""
+        if self.app_vm:
+            if checked:
+                self.app_vm.image_area_vm.start_action_mode("manual_ocr")
+            else:
+                self.app_vm.image_area_vm.cancel_action_mode()
+
+    def _on_manual_ocr_mode_active_changed(self, active):
+        """VM state changed; sync the menu action without re-emitting toggled."""
+        if hasattr(self, '_manual_mode_action'):
+            self._manual_mode_action.blockSignals(True)
+            self._manual_mode_action.setChecked(active)
+            self._manual_mode_action.blockSignals(False)

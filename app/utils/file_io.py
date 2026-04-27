@@ -242,40 +242,7 @@ def import_translation_file(self):
         new_ocr_results = import_master_file(self, file_path, skip_confirmation=False)
         if new_ocr_results is not None:
             try:
-                # Always replace existing OCR results
-                self.model.ocr_results = new_ocr_results
-                
-                # Reload profiles from the OCR results
-                loaded_profiles = set(["Original"])
-                max_row_num = -1
-                
-                for res in self.model.ocr_results:
-                    if 'row_number' in res:
-                        try:
-                            max_row_num = max(max_row_num, int(float(res['row_number'])))
-                        except (ValueError, TypeError):
-                            pass
-                    if 'translations' in res and isinstance(res['translations'], dict):
-                        for profile_name in res['translations']:
-                            loaded_profiles.add(profile_name)
-                
-                # Update next_global_row_number
-                if max_row_num >= 0:
-                    self.model.next_global_row_number = max_row_num + 1
-                
-                # Replace profiles
-                self.model.profiles = {name: {} for name in loaded_profiles}
-                
-                # Check if current active profile still exists, if not default to "Original"
-                if self.model.active_profile_name not in self.model.profiles:
-                    print(f"Warning: Active profile '{self.model.active_profile_name}' not found in imported data. Defaulting to 'Original'.")
-                    self.model.active_profile_name = "Original"
-                
-                # Emit signal to update UI (profile selector, etc.)
-                self.model.profiles_updated.emit()
-                
-                if hasattr(self, 'update_all_views'):
-                    self.update_all_views()
+                self.model.import_master_data(new_ocr_results)
                 
                 QMessageBox.information(self, "Success", 
                                       f"Master file imported successfully!\n"
@@ -341,10 +308,6 @@ def import_translation_file(self):
                     # Apply translation to profile
                     self.model.add_profile(profile_name, translation_data)
                     
-                    # Refresh UI
-                    if hasattr(self, 'update_all_views'):
-                        self.update_all_views()
-                    
                     QMessageBox.information(self, "Success", 
                                           f"Translation successfully applied to profile:\n'{profile_name}'")
                     return True
@@ -373,19 +336,19 @@ def import_translation_file(self):
             )
             return False
 
-def export_rendered_images(self):
+def export_rendered_images(main_window, scroll_layout):
     """Export images with applied translations directly from QGraphicsView scenes."""
-    if not self.model.image_paths:
-        QMessageBox.warning(self, "Warning", "No images available for export.")
+    if not main_window.model.image_paths:
+        QMessageBox.warning(main_window, "Warning", "No images available for export.")
         return
 
     # Ask user for save location, defaulting to the project's directory.
-    project_directory = os.path.dirname(self.model.mmtl_path) if self.model.mmtl_path else ""
-    default_filename = f"{self.model.project_name}.zip"
+    project_directory = os.path.dirname(main_window.model.mmtl_path) if main_window.model.mmtl_path else ""
+    default_filename = f"{main_window.model.project_name}.zip"
     default_path = os.path.join(project_directory, default_filename)
     
     export_path, _ = QFileDialog.getSaveFileName(
-        self,
+        main_window,
         "Export Rendered Images",
         default_path,
         "ZIP Files (*.zip)"
@@ -395,8 +358,8 @@ def export_rendered_images(self):
         return # User cancelled
         
     # Suspend updates during export
-    for i in range(self.scroll_layout.count()):
-        widget = self.scroll_layout.itemAt(i).widget()
+    for i in range(scroll_layout.count()):
+        widget = scroll_layout.itemAt(i).widget()
         if isinstance(widget, ResizableImageLabel):
             widget.setUpdatesEnabled(False)
 
@@ -408,8 +371,8 @@ def export_rendered_images(self):
     translated_images = []
 
     try:
-        for i in range(self.scroll_layout.count()):
-            widget = self.scroll_layout.itemAt(i).widget()
+        for i in range(scroll_layout.count()):
+            widget = scroll_layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
                 scene = widget.scene()
                 
@@ -447,21 +410,21 @@ def export_rendered_images(self):
 
         if success:
             # Success message - keep QMessageBox.information for non-error cases
-            QMessageBox.information(self, "Success", f"Exported to:\n{saved_path}")
+            QMessageBox.information(main_window, "Success", f"Exported to:\n{saved_path}")
         else:
             from app.ui.dialogs.error_dialog import ErrorDialog
-            ErrorDialog.critical(self, "Export Error", "Failed to export rendered images.", None)
+            ErrorDialog.critical(main_window, "Export Error", "Failed to export rendered images.", None)
     except Exception as e:
         import traceback
         from app.ui.dialogs.error_dialog import ErrorDialog
         ErrorDialog.critical(
-            self, "Render Error", 
+            main_window, "Render Error", 
             f"Failed to render images for export:\n{str(e)}",
             traceback.format_exc()
         )
     finally:
-        for i in range(self.scroll_layout.count()):
-            widget = self.scroll_layout.itemAt(i).widget()
+        for i in range(scroll_layout.count()):
+            widget = scroll_layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
                 widget.setUpdatesEnabled(True)
         shutil.rmtree(temp_dir, ignore_errors=True)
