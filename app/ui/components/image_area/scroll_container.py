@@ -22,7 +22,7 @@ class CustomScrollArea(QScrollArea):
 
     def __init__(self, model, editor_viewmodel, image_area_viewmodel,
                  on_save_project, on_export_manhwa, get_display_text, on_text_edited,
-                 get_settings, on_manual_ocr_cancelled, parent=None):
+                 get_settings, parent=None):
         super().__init__(parent)
         self.model = model
         self.editor_vm = editor_viewmodel
@@ -32,7 +32,6 @@ class CustomScrollArea(QScrollArea):
         self.get_display_text = get_display_text
         self.on_text_edited = on_text_edited
         self.get_settings = get_settings
-        self.on_manual_ocr_cancelled = on_manual_ocr_cancelled
         self.overlay_widget = None
         self._action_overlay = None
 
@@ -62,8 +61,6 @@ class CustomScrollArea(QScrollArea):
         self.image_area_vm.can_reset_action_changed.connect(self._on_can_reset_changed)
         self.image_area_vm.action_mode_message_changed.connect(self._on_action_mode_message_changed)
         self.image_area_vm.action_mode_cancelled.connect(self._on_action_mode_cancelled)
-        # Phase 7 TODO: Move error_occurred signal ownership to AppViewModel -> MainWindow
-        self.image_area_vm.error_occurred.connect(self._on_vm_error_occurred)
         self.image_area_vm.selected_images_for_stitch_changed.connect(self._on_stitch_selection_changed)
         self.image_area_vm.split_point_changed.connect(self._on_split_point_changed)
         self.image_area_vm.inpaint_selection_paths_changed.connect(self._on_inpaint_selections_changed)
@@ -340,10 +337,6 @@ class CustomScrollArea(QScrollArea):
     def _on_action_mode_cancelled(self, mode):
         # Overlay is already hidden by _on_active_action_mode_changed (mode becomes empty)
         pass
-
-    def _on_vm_error_occurred(self, title, message):
-        # Phase 7 TODO: Move error dialog ownership to MainWindow via AppViewModel
-        QMessageBox.warning(self, title, message)
 
     # ------------------------------------------------------------------
     # Mode-specific visual updates

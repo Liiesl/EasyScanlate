@@ -37,8 +37,9 @@ class ImageAreaViewModel(BaseViewModel):
     selected_inpaint_record_id_changed = Signal(str)
     manual_ocr_rect_changed = Signal(str, object)
     manual_ocr_processing_changed = Signal(bool)
+    manual_ocr_mode_active_changed = Signal(bool)
 
-    # Temporary error signal (Phase 7 TODO: move error dialog ownership to AppViewModel)
+    # Forwarded to AppViewModel.error_occurred; do not show dialogs from child VMs.
     error_occurred = Signal(str, str)
 
     def __init__(self, model, ocr_service=None, get_settings=None, parent=None):
@@ -227,6 +228,9 @@ class ImageAreaViewModel(BaseViewModel):
         if self._active_action_mode != mode:
             return
 
+        if mode == "manual_ocr":
+            self.manual_ocr_mode_active_changed.emit(True)
+
         self.active_action_mode_changed.emit(
             mode, self._action_mode_message, self._can_confirm_action
         )
@@ -279,6 +283,8 @@ class ImageAreaViewModel(BaseViewModel):
             self.can_reset_action_changed.emit(False)
         # Notify the view that the mode is cleared so it hides the overlay.
         self.active_action_mode_changed.emit("", "", False)
+        if mode == "manual_ocr":
+            self.manual_ocr_mode_active_changed.emit(False)
         if mode:
             self.action_mode_cancelled.emit(mode)
 

@@ -101,6 +101,13 @@ class EditorViewModel(BaseViewModel):
         """Stub – will be wired once a UI trigger exists."""
         pass
 
+    def combine_rows(self, first_row_number, combined_text, min_confidence, rows_to_delete):
+        """Delegates combine operation to the model and returns the result."""
+        message, success = self._model.combine_rows(
+            first_row_number, combined_text, min_confidence, rows_to_delete
+        )
+        return success, message
+
     # ------------------------------------------------------------------
     # Style helpers
     # ------------------------------------------------------------------

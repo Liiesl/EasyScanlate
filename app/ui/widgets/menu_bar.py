@@ -16,7 +16,6 @@ class MenuBar(QMenuBar):
                  is_context_fill_edit_active=None,
                  on_split_clicked=None, on_stitch_clicked=None,
                  on_toggle_text_visibility=None, on_toggle_inpainting_visibility=None,
-                 get_is_manual_ocr_checked=None, on_manual_ocr_toggled=None,
                  model=None):
         super().__init__(parent)
         self.state = state
@@ -28,8 +27,6 @@ class MenuBar(QMenuBar):
         self.on_stitch_clicked = on_stitch_clicked
         self.on_toggle_text_visibility = on_toggle_text_visibility
         self.on_toggle_inpainting_visibility = on_toggle_inpainting_visibility
-        self.get_is_manual_ocr_checked = get_is_manual_ocr_checked
-        self.on_manual_ocr_toggled = on_manual_ocr_toggled
         self.model = model
         self._parent_window = parent
         self.setStyleSheet("""
@@ -161,13 +158,14 @@ class MenuBar(QMenuBar):
             process_menu.addSeparator()
 
             # Manual OCR Mode
-            manual_mode_action = QAction(QIcon("assets/icons/manual_ocr.svg"), "Manual OCR Mode", self)
-            manual_mode_action.setCheckable(True)
-            if self.get_is_manual_ocr_checked:
-                manual_mode_action.setChecked(self.get_is_manual_ocr_checked())
-            if self.on_manual_ocr_toggled:
-                manual_mode_action.toggled.connect(self.on_manual_ocr_toggled)
-            process_menu.addAction(manual_mode_action)
+            self._manual_mode_action = QAction(QIcon("assets/icons/manual_ocr.svg"), "Manual OCR Mode", self)
+            self._manual_mode_action.setCheckable(True)
+            self._manual_mode_action.toggled.connect(self._on_manual_ocr_toggled)
+            if self.app_vm:
+                self.app_vm.image_area_vm.manual_ocr_mode_active_changed.connect(
+                    self._on_manual_ocr_mode_active_changed
+                )
+            process_menu.addAction(self._manual_mode_action)
 
             # Context Fill Mode
             context_fill_action = QAction(qta.icon('fa5s.fill-drip', color="white"), "Context Fill Mode", self)
@@ -312,3 +310,18 @@ class MenuBar(QMenuBar):
                 file_path += '.mmtl'
             if self.app_vm:
                 self.app_vm.save_project_as(file_path)
+
+    def _on_manual_ocr_toggled(self, checked):
+        """User toggled the menu action; delegate to VM."""
+        if self.app_vm:
+            if checked:
+                self.app_vm.image_area_vm.start_action_mode("manual_ocr")
+            else:
+                self.app_vm.image_area_vm.cancel_action_mode()
+
+    def _on_manual_ocr_mode_active_changed(self, active):
+        """VM state changed; sync the menu action without re-emitting toggled."""
+        if hasattr(self, '_manual_mode_action'):
+            self._manual_mode_action.blockSignals(True)
+            self._manual_mode_action.setChecked(active)
+            self._manual_mode_action.blockSignals(False)

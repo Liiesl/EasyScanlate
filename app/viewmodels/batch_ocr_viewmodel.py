@@ -86,10 +86,17 @@ class BatchOCRViewModel(BaseViewModel):
     # ------------------------------------------------------------------
     # Public commands
     # ------------------------------------------------------------------
-    def start_ocr(self, image_paths) -> bool:
+    @property
+    def has_existing_standard_results(self) -> bool:
+        return any(not res.get('is_manual', False) for res in self._model.ocr_results)
+
+    def start_ocr(self) -> bool:
         """Starts a batch OCR run. Returns True if started, False if blocked."""
+        if not self._model.image_paths:
+            self.error_occurred.emit("No images loaded to process.")
+            return False
         if self._is_running:
-            print("BatchOCRViewModel: Already running.")
+            self.error_occurred.emit("OCR is already running.")
             return False
 
         if not self._ocr_service.initialize("Standard OCR"):
@@ -113,7 +120,7 @@ class BatchOCRViewModel(BaseViewModel):
         self._model.clear_standard_results()
 
         self._handler = BatchOCRHandler(
-            image_paths=image_paths,
+            image_paths=self._model.image_paths,
             reader=reader,
             settings=ocr_settings,
             starting_row_number=self._model.next_global_row_number,

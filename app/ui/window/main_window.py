@@ -18,7 +18,6 @@ from app.ui.widgets.menu_bar import MenuBar, TitleBarState
 from app.ui.window.chrome import CustomTitleBar, WindowResizer
 from app.ui.widgets.progress_bar import CustomProgressBar
 from app.ui.widgets.menus import Menu, ToggleButton, ToggleWithProgress
-from app.core.project_model import ProjectModel
 from app.viewmodels import AppViewModel
 from app.ui.dialogs.settings_dialog import SettingsDialog
 from app.ui.components.background import AuroraCanvas
@@ -32,15 +31,12 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 1200, 600)
         self.settings = QSettings("Liiesl", "EasyScanlate")
         self._load_filter_settings()
-        
-        self.model = ProjectModel()
-        self.model.model_updated.connect(self.on_model_updated)
-        self.model.profiles_updated.connect(self._on_profile_list_changed)
 
-        self.app_vm = AppViewModel(self.model, lambda: self.settings, self)
+        self.app_vm = AppViewModel(lambda: self.settings, self)
         self.app_vm.project_vm.project_loaded.connect(self._on_project_loaded)
         self.app_vm.project_vm.project_load_failed.connect(self.on_project_load_failed)
         self.app_vm.project_vm.project_name_changed.connect(self._on_project_name_changed)
+        self.app_vm.error_occurred.connect(self._on_app_error_occurred)
         self.editor_vm = self.app_vm.editor_vm
         self.translation_vm = self.app_vm.translation_vm
         self.translation_vm.profile_created_for_user_edit.connect(self._on_profile_created_for_user_edit)
@@ -88,15 +84,14 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.background_canvas)
 
         self.scroll_area = CustomScrollArea(
-            model=self.model,
+            model=self.app_vm.model,  # Phase 9 TODO: remove once CustomScrollArea is fully VM-driven
             editor_viewmodel=self.editor_vm,
             image_area_viewmodel=self.app_vm.image_area_vm,
             on_save_project=self.on_save_project_triggered,
             on_export_manhwa=self.export_manhwa,
-            get_display_text=self.get_display_text,
+            get_display_text=self.translation_vm.get_display_text,
             on_text_edited=self.translation_vm.update_text,
             get_settings=lambda: self.settings,
-            on_manual_ocr_cancelled=self._on_manual_ocr_cancelled,
             parent=self
         )
         
@@ -230,7 +225,7 @@ class MainWindow(QMainWindow):
 
         # Create unified translation panel (replaces ResultsWidget + TranslationChatWidget)
         self.translation_panel = TranslationPanel(
-            source_language=self.model.original_language,
+            source_language=self.translation_vm.original_language,
             editor_viewmodel=self.editor_vm,
             translation_viewmodel=self.translation_vm
         )
@@ -289,13 +284,11 @@ class MainWindow(QMainWindow):
             on_stitch_clicked=self.btn_stitch.click,
             on_toggle_text_visibility=self.app_vm.image_area_vm.toggle_text_visibility,
             on_toggle_inpainting_visibility=self.app_vm.image_area_vm.toggle_inpaint_visibility,
-            get_is_manual_ocr_checked=lambda: self.btn_manual_ocr.isChecked(),
-            on_manual_ocr_toggled=self.btn_manual_ocr.setChecked
         )
         # VM-driven sync for text visibility UI state
         self.app_vm.image_area_vm.text_visible_changed.connect(self._on_text_visibility_changed)
-        # Phase 7 TODO: action_mode_cancelled should drive button states via VM, not MainWindow slot
-        self.app_vm.image_area_vm.action_mode_cancelled.connect(self._on_action_mode_cancelled)
+        # VM-driven sync for manual OCR button/menu state
+        self.app_vm.image_area_vm.manual_ocr_mode_active_changed.connect(self._on_manual_ocr_mode_active_changed)
         self.title_bar.setState(TitleBarState.MAIN_WINDOW, self.menu_bar)
 
         # Connect AppViewModel signals
@@ -314,7 +307,6 @@ class MainWindow(QMainWindow):
         self.app_vm.batch_ocr_vm.progress_changed.connect(self.progress_controller.update_target_progress)
         self.app_vm.batch_ocr_vm.can_run_ocr_changed.connect(self.btn_ocr_toggle.setEnabled)
         self.app_vm.batch_ocr_vm.batch_finished.connect(self._on_batch_finished_dialog)
-        self.app_vm.batch_ocr_vm.error_occurred.connect(self._on_batch_error_dialog)
         self.app_vm.batch_ocr_vm.processing_stopped.connect(self._on_batch_stopped_dialog)
         self.app_vm.batch_ocr_vm.auto_inpaint_requested.connect(self.on_auto_inpaint_requested)
 
@@ -388,11 +380,6 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'find_replace_widget'):
             self.find_replace_widget.on_profile_changed()
 
-    def _on_profile_list_changed(self):
-        """Handles profile list changes (additions/deletions)."""
-        if hasattr(self, 'find_replace_widget'):
-            self.find_replace_widget.on_profile_changed()
-
     def show_settings_dialog(self):
         dialog = SettingsDialog(self)
         if dialog.exec():
@@ -418,19 +405,19 @@ class MainWindow(QMainWindow):
         # Reset OCR service so next initialize() picks up new language
         self.app_vm.ocr_service.reset()
 
-        image_paths = self.model.image_paths
-        self.btn_ocr_toggle.setEnabled(bool(image_paths))
-        self.btn_manual_ocr.setEnabled(bool(image_paths))
-        self.orientation_combo.setEnabled(bool(image_paths))
+        has_images = bool(self.app_vm.image_area_vm.images)
+        self.btn_ocr_toggle.setEnabled(has_images)
+        self.btn_manual_ocr.setEnabled(has_images)
+        self.orientation_combo.setEnabled(has_images)
 
-        if not image_paths:
+        if not has_images:
             QMessageBox.warning(self, "No Images", "The project was loaded, but no images were found inside.")
 
         # ImageAreaViewModel auto-syncs images from model.image_list_changed;
         # CustomScrollArea reactively rebuilds labels from images_changed.
         # Translation panel is reactive via TranslationViewModel.
         self.update_profile_selector()
-        print(f"Project '{self.model.project_name}' loaded and UI populated.")
+        print(f"Project '{self.app_vm.project_vm.project_name}' loaded and UI populated.")
 
     def _on_project_name_changed(self, name):
         """Updates the window title when the project name changes."""
@@ -439,19 +426,7 @@ class MainWindow(QMainWindow):
         else:
             self.setWindowTitle("Easy Scanlate")
     
-    def handle_inpaint_record_deleted(self, record_id):
-        """Delegates the inpaint record deletion request to the model."""
-        self.model.remove_inpaint_record(record_id)
-    
-    def on_model_updated(self, affected_filenames):
-        """SLOT: Handles the model_updated signal.
-        Image-label and translation-panel updates are now reactive via VMs.
-        """
-        pass
 
-    def get_display_text(self, result):
-        """ DELEGATED: Asks the model for the correct text to display. """
-        return self.model.get_display_text(result)
 
 
 
@@ -464,21 +439,12 @@ class MainWindow(QMainWindow):
 
     def _start_ocr_with_validation(self):
         """View-level validation before delegating to BatchOCRViewModel."""
-        if not self.model.image_paths:
-            QMessageBox.warning(self, "Warning", "No images loaded to process.")
-            self.btn_ocr_toggle.setChecked(False)
-            return
-        if self.app_vm.batch_ocr_vm.is_running:
-            QMessageBox.warning(self, "Warning", "OCR is already running.")
-            self.btn_ocr_toggle.setChecked(False)
-            return
         if self.app_vm.image_area_vm.active_action_mode == "manual_ocr":
             QMessageBox.warning(self, "Warning", "Cannot start standard OCR while in Manual OCR mode.")
             self.btn_ocr_toggle.setChecked(False)
             return
 
-        has_existing_results = any(not res.get('is_manual', False) for res in self.model.ocr_results)
-        if has_existing_results:
+        if self.app_vm.batch_ocr_vm.has_existing_standard_results:
             reply = QMessageBox.question(self, 'Confirm Overwrite',
                                          "This will overwrite all existing OCR data (except for manual entries). Do you want to continue?",
                                          QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
@@ -486,7 +452,7 @@ class MainWindow(QMainWindow):
                 self.btn_ocr_toggle.setChecked(False)
                 return
 
-        success = self.app_vm.batch_ocr_vm.start_ocr(self.model.image_paths)
+        success = self.app_vm.batch_ocr_vm.start_ocr()
         if not success:
             self.btn_ocr_toggle.setChecked(False)
 
@@ -498,14 +464,13 @@ class MainWindow(QMainWindow):
             self.btn_ocr_toggle.transition_to_idle()
             self.progress_controller.reset()
         self.btn_ocr_toggle.setEnabled(self.app_vm.batch_ocr_vm.can_run_ocr)
-        self.orientation_combo.setEnabled(bool(self.model.image_paths))
+        self.orientation_combo.setEnabled(bool(self.app_vm.image_area_vm.images))
 
     def _on_batch_finished_dialog(self, next_row_number):
-        self.model.next_global_row_number = next_row_number
         QMessageBox.information(self, "Finished", "OCR processing completed for all images.")
 
-    def _on_batch_error_dialog(self, message):
-        ErrorDialog.critical(self, "OCR Error", message)
+    def _on_app_error_occurred(self, title, message):
+        ErrorDialog.critical(self, title, message)
 
     def _on_batch_stopped_dialog(self):
         QMessageBox.information(self, "Stopped", "OCR processing was stopped.")
@@ -522,15 +487,12 @@ class MainWindow(QMainWindow):
                                 "Your original OCR text is preserved.")
 
     def combine_rows_in_model(self, first_row_number, combined_text, min_confidence, rows_to_delete):
-        if self.model.active_profile_name == "Original":
-             QMessageBox.information(self, "Edit Profile Created",
-                                     f"First combination edit detected. A new profile 'User Edit 1' has been created and set as active.")
-        
-        message, success = self.model.combine_rows(first_row_number, combined_text, min_confidence, rows_to_delete)
+        success, message = self.editor_vm.combine_rows(
+            first_row_number, combined_text, min_confidence, rows_to_delete
+        )
         if success:
             if hasattr(self, 'find_replace_widget') and self.find_replace_widget.isVisible():
                 self.find_replace_widget.find_text()
-            # Success message - keep QMessageBox.information for non-error cases
             QMessageBox.information(self, "Success", message)
         else:
             ErrorDialog.critical(self, "Error", message)
@@ -625,20 +587,17 @@ class MainWindow(QMainWindow):
         checked = (text == "Bottom")
         self.toggle_panel_layout(checked)
 
-    def _on_manual_ocr_cancelled(self):
-        if self.btn_manual_ocr.isChecked():
-            self.btn_manual_ocr.setChecked(False)
-
     def _on_manual_ocr_toggled(self, checked):
         if checked:
             self.scroll_area.image_area_vm.start_action_mode("manual_ocr")
         else:
             self.scroll_area.image_area_vm.cancel_action_mode()
 
-    def _on_action_mode_cancelled(self, mode):
-        """Phase 7 TODO: VM should drive button checked states directly."""
-        if mode == "manual_ocr" and self.btn_manual_ocr.isChecked():
-            self.btn_manual_ocr.setChecked(False)
+    def _on_manual_ocr_mode_active_changed(self, active):
+        """VM-driven sync: update toolbar button without re-emitting toggled."""
+        self.btn_manual_ocr.blockSignals(True)
+        self.btn_manual_ocr.setChecked(active)
+        self.btn_manual_ocr.blockSignals(False)
 
     def on_project_saved(self, result_message):
         if "successfully" in result_message:

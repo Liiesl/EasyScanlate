@@ -24,6 +24,7 @@ class TranslationViewModel(BaseViewModel):
     ocr_results_changed = Signal(list)             # list[dict]
     row_text_updated = Signal(int, str)            # row_number, actual_saved_text
     current_text_changed = Signal(str)             # text for selected row
+    original_language_changed = Signal(str)        # e.g. "Korean"
 
     # -- Translation thread signals --
     is_translating_changed = Signal(bool)
@@ -46,6 +47,7 @@ class TranslationViewModel(BaseViewModel):
         self._previous_visible_rows = set()
         self._selected_row = None
         self._current_text = ""
+        self._original_language = ""
         self._is_translating = False
         self._is_dirty = False  # TODO: Deferred – see class docstring.
 
@@ -125,6 +127,16 @@ class TranslationViewModel(BaseViewModel):
             self.is_translating_changed.emit(value)
 
     @property
+    def original_language(self):
+        return self._original_language
+
+    @original_language.setter
+    def original_language(self, value):
+        if self._original_language != value:
+            self._original_language = value
+            self.original_language_changed.emit(value)
+
+    @property
     def is_dirty(self):
         # TODO(Phase 3 dirty flag): Deferred. Wire this up when we switch from
         # immediate-per-keystroke writes to batched/committed edits.
@@ -136,6 +148,7 @@ class TranslationViewModel(BaseViewModel):
     def _sync_from_model(self):
         self.profiles = list(self._model.profiles.keys())
         self.active_profile = self._model.active_profile_name
+        self.original_language = self._model.original_language
         self._rebuild_ocr_results()
         self._refresh_current_text()
 
