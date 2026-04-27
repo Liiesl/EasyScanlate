@@ -16,15 +16,21 @@ class ProjectModel(QObject):
     project_loaded = Signal()
     # Emitted with an error message if project loading fails.
     project_load_failed = Signal(str)
-    # Emitted after any data change (e.g., text edit, deletion, new OCR results).
-    # The payload is a list of affected filenames for targeted UI updates.
-    model_updated = Signal(list)
     # Emitted when the list of profiles changes (new profile added).
     profiles_updated = Signal()
     # Emitted when a profile is created for a user edit (not programmatic changes like find/replace).
     profile_created_for_user_edit = Signal()
     # Emitted when the image list changes structurally (load, stitch, split).
     image_list_changed = Signal()
+
+    # --- Granular data-change signals ---
+    # Each carries a list of affected filenames (empty list means "all").
+    text_updated = Signal(list)          # text/translation edits, combine rows
+    style_updated = Signal(list)         # custom style diff applied
+    rows_deleted = Signal(list)          # row soft-deleted
+    ocr_results_added = Signal(list)     # new OCR results added or standard results cleared
+    inpaint_updated = Signal(list)       # inpaint record added/removed
+    structural_updated = Signal(list)    # import, stitch, split (bulk structural changes)
 
     def __init__(self):
         super().__init__()
@@ -196,8 +202,8 @@ class ProjectModel(QObject):
             self.inpaint_data.append(record)
             print(f"Added and saved inpaint record for '{record['target_image']}'.")
 
-            # Signal that the model has changed, affecting one specific image.
-            self.model_updated.emit([record['target_image']])
+            # Signal that inpaint data changed, affecting one specific image.
+            self.inpaint_updated.emit([record['target_image']])
             return True, None
         except Exception as e:
             error_msg = f"Failed to add inpaint record: {e}"
@@ -234,10 +240,10 @@ class ProjectModel(QObject):
             self.inpaint_data.remove(record_to_remove)
             print(f"Removed inpaint record ID '{record_id}' from model.")
 
-            # 3. Signal that the model has updated, affecting the target image
+            # 3. Signal that inpaint data changed, affecting the target image
             # This will trigger a UI refresh, causing the patch to disappear.
             target_image = record_to_remove['target_image']
-            self.model_updated.emit([target_image])
+            self.inpaint_updated.emit([target_image])
             return True, None
         except Exception as e:
             error_msg = f"Failed to remove inpaint record: {e}"
@@ -398,7 +404,7 @@ class ProjectModel(QObject):
             self.active_profile_name = "Original"
 
         self.profiles_updated.emit()
-        self.model_updated.emit([])
+        self.structural_updated.emit([])
         self.image_list_changed.emit()
 
     def stitch_images_update(self, filenames: list[str], new_filename: str, offsets: dict[str, int]):
@@ -443,7 +449,7 @@ class ProjectModel(QObject):
                 print(f"Warning: Could not delete old image file {full_path}. Error: {e}")
 
         self._sort_ocr_results()
-        self.model_updated.emit([])
+        self.structural_updated.emit([])
         self.image_list_changed.emit()
 
     def split_image_update(self, source_filename: str, new_image_data: list[dict], split_y_coords: list[int]) -> list[str]:
@@ -478,7 +484,7 @@ class ProjectModel(QObject):
             affected_filenames.add(data['filename'])
 
         self._sort_ocr_results()
-        self.model_updated.emit(list(filter(None, affected_filenames)))
+        self.structural_updated.emit(list(filter(None, affected_filenames)))
         self.image_list_changed.emit()
 
         return [data['filename'] for data in new_image_data]
@@ -499,7 +505,7 @@ class ProjectModel(QObject):
         return None, -1
 
     def update_style(self, row_number, style_diff):
-        """Updates the custom_style for a given row and emits model_updated."""
+        """Updates the custom_style for a given row and emits style_updated."""
         target_result, _ = self._find_result_by_row_number(row_number)
         if not target_result:
             return False
@@ -509,7 +515,7 @@ class ProjectModel(QObject):
             target_result['custom_style'] = style_diff
         elif 'custom_style' in target_result:
             del target_result['custom_style']
-        self.model_updated.emit([target_result.get('filename')])
+        self.style_updated.emit([target_result.get('filename')])
         return True
 
     def _sort_ocr_results(self):
@@ -551,7 +557,7 @@ class ProjectModel(QObject):
         self.next_global_row_number = max_existing_base + 1
         print(f"Standard OCR results cleared. Next global row number will start from: {self.next_global_row_number}")
         # Notify views so image labels refresh (batch OCR clear was leaving stale text boxes).
-        self.model_updated.emit([])
+        self.ocr_results_added.emit([])
 
 
     def add_new_ocr_results(self, new_results: list[dict]):
@@ -561,9 +567,9 @@ class ProjectModel(QObject):
         
         self.ocr_results.extend(new_results)
         self._sort_ocr_results()
-        
+
         affected_filename = new_results[0].get('filename')
-        self.model_updated.emit([affected_filename] if affected_filename else [])
+        self.ocr_results_added.emit([affected_filename] if affected_filename else [])
 
     def _find_existing_user_edit_profile(self):
         """Finds the first existing user edit profile, or None if none exists.
@@ -662,7 +668,7 @@ class ProjectModel(QObject):
         else:
             target_result['translations'][self.active_profile_name] = new_text
 
-        self.model_updated.emit([target_result.get('filename')])
+        self.text_updated.emit([target_result.get('filename')])
         return None, True, profile_created, profile_created and is_user_edit
 
     def delete_row(self, row_number_to_delete):
@@ -673,9 +679,9 @@ class ProjectModel(QObject):
 
         self.ocr_results[target_index]['is_deleted'] = True
         print(f"Marked row {row_number_to_delete} as deleted in model.")
-        
+
         affected_filename = target_result.get('filename')
-        self.model_updated.emit([affected_filename] if affected_filename else [])
+        self.rows_deleted.emit([affected_filename] if affected_filename else [])
 
     def combine_rows(self, first_row_number, combined_text, min_confidence, rows_to_delete):
         """Combines multiple rows into a single entry."""
@@ -710,7 +716,7 @@ class ProjectModel(QObject):
                 self.ocr_results[delete_index]['is_deleted'] = True
                 affected_filenames.add(result_to_delete.get('filename'))
 
-        self.model_updated.emit(list(filter(None, affected_filenames)))
+        self.text_updated.emit(list(filter(None, affected_filenames)))
         return f"Combined rows into row {first_row_number} in profile '{self.active_profile_name}'", True
 
     def add_profile(self, profile_name, translation_data=None):
@@ -738,4 +744,4 @@ class ProjectModel(QObject):
         print(f"Added profile '{profile_name}'. Applied {applied_count} translations.")
         self.active_profile_name = profile_name
         self.profiles_updated.emit()
-        self.model_updated.emit([])
+        self.text_updated.emit([])

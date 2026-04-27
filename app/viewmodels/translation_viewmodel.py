@@ -55,8 +55,11 @@ class TranslationViewModel(BaseViewModel):
         self._pending_retranslate_row = None
         self._batch_target_lang = ""
 
-        # Model signals
-        self._model.model_updated.connect(self._on_model_updated)
+        # Model signals — connect only to the granular signals this VM cares about
+        self._model.text_updated.connect(self._on_text_updated)
+        self._model.rows_deleted.connect(self._on_rows_changed)
+        self._model.ocr_results_added.connect(self._on_rows_changed)
+        self._model.structural_updated.connect(self._on_rows_changed)
         self._model.profiles_updated.connect(self._on_profiles_updated)
         self._model.project_loaded.connect(self._on_project_loaded)
         self._model.profile_created_for_user_edit.connect(self.profile_created_for_user_edit)
@@ -171,9 +174,12 @@ class TranslationViewModel(BaseViewModel):
         else:
             self.current_text = ""
 
-    def _on_model_updated(self, affected_filenames):
-        # Structural changes (delete, combine, new OCR) change visible row numbers;
-        # text edits do not. _rebuild_ocr_results handles the distinction.
+    def _on_text_updated(self, affected_filenames):
+        # Text edits do not change the visible row set, so only refresh current text.
+        self._refresh_current_text()
+
+    def _on_rows_changed(self, affected_filenames):
+        # Structural changes (delete, new OCR, import, stitch, split) change visible row numbers.
         self._rebuild_ocr_results()
         self._refresh_current_text()
 

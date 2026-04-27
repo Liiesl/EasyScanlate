@@ -50,7 +50,12 @@ class CustomScrollArea(QScrollArea):
 
         # Reactive rebuild wiring
         self.image_area_vm.images_changed.connect(self._rebuild_labels)
-        self.model.model_updated.connect(self._on_model_updated)
+        self.model.text_updated.connect(self._on_model_updated)
+        self.model.style_updated.connect(self._on_model_updated)
+        self.model.rows_deleted.connect(self._on_model_updated)
+        self.model.ocr_results_added.connect(self._on_model_updated)
+        self.model.inpaint_updated.connect(self._on_model_updated)
+        self.model.structural_updated.connect(self._on_model_updated)
         self.editor_vm.selected_row_changed.connect(self._on_vm_selection_changed)
         self.image_area_vm.text_visible_changed.connect(self._on_text_visibility_changed)
         self.image_area_vm.inpaints_visible_changed.connect(self._on_inpaints_visibility_changed)
