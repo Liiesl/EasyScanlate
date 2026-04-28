@@ -22,7 +22,7 @@ def export_translated_images_to_zip(image_paths_with_names, output_path):
 
 def export_ocr_results(self):
     """Export OCR results to either a JSON file (Master) or an XML file (For-Translate)."""
-    if not self.model.ocr_results:
+    if not self.app_vm.model.ocr_results:
         QMessageBox.warning(self, "Error", "No OCR results to export.")
         return
 
@@ -31,13 +31,13 @@ def export_ocr_results(self):
         from PySide6.QtWidgets import QDialog
         
         # Get available profiles
-        available_profiles = list(self.model.profiles.keys())
+        available_profiles = list(self.app_vm.model.profiles.keys())
         if not available_profiles:
             available_profiles = ["Original"]
         
         # Get project info for default path
-        project_directory = os.path.dirname(self.model.mmtl_path) if self.model.mmtl_path else None
-        project_name = self.model.project_name if hasattr(self.model, 'project_name') else None
+        project_directory = os.path.dirname(self.app_vm.model.mmtl_path) if self.app_vm.model.mmtl_path else None
+        project_name = self.app_vm.model.project_name if hasattr(self.app_vm.model, 'project_name') else None
         
         # Show export dialog
         dialog = ExportDialog(self, available_profiles, project_name, project_directory)
@@ -53,13 +53,13 @@ def export_ocr_results(self):
                 # Export as Master JSON
                 indent = 4 if config['pretty_print'] else None
                 with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(self.model.ocr_results, f, ensure_ascii=False, indent=indent)
+                    json.dump(self.app_vm.model.ocr_results, f, ensure_ascii=False, indent=indent)
                 QMessageBox.information(self, "Success", "OCR results exported successfully in JSON format.")
             
             elif config['format'] == 'for-translate':
                 # Export as For-Translate XML/TXT
                 profile_name = config['profile_name']
-                content = generate_for_translate_content(self.model.ocr_results, profile_name)
+                content = generate_for_translate_content(self.app_vm.model.ocr_results, profile_name)
                 
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(content)
@@ -107,7 +107,7 @@ def import_master_file(self, file_path=None, skip_confirmation=False):
             raise ValueError("Invalid JSON format: Expected a list of OCR results.")
 
         # Check if we have existing OCR results (only if not skipping confirmation)
-        if not skip_confirmation and self.model.ocr_results:
+        if not skip_confirmation and self.app_vm.model.ocr_results:
             reply = QMessageBox.question(
                 self,
                 "Replace OCR Results?",
@@ -242,12 +242,12 @@ def import_translation_file(self):
         new_ocr_results = import_master_file(self, file_path, skip_confirmation=False)
         if new_ocr_results is not None:
             try:
-                self.model.import_master_data(new_ocr_results)
+                self.app_vm.model.import_master_data(new_ocr_results)
                 
                 QMessageBox.information(self, "Success", 
                                       f"Master file imported successfully!\n"
                                       f"Loaded {len(new_ocr_results)} OCR entries.\n"
-                                      f"Profiles: {', '.join(sorted(self.model.profiles.keys()))}")
+                                      f"Profiles: {', '.join(sorted(self.app_vm.model.profiles.keys()))}")
                 return True
             except Exception as e:
                 import traceback
@@ -266,7 +266,7 @@ def import_translation_file(self):
             from PySide6.QtWidgets import QDialog
             
             # Get available profiles
-            available_profiles = list(self.model.profiles.keys())
+            available_profiles = list(self.app_vm.model.profiles.keys())
             
             # Show import dialog with file pre-selected
             dialog = ImportDialog(self, available_profiles)
@@ -306,7 +306,7 @@ def import_translation_file(self):
                         self.results_widget._is_updating_views = True
                     
                     # Apply translation to profile
-                    self.model.add_profile(profile_name, translation_data)
+                    self.app_vm.model.add_profile(profile_name, translation_data)
                     
                     QMessageBox.information(self, "Success", 
                                           f"Translation successfully applied to profile:\n'{profile_name}'")
@@ -338,13 +338,13 @@ def import_translation_file(self):
 
 def export_rendered_images(main_window, scroll_layout):
     """Export images with applied translations directly from QGraphicsView scenes."""
-    if not main_window.model.image_paths:
+    if not main_window.app_vm.model.image_paths:
         QMessageBox.warning(main_window, "Warning", "No images available for export.")
         return
 
     # Ask user for save location, defaulting to the project's directory.
-    project_directory = os.path.dirname(main_window.model.mmtl_path) if main_window.model.mmtl_path else ""
-    default_filename = f"{main_window.model.project_name}.zip"
+    project_directory = os.path.dirname(main_window.app_vm.model.mmtl_path) if main_window.app_vm.model.mmtl_path else ""
+    default_filename = f"{main_window.app_vm.model.project_name}.zip"
     default_path = os.path.join(project_directory, default_filename)
     
     export_path, _ = QFileDialog.getSaveFileName(
