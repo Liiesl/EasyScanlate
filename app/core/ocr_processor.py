@@ -13,7 +13,6 @@ class OCRProcessor(QThread):
     ocr_progress = Signal(int)  # Progress for the current image (0-100)
     ocr_finished = Signal(list)  # Results for the current image (list of dicts)
     error_occurred = Signal(str)
-    auto_inpaint_requested = Signal(str, list)
 
     # --- MODIFIED: Add image_data parameter to accept in-memory images ---
     def __init__(self, reader,
@@ -23,8 +22,6 @@ class OCRProcessor(QThread):
                   distance_threshold,
                   # OCR Params (used for image preprocessing)
                   adjust_contrast, resize_threshold,
-                 # Inpainting
-                 auto_context_fill=False,
                  # Image Sources (one must be provided)
                  image_path=None, image_data=None
                 ):
@@ -43,8 +40,7 @@ class OCRProcessor(QThread):
         # Preprocessing params for image quality
         self.adjust_contrast = adjust_contrast
         self.resize_threshold = resize_threshold
-        self.auto_context_fill = auto_context_fill
-        
+
         # --- NEW: Add validation ---
         if self.image_path is None and self.image_data is None:
             raise ValueError("OCRProcessor requires either an image_path or image_data.")
@@ -160,19 +156,8 @@ class OCRProcessor(QThread):
 
             if self.stop_requested: return
             print(f"OCR Proc: Filtered down to {len(filtered_results)} results.")
-            
-            # --- 6. Request Inpainting (BEFORE merging) ---
-            # --- MODIFIED: Only request inpainting if we have a file path ---
-            if self.auto_context_fill and filtered_results and self.image_path:
-                try:
-                    filename = os.path.basename(self.image_path)
-                    all_coordinates = [res['coordinates'] for res in filtered_results]
-                    print(f"OCR Proc: Requesting auto-inpaint for {len(all_coordinates)} regions in {filename} (pre-merge).")
-                    self.auto_inpaint_requested.emit(filename, all_coordinates)
-                except KeyError:
-                    print(f"OCR Proc: Warning - Could not get coordinates for auto-inpaint from filtered results for {filename}.")
 
-            # --- 7. Merge Results ---
+            # --- 6. Merge Results ---
             if not filtered_results:
                  print("OCR Proc: No results remaining after filtering to merge.")
                  merged_results = []
@@ -187,12 +172,6 @@ class OCRProcessor(QThread):
                  # Remove the placeholder filename before emitting
                  for res in merged_results: res.pop('filename', None)
                  print(f"OCR Proc: Merged into {len(merged_results)} final blocks.")
-
-            # --- Apply Transparent Style for Auto-Inpaint ---
-            if self.auto_context_fill and merged_results and self.image_path:
-                print(f"OCR Proc: Applying transparent background style to {len(merged_results)} results for auto-inpaint.")
-                for result in merged_results:
-                    result['custom_style'] = {'bg_color': '#00000000'}
 
             self.ocr_progress.emit(100)
 

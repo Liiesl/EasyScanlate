@@ -22,7 +22,6 @@ class BatchOCRViewModel(BaseViewModel):
     batch_finished = Signal(int)          # next_global_row_number
     error_occurred = Signal(str)
     processing_stopped = Signal()
-    auto_inpaint_requested = Signal(str, list)
 
     def __init__(self, model, ocr_service, get_settings, parent=None):
         super().__init__(parent)
@@ -132,7 +131,6 @@ class BatchOCRViewModel(BaseViewModel):
         self._handler.batch_finished.connect(self._on_batch_finished)
         self._handler.error_occurred.connect(self._on_batch_error)
         self._handler.processing_stopped.connect(self._on_batch_stopped)
-        self._handler.auto_inpaint_requested.connect(self.auto_inpaint_requested)
 
         self.is_running = True
         self.progress = 0

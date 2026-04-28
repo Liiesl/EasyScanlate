@@ -244,7 +244,6 @@ class MainWindow(QMainWindow):
         self.app_vm.batch_ocr_vm.can_run_ocr_changed.connect(self.btn_ocr_toggle.setEnabled)
         self.app_vm.batch_ocr_vm.batch_finished.connect(self._on_batch_finished_dialog)
         self.app_vm.batch_ocr_vm.processing_stopped.connect(self._on_batch_stopped_dialog)
-        self.app_vm.batch_ocr_vm.auto_inpaint_requested.connect(self.on_auto_inpaint_requested)
 
     def nativeEvent(self, eventType, message):
         # Use getattr to safely check if resizer exists and is fully initialized
@@ -383,11 +382,6 @@ class MainWindow(QMainWindow):
     def _on_batch_stopped_dialog(self):
         QMessageBox.information(self, "Stopped", "OCR processing was stopped.")
 
-    def on_auto_inpaint_requested(self, filename, bounding_boxes):
-        """SLOT: Handles the request from BatchOCRHandler to perform automatic inpainting."""
-        """OCR functionality disabled - placeholder method"""
-        self.app_vm.image_area_vm.perform_auto_inpainting(filename, bounding_boxes)
- 
     def _on_profile_created_for_user_edit(self):
         """Shows message when a profile is created for a user edit."""
         QMessageBox.information(self, "Edit Profile Created",

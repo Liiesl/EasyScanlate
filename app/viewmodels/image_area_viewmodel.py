@@ -7,6 +7,7 @@ from app.viewmodels.base_viewmodel import BaseViewModel
 from app.services.stitch_service import StitchService
 from app.services.split_service import SplitService
 from app.services.inpaint_service import InpaintService
+from app.core.inpaint_processor import InpaintProcessor
 from app.services.manual_ocr_service import ManualOCRService
 
 
@@ -71,6 +72,7 @@ class ImageAreaViewModel(BaseViewModel):
         self._inpaint_selection_paths = []
         self._inpaint_edit_mode_active = False
         self._selected_inpaint_record_id = None
+        self._inpaint_thread = None
 
         # Manual OCR state
         self._manual_ocr_filename = ""
@@ -267,6 +269,11 @@ class ImageAreaViewModel(BaseViewModel):
             self._inpaint_active_filename = ""
             self._inpaint_selection_paths = []
             self.inpaint_selection_paths_changed.emit("", [])
+
+        # Abort any running inpaint thread
+        if self._inpaint_thread and self._inpaint_thread.isRunning():
+            self._inpaint_thread.stop_requested = True
+            self._inpaint_thread = None
 
         # Clear manual OCR state
         if self._manual_ocr_filename or self._manual_ocr_rect or self._manual_ocr_processing:
@@ -473,9 +480,27 @@ class ImageAreaViewModel(BaseViewModel):
         if not self._inpaint_active_filename or not self._inpaint_selection_paths:
             self.error_occurred.emit("Error", "No area selected.")
             return
-        success, msg = self._inpaint_service.process_inpaint(
-            self._inpaint_active_filename, self._inpaint_selection_paths
+        if self._inpaint_thread and self._inpaint_thread.isRunning():
+            self.error_occurred.emit("Busy", "Inpainting is already in progress.")
+            return
+
+        bounding_boxes = []
+        for path in self._inpaint_selection_paths:
+            polygon = path.toFillPolygon().toPolygon()
+            points = [[p.x(), p.y()] for p in polygon]
+            bounding_boxes.append(points)
+
+        self._inpaint_thread = InpaintProcessor(
+            self._model,
+            self._inpaint_active_filename,
+            bounding_boxes,
+            parent=self,
         )
+        self._inpaint_thread.finished.connect(self._on_inpaint_finished)
+        self._inpaint_thread.start()
+
+    def _on_inpaint_finished(self, success, msg):
+        self._inpaint_thread = None
         if success:
             self.cancel_action_mode()
         else:
@@ -492,7 +517,20 @@ class ImageAreaViewModel(BaseViewModel):
             self.error_occurred.emit("Error", msg)
 
     def perform_auto_inpainting(self, filename: str, bounding_boxes: list):
-        self._inpaint_service.perform_auto_inpainting(filename, bounding_boxes)
+        if not filename or not bounding_boxes:
+            return
+        if self._inpaint_thread and self._inpaint_thread.isRunning():
+            return
+        self._inpaint_thread = InpaintProcessor(
+            self._model, filename, bounding_boxes, parent=self
+        )
+        self._inpaint_thread.finished.connect(self._on_auto_inpaint_finished)
+        self._inpaint_thread.start()
+
+    def _on_auto_inpaint_finished(self, success, msg):
+        self._inpaint_thread = None
+        if not success:
+            self.error_occurred.emit("Auto-Inpainting Error", msg)
 
     # --- Manual OCR ---
 
