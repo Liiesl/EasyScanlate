@@ -70,7 +70,6 @@ class ManualOCRService(QObject):
             "distance_threshold": int(settings.value("distance_threshold", 100)) if settings else 100,
             "adjust_contrast": float(settings.value("ocr_adjust_contrast", 0.5)) if settings else 0.5,
             "resize_threshold": int(settings.value("ocr_resize_threshold", 1024)) if settings else 1024,
-            "auto_context_fill": False,
         }
 
         self.ocr_thread = OCRProcessor(

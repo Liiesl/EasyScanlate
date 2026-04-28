@@ -11,8 +11,8 @@ from assets import DEFAULT_TEXT_STYLE
 class ResizableImageLabel(QGraphicsView):
     # --- MODIFIED: textBoxSelected is no longer needed ---
     textBoxDeleted = Signal(object)
-    row_selected = Signal(int)
-    row_deselected = Signal(int)
+    row_selected = Signal(object)
+    row_deselected = Signal(object)
     manual_area_selected = Signal(QRectF, object)
     stitching_selection_changed = Signal(object, bool)
     split_indicator_requested = Signal(object, int)

@@ -1,5 +1,6 @@
 # app/viewmodels/translation_viewmodel.py
 
+import math
 from PySide6.QtCore import Signal
 from app.viewmodels.base_viewmodel import BaseViewModel
 from app.core.translations import (
@@ -22,7 +23,7 @@ class TranslationViewModel(BaseViewModel):
     profiles_changed = Signal(list)                # list[str]
     active_profile_changed = Signal(str)           # profile name
     ocr_results_changed = Signal(list)             # list[dict]
-    row_text_updated = Signal(int, str)            # row_number, actual_saved_text
+    row_text_updated = Signal(object, str)            # row_number, actual_saved_text
     current_text_changed = Signal(str)             # text for selected row
     original_language_changed = Signal(str)        # e.g. "Korean"
 
@@ -272,7 +273,7 @@ class TranslationViewModel(BaseViewModel):
 
         result = None
         for r in self._model.ocr_results:
-            if int(r.get("row_number", 0)) == row_number:
+            if math.isclose(float(r.get("row_number", 0)), row_number):
                 result = r
                 break
         if not result:

@@ -10,7 +10,7 @@ from app.ui.components.image_area.textbox_frame import SelectionFrameItem
 class TextBoxSignals(QObject):
     rowDeleted = Signal(object)
     selectedChanged = Signal(bool, object)
-    textEdited = Signal(int, str)
+    textEdited = Signal(object, str)
 
 class MainTextItem(QGraphicsTextItem):
     """

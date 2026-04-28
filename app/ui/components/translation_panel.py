@@ -137,11 +137,11 @@ class FocusableTextEdit(QTextEdit):
 class TranslationCard(QFrame):
     """A card representing a single translation row."""
     clicked = Signal(object)
-    text_changed = Signal(int, str)
-    delete_requested = Signal(int)
-    retranslate_requested = Signal(int)
+    text_changed = Signal(object, str)
+    delete_requested = Signal(object)
+    retranslate_requested = Signal(object)
 
-    def __init__(self, row_number: int, source_text: str, target_text: str, parent=None):
+    def __init__(self, row_number, source_text: str, target_text: str, parent=None):
         super().__init__(parent)
         self.row_number = row_number
         self.setObjectName("TranslationCard")
@@ -495,7 +495,7 @@ class TranslationPanel(QFrame):
         visible_results = [r for r in self.ocr_results if not r.get('is_deleted', False)]
 
         for result in visible_results:
-            row_number = int(result.get('row_number', 0))
+            row_number = float(result.get('row_number', 0))
             source_text = result.get('text', '')  # Original KOR text
             target_text = self.get_display_text_func(result) if self.get_display_text_func else source_text
 
@@ -510,17 +510,17 @@ class TranslationPanel(QFrame):
 
         self.cards_layout.addStretch(1)
 
-    def update_row_text(self, row_number: int, text: str):
+    def update_row_text(self, row_number, text: str):
         """Update text for a specific row without rebuilding."""
         if row_number in self.cards:
             self.cards[row_number].set_target_text(text)
 
-    def set_active_row(self, row_number: int):
+    def set_active_row(self, row_number):
         """Set the active/selected row."""
         if row_number in self.cards:
             self._on_card_clicked(self.cards[row_number])
 
-    def scroll_to_row(self, row_number: int):
+    def scroll_to_row(self, row_number):
         """Scroll to make a row visible."""
         if row_number in self.cards:
             card = self.cards[row_number]
@@ -566,12 +566,12 @@ class TranslationPanel(QFrame):
         if self.editor_vm:
             self.editor_vm.select_row(card.row_number)
 
-    def _on_card_text_changed(self, row_number: int, text: str):
+    def _on_card_text_changed(self, row_number, text: str):
         """Forward text edit to the ViewModel."""
         if self.translation_vm:
             self.translation_vm.update_text(row_number, text)
 
-    def _on_card_delete_requested(self, row_number: int):
+    def _on_card_delete_requested(self, row_number):
         """Show confirmation dialog and delegate deletion to EditorViewModel."""
         show_warning = self.settings.value("show_delete_warning", "true") == "true"
         proceed = True
@@ -592,7 +592,7 @@ class TranslationPanel(QFrame):
         if proceed and self.editor_vm:
             self.editor_vm.delete_row(row_number)
 
-    def _on_single_retranslate(self, row_number: int):
+    def _on_single_retranslate(self, row_number):
         """Forward retranslate request to the ViewModel."""
         if not self.translation_vm:
             return
