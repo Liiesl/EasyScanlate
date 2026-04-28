@@ -284,6 +284,10 @@ class ImageAreaViewModel(BaseViewModel):
             self.manual_ocr_processing_changed.emit(False)
             self._manual_ocr_service.stop()
 
+        # Deactivate inpaint edit mode as well
+        if self._inpaint_edit_mode_active:
+            self.toggle_inpaint_edit_mode()
+
         if old_can_confirm != self._can_confirm_action:
             self.can_confirm_action_changed.emit(False)
         if old_can_reset != self._can_reset_action:

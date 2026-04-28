@@ -404,7 +404,21 @@ class CustomScrollArea(QScrollArea):
                     widget.set_text_visibility(False)
                 else:
                     widget.set_text_visibility(self.image_area_vm.text_visible)
-        if not active:
+        if active:
+            self._hide_action_overlay()
+            if self.image_area_vm.selected_inpaint_record_id:
+                self._on_inpaint_record_selected(self.image_area_vm.selected_inpaint_record_id)
+            else:
+                overlay = HandlerOverlay(self, "InpaintEditModeOverlay", "", (380, 80))
+                info_label = QLabel("Click on a context fill to select it.")
+                info_label.setAlignment(Qt.AlignCenter)
+                overlay.add_widget(info_label)
+                overlay.create_cancel_button("Exit Edit Mode", "fa5s.times")
+                overlay.setStyleSheet(HANDLER_OVERLAY_STYLES)
+                overlay.cancelled.connect(self.image_area_vm.toggle_inpaint_edit_mode)
+                overlay.show_overlay()
+                self._action_overlay = overlay
+        else:
             self._hide_action_overlay()
 
     def _on_inpaint_record_selected(self, record_id):
@@ -420,10 +434,15 @@ class CustomScrollArea(QScrollArea):
             self._action_overlay = overlay
         elif self._action_overlay and self._action_overlay.objectName() == "InpaintEditOverlay":
             self._hide_action_overlay()
+            # Restore generic edit mode overlay if still in edit mode
+            if self.image_area_vm.inpaint_edit_mode_active:
+                self._on_inpaint_edit_mode_changed(True)
 
     def _hide_inpaint_edit_overlay(self):
         self.image_area_vm.select_inpaint_record("")
         self._hide_action_overlay()
+        if self.image_area_vm.inpaint_edit_mode_active:
+            self._on_inpaint_edit_mode_changed(True)
 
     def _on_manual_ocr_rect_changed(self, filename, rect):
         for i in range(self._scroll_layout.count()):

@@ -174,13 +174,17 @@ class MenuBar(QMenuBar):
             process_menu.addAction(context_fill_action)
 
             # Edit Context Fill
-            edit_context_action = QAction(qta.icon('fa5s.paint-brush', color="white"), "Edit Context Fills", self)
-            edit_context_action.setCheckable(True)
+            self.edit_context_action = QAction(qta.icon('fa5s.paint-brush', color="white"), "Edit Context Fills", self)
+            self.edit_context_action.setCheckable(True)
             if self.is_context_fill_edit_active:
-                edit_context_action.setChecked(self.is_context_fill_edit_active())
+                self.edit_context_action.setChecked(self.is_context_fill_edit_active())
             if self.on_context_fill_edit_toggled:
-                edit_context_action.toggled.connect(self.on_context_fill_edit_toggled)
-            process_menu.addAction(edit_context_action)
+                self.edit_context_action.toggled.connect(self.on_context_fill_edit_toggled)
+            process_menu.addAction(self.edit_context_action)
+            if self.app_vm:
+                self.app_vm.image_area_vm.inpaint_edit_mode_active_changed.connect(
+                    self._on_inpaint_edit_mode_active_changed
+                )
 
             process_menu.addSeparator()
 
@@ -325,3 +329,10 @@ class MenuBar(QMenuBar):
             self._manual_mode_action.blockSignals(True)
             self._manual_mode_action.setChecked(active)
             self._manual_mode_action.blockSignals(False)
+
+    def _on_inpaint_edit_mode_active_changed(self, active):
+        """VM state changed; sync the edit context fill menu action without re-emitting toggled."""
+        if hasattr(self, 'edit_context_action'):
+            self.edit_context_action.blockSignals(True)
+            self.edit_context_action.setChecked(active)
+            self.edit_context_action.blockSignals(False)

@@ -125,11 +125,16 @@ class VerticalToolbar(QWidget):
         )
         menu.addButton(btn_context_fill_mode)
 
-        btn_edit_context_fill = QPushButton(
-            qta.icon("fa5s.paint-brush", color="white"), " Edit Context Fills"
+        btn_edit_context_fill = ToggleButton(
+            off_text=" Edit Context Fills",
+            on_text=" Edit Context Fills",
+            off_icon=qta.icon("fa5s.paint-brush", color="white"),
+            on_icon=qta.icon("fa5s.paint-brush", color="white"),
         )
-        btn_edit_context_fill.clicked.connect(self._vm.toggle_inpaint_edit_mode)
-        menu.addButton(btn_edit_context_fill)
+        btn_edit_context_fill.setToolTip("Toggle Edit Context Fills")
+        btn_edit_context_fill.setState(self._vm.inpaint_edit_mode_active)
+        btn_edit_context_fill.toggled.connect(self._vm.toggle_inpaint_edit_mode)
+        menu.addButton(btn_edit_context_fill, close_on_click=False)
 
         btn_toggle_fill_visibility = ToggleButton(
             off_text=" Show Fills",
