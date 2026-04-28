@@ -110,34 +110,60 @@ class CustomScrollArea(QScrollArea):
         """Rebuilds ResizableImageLabels reactively from the ViewModel image list."""
         self.cancel_active_modes()
         layout = self._scroll_layout
-        while layout.count():
-            item = layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                if hasattr(widget, 'cleanup'):
-                    widget.cleanup()
-                widget.deleteLater()
+
+        # Index existing labels by filename
+        existing_labels = {}
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
+            if isinstance(widget, ResizableImageLabel):
+                existing_labels[widget.filename] = widget
 
         path_map = {os.path.basename(p): p for p in self.model.image_paths}
-        for filename in filenames:
-            path = path_map.get(filename)
-            if not path:
-                continue
-            try:
-                pixmap = QPixmap(path)
-                if pixmap.isNull():
+
+        # Remove labels that are no longer in the list
+        for filename in list(existing_labels.keys()):
+            if filename not in filenames:
+                label = existing_labels.pop(filename)
+                layout.removeWidget(label)
+                if hasattr(label, 'cleanup'):
+                    label.cleanup()
+                label.deleteLater()
+
+        # Add, move, or update labels to match the new order
+        for idx, filename in enumerate(filenames):
+            if filename in existing_labels:
+                label = existing_labels[filename]
+                # Check if label is already at the correct position
+                current_item = layout.itemAt(idx)
+                current_widget = current_item.widget() if current_item else None
+                if current_widget is not label:
+                    layout.removeWidget(label)
+                    layout.insertWidget(idx, label)
+                # Refresh pixmap in case the file was overwritten (e.g. stitch)
+                path = path_map.get(filename)
+                if path:
+                    pixmap = QPixmap(path)
+                    if not pixmap.isNull():
+                        label.update_pixmap(pixmap)
+            else:
+                path = path_map.get(filename)
+                if not path:
                     continue
-                label = self.create_image_label(pixmap, filename)
-                layout.addWidget(label)
-            except Exception as e:
-                print(f"Error creating ResizableImageLabel for {path}: {e}")
+                try:
+                    pixmap = QPixmap(path)
+                    if pixmap.isNull():
+                        continue
+                    label = self.create_image_label(pixmap, filename)
+                    layout.insertWidget(idx, label)
+                except Exception as e:
+                    print(f"Error creating ResizableImageLabel for {path}: {e}")
 
         # Apply current visibility states
         for i in range(layout.count()):
             widget = layout.itemAt(i).widget()
             if isinstance(widget, ResizableImageLabel):
                 widget.set_text_visibility(self.image_area_vm.text_visible)
-                label.set_inpaints_applied(self.image_area_vm.inpaints_visible)
+                widget.set_inpaints_applied(self.image_area_vm.inpaints_visible)
 
     def _on_model_updated(self, affected_filenames):
         """

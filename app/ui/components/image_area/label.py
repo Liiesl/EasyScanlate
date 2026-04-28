@@ -513,6 +513,10 @@ class ResizableImageLabel(QGraphicsView):
         self.updateGeometry()
         QTimer.singleShot(0, self.update_view_transform)
 
+    def _update_displayed_pixmap(self):
+        if self.pixmap_item:
+            self.pixmap_item.setPixmap(self.original_pixmap)
+
     def update_view_transform(self):
         if not self.scene() or self.original_pixmap.isNull() or not self.pixmap_item: return
         scene_rect = self.scene().sceneRect()
