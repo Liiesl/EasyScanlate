@@ -3570,6 +3570,7 @@ dependencies = [
 name = "scanlateit"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "iced",
  "image",
  "rapidocr-core",

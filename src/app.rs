@@ -1,14 +1,19 @@
-use iced::widget::canvas::{self, Canvas};
-use iced::widget::image::Handle;
-use iced::widget::{column, container, responsive, row, scrollable, text};
+use std::ops::Range;
+use std::sync::Arc;
+
+use iced::widget::{container, row, text};
 use iced::{Element, Font, Length, Task};
 
 use rapidocr_core::OcrCancellationToken;
 
 use crate::model::{NewEntry, ProfileId, Project};
 use crate::ocr::{self, Engine};
-use crate::ui::overlay::{Overlay, OverlayEntry};
+use crate::ui::decode::{decode_page, DecodedPage, PageDecode, MAX_DECODE_EDGE};
+use crate::ui::overlay::OverlayEntry;
+use crate::ui::tile_view::{TileSpec, TileView};
 use crate::ui::{side_panel, KOREAN_FONT_NAME, KOREAN_FONT_PATH};
+
+const DECODE_PRELOAD: usize = 2;
 
 const IMAGE_FILTERS: &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "avif"];
 
@@ -22,15 +27,16 @@ pub enum Message {
     OcrFinished(usize, Result<Vec<NewEntry>, String>),
     FontLoaded,
     CycleProfile,
+    TilesVisible(Range<usize>),
+    TileDecoded(usize, Result<Arc<DecodedPage>, String>),
 }
 
 pub(crate) struct LoadedImage {
-    handle: Handle,
-    width: f32,
-    height: f32,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
     pub(crate) path: String,
     pub(crate) project: Project,
-    cache: canvas::Cache,
+    decode: PageDecode,
 }
 
 /// Session state: one loaded image plus everything iced/OCR related that the
@@ -151,16 +157,27 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 }
                 for (path, width, height) in images {
                     app.images.push(LoadedImage {
-                        handle: Handle::from_path(&path),
                         width: width as f32,
                         height: height as f32,
                         path,
                         project: Project::new(),
-                        cache: canvas::Cache::new(),
+                        decode: PageDecode::Pending,
                     });
                 }
-                app.status = format!("Loaded {} image(s).", app.images.len());
-                Task::none()
+                app.status = format!("Decoding {} image(s)...", app.images.len());
+                let tasks: Vec<Task<Message>> = app
+                    .images
+                    .iter()
+                    .enumerate()
+                    .map(|(index, image)| {
+                        let path = image.path.clone();
+                        Task::perform(
+                            async move { decode_page(&path, MAX_DECODE_EDGE).map(Arc::new) },
+                            move |result| Message::TileDecoded(index, result),
+                        )
+                    })
+                    .collect();
+                Task::batch(tasks)
             }
             Err(e) => {
                 app.status = e;
@@ -216,7 +233,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             match result {
                 Ok(entries) => {
                     let count = app.images[index].project.append_ocr(entries);
-                    app.images[index].cache.clear();
                     app.ocr_total += count;
                 }
                 Err(e) => {
@@ -272,10 +288,39 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     .unwrap_or(ids[0]);
                 for img in &mut app.images {
                     img.project.profiles.select(next);
-                    img.cache.clear();
                 }
                 let name = app.images[0].project.profiles.selected().name.clone();
                 app.status = format!("Profile: {name}");
+            }
+            Task::none()
+        }
+        Message::TilesVisible(range) => {
+            let start = range.start.saturating_sub(DECODE_PRELOAD);
+            let end = range.end.saturating_add(DECODE_PRELOAD).min(app.images.len());
+            let mut tasks = Vec::new();
+            for index in start..end {
+                let image = &mut app.images[index];
+                if matches!(&image.decode, PageDecode::Pending) {
+                    image.decode = PageDecode::Decoding;
+                    let path = image.path.clone();
+                    tasks.push(Task::perform(
+                        async move { decode_page(&path, MAX_DECODE_EDGE).map(Arc::new) },
+                        move |result| Message::TileDecoded(index, result),
+                    ));
+                }
+            }
+            if tasks.is_empty() {
+                Task::none()
+            } else {
+                Task::batch(tasks)
+            }
+        }
+        Message::TileDecoded(index, result) => {
+            if index < app.images.len() {
+                app.images[index].decode = match result {
+                    Ok(decoded) => PageDecode::Ready(decoded),
+                    Err(_) => PageDecode::Failed,
+                };
             }
             Task::none()
         }
@@ -289,40 +334,27 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .height(Length::Fill)
             .into()
     } else {
-        let mut pages = column![].width(Length::Fill).spacing(0);
-        for image in &app.images {
-            let entries: Vec<OverlayEntry<'_>> = image
-                .project
-                .ocr
-                .visible()
-                .map(|entry| OverlayEntry {
-                    text: image.project.display_text(entry),
-                    bounds: entry.quad.bounds(),
-                    style: image.project.entry_style(entry.id),
-                })
-                .collect();
-            let aspect = image.height / image.width;
-            let overlay = Overlay::new(
-                &image.handle,
-                entries,
-                app.font.unwrap_or(Font::DEFAULT),
-                &image.cache,
-                image.width,
-            );
-            pages = pages.push(
-                responsive(move |size| {
-                    let page: Element<'_, Message> = Canvas::new(overlay.clone())
-                        .width(Length::Fill)
-                        .height(Length::Fixed(size.width * aspect))
-                        .into();
-                    page
-                })
-                .height(Length::Shrink),
-            );
-        }
-        scrollable(pages)
-            .width(Length::Fill)
-            .height(Length::Fill)
+        let tiles: Vec<TileSpec<'_>> = app
+            .images
+            .iter()
+            .map(|image| TileSpec {
+                source_width: image.width as u32,
+                source_height: image.height as u32,
+                decode: &image.decode,
+                overlays: image
+                    .project
+                    .ocr
+                    .visible()
+                    .map(|entry| OverlayEntry {
+                        text: image.project.display_text(entry),
+                        bounds: entry.quad.bounds(),
+                        style: image.project.entry_style(entry.id),
+                    })
+                    .collect(),
+            })
+            .collect();
+        TileView::new(tiles, app.font.unwrap_or(Font::DEFAULT))
+            .on_visible_range(Message::TilesVisible)
             .into()
     };
 
