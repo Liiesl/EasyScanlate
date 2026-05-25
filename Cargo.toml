@@ -7,3 +7,4 @@ edition = "2024"
 iced = { version = "0.14.0", path = "iced", features = ["image", "canvas"] }
 rapidocr-core = { version = "0.2.2", path = "rapidocr-core", default-features = false }
 image = "0.25"
+rfd = "0.17"
