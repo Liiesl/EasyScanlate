@@ -19,7 +19,7 @@ pub enum Message {
     StartOcr,
     StopOcr,
     EngineReady(Result<Engine, String>),
-    OcrAllFinished(Vec<(usize, Result<Vec<NewEntry>, String>)>),
+    OcrFinished(usize, Result<Vec<NewEntry>, String>),
     FontLoaded,
     CycleProfile,
 }
@@ -42,6 +42,11 @@ pub struct App {
     pub(crate) running: bool,
     font: Option<Font>,
     pub(crate) status: String,
+    pending: usize,
+    ocr_total: usize,
+    ocr_failed: usize,
+    ocr_cancelled: bool,
+    ocr_index: usize,
 }
 
 impl App {
@@ -53,6 +58,11 @@ impl App {
             running: false,
             font: None,
             status: "Idle - open images to begin.".to_string(),
+            pending: 0,
+            ocr_total: 0,
+            ocr_failed: 0,
+            ocr_cancelled: false,
+            ocr_index: 0,
         }
     }
 }
@@ -65,25 +75,43 @@ pub fn boot() -> (App, Task<Message>) {
     (App::new(), font_task)
 }
 
+/// Spawns OCR for exactly one image (the next in the queue). At most one task
+/// is in flight at a time: the next image is only scheduled from inside the
+/// `OcrFinished` handler, so each result reaches the UI before the next OCR
+/// starts. The shared token is created once per run in [`Message::StartOcr`].
 fn start_ocr_run(app: &mut App, engine: Engine) -> Task<Message> {
-    let paths: Vec<String> = app.images.iter().map(|img| img.path.clone()).collect();
-    let token = OcrCancellationToken::new();
-    app.cancel = Some(token.clone());
-    app.running = true;
-    app.status = format!("Running OCR on {} image(s)...", paths.len());
+    let index = app.ocr_index;
+    app.ocr_index += 1;
+    let path = app.images[index].path.clone();
+    let token = app
+        .cancel
+        .as_ref()
+        .expect("cancellation token set before run")
+        .clone();
     Task::perform(
         async move {
-            let mut results = Vec::with_capacity(paths.len());
-            for (index, path) in paths.iter().enumerate() {
-                let entry = engine
-                    .run_path_cancellable(path, &token)
-                    .map(ocr::to_entries);
-                results.push((index, entry));
-            }
-            results
+            let result = engine
+                .run_path_cancellable(&path, &token)
+                .map(ocr::to_entries);
+            (index, result)
         },
-        Message::OcrAllFinished,
+        |(index, result)| Message::OcrFinished(index, result),
     )
+}
+
+fn finalize_run(app: &mut App) {
+    app.running = false;
+    app.cancel = None;
+    app.status = if app.ocr_cancelled {
+        "OCR cancelled.".to_string()
+    } else if app.ocr_failed > 0 {
+        format!(
+            "OCR done: {} line(s), {} image(s) failed.",
+            app.ocr_total, app.ocr_failed
+        )
+    } else {
+        format!("OCR done: {} line(s).", app.ocr_total)
+    };
 }
 
 pub fn update(app: &mut App, message: Message) -> Task<Message> {
@@ -147,13 +175,17 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             if app.running {
                 return Task::none();
             }
+            app.cancel = Some(OcrCancellationToken::new());
+            app.running = true;
+            app.pending = app.images.len();
+            app.ocr_total = 0;
+            app.ocr_failed = 0;
+            app.ocr_cancelled = false;
+            app.ocr_index = 0;
+            app.status = format!("Running OCR on {} image(s)...", app.images.len());
             match app.engine.clone() {
                 Some(engine) => start_ocr_run(app, engine),
-                None => {
-                    app.running = true;
-                    app.status = "Initializing OCR engine...".to_string();
-                    Task::perform(async move { Engine::build() }, Message::EngineReady)
-                }
+                None => Task::perform(async move { Engine::build() }, Message::EngineReady),
             }
         }
         Message::EngineReady(result) => match result {
@@ -179,35 +211,39 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.status = "Cancelling OCR...".to_string();
             Task::none()
         }
-        Message::OcrAllFinished(results) => {
-            app.running = false;
-            app.cancel = None;
-            let mut total = 0;
-            let mut failed = 0;
-            let mut cancelled = false;
-            for (index, result) in results.into_iter() {
-                match result {
-                    Ok(entries) => {
-                        let count = app.images[index].project.append_ocr(entries);
-                        app.images[index].cache.clear();
-                        total += count;
-                    }
-                    Err(e) => {
-                        failed += 1;
-                        if e == "cancelled" {
-                            cancelled = true;
-                        }
+        Message::OcrFinished(index, result) => {
+            app.pending = app.pending.saturating_sub(1);
+            match result {
+                Ok(entries) => {
+                    let count = app.images[index].project.append_ocr(entries);
+                    app.images[index].cache.clear();
+                    app.ocr_total += count;
+                }
+                Err(e) => {
+                    app.ocr_failed += 1;
+                    if e == "cancelled" {
+                        app.ocr_cancelled = true;
                     }
                 }
             }
-            app.status = if cancelled {
-                "OCR cancelled.".to_string()
-            } else if failed > 0 {
-                format!("OCR done: {total} line(s), {failed} image(s) failed.")
-            } else {
-                format!("OCR done: {total} line(s).")
-            };
-            Task::none()
+            if app.pending == 0 || app.ocr_cancelled {
+                finalize_run(app);
+                return Task::none();
+            }
+            app.status = format!(
+                "OCR in progress: {} of {} image(s) done ({} line(s)).",
+                app.images.len() - app.pending,
+                app.images.len(),
+                app.ocr_total
+            );
+            match app.engine.clone() {
+                Some(engine) => start_ocr_run(app, engine),
+                None => {
+                    app.ocr_failed += 1;
+                    finalize_run(app);
+                    Task::none()
+                }
+            }
         }
         Message::FontLoaded => {
             app.font = Some(Font::with_name(KOREAN_FONT_NAME));
