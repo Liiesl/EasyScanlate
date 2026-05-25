@@ -1,6 +1,6 @@
 use iced::widget::canvas::{self, Canvas};
 use iced::widget::image::Handle;
-use iced::widget::{column, container, row, scrollable, text};
+use iced::widget::{column, container, responsive, row, scrollable, text};
 use iced::{Element, Font, Length, Task};
 
 use rapidocr_core::OcrCancellationToken;
@@ -253,7 +253,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .height(Length::Fill)
             .into()
     } else {
-        let mut pages = column![].spacing(8);
+        let mut pages = column![].width(Length::Fill).spacing(0);
         for image in &app.images {
             let entries: Vec<OverlayEntry<'_>> = image
                 .project
@@ -265,16 +265,23 @@ pub fn view(app: &App) -> Element<'_, Message> {
                     style: image.project.entry_style(entry.id),
                 })
                 .collect();
+            let aspect = image.height / image.width;
             let overlay = Overlay::new(
                 &image.handle,
                 entries,
                 app.font.unwrap_or(Font::DEFAULT),
                 &image.cache,
+                image.width,
             );
             pages = pages.push(
-                Canvas::new(overlay)
-                    .width(Length::Fixed(image.width))
-                    .height(Length::Fixed(image.height)),
+                responsive(move |size| {
+                    let page: Element<'_, Message> = Canvas::new(overlay.clone())
+                        .width(Length::Fill)
+                        .height(Length::Fixed(size.width * aspect))
+                        .into();
+                    page
+                })
+                .height(Length::Shrink),
             );
         }
         scrollable(pages)
