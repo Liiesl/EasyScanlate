@@ -1,6 +1,7 @@
 mod app;
 mod model;
 mod ocr;
+mod translation;
 mod ui;
 
 use iced::{Size, Theme};

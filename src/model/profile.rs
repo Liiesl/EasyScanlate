@@ -139,6 +139,11 @@ impl Profiles {
         }
     }
 
+    /// The id of the profile with the given name, if any.
+    pub fn find_by_name(&self, name: &str) -> Option<ProfileId> {
+        self.profiles.iter().find(|p| p.name == name).map(|p| p.id)
+    }
+
     pub fn selected_id(&self) -> ProfileId {
         self.selected
     }

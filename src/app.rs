@@ -6,8 +6,9 @@ use iced::{Element, Font, Length, Task};
 
 use rapidocr_core::OcrCancellationToken;
 
-use crate::model::{NewEntry, ProfileId, Project};
+use crate::model::{EntryId, NewEntry, ProfileId, Project};
 use crate::ocr::{self, Engine};
+use crate::translation;
 use crate::ui::decode::{decode_page, DecodedPage, PageDecode, MAX_DECODE_EDGE};
 use crate::ui::overlay::OverlayEntry;
 use crate::ui::tile_view::{TileSpec, TileView};
@@ -29,6 +30,11 @@ pub enum Message {
     CycleProfile,
     TilesVisible(Range<usize>),
     TileDecoded(usize, Result<Arc<DecodedPage>, String>),
+    Translate,
+    TranslateModel(String),
+    TranslateLang(String),
+    TranslateApiKey(String),
+    TranslateFinished(Vec<(usize, EntryId, String)>, Result<Vec<String>, String>),
 }
 
 pub(crate) struct LoadedImage {
@@ -53,8 +59,11 @@ pub struct App {
     ocr_failed: usize,
     ocr_cancelled: bool,
     ocr_index: usize,
+    pub(crate) translating: bool,
+    pub(crate) translate_model: String,
+    pub(crate) translate_lang: String,
+    pub(crate) translate_api_key: String,
 }
-
 impl App {
     fn new() -> Self {
         Self {
@@ -69,6 +78,10 @@ impl App {
             ocr_failed: 0,
             ocr_cancelled: false,
             ocr_index: 0,
+            translating: false,
+            translate_model: translation::MODELS[0].to_string(),
+            translate_lang: translation::LANGUAGES[0].to_string(),
+            translate_api_key: String::new(),
         }
     }
 }
@@ -321,6 +334,96 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     Ok(decoded) => PageDecode::Ready(decoded),
                     Err(_) => PageDecode::Failed,
                 };
+            }
+            Task::none()
+        }
+        Message::Translate => {
+            if app.translating || app.running {
+                return Task::none();
+            }
+            let jobs: Vec<(usize, EntryId, String)> = app
+                .images
+                .iter()
+                .enumerate()
+                .flat_map(|(index, image)| {
+                    image
+                        .project
+                        .ocr
+                        .visible()
+                        .map(move |entry| (index, entry.id, entry.text.clone()))
+                })
+                .collect();
+            if jobs.is_empty() {
+                app.status = "Run OCR first.".to_string();
+                return Task::none();
+            }
+            app.translating = true;
+            let texts: Vec<String> = jobs.iter().map(|(_, _, text)| text.clone()).collect();
+            let target = app.translate_lang.clone();
+            let model = app.translate_model.clone();
+            let api_key = (!app.translate_api_key.is_empty())
+                .then(|| app.translate_api_key.clone());
+            app.status = format!(
+                "Translating {} line(s) to {} via {model}...",
+                jobs.len(),
+                app.translate_lang
+            );
+            Task::perform(
+                async move {
+                    let result = translation::translate_all(&texts, &target, &model, api_key).await;
+                    (jobs, result)
+                },
+                |(jobs, result)| Message::TranslateFinished(jobs, result),
+            )
+        }
+        Message::TranslateModel(model) => {
+            app.translate_model = model;
+            Task::none()
+        }
+        Message::TranslateLang(lang) => {
+            app.translate_lang = lang;
+            Task::none()
+        }
+        Message::TranslateApiKey(key) => {
+            app.translate_api_key = key;
+            Task::none()
+        }
+        Message::TranslateFinished(jobs, result) => {
+            app.translating = false;
+            match result {
+                Ok(translations) => {
+                    if translations.len() != jobs.len() {
+                        app.status = "Translation count mismatch; nothing saved.".to_string();
+                        return Task::none();
+                    }
+                    let profile_name = translation::profile_name(&app.translate_lang);
+                    let mut current_image: Option<usize> = None;
+                    for ((image_index, entry_id, _), translation) in
+                        jobs.iter().zip(translations.iter())
+                    {
+                        if current_image != Some(*image_index) {
+                            let image = &mut app.images[*image_index];
+                            let id = image.project.profiles.find_by_name(&profile_name).unwrap_or_else(
+                                || image.project.profiles.add(profile_name.clone()),
+                            );
+                            image.project.profiles.select(id);
+                            current_image = Some(*image_index);
+                        }
+                        let image = &mut app.images[*image_index];
+                        image
+                            .project
+                            .profiles
+                            .selected_mut()
+                            .set_translation(*entry_id, Some(translation.clone()));
+                    }
+                    app.status = format!(
+                        "Translated {} line(s) into '{profile_name}'.",
+                        translations.len()
+                    );
+                }
+                Err(e) => {
+                    app.status = e;
+                }
             }
             Task::none()
         }

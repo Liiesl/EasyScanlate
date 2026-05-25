@@ -1,7 +1,8 @@
-use iced::widget::{button, column, container, row, scrollable, text, Column};
+use iced::widget::{button, column, container, pick_list, row, scrollable, text, text_input, Column};
 use iced::{Color, Element, Fill as FillLength};
 
 use crate::app::{App, Message};
+use crate::translation;
 
 fn file_name(path: &str) -> &str {
     path.rsplit(['\\', '/']).next().unwrap_or(path)
@@ -44,6 +45,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     }
 
     let total_results: usize = app.images.iter().map(|i| i.project.ocr.visible_count()).sum();
+    let has_entries = total_results > 0;
 
     container(
         column![
@@ -51,7 +53,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
             button("Open Images...").on_press(Message::OpenImages),
             row![
                 button("Start OCR").on_press_maybe(
-                    (!app.images.is_empty() && !app.running).then_some(Message::StartOcr)
+                    (!app.images.is_empty() && !app.running && !app.translating)
+                        .then_some(Message::StartOcr)
                 ),
                 button("Stop").on_press_maybe(app.running.then_some(Message::StopOcr)),
             ]
@@ -71,6 +74,37 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 ),
             ]
             .spacing(6),
+            text("Translate").size(16),
+            row![
+                text("Model:").size(12),
+                pick_list(
+                    translation::MODELS,
+                    Some(app.translate_model.as_str()),
+                    |m| Message::TranslateModel(m.to_string()),
+                )
+                .text_size(12)
+                .width(FillLength),
+            ]
+            .spacing(6),
+            row![
+                text("To:").size(12),
+                pick_list(
+                    translation::LANGUAGES,
+                    Some(app.translate_lang.as_str()),
+                    |l| Message::TranslateLang(l.to_string()),
+                )
+                .text_size(12)
+                .width(FillLength),
+            ]
+            .spacing(6),
+            text_input("API key (optional, in-memory)", &app.translate_api_key)
+                .on_input(Message::TranslateApiKey)
+                .padding(4)
+                .size(12)
+                .width(FillLength),
+            button("Translate").on_press_maybe(
+                (has_entries && !app.translating && !app.running).then_some(Message::Translate)
+            ),
             text(&app.status).size(12),
             text(format!("{} image(s), {} result(s)", app.images.len(), total_results)).size(13),
             scrollable(Column::with_children(results_list).spacing(2))
