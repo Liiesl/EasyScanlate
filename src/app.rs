@@ -33,6 +33,9 @@ pub enum Message {
     TranslateLang(String),
     TranslateApiKey(String),
     TranslateFinished(Vec<(usize, EntryId, String)>, Result<Vec<String>, String>),
+    /// Left-click on an overlay entry in the main area; `Some((image, entry))`
+    /// selects it, `None` clears the selection.
+    EntryClicked(Option<(usize, EntryId)>),
     StyleBold(bool),
     StyleItalic(bool),
     StyleTextHex(String),
@@ -68,10 +71,14 @@ pub struct App {
     pub(crate) translate_model: String,
     pub(crate) translate_lang: String,
     pub(crate) translate_api_key: String,
-    /// Global text style applied to every overlay entry.
-    pub(crate) style: EntryStyle,
+    /// The currently selected overlay entry as `(image index, entry id)`;
+    /// the style panel edits exactly this entry and nothing else.
+    pub(crate) selected: Option<(usize, EntryId)>,
+    /// Staged style of the selected entry. Mirrors the entry's stored style
+    /// on selection; mutations are written back to that entry only.
+    pub(crate) style_working: EntryStyle,
     /// Raw hex text of the styling inputs; kept as typed, only applied to
-    /// `style` while it parses.
+    /// `style_working` while it parses.
     pub(crate) style_text_hex: String,
     pub(crate) style_stroke_hex: String,
     pub(crate) style_bg_hex: String,
@@ -80,6 +87,7 @@ pub struct App {
 }
 impl App {
     fn new() -> Self {
+        let style = EntryStyle::default();
         Self {
             images: Vec::new(),
             engine: None,
@@ -96,14 +104,26 @@ impl App {
             translate_model: translation::MODELS[0].to_string(),
             translate_lang: translation::LANGUAGES[0].to_string(),
             translate_api_key: String::new(),
-            style: EntryStyle::default(),
-            style_text_hex: hex_to_string(EntryStyle::default().text_color),
-            style_stroke_hex: hex_to_string(EntryStyle::default().stroke_color),
-            style_bg_hex: hex_to_string(EntryStyle::default().bg_color),
-            style_stroke_width: EntryStyle::default().stroke_width.to_string(),
-            style_bg_radius: EntryStyle::default().bg_radius.to_string(),
+            selected: None,
+            style_working: style,
+            style_text_hex: hex_to_string(style.text_color),
+            style_stroke_hex: hex_to_string(style.stroke_color),
+            style_bg_hex: hex_to_string(style.bg_color),
+            style_stroke_width: style.stroke_width.to_string(),
+            style_bg_radius: style.bg_radius.to_string(),
         }
     }
+}
+
+/// Reseeds the style panel inputs from `style`, keeping raw strings in sync
+/// with the resolved values.
+fn seed_style_inputs(app: &mut App, style: EntryStyle) {
+    app.style_working = style;
+    app.style_text_hex = hex_to_string(style.text_color);
+    app.style_stroke_hex = hex_to_string(style.stroke_color);
+    app.style_bg_hex = hex_to_string(style.bg_color);
+    app.style_stroke_width = style.stroke_width.to_string();
+    app.style_bg_radius = style.bg_radius.to_string();
 }
 
 /// Formats an RGBA color as `#RRGGBBAA`.
@@ -491,46 +511,71 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.translate_api_key = key;
             Task::none()
         }
+        Message::EntryClicked(selection) => {
+            app.selected = selection.filter(|(index, id)| {
+                app.images
+                    .get(*index)
+                    .is_some_and(|image| image.project.ocr.get(*id).is_some())
+            });
+            if let Some((index, id)) = app.selected {
+                seed_style_inputs(app, app.images[index].project.entry_style(id));
+            }
+            Task::none()
+        }
         Message::StyleBold(bold) => {
-            app.style.bold = bold;
+            let Some((index, id)) = app.selected else { return Task::none() };
+            app.style_working.bold = bold;
+            app.images[index].project.set_entry_style(id, app.style_working);
             Task::none()
         }
         Message::StyleItalic(italic) => {
-            app.style.italic = italic;
+            let Some((index, id)) = app.selected else { return Task::none() };
+            app.style_working.italic = italic;
+            app.images[index].project.set_entry_style(id, app.style_working);
             Task::none()
         }
         Message::StyleTextHex(text) => {
+            let Some((index, id)) = app.selected else { return Task::none() };
             app.style_text_hex = text;
             if let Some(color) = parse_hex(&app.style_text_hex) {
-                app.style.text_color = color;
+                app.style_working.text_color = color;
+                app.images[index].project.set_entry_style(id, app.style_working);
             }
             Task::none()
         }
         Message::StyleStrokeHex(text) => {
+            let Some((index, id)) = app.selected else { return Task::none() };
             app.style_stroke_hex = text;
             if let Some(color) = parse_hex(&app.style_stroke_hex) {
-                app.style.stroke_color = color;
+                app.style_working.stroke_color = color;
+                app.images[index].project.set_entry_style(id, app.style_working);
             }
             Task::none()
         }
         Message::StyleBgHex(text) => {
+            let Some((index, id)) = app.selected else { return Task::none() };
             app.style_bg_hex = text;
             if let Some(color) = parse_hex(&app.style_bg_hex) {
-                app.style.bg_color = color;
+                app.style_working.bg_color = color;
+                app.images[index].project.set_entry_style(id, app.style_working);
             }
             Task::none()
         }
         Message::StyleStrokeWidth(text) => {
+            let Some((index, id)) = app.selected else { return Task::none() };
             app.style_stroke_width = text;
             if let Ok(width) = app.style_stroke_width.parse::<f32>() {
-                app.style.stroke_width = width.max(0.0);
+                app.style_working.stroke_width = width.max(0.0);
+                app.images[index].project.set_entry_style(id, app.style_working);
             }
             Task::none()
         }
         Message::StyleBgRadius(text) => {
+            let Some((index, id)) = app.selected else { return Task::none() };
             app.style_bg_radius = text;
             if let Ok(radius) = app.style_bg_radius.parse::<f32>() {
-                app.style.bg_radius = radius.max(0.0);
+                app.style_working.bg_radius = radius.max(0.0);
+                app.images[index].project.set_entry_style(id, app.style_working);
             }
             Task::none()
         }

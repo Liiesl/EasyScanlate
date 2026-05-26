@@ -22,7 +22,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
         let tiles: Vec<TileSpec<'_>> = app
             .images
             .iter()
-            .map(|image| TileSpec {
+            .enumerate()
+            .map(|(index, image)| TileSpec {
                 source_width: image.width as u32,
                 source_height: image.height as u32,
                 decode: &image.decode,
@@ -31,15 +32,18 @@ pub fn view(app: &App) -> Element<'_, Message> {
                     .ocr
                     .visible()
                     .map(|entry| OverlayEntry {
+                        id: entry.id,
                         text: image.project.display_text(entry),
                         bounds: entry.quad.bounds(),
-                        style: app.style,
+                        style: image.project.entry_style(entry.id),
+                        selected: app.selected == Some((index, entry.id)),
                     })
                     .collect(),
             })
             .collect();
         TileView::new(tiles, app.font.unwrap_or(Font::DEFAULT))
             .on_visible_range(Message::TilesVisible)
+            .on_entry_clicked(Message::EntryClicked)
             .into()
     }
 }

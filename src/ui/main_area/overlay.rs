@@ -12,17 +12,24 @@ use iced::border::Radius;
 use iced::font::{Style as FontStyle, Weight as FontWeight};
 use iced::{alignment, Color, Font, Pixels, Point, Size};
 
-use crate::model::EntryStyle;
+use crate::model::{EntryId, EntryStyle};
 
 /// View-model entry: what the overlay draws, resolved from the model with the
-/// selected profile's translation and style already applied.
+/// selected profile's translation and the per-entry style already applied.
 #[derive(Clone)]
 pub struct OverlayEntry<'a> {
+    pub id: EntryId,
     pub text: &'a str,
     /// `[min_x, min_y, max_x, max_y]` in image pixels.
     pub bounds: [f32; 4],
     pub style: EntryStyle,
+    /// True when this entry is the one picked in the style panel.
+    pub selected: bool,
 }
+
+/// Outline drawn around the selected entry.
+const SELECTED_COLOR: Color = Color::from_rgba8(92, 190, 255, 1.0);
+const SELECTED_WIDTH: f32 = 2.0;
 
 fn to_color(rgba: [u8; 4]) -> Color {
     Color::from_rgba8(rgba[0], rgba[1], rgba[2], rgba[3] as f32 / 255.0)
@@ -234,6 +241,18 @@ pub fn draw_entries<F>(
             ),
             Fill::from(to_color(entry.style.bg_color)),
         );
+        if entry.selected {
+            frame.stroke(
+                &Path::rounded_rectangle(
+                    position,
+                    Size::new(width, height),
+                    Radius::from(entry.style.bg_radius * scale),
+                ),
+                Stroke::default()
+                    .with_color(SELECTED_COLOR)
+                    .with_width(SELECTED_WIDTH),
+            );
+        }
         let wrap_width = width.max(8.0);
         let size = fit_font_size(
             entry.text,

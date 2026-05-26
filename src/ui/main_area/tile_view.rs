@@ -21,6 +21,7 @@ use iced::{Color, Element, Event, Font, Length, Pixels, Point, Rectangle, Size, 
 
 use super::decode::PageDecode;
 use super::overlay::{self, OverlayEntry};
+use crate::model::EntryId;
 
 const SCROLL_LINE_HEIGHT: f32 = 180.0;
 const SCROLLBAR_WIDTH: f32 = 8.0;
@@ -44,24 +45,28 @@ pub struct TileSpec<'a> {
 
 /// The tile viewer widget. Scroll state lives in the widget tree and survives
 /// rebuilds; decoded pages are owned by the app (see [`PageDecode`]).
-pub struct TileView<'a, Message, F = fn(Range<usize>) -> Message>
+pub struct TileView<'a, Message, F = fn(Range<usize>) -> Message, G = fn(Option<(usize, EntryId)>) -> Message>
 where
     F: Fn(Range<usize>) -> Message,
+    G: Fn(Option<(usize, EntryId)>) -> Message,
 {
     tiles: Vec<TileSpec<'a>>,
     font: Font,
     on_visible_range: Option<F>,
+    on_entry_clicked: Option<G>,
 }
 
-impl<'a, Message, F> TileView<'a, Message, F>
+impl<'a, Message, F, G> TileView<'a, Message, F, G>
 where
     F: Fn(Range<usize>) -> Message,
+    G: Fn(Option<(usize, EntryId)>) -> Message,
 {
     pub fn new(tiles: Vec<TileSpec<'a>>, font: Font) -> Self {
         Self {
             tiles,
             font,
             on_visible_range: None,
+            on_entry_clicked: None,
         }
     }
 
@@ -69,6 +74,13 @@ where
     /// first frame and on window resizes.
     pub fn on_visible_range(mut self, f: F) -> Self {
         self.on_visible_range = Some(f);
+        self
+    }
+
+    /// Called whenever an overlay entry is clicked (`Some((tile, entry))`) or
+    /// the page is clicked outside every entry (`None`).
+    pub fn on_entry_clicked(mut self, f: G) -> Self {
+        self.on_entry_clicked = Some(f);
         self
     }
 }
@@ -178,6 +190,39 @@ fn local_point(position: Point, bounds: Rectangle) -> Point {
     Point::new(position.x - bounds.position().x, position.y - bounds.position().y)
 }
 
+/// The topmost overlay entry whose box contains `local` (viewport-relative).
+///
+/// Tiles below the fold are skipped via the scroll offset; within a tile the
+/// scale is the frame's width over the image width. Entries in later tiles
+/// and later positions are drawn on top, so the last hit wins.
+fn hit_entry(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Option<(usize, EntryId)> {
+    let (layout, _) = tile_layout(tiles, state.width);
+    let content_y = local.y + state.offset;
+    let mut hit = None;
+    for (index, tile) in tiles.iter().enumerate() {
+        let (y, height) = layout[index];
+        if content_y < y || content_y >= y + height {
+            continue;
+        }
+        let scale = if tile.source_width > 0 {
+            state.width / tile.source_width as f32
+        } else {
+            0.0
+        };
+        for entry in &tile.overlays {
+            let [min_x, min_y, max_x, max_y] = entry.bounds;
+            let rect = Rectangle::new(
+                Point::new(min_x * scale, y + min_y * scale),
+                Size::new((max_x - min_x) * scale, (max_y - min_y) * scale),
+            );
+            if rect.contains(local) {
+                hit = Some((index, entry.id));
+            }
+        }
+    }
+    hit
+}
+
 fn track_rect(bounds: Rectangle) -> Rectangle {
     Rectangle::new(
         Point::new(
@@ -252,9 +297,11 @@ where
     }
 }
 
-impl<'a, Message, F, Theme, Renderer> Widget<Message, Theme, Renderer> for TileView<'a, Message, F>
+impl<'a, Message, F, G, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for TileView<'a, Message, F, G>
 where
     F: Fn(Range<usize>) -> Message,
+    G: Fn(Option<(usize, EntryId)>) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
     fn size(&self) -> Size<Length> {
@@ -421,6 +468,9 @@ where
                             grab_offset: local.y - thumb_rect(bounds, state).y,
                         };
                         shell.capture_event();
+                    } else if let Some(callback) = self.on_entry_clicked.as_ref() {
+                        shell.publish(callback(hit_entry(&self.tiles, state, local)));
+                        shell.capture_event();
                     }
                 }
             }
@@ -482,13 +532,14 @@ where
     }
 }
 
-impl<'a, Message: 'a, F: 'a, Theme, Renderer> From<TileView<'a, Message, F>>
+impl<'a, Message: 'a, F: 'a, G: 'a, Theme, Renderer> From<TileView<'a, Message, F, G>>
     for Element<'a, Message, Theme, Renderer>
 where
     F: Fn(Range<usize>) -> Message,
+    G: Fn(Option<(usize, EntryId)>) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
-    fn from(view: TileView<'a, Message, F>) -> Self {
+    fn from(view: TileView<'a, Message, F, G>) -> Self {
         Self::new(view)
     }
 }

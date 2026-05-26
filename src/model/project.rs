@@ -1,11 +1,16 @@
+use std::collections::HashMap;
+
 use super::{EntryId, EntryStyle, Extras, NewEntry, OcrEntry, OcrResult, Profiles};
 
 /// The whole document model for one image: immutable OCR results, freely
-/// editable profiles, and cross-profile extras.
+/// editable profiles, cross-profile entry styles, and extras.
 #[derive(Debug)]
 pub struct Project {
     pub ocr: OcrResult,
     pub profiles: Profiles,
+    /// Per-OCR-result styles shared by every profile. An entry without an
+    /// entry falls back to `EntryStyle::default()`.
+    styles: HashMap<EntryId, EntryStyle>,
     /// Reserved for upcoming features (notes, inpainting, geometries).
     #[allow(dead_code)]
     pub extras: Extras,
@@ -16,6 +21,7 @@ impl Project {
         Self {
             ocr: OcrResult::new(),
             profiles: Profiles::default(),
+            styles: HashMap::new(),
             extras: Extras::default(),
         }
     }
@@ -31,9 +37,19 @@ impl Project {
         self.profiles.selected().translation_of(entry.id).unwrap_or(&entry.text)
     }
 
-    /// The overlay/export style for an entry under the selected profile.
+    /// The overlay/export style for an entry, identical across all profiles.
     pub fn entry_style(&self, entry_id: EntryId) -> EntryStyle {
-        self.profiles.selected().style_of(entry_id)
+        self.styles.get(&entry_id).copied().unwrap_or_default()
+    }
+
+    /// Set the overlay/export style for an entry. Setting the default style
+    /// is equivalent to clearing the override.
+    pub fn set_entry_style(&mut self, entry_id: EntryId, style: EntryStyle) {
+        if style == EntryStyle::default() {
+            self.styles.remove(&entry_id);
+        } else {
+            self.styles.insert(entry_id, style);
+        }
     }
 }
 
@@ -67,11 +83,19 @@ mod tests {
     }
 
     #[test]
-    fn entry_style_comes_from_selected_profile() {
+    fn entry_style_is_shared_across_profiles() {
         let mut project = Project::new();
         let style = EntryStyle { font_size: 30.0, ..EntryStyle::default() };
-        project.profiles.selected_mut().set_style(EntryId(7), style);
+
+        project.set_entry_style(EntryId(7), style);
         assert_eq!(project.entry_style(EntryId(7)), style);
         assert_eq!(project.entry_style(EntryId(8)), EntryStyle::default());
+
+        let jp = project.profiles.add("JP");
+        project.profiles.select(jp);
+        assert_eq!(project.entry_style(EntryId(7)), style, "style must survive profile switch");
+
+        project.set_entry_style(EntryId(7), EntryStyle::default());
+        assert_eq!(project.entry_style(EntryId(7)), EntryStyle::default());
     }
 }
