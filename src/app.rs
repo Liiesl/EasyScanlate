@@ -1,7 +1,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use iced::widget::{container, row, text};
+use iced::widget::row;
 use iced::{Element, Font, Length, Task};
 
 use rapidocr_core::OcrCancellationToken;
@@ -9,10 +9,8 @@ use rapidocr_core::OcrCancellationToken;
 use crate::model::{EntryId, NewEntry, ProfileId, Project};
 use crate::ocr::{self, Engine};
 use crate::translation;
-use crate::ui::decode::{decode_page, DecodedPage, PageDecode, MAX_DECODE_EDGE};
-use crate::ui::overlay::OverlayEntry;
-use crate::ui::tile_view::{TileSpec, TileView};
-use crate::ui::{side_panel, KOREAN_FONT_NAME, KOREAN_FONT_PATH};
+use crate::ui::main_area::decode::{decode_page, DecodedPage, PageDecode, MAX_DECODE_EDGE};
+use crate::ui::{main_area, panel, KOREAN_FONT_NAME, KOREAN_FONT_PATH};
 
 const DECODE_PRELOAD: usize = 2;
 
@@ -42,7 +40,7 @@ pub(crate) struct LoadedImage {
     pub(crate) height: f32,
     pub(crate) path: String,
     pub(crate) project: Project,
-    decode: PageDecode,
+    pub(crate) decode: PageDecode,
 }
 
 /// Session state: one loaded image plus everything iced/OCR related that the
@@ -52,7 +50,7 @@ pub struct App {
     engine: Option<Engine>,
     cancel: Option<OcrCancellationToken>,
     pub(crate) running: bool,
-    font: Option<Font>,
+    pub(crate) font: Option<Font>,
     pub(crate) status: String,
     pending: usize,
     ocr_total: usize,
@@ -431,37 +429,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    let left: Element<'_, Message> = if app.images.is_empty() {
-        container(text("No images loaded. Click \"Open Images\" to pick some."))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
-    } else {
-        let tiles: Vec<TileSpec<'_>> = app
-            .images
-            .iter()
-            .map(|image| TileSpec {
-                source_width: image.width as u32,
-                source_height: image.height as u32,
-                decode: &image.decode,
-                overlays: image
-                    .project
-                    .ocr
-                    .visible()
-                    .map(|entry| OverlayEntry {
-                        text: image.project.display_text(entry),
-                        bounds: entry.quad.bounds(),
-                        style: image.project.entry_style(entry.id),
-                    })
-                    .collect(),
-            })
-            .collect();
-        TileView::new(tiles, app.font.unwrap_or(Font::DEFAULT))
-            .on_visible_range(Message::TilesVisible)
-            .into()
-    };
-
-    row![left, side_panel::view(app)]
+    row![main_area::view(app), panel::view(app)]
         .spacing(2)
         .width(Length::Fill)
         .height(Length::Fill)
