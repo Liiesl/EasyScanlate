@@ -224,13 +224,6 @@ where
     F: geometry::frame::Backend,
 {
     match tile.decode {
-        PageDecode::Ready(decoded) => {
-            frame.draw_image(
-                Rectangle::with_size(frame.size()),
-                geometry::Image::new(decoded.handle.clone()),
-            );
-            overlay::draw_entries(frame, &tile.overlays, font, tile.source_width as f32);
-        }
         PageDecode::Failed => {
             frame.fill_rectangle(Point::ORIGIN, frame.size(), Fill::from(FAILED_BG));
             frame.fill_text(Text {
@@ -253,6 +246,9 @@ where
                 ..Text::default()
             });
         }
+        // `PageDecode::Ready` images are drawn by the caller in the base
+        // layer; overlays go into their own layer on top.
+        PageDecode::Ready(_) => {}
     }
 }
 
@@ -312,6 +308,7 @@ where
                 let bottom = state.offset + visible_bounds.height;
                 let content_w = content_width(bounds.width);
                 let (layout, _) = tile_layout(&self.tiles, content_w);
+                let mut overlays: Vec<(usize, Rectangle)> = Vec::new();
                 for (index, tile) in self.tiles.iter().enumerate() {
                     let (y, height) = layout[index];
                     if y + height <= top || y >= bottom {
@@ -321,8 +318,37 @@ where
                         Rectangle::new(Point::new(0.0, y), Size::new(content_w, height));
                     let mut frame = renderer.new_frame(tile_bounds);
                     frame.translate(Vector::new(tile_bounds.x, tile_bounds.y));
-                    draw_tile(&mut frame, tile, self.font);
+                    match tile.decode {
+                        PageDecode::Ready(decoded) => {
+                            frame.draw_image(
+                                Rectangle::with_size(frame.size()),
+                                geometry::Image::new(decoded.handle.clone()),
+                            );
+                            overlays.push((index, tile_bounds));
+                        }
+                        _ => draw_tile(&mut frame, tile, self.font),
+                    }
                     renderer.draw_geometry(frame.into_geometry());
+                }
+                // Overlays cannot share a layer with the images: every backend
+                // paints meshes (backgrounds, strokes) below raster images and
+                // only layers on top of them. A dedicated layer keeps the
+                // entries above their page.
+                if !overlays.is_empty() {
+                    renderer.with_layer(visible_bounds, |renderer| {
+                        for (index, tile_bounds) in overlays {
+                            let mut overlay_frame = renderer.new_frame(tile_bounds);
+                            overlay_frame
+                                .translate(Vector::new(tile_bounds.x, tile_bounds.y));
+                            overlay::draw_entries(
+                                &mut overlay_frame,
+                                &self.tiles[index].overlays,
+                                self.font,
+                                self.tiles[index].source_width as f32,
+                            );
+                            renderer.draw_geometry(overlay_frame.into_geometry());
+                        }
+                    });
                 }
             });
         });

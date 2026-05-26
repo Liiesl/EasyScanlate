@@ -6,7 +6,7 @@ use iced::{Element, Font, Length, Task};
 
 use rapidocr_core::OcrCancellationToken;
 
-use crate::model::{EntryId, NewEntry, ProfileId, Project};
+use crate::model::{EntryId, EntryStyle, NewEntry, ProfileId, Project};
 use crate::ocr::{self, Engine};
 use crate::translation;
 use crate::ui::main_area::decode::{decode_page, DecodedPage, PageDecode, MAX_DECODE_EDGE};
@@ -33,6 +33,13 @@ pub enum Message {
     TranslateLang(String),
     TranslateApiKey(String),
     TranslateFinished(Vec<(usize, EntryId, String)>, Result<Vec<String>, String>),
+    StyleBold(bool),
+    StyleItalic(bool),
+    StyleTextHex(String),
+    StyleStrokeHex(String),
+    StyleStrokeWidth(String),
+    StyleBgHex(String),
+    StyleBgRadius(String),
 }
 
 pub(crate) struct LoadedImage {
@@ -61,6 +68,15 @@ pub struct App {
     pub(crate) translate_model: String,
     pub(crate) translate_lang: String,
     pub(crate) translate_api_key: String,
+    /// Global text style applied to every overlay entry.
+    pub(crate) style: EntryStyle,
+    /// Raw hex text of the styling inputs; kept as typed, only applied to
+    /// `style` while it parses.
+    pub(crate) style_text_hex: String,
+    pub(crate) style_stroke_hex: String,
+    pub(crate) style_bg_hex: String,
+    pub(crate) style_stroke_width: String,
+    pub(crate) style_bg_radius: String,
 }
 impl App {
     fn new() -> Self {
@@ -80,7 +96,96 @@ impl App {
             translate_model: translation::MODELS[0].to_string(),
             translate_lang: translation::LANGUAGES[0].to_string(),
             translate_api_key: String::new(),
+            style: EntryStyle::default(),
+            style_text_hex: hex_to_string(EntryStyle::default().text_color),
+            style_stroke_hex: hex_to_string(EntryStyle::default().stroke_color),
+            style_bg_hex: hex_to_string(EntryStyle::default().bg_color),
+            style_stroke_width: EntryStyle::default().stroke_width.to_string(),
+            style_bg_radius: EntryStyle::default().bg_radius.to_string(),
         }
+    }
+}
+
+/// Formats an RGBA color as `#RRGGBBAA`.
+fn hex_to_string(rgba: [u8; 4]) -> String {
+    format!("#{:02X}{:02X}{:02X}{:02X}", rgba[0], rgba[1], rgba[2], rgba[3])
+}
+
+/// Parses `#RGB`, `#RGBA`, `#RRGGBB` or `#RRGGBBAA` into an RGBA color.
+/// Shorthand forms expand the alpha to `255`.
+pub(crate) fn parse_hex(text: &str) -> Option<[u8; 4]> {
+    let digits: Vec<u8> = text
+        .strip_prefix('#')
+        .and_then(|rest| {
+            (rest.len() == 3 || rest.len() == 4 || rest.len() == 6 || rest.len() == 8)
+                .then_some(rest)
+        })?
+        .bytes()
+        .map(|b| match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(b - b'a' + 10),
+            b'A'..=b'F' => Some(b - b'A' + 10),
+            _ => None,
+        })
+        .collect::<Option<Vec<u8>>>()?;
+    let (short, chars) = match digits.len() {
+        3 | 4 => (true, digits.len()),
+        6 | 8 => (false, digits.len() / 2),
+        _ => return None,
+    };
+    let mut out = [0u8; 4];
+    for i in 0..4 {
+        let value = if i < chars {
+            if short {
+                digits[i] * 17
+            } else {
+                digits[i * 2] * 16 + digits[i * 2 + 1]
+            }
+        } else {
+            255
+        };
+        out[i] = value;
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_round_trips() {
+        for color in [
+            [0, 0, 0, 255],
+            [255, 230, 90, 255],
+            [20, 20, 31, 140],
+        ] {
+            assert_eq!(parse_hex(&hex_to_string(color)), Some(color));
+        }
+    }
+
+    #[test]
+    fn hex_parses_shorthand_with_alpha_default() {
+        assert_eq!(parse_hex("#FFF"), Some([255, 255, 255, 255]));
+        assert_eq!(parse_hex("#fff0"), Some([255, 255, 255, 0]));
+        assert_eq!(parse_hex("#FFE65A"), Some([255, 230, 90, 255]));
+    }
+
+    #[test]
+    fn hex_rejects_malformed_input() {
+        for bad in ["", "#", "#12", "#GGG", "#12345", "FFE65A", "red", "#123456789"] {
+            assert_eq!(parse_hex(bad), None, "expected {bad:?} to be rejected");
+        }
+    }
+
+    #[test]
+    fn default_style_round_trips_all_fields() {
+        let style = EntryStyle::default();
+        assert_eq!(style.bold, false);
+        assert_eq!(style.italic, false);
+        assert_eq!(style.stroke_color, [0, 0, 0, 255]);
+        assert_eq!(style.stroke_width, 0.0);
+        assert_eq!(style.bg_radius, 0.0);
     }
 }
 
@@ -384,6 +489,49 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         }
         Message::TranslateApiKey(key) => {
             app.translate_api_key = key;
+            Task::none()
+        }
+        Message::StyleBold(bold) => {
+            app.style.bold = bold;
+            Task::none()
+        }
+        Message::StyleItalic(italic) => {
+            app.style.italic = italic;
+            Task::none()
+        }
+        Message::StyleTextHex(text) => {
+            app.style_text_hex = text;
+            if let Some(color) = parse_hex(&app.style_text_hex) {
+                app.style.text_color = color;
+            }
+            Task::none()
+        }
+        Message::StyleStrokeHex(text) => {
+            app.style_stroke_hex = text;
+            if let Some(color) = parse_hex(&app.style_stroke_hex) {
+                app.style.stroke_color = color;
+            }
+            Task::none()
+        }
+        Message::StyleBgHex(text) => {
+            app.style_bg_hex = text;
+            if let Some(color) = parse_hex(&app.style_bg_hex) {
+                app.style.bg_color = color;
+            }
+            Task::none()
+        }
+        Message::StyleStrokeWidth(text) => {
+            app.style_stroke_width = text;
+            if let Ok(width) = app.style_stroke_width.parse::<f32>() {
+                app.style.stroke_width = width.max(0.0);
+            }
+            Task::none()
+        }
+        Message::StyleBgRadius(text) => {
+            app.style_bg_radius = text;
+            if let Ok(radius) = app.style_bg_radius.parse::<f32>() {
+                app.style.bg_radius = radius.max(0.0);
+            }
             Task::none()
         }
         Message::TranslateFinished(jobs, result) => {

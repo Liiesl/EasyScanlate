@@ -3,11 +3,13 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 
-use iced::advanced::graphics::geometry::{self, Fill, Text};
+use iced::advanced::graphics::geometry::{self, Fill, Path, Stroke, Text};
 use iced::advanced::text::{
     Alignment as TextAlignment, LineHeight, Paragraph as _, Shaping, Text as ParagraphText,
     Wrapping,
 };
+use iced::border::Radius;
+use iced::font::{Style as FontStyle, Weight as FontWeight};
 use iced::{alignment, Color, Font, Pixels, Point, Size};
 
 use crate::model::EntryStyle;
@@ -189,6 +191,23 @@ fn fit_font_size(text: &str, font: Font, bounds: Size) -> f32 {
     size
 }
 
+/// The base font with the entry's weight (bold) and style (italic) applied.
+fn styled_font(font: Font, style: &EntryStyle) -> Font {
+    Font {
+        weight: if style.bold {
+            FontWeight::Bold
+        } else {
+            FontWeight::Normal
+        },
+        style: if style.italic {
+            FontStyle::Italic
+        } else {
+            FontStyle::Normal
+        },
+        ..font
+    }
+}
+
 /// Draws one translucent box + label per entry on top of the image inside
 /// `frame`. Coordinates are image pixels, scaled to the frame's width. Each
 /// label's font size is auto-sized to fill its bounding box (growing or
@@ -207,22 +226,38 @@ pub fn draw_entries<F>(
         let width = (max_x - min_x).max(0.0) * scale;
         let height = (max_y - min_y).max(0.0) * scale;
         let position = Point::new(min_x * scale, min_y * scale);
-        frame.fill_rectangle(
-            position,
-            Size::new(width, height),
+        frame.fill(
+            &Path::rounded_rectangle(
+                position,
+                Size::new(width, height),
+                Radius::from(entry.style.bg_radius * scale),
+            ),
             Fill::from(to_color(entry.style.bg_color)),
         );
         let wrap_width = width.max(8.0);
-        let size = fit_font_size(entry.text, font, Size::new(wrap_width, height));
-        frame.fill_text(Text {
+        let size = fit_font_size(
+            entry.text,
+            styled_font(font, &entry.style),
+            Size::new(wrap_width, height),
+        );
+        let text = Text {
             content: entry.text.to_string(),
             position,
             max_width: wrap_width,
             size: Pixels(size),
             color: to_color(entry.style.text_color),
-            font,
+            font: styled_font(font, &entry.style),
             ..Text::default()
-        });
+        };
+        if entry.style.stroke_width > 0.0 {
+            frame.stroke_text(
+                text.clone(),
+                Stroke::default()
+                    .with_color(to_color(entry.style.stroke_color))
+                    .with_width(entry.style.stroke_width * scale),
+            );
+        }
+        frame.fill_text(text);
     }
 }
 

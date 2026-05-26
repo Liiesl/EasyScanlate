@@ -33,7 +33,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
                     .map(|entry| OverlayEntry {
                         text: image.project.display_text(entry),
                         bounds: entry.quad.bounds(),
-                        style: image.project.entry_style(entry.id),
+                        style: app.style,
                     })
                     .collect(),
             })

@@ -21,7 +21,7 @@ pub fn file_name(path: &str) -> &str {
 
 pub fn view(app: &App) -> Element<'_, Message> {
     container(
-        column![actions::view(app), styling::view(), results::view(app)]
+        column![actions::view(app), styling::view(app), results::view(app)]
             .spacing(8)
             .height(FillLength),
     )
