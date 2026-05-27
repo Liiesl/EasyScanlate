@@ -5,7 +5,8 @@ pub mod decode;
 pub mod overlay;
 pub mod tile_view;
 
-use iced::widget::{container, space, text, text_input};
+use iced::keyboard::{key, Key};
+use iced::widget::{container, space, text, text_editor};
 use iced::{Background, Border, Color, Element, Font, Length, Size};
 
 use crate::app::{App, Message};
@@ -16,22 +17,27 @@ use crate::ui::main_area::tile_view::{TileSpec, TileView};
 /// Widget id of the floating inline editor; must match the app's focus id.
 const EDIT_INPUT_ID: &'static str = "overlay-editor";
 
-/// The floating `TextInput` used to edit a double-clicked overlay entry,
-/// positioned (and clipped) exactly over the entry's box.
+/// The floating multi-line `TextEditor` used to edit a double-clicked overlay
+/// entry, positioned (and clipped) exactly over the entry's box.
 ///
 /// The tile viewer publishes the entry's current viewport rect
-/// (`Message::EditRect`), which the app stores in `editing_rect`. The input
-/// is wrapped in a [`iced::widget::Pin`] at the rect's coordinates; the
-/// input's size and line height match the overlay's fitted text, and its
-/// top-left is pinned to the top-left of the overlay's vertically-centered
-/// wrapped text block, so the editable first line and its selection highlight
-/// sit exactly where the static overlay draws them. `Pin` gives the input
-/// real layout coordinates (unlike `Float`, whose overlay translation leaves
-/// event positions in window space and breaks click-drag hit-testing). The
-/// input is styled from the entry's style (text color, background, radius) so
-/// it looks like the static overlay.
+/// (`Message::EditRect`), which the app stores in `editing_rect`. The editor
+/// is wrapped in a [`iced::widget::Pin`] at the rect's coordinates; its size
+/// and line height match the overlay's fitted text block, and its top-left is
+/// pinned to the top-left of the overlay's vertically-centered wrapped text
+/// block, so the editable text sits exactly where the static overlay draws
+/// it. `Pin` gives the editor real layout coordinates (unlike `Float`, whose
+/// overlay translation leaves event positions in window space and breaks
+/// click-drag hit-testing). The editor is styled from the entry's style (text
+/// color, background, radius) so it looks like the static overlay.
+///
+/// Enter inserts a newline (the editor is multi-line); Escape or Ctrl+Enter
+/// commit and exit.
 fn edit_overlay(app: &App) -> Element<'_, Message> {
     let (Some((index, id)), Some(rect)) = (app.editing, app.editing_rect) else {
+        return space().into();
+    };
+    let Some(content) = app.edit_content.as_ref() else {
         return space().into();
     };
     let (text, style) = match app
@@ -50,29 +56,37 @@ fn edit_overlay(app: &App) -> Element<'_, Message> {
     let (size, fitted_height) = overlay::fit_font_metrics(&text, font, Size::new(wrap_width, rect.height));
     let size = size.max(8.0);
     let text_color = to_color(style.text_color);
-    let input = text_input::TextInput::new("", &text)
+    let editor = text_editor::TextEditor::new(content)
         .id(EDIT_INPUT_ID)
         .font(font)
         .size(size)
         .line_height(1.2)
         .width(rect.width)
+        .height(Length::Fixed(fitted_height))
         .padding(0)
-        .on_input(Message::EditChanged)
-        .on_submit(Message::EditSubmit)
-        .style(move |_theme, _status| text_input::Style {
+        .on_action(Message::EditAction)
+        .key_binding(|press| match press.modified_key.as_ref() {
+            Key::Named(key::Named::Escape) => {
+                Some(text_editor::Binding::Custom(Message::EditSubmit))
+            }
+            Key::Named(key::Named::Enter) if press.modifiers.command() => {
+                Some(text_editor::Binding::Custom(Message::EditSubmit))
+            }
+            _ => text_editor::Binding::from_key_press(press),
+        })
+        .style(move |_theme, _status| text_editor::Style {
             background: Background::Color(Color::TRANSPARENT),
             border: Border::default().rounded(0.0),
-            icon: Color::TRANSPARENT,
             placeholder: text_color,
             value: text_color,
             selection: Color::from_rgba8(92, 190, 255, 0.35),
         });
-    // The input is one line tall while the overlay wraps the text block and
-    // centers it in the box; anchor the input's top-left to the wrapped
-    // block's top-left so the first line (and the selection highlight) sits
-    // exactly where the static overlay draws it.
+    // The editor is sized to the wrapped text block and centered in the box;
+    // anchor its top-left to the wrapped block's top-left so the first line
+    // (and the selection highlight) sits exactly where the static overlay
+    // draws it.
     let block_top = rect.y + (rect.height - fitted_height).max(0.0) / 2.0;
-    iced::widget::Pin::new(input)
+    iced::widget::Pin::new(editor)
         .x(rect.x)
         .y(block_top)
         .into()

@@ -1,7 +1,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use iced::widget::row;
+use iced::widget::{row, text_editor};
 use iced::{Element, Font, Length, Rectangle, Task};
 
 use rapidocr_core::OcrCancellationToken;
@@ -41,11 +41,12 @@ pub enum Message {
     EntryClicked(Option<(usize, EntryId)>),
     /// Double-click on an overlay entry: starts an inline text edit for it.
     EntryDoubleClicked((usize, EntryId)),
-    /// The inline editor's text changed, live on every keystroke.
-    EditChanged(String),
+    /// The inline editor's content changed, live on every action.
+    EditAction(text_editor::Action),
     /// Live viewport rect of the edited entry, published by the tile viewer.
     EditRect(Rectangle),
-    /// Enter in the inline editor: commits (already applied live) and exits.
+    /// Escape or Ctrl+Enter in the inline editor: commits (already applied
+    /// live) and exits.
     EditSubmit,
     StyleBold(bool),
     StyleItalic(bool),
@@ -88,6 +89,9 @@ pub struct App {
     /// The entry being edited inline as `(image index, entry id)`; `None`
     /// when no inline edit is active.
     pub(crate) editing: Option<(usize, EntryId)>,
+    /// The multi-line editor buffer backing the inline edit; always `Some`
+    /// while `editing` is. Owned here so the widget can mutate it in place.
+    pub(crate) edit_content: Option<text_editor::Content>,
     /// True once a keystroke actually changed the edited text. The fork off
     /// the original profile happens exactly once, on this first change: the
     /// double-click itself never forks anything.
@@ -126,6 +130,7 @@ impl App {
             translate_api_key: String::new(),
             selected: None,
             editing: None,
+            edit_content: None,
             editing_dirty: false,
             editing_rect: None,
             style_working: style,
@@ -253,12 +258,45 @@ mod tests {
         (app, id)
     }
 
+    /// Starts an inline edit exactly like a double-click on the entry:
+    /// selects it, seeds the editor buffer with its displayed text and
+    /// selects it all so the first keystroke replaces it.
+    fn start_edit(app: &mut App, id: EntryId) {
+        app.selected = Some((0, id));
+        app.editing = Some((0, id));
+        app.editing_dirty = false;
+        let text = app.images[0]
+            .project
+            .display_text(app.images[0].project.ocr.get(id).unwrap())
+            .to_string();
+        let mut content = text_editor::Content::with_text(&text);
+        content.perform(text_editor::Action::SelectAll);
+        app.edit_content = Some(content);
+    }
+
+    /// Types `text` into the inline editor one character at a time, the way
+    /// the editor widget reports it.
+    fn type_text(app: &mut App, text: &str) {
+        for c in text.chars() {
+            let _ = update(
+                app,
+                Message::EditAction(text_editor::Action::Edit(
+                    text_editor::Edit::Insert(c),
+                )),
+            );
+        }
+    }
+
+    fn edit_action(app: &mut App, action: text_editor::Action) {
+        let _ = update(app, Message::EditAction(action));
+    }
+
     #[test]
     fn first_keystroke_forks_off_the_original_profile() {
         let (mut app, id) = app_with_entry();
-        app.editing = Some((0, id));
+        start_edit(&mut app, id);
 
-        let _ = update(&mut app, Message::EditChanged("안녕하세요".into()));
+        type_text(&mut app, "안녕하세요");
 
         let project = &app.images[0].project;
         assert_eq!(project.profiles.len(), 2);
@@ -272,11 +310,9 @@ mod tests {
     #[test]
     fn later_keystrokes_stay_on_the_forked_profile() {
         let (mut app, id) = app_with_entry();
-        app.editing = Some((0, id));
+        start_edit(&mut app, id);
 
-        let _ = update(&mut app, Message::EditChanged("a".into()));
-        let _ = update(&mut app, Message::EditChanged("ab".into()));
-        let _ = update(&mut app, Message::EditChanged("abc".into()));
+        type_text(&mut app, "abc");
 
         let project = &app.images[0].project;
         assert_eq!(project.profiles.len(), 2, "fork must happen exactly once");
@@ -295,9 +331,9 @@ mod tests {
             .set_translation(id, Some("Hello".into()));
         let jp = app.images[0].project.profiles.add("JP");
         app.images[0].project.profiles.select(jp);
-        app.editing = Some((0, id));
+        start_edit(&mut app, id);
 
-        let _ = update(&mut app, Message::EditChanged("Hi".into()));
+        type_text(&mut app, "Hi");
 
         let project = &app.images[0].project;
         assert_eq!(project.profiles.len(), 2, "no fork on non-original profiles");
@@ -312,6 +348,38 @@ mod tests {
         let _ = update(&mut app, Message::EntryDoubleClicked((0, id)));
         assert_eq!(app.images[0].project.profiles.len(), 1);
         assert_eq!(app.editing, Some((0, id)));
+        assert!(app.edit_content.is_some(), "double-click must seed the editor");
+    }
+
+    #[test]
+    fn enter_inserts_a_newline() {
+        let (mut app, id) = app_with_entry();
+        start_edit(&mut app, id);
+
+        edit_action(&mut app, text_editor::Action::Edit(text_editor::Edit::Enter));
+
+        let entry = app.images[0].project.ocr.get(id).unwrap();
+        assert_eq!(
+            app.images[0].project.display_text(entry),
+            "\n",
+            "the selected text is replaced by the newline"
+        );
+        let text = app.edit_content.as_ref().unwrap().text();
+        assert_eq!(text, "\n");
+    }
+
+    #[test]
+    fn submit_clears_the_editing_state() {
+        let (mut app, id) = app_with_entry();
+        start_edit(&mut app, id);
+        type_text(&mut app, "hi");
+
+        let _ = update(&mut app, Message::EditSubmit);
+
+        assert_eq!(app.editing, None);
+        assert!(app.edit_content.is_none());
+        let entry = app.images[0].project.ocr.get(id).unwrap();
+        assert_eq!(app.images[0].project.display_text(entry), "hi");
     }
 }
 
@@ -619,6 +687,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         }
         Message::EntryClicked(selection) => {
             app.editing = None;
+            app.edit_content = None;
             app.editing_dirty = false;
             app.editing_rect = None;
             app.selected = selection.filter(|(index, id)| {
@@ -644,13 +713,18 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.editing = Some((index, id));
             app.editing_dirty = false;
             app.editing_rect = None;
+            let mut content = text_editor::Content::with_text(&text);
+            content.perform(text_editor::Action::SelectAll);
+            app.edit_content = Some(content);
             app.status = format!("Editing \"{text}\" in the overlay.");
-            Task::batch([
-                iced::widget::operation::focus(EDIT_INPUT_ID),
-                iced::widget::operation::select_range(EDIT_INPUT_ID, usize::MAX, 0),
-            ])
+            Task::batch([iced::widget::operation::focus(EDIT_INPUT_ID)])
         }
-        Message::EditChanged(text) => {
+        Message::EditAction(action) => {
+            let Some(content) = app.edit_content.as_mut() else {
+                return Task::none();
+            };
+            content.perform(action);
+            let text = content.text();
             let Some((index, id)) = app.editing else {
                 return Task::none();
             };
@@ -681,6 +755,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         }
         Message::EditSubmit => {
             app.editing = None;
+            app.edit_content = None;
             app.editing_dirty = false;
             app.editing_rect = None;
             Task::none()
