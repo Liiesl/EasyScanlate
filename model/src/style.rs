@@ -3,7 +3,7 @@
 /// Stored as a delta inside a [`Profile`]; `Default` is the fallback when the
 /// profile has no delta for an entry.
 ///
-/// [`Profile`]: crate::model::Profile
+/// [`Profile`]: crate::Profile
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EntryStyle {
     pub font_size: f32,

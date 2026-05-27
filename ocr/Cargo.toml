@@ -1,0 +1,8 @@
+[package]
+name = "scanlateit-ocr"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+scanlateit-model = { path = "../model" }
+rapidocr-core = { version = "0.2.2", path = "../rapidocr-core", default-features = false }

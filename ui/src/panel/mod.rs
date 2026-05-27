@@ -10,7 +10,8 @@ pub mod styling;
 use iced::widget::{column, container};
 use iced::{Color, Element, Fill as FillLength};
 
-use crate::app::{App, Message};
+use crate::event::UiEvent;
+use crate::state::UiState;
 
 pub const PANEL_BG: Color = Color::from_rgb8(34, 36, 44);
 pub const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);
@@ -19,9 +20,9 @@ pub fn file_name(path: &str) -> &str {
     path.rsplit(['\\', '/']).next().unwrap_or(path)
 }
 
-pub fn view(app: &App) -> Element<'_, Message> {
+pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     container(
-        column![actions::view(app), styling::view(app), results::view(app)]
+        column![actions::view(state), styling::view(state), results::view(state)]
             .spacing(8)
             .height(FillLength),
     )

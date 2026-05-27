@@ -89,13 +89,13 @@ impl Default for Project {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Quad;
+    use crate::Quad;
 
     #[test]
     fn display_text_prefers_selected_profile_translation() {
         let mut project = Project::new();
         let id = project.ocr.append(NewEntry {
-            source: crate::model::EntrySource::AutoOcr,
+            source: crate::EntrySource::AutoOcr,
             text: "안녕".to_string(),
             score: 0.9,
             quad: Quad {
@@ -130,7 +130,7 @@ mod tests {
     fn view_bounds_fall_back_to_quad_then_override_then_reset() {
         let mut project = Project::new();
         let id = project.ocr.append(NewEntry {
-            source: crate::model::EntrySource::AutoOcr,
+            source: crate::EntrySource::AutoOcr,
             text: "hi".to_string(),
             score: 0.9,
             quad: Quad {
@@ -142,6 +142,7 @@ mod tests {
         assert_eq!(project.view_bounds(entry), [0.0, 0.0, 10.0, 10.0]);
 
         project.set_view_bounds(id, [20.0, 30.0, 60.0, 45.0]);
+        let entry = project.ocr.get(id).unwrap();
         assert_eq!(project.view_bounds(entry), [20.0, 30.0, 60.0, 45.0]);
         assert_eq!(
             entry.quad.bounds(),
@@ -150,6 +151,7 @@ mod tests {
         );
 
         project.reset_view_bounds(id);
+        let entry = project.ocr.get(id).unwrap();
         assert_eq!(project.view_bounds(entry), [0.0, 0.0, 10.0, 10.0]);
     }
 
@@ -157,16 +159,17 @@ mod tests {
     fn view_bounds_are_shared_across_profiles() {
         let mut project = Project::new();
         let jp = project.profiles.add("JP");
-        project.set_view_bounds(EntryId(3), [5.0, 5.0, 25.0, 20.0]);
 
         let id = project.ocr.append(NewEntry {
-            source: crate::model::EntrySource::AutoOcr,
+            source: crate::EntrySource::AutoOcr,
             text: "hi".to_string(),
             score: 0.9,
             quad: Quad {
                 points: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
             },
         });
+        project.set_view_bounds(id, [5.0, 5.0, 25.0, 20.0]);
+
         let entry = project.ocr.get(id).unwrap();
         assert_eq!(project.view_bounds(entry), [5.0, 5.0, 25.0, 20.0]);
 

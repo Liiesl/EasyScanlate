@@ -12,7 +12,7 @@ use iced::border::Radius;
 use iced::font::{Style as FontStyle, Weight as FontWeight};
 use iced::{alignment, Color, Font, Pixels, Point, Size};
 
-use crate::model::{EntryId, EntryStyle};
+use scanlateit_model::{EntryId, EntryStyle};
 
 /// View-model entry: what the overlay draws, resolved from the model with the
 /// selected profile's translation and the per-entry style already applied.

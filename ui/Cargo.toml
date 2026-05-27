@@ -1,0 +1,11 @@
+[package]
+name = "scanlateit-ui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+iced = { version = "0.14.0", path = "../iced", features = ["image", "canvas", "advanced", "tokio"] }
+bytes = "1.6"
+image = "0.25"
+scanlateit-model = { path = "../model" }
+scanlateit-translation = { path = "../translation" }

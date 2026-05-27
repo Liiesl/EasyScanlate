@@ -1,16 +1,14 @@
-use std::ops::Range;
 use std::sync::Arc;
 
 use iced::widget::{row, text_editor};
 use iced::{Element, Font, Length, Rectangle, Task};
 
-use rapidocr_core::OcrCancellationToken;
-
-use crate::model::{EntryId, EntryStyle, NewEntry, ProfileId, Project};
-use crate::ocr::{self, Engine};
-use crate::translation;
-use crate::ui::main_area::decode::{decode_page, DecodedPage, PageDecode, MAX_DECODE_EDGE};
-use crate::ui::{main_area, panel, KOREAN_FONT_NAME, KOREAN_FONT_PATH};
+use scanlateit_model::{EntryId, EntryStyle, NewEntry, ProfileId, Project};
+use scanlateit_ocr::{self as ocr, Engine, OcrCancellationToken};
+use scanlateit_translation as translation;
+use scanlateit_ui::main_area::decode::{decode_page, DecodedPage, PageDecode, MAX_DECODE_EDGE};
+use scanlateit_ui::{event::UiEvent, main_area, panel, KOREAN_FONT_NAME, KOREAN_FONT_PATH, LoadedImage, UiState};
+use scanlateit_ui::parse_hex;
 
 const DECODE_PRELOAD: usize = 2;
 
@@ -21,52 +19,20 @@ const IMAGE_FILTERS: &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "webp", "ti
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    OpenImages,
+    /// A widget-level event from the ui crate.
+    Ui(UiEvent),
     ImagesPicked(Result<Vec<(String, u32, u32)>, String>),
-    StartOcr,
-    StopOcr,
     EngineReady(Result<Engine, String>),
     OcrFinished(usize, Result<Vec<NewEntry>, String>),
     FontLoaded,
-    CycleProfile,
-    TilesVisible(Range<usize>),
     TileDecoded(usize, Result<Arc<DecodedPage>, String>),
-    Translate,
-    TranslateModel(String),
-    TranslateLang(String),
-    TranslateApiKey(String),
     TranslateFinished(Vec<(usize, EntryId, String)>, Result<Vec<String>, String>),
-    /// Left-click on an overlay entry in the main area; `Some((image, entry))`
-    /// selects it, `None` clears the selection.
-    EntryClicked(Option<(usize, EntryId)>),
-    /// Double-click on an overlay entry: starts an inline text edit for it.
-    EntryDoubleClicked((usize, EntryId)),
-    /// Drag in the main area moved an overlay entry's box; carries the entry's
-    /// new view bounds `[min_x, min_y, max_x, max_y]` in image pixels,
-    /// published once per cursor move while dragging.
-    EntryMoved((usize, EntryId, [f32; 4])),
-    /// The inline editor's content changed, live on every action.
-    EditAction(text_editor::Action),
-    /// Live viewport rect of the edited entry, published by the tile viewer.
-    EditRect(Rectangle),
-    /// Escape or Ctrl+Enter in the inline editor: commits (already applied
-    /// live) and exits.
-    EditSubmit,
-    StyleBold(bool),
-    StyleItalic(bool),
-    StyleTextHex(String),
-    StyleStrokeHex(String),
-    StyleStrokeWidth(String),
-    StyleBgHex(String),
-    StyleBgRadius(String),
 }
 
-pub(crate) struct LoadedImage {
-    pub(crate) width: f32,
-    pub(crate) height: f32,
-    pub(crate) path: String,
-    pub(crate) project: Project,
-    pub(crate) decode: PageDecode,
+impl From<UiEvent> for Message {
+    fn from(event: UiEvent) -> Self {
+        Message::Ui(event)
+    }
 }
 
 /// Session state: one loaded image plus everything iced/OCR related that the
@@ -163,72 +129,83 @@ fn hex_to_string(rgba: [u8; 4]) -> String {
     format!("#{:02X}{:02X}{:02X}{:02X}", rgba[0], rgba[1], rgba[2], rgba[3])
 }
 
-/// Parses `#RGB`, `#RGBA`, `#RRGGBB` or `#RRGGBBAA` into an RGBA color.
-/// Shorthand forms expand the alpha to `255`.
-pub(crate) fn parse_hex(text: &str) -> Option<[u8; 4]> {
-    let digits: Vec<u8> = text
-        .strip_prefix('#')
-        .and_then(|rest| {
-            (rest.len() == 3 || rest.len() == 4 || rest.len() == 6 || rest.len() == 8)
-                .then_some(rest)
-        })?
-        .bytes()
-        .map(|b| match b {
-            b'0'..=b'9' => Some(b - b'0'),
-            b'a'..=b'f' => Some(b - b'a' + 10),
-            b'A'..=b'F' => Some(b - b'A' + 10),
-            _ => None,
-        })
-        .collect::<Option<Vec<u8>>>()?;
-    let (short, chars) = match digits.len() {
-        3 | 4 => (true, digits.len()),
-        6 | 8 => (false, digits.len() / 2),
-        _ => return None,
-    };
-    let mut out = [0u8; 4];
-    for i in 0..4 {
-        let value = if i < chars {
-            if short {
-                digits[i] * 17
-            } else {
-                digits[i * 2] * 16 + digits[i * 2 + 1]
-            }
-        } else {
-            255
-        };
-        out[i] = value;
+impl UiState for App {
+    fn images(&self) -> &[LoadedImage] {
+        &self.images
     }
-    Some(out)
+
+    fn running(&self) -> bool {
+        self.running
+    }
+
+    fn translating(&self) -> bool {
+        self.translating
+    }
+
+    fn status(&self) -> &str {
+        &self.status
+    }
+
+    fn translate_model(&self) -> &str {
+        &self.translate_model
+    }
+
+    fn translate_lang(&self) -> &str {
+        &self.translate_lang
+    }
+
+    fn translate_api_key(&self) -> &str {
+        &self.translate_api_key
+    }
+
+    fn selected(&self) -> Option<(usize, EntryId)> {
+        self.selected
+    }
+
+    fn style_working(&self) -> &EntryStyle {
+        &self.style_working
+    }
+
+    fn style_text_hex(&self) -> &str {
+        &self.style_text_hex
+    }
+
+    fn style_stroke_hex(&self) -> &str {
+        &self.style_stroke_hex
+    }
+
+    fn style_bg_hex(&self) -> &str {
+        &self.style_bg_hex
+    }
+
+    fn style_stroke_width(&self) -> &str {
+        &self.style_stroke_width
+    }
+
+    fn style_bg_radius(&self) -> &str {
+        &self.style_bg_radius
+    }
+
+    fn editing(&self) -> Option<(usize, EntryId)> {
+        self.editing
+    }
+
+    fn editing_rect(&self) -> Option<Rectangle> {
+        self.editing_rect
+    }
+
+    fn edit_content(&self) -> Option<&text_editor::Content> {
+        self.edit_content.as_ref()
+    }
+
+    fn font(&self) -> Option<Font> {
+        self.font
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn hex_round_trips() {
-        for color in [
-            [0, 0, 0, 255],
-            [255, 230, 90, 255],
-            [20, 20, 31, 140],
-        ] {
-            assert_eq!(parse_hex(&hex_to_string(color)), Some(color));
-        }
-    }
-
-    #[test]
-    fn hex_parses_shorthand_with_alpha_default() {
-        assert_eq!(parse_hex("#FFF"), Some([255, 255, 255, 255]));
-        assert_eq!(parse_hex("#fff0"), Some([255, 255, 255, 0]));
-        assert_eq!(parse_hex("#FFE65A"), Some([255, 230, 90, 255]));
-    }
-
-    #[test]
-    fn hex_rejects_malformed_input() {
-        for bad in ["", "#", "#12", "#GGG", "#12345", "FFE65A", "red", "#123456789"] {
-            assert_eq!(parse_hex(bad), None, "expected {bad:?} to be rejected");
-        }
-    }
 
     #[test]
     fn default_style_round_trips_all_fields() {
@@ -241,7 +218,7 @@ mod tests {
     }
 
     fn app_with_entry() -> (App, EntryId) {
-        use crate::model::{EntrySource, NewEntry, Quad};
+        use scanlateit_model::{EntrySource, NewEntry, Quad};
         let mut app = App::new();
         let mut project = Project::new();
         let id = project.ocr.append(NewEntry {
@@ -281,18 +258,18 @@ mod tests {
     /// Types `text` into the inline editor one character at a time, the way
     /// the editor widget reports it.
     fn type_text(app: &mut App, text: &str) {
-        for c in text.chars() {
+for c in text.chars() {
             let _ = update(
                 app,
-                Message::EditAction(text_editor::Action::Edit(
+                Message::Ui(UiEvent::EditAction(text_editor::Action::Edit(
                     text_editor::Edit::Insert(c),
-                )),
+                ))),
             );
         }
     }
 
     fn edit_action(app: &mut App, action: text_editor::Action) {
-        let _ = update(app, Message::EditAction(action));
+        let _ = update(app, Message::Ui(UiEvent::EditAction(action)));
     }
 
     #[test]
@@ -349,7 +326,7 @@ mod tests {
     #[test]
     fn double_click_alone_does_not_fork() {
         let (mut app, id) = app_with_entry();
-        let _ = update(&mut app, Message::EntryDoubleClicked((0, id)));
+        let _ = update(&mut app, Message::Ui(UiEvent::EntryDoubleClicked((0, id))));
         assert_eq!(app.images[0].project.profiles.len(), 1);
         assert_eq!(app.editing, Some((0, id)));
         assert!(app.edit_content.is_some(), "double-click must seed the editor");
@@ -358,7 +335,7 @@ mod tests {
     #[test]
     fn moving_an_entry_updates_view_bounds_but_not_the_quad() {
         let (mut app, id) = app_with_entry();
-        let _ = update(&mut app, Message::EntryMoved((0, id, [20.0, 25.0, 40.0, 35.0])));
+        let _ = update(&mut app, Message::Ui(UiEvent::EntryMoved((0, id, [20.0, 25.0, 40.0, 35.0]))));
 
         let image = &app.images[0];
         let entry = image.project.ocr.get(id).unwrap();
@@ -393,7 +370,7 @@ mod tests {
         start_edit(&mut app, id);
         type_text(&mut app, "hi");
 
-        let _ = update(&mut app, Message::EditSubmit);
+        let _ = update(&mut app, Message::Ui(UiEvent::EditSubmit));
 
         assert_eq!(app.editing, None);
         assert!(app.edit_content.is_none());
@@ -413,7 +390,7 @@ pub fn boot() -> (App, Task<Message>) {
 /// Spawns OCR for exactly one image (the next in the queue). At most one task
 /// is in flight at a time: the next image is only scheduled from inside the
 /// `OcrFinished` handler, so each result reaches the UI before the next OCR
-/// starts. The shared token is created once per run in [`Message::StartOcr`].
+/// starts. The shared token is created once per run in the `StartOcr` arm.
 fn start_ocr_run(app: &mut App, engine: Engine) -> Task<Message> {
     let index = app.ocr_index;
     app.ocr_index += 1;
@@ -451,7 +428,7 @@ fn finalize_run(app: &mut App) {
 
 pub fn update(app: &mut App, message: Message) -> Task<Message> {
     match message {
-        Message::OpenImages => Task::perform(
+        Message::Ui(UiEvent::OpenImages) => Task::perform(
             async {
                 let files = rfd::AsyncFileDialog::new()
                     .add_filter("Images", IMAGE_FILTERS)
@@ -513,7 +490,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 Task::none()
             }
         },
-        Message::StartOcr => {
+        Message::Ui(UiEvent::StartOcr) => {
             if app.images.is_empty() {
                 app.status = "Open images first.".to_string();
                 return Task::none();
@@ -549,7 +526,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 Task::none()
             }
         },
-        Message::StopOcr => {
+        Message::Ui(UiEvent::StopOcr) => {
             if let Some(token) = &app.cancel {
                 token.cancel();
             }
@@ -603,7 +580,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             );
             Task::none()
         }
-        Message::CycleProfile => {
+        Message::Ui(UiEvent::CycleProfile) => {
             let Some(first) = app.images.first() else {
                 return Task::none();
             };
@@ -623,7 +600,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        Message::TilesVisible(range) => {
+        Message::Ui(UiEvent::TilesVisible(range)) => {
             let start = range.start.saturating_sub(DECODE_PRELOAD);
             let end = range.end.saturating_add(DECODE_PRELOAD).min(app.images.len());
             let mut tasks = Vec::new();
@@ -653,7 +630,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        Message::Translate => {
+        Message::Ui(UiEvent::Translate) => {
             if app.translating || app.running {
                 return Task::none();
             }
@@ -692,19 +669,19 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 |(jobs, result)| Message::TranslateFinished(jobs, result),
             )
         }
-        Message::TranslateModel(model) => {
+        Message::Ui(UiEvent::TranslateModel(model)) => {
             app.translate_model = model;
             Task::none()
         }
-        Message::TranslateLang(lang) => {
+        Message::Ui(UiEvent::TranslateLang(lang)) => {
             app.translate_lang = lang;
             Task::none()
         }
-        Message::TranslateApiKey(key) => {
+        Message::Ui(UiEvent::TranslateApiKey(key)) => {
             app.translate_api_key = key;
             Task::none()
         }
-        Message::EntryClicked(selection) => {
+        Message::Ui(UiEvent::EntryClicked(selection)) => {
             app.editing = None;
             app.edit_content = None;
             app.editing_dirty = false;
@@ -719,7 +696,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        Message::EntryDoubleClicked((index, id)) => {
+        Message::Ui(UiEvent::EntryDoubleClicked((index, id))) => {
             let Some(image) = app.images.get(index) else {
                 return Task::none();
             };
@@ -738,13 +715,13 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.status = format!("Editing \"{text}\" in the overlay.");
             Task::batch([iced::widget::operation::focus(EDIT_INPUT_ID)])
         }
-        Message::EntryMoved((index, id, bounds)) => {
+        Message::Ui(UiEvent::EntryMoved((index, id, bounds))) => {
             if let Some(image) = app.images.get_mut(index) {
                 image.project.set_view_bounds(id, bounds);
             }
             Task::none()
         }
-        Message::EditAction(action) => {
+        Message::Ui(UiEvent::EditAction(action)) => {
             let Some(content) = app.edit_content.as_mut() else {
                 return Task::none();
             };
@@ -772,32 +749,32 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 .set_translation(id, Some(text));
             Task::none()
         }
-        Message::EditRect(rect) => {
+        Message::Ui(UiEvent::EditRect(rect)) => {
             if app.editing.is_some() {
                 app.editing_rect = Some(rect);
             }
             Task::none()
         }
-        Message::EditSubmit => {
+        Message::Ui(UiEvent::EditSubmit) => {
             app.editing = None;
             app.edit_content = None;
             app.editing_dirty = false;
             app.editing_rect = None;
             Task::none()
         }
-        Message::StyleBold(bold) => {
+        Message::Ui(UiEvent::StyleBold(bold)) => {
             let Some((index, id)) = app.selected else { return Task::none() };
             app.style_working.bold = bold;
             app.images[index].project.set_entry_style(id, app.style_working);
             Task::none()
         }
-        Message::StyleItalic(italic) => {
+        Message::Ui(UiEvent::StyleItalic(italic)) => {
             let Some((index, id)) = app.selected else { return Task::none() };
             app.style_working.italic = italic;
             app.images[index].project.set_entry_style(id, app.style_working);
             Task::none()
         }
-        Message::StyleTextHex(text) => {
+        Message::Ui(UiEvent::StyleTextHex(text)) => {
             let Some((index, id)) = app.selected else { return Task::none() };
             app.style_text_hex = text;
             if let Some(color) = parse_hex(&app.style_text_hex) {
@@ -806,7 +783,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        Message::StyleStrokeHex(text) => {
+        Message::Ui(UiEvent::StyleStrokeHex(text)) => {
             let Some((index, id)) = app.selected else { return Task::none() };
             app.style_stroke_hex = text;
             if let Some(color) = parse_hex(&app.style_stroke_hex) {
@@ -815,7 +792,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        Message::StyleBgHex(text) => {
+        Message::Ui(UiEvent::StyleBgHex(text)) => {
             let Some((index, id)) = app.selected else { return Task::none() };
             app.style_bg_hex = text;
             if let Some(color) = parse_hex(&app.style_bg_hex) {
@@ -824,7 +801,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        Message::StyleStrokeWidth(text) => {
+        Message::Ui(UiEvent::StyleStrokeWidth(text)) => {
             let Some((index, id)) = app.selected else { return Task::none() };
             app.style_stroke_width = text;
             if let Ok(width) = app.style_stroke_width.parse::<f32>() {
@@ -833,7 +810,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        Message::StyleBgRadius(text) => {
+        Message::Ui(UiEvent::StyleBgRadius(text)) => {
             let Some((index, id)) = app.selected else { return Task::none() };
             app.style_bg_radius = text;
             if let Ok(radius) = app.style_bg_radius.parse::<f32>() {
@@ -885,9 +862,10 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    row![main_area::view(app), panel::view(app)]
+    let content: Element<'_, UiEvent> = row![main_area::view(app), panel::view(app)]
         .spacing(2)
         .width(Length::Fill)
         .height(Length::Fill)
-        .into()
+        .into();
+    Element::map(content, Message::from)
 }

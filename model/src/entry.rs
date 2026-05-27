@@ -1,7 +1,7 @@
 /// Stable identifier for an OCR entry. Assigned by [`OcrResult`] on append,
 /// never reused, survives soft-deletes.
 ///
-/// [`OcrResult`]: crate::model::OcrResult
+/// [`OcrResult`]: crate::OcrResult
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EntryId(pub u64);
 

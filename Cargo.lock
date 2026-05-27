@@ -4139,15 +4139,46 @@ dependencies = [
 name = "scanlateit"
 version = "0.1.0"
 dependencies = [
- "aisdk",
- "bytes",
  "iced",
  "image",
- "rapidocr-core",
  "rfd",
+ "scanlateit-model",
+ "scanlateit-ocr",
+ "scanlateit-translation",
+ "scanlateit-ui",
+]
+
+[[package]]
+name = "scanlateit-model"
+version = "0.1.0"
+
+[[package]]
+name = "scanlateit-ocr"
+version = "0.1.0"
+dependencies = [
+ "rapidocr-core",
+ "scanlateit-model",
+]
+
+[[package]]
+name = "scanlateit-translation"
+version = "0.1.0"
+dependencies = [
+ "aisdk",
  "schemars",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "scanlateit-ui"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "iced",
+ "image",
+ "scanlateit-model",
+ "scanlateit-translation",
 ]
 
 [[package]]

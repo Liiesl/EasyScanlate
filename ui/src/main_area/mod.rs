@@ -9,10 +9,12 @@ use iced::keyboard::{key, Key};
 use iced::widget::{container, space, text, text_editor};
 use iced::{Background, Border, Color, Element, Font, Length, Size};
 
-use crate::app::{App, Message};
-use crate::model::EntryStyle;
-use crate::ui::main_area::overlay::OverlayEntry;
-use crate::ui::main_area::tile_view::{TileSpec, TileView};
+use scanlateit_model::EntryStyle;
+
+use crate::event::UiEvent;
+use crate::main_area::overlay::OverlayEntry;
+use crate::main_area::tile_view::{TileSpec, TileView};
+use crate::state::UiState;
 
 /// Widget id of the floating inline editor; must match the app's focus id.
 const EDIT_INPUT_ID: &'static str = "overlay-editor";
@@ -21,7 +23,7 @@ const EDIT_INPUT_ID: &'static str = "overlay-editor";
 /// entry, positioned (and clipped) exactly over the entry's box.
 ///
 /// The tile viewer publishes the entry's current viewport rect
-/// (`Message::EditRect`), which the app stores in `editing_rect`. The editor
+/// (`UiEvent::EditRect`), which the app stores in `editing_rect`. The editor
 /// is wrapped in a [`iced::widget::Pin`] at the rect's coordinates; its size
 /// and line height match the overlay's fitted text block, and its top-left is
 /// pinned to the top-left of the overlay's vertically-centered wrapped text
@@ -33,25 +35,25 @@ const EDIT_INPUT_ID: &'static str = "overlay-editor";
 ///
 /// Enter inserts a newline (the editor is multi-line); Escape or Ctrl+Enter
 /// commit and exit.
-fn edit_overlay(app: &App) -> Element<'_, Message> {
-    let (Some((index, id)), Some(rect)) = (app.editing, app.editing_rect) else {
+fn edit_overlay<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
+    let (Some((index, id)), Some(rect)) = (state.editing(), state.editing_rect()) else {
         return space().into();
     };
-    let Some(content) = app.edit_content.as_ref() else {
+    let Some(content) = state.edit_content() else {
         return space().into();
     };
-    let (text, style) = match app
-        .images
+    let (text, style) = match state
+        .images()
         .get(index)
         .and_then(|image| image.project.ocr.get(id))
     {
         Some(entry) => (
-            app.images[index].project.display_text(entry).to_string(),
-            app.images[index].project.entry_style(entry.id),
+            state.images()[index].project.display_text(entry).to_string(),
+            state.images()[index].project.entry_style(entry.id),
         ),
         None => (String::new(), EntryStyle::default()),
     };
-    let font = overlay::styled_font(app.font.unwrap_or(Font::DEFAULT), &style);
+    let font = overlay::styled_font(state.font().unwrap_or(Font::DEFAULT), &style);
     let wrap_width = rect.width.max(8.0);
     let (size, fitted_height) = overlay::fit_font_metrics(&text, font, Size::new(wrap_width, rect.height));
     let size = size.max(8.0);
@@ -64,13 +66,13 @@ fn edit_overlay(app: &App) -> Element<'_, Message> {
         .width(rect.width)
         .height(Length::Fixed(fitted_height))
         .padding(0)
-        .on_action(Message::EditAction)
+        .on_action(UiEvent::EditAction)
         .key_binding(|press| match press.modified_key.as_ref() {
             Key::Named(key::Named::Escape) => {
-                Some(text_editor::Binding::Custom(Message::EditSubmit))
+                Some(text_editor::Binding::Custom(UiEvent::EditSubmit))
             }
             Key::Named(key::Named::Enter) if press.modifiers.command() => {
-                Some(text_editor::Binding::Custom(Message::EditSubmit))
+                Some(text_editor::Binding::Custom(UiEvent::EditSubmit))
             }
             _ => text_editor::Binding::from_key_press(press),
         })
@@ -96,15 +98,15 @@ fn to_color(rgba: [u8; 4]) -> Color {
     Color::from_rgba8(rgba[0], rgba[1], rgba[2], rgba[3] as f32 / 255.0)
 }
 
-pub fn view(app: &App) -> Element<'_, Message> {
-    if app.images.is_empty() {
+pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
+    if state.images().is_empty() {
         container(text("No images loaded. Click \"Open Images\" to pick some."))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     } else {
-        let tiles: Vec<TileSpec<'_>> = app
-            .images
+        let tiles: Vec<TileSpec<'_>> = state
+            .images()
             .iter()
             .enumerate()
             .map(|(index, image)| TileSpec {
@@ -120,21 +122,21 @@ pub fn view(app: &App) -> Element<'_, Message> {
                         text: image.project.display_text(entry),
                         bounds: image.project.view_bounds(entry),
                         style: image.project.entry_style(entry.id),
-                        selected: app.selected == Some((index, entry.id)),
-                        hide_text: app.editing == Some((index, entry.id)),
+                        selected: state.selected() == Some((index, entry.id)),
+                        hide_text: state.editing() == Some((index, entry.id)),
                     })
                     .collect(),
             })
             .collect();
-        let viewer = TileView::new(tiles, app.font.unwrap_or(Font::DEFAULT))
-            .on_visible_range(Message::TilesVisible)
-            .on_entry_clicked(Message::EntryClicked)
-            .on_entry_double_clicked(|(index, id)| Message::EntryDoubleClicked((index, id)))
-            .on_edit_rect(Message::EditRect)
-            .on_entry_moved(Message::EntryMoved)
-            .editing(app.editing);
-        if app.editing.is_some() {
-            iced::widget::stack![viewer, edit_overlay(app)].into()
+        let viewer = TileView::new(tiles, state.font().unwrap_or(Font::DEFAULT))
+            .on_visible_range(UiEvent::TilesVisible)
+            .on_entry_clicked(UiEvent::EntryClicked)
+            .on_entry_double_clicked(|(index, id)| UiEvent::EntryDoubleClicked((index, id)))
+            .on_edit_rect(UiEvent::EditRect)
+            .on_entry_moved(UiEvent::EntryMoved)
+            .editing(state.editing());
+        if state.editing().is_some() {
+            iced::widget::stack![viewer, edit_overlay(state)].into()
         } else {
             viewer.into()
         }

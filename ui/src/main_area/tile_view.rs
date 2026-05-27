@@ -22,7 +22,7 @@ use iced::{Color, Element, Event, Font, Length, Pixels, Point, Rectangle, Size, 
 
 use super::decode::PageDecode;
 use super::overlay::{self, OverlayEntry};
-use crate::model::EntryId;
+use scanlateit_model::EntryId;
 
 const SCROLL_LINE_HEIGHT: f32 = 180.0;
 const SCROLLBAR_WIDTH: f32 = 8.0;
@@ -460,7 +460,7 @@ where
     frame.fill_rectangle(thumb.position(), thumb.size(), Fill::from(SCROLLBAR_THUMB));
 }
 
-fn draw_tile<F>(frame: &mut F, tile: &TileSpec<'_>, font: Font)
+fn draw_tile<F>(frame: &mut F, tile: &TileSpec<'_>, _font: Font)
 where
     F: geometry::frame::Backend,
 {

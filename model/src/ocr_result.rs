@@ -74,11 +74,11 @@ impl OcrResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Quad;
+    use crate::Quad;
 
     fn new_entry(text: &str) -> NewEntry {
         NewEntry {
-            source: crate::model::EntrySource::AutoOcr,
+            source: crate::EntrySource::AutoOcr,
             text: text.to_string(),
             score: 0.9,
             quad: Quad {

@@ -10,11 +10,13 @@ use rapidocr_core::config::{
     DetConfig, InferenceOptions, LimitType, PipelineConfig, RapidOcrConfig, RecConfig,
 };
 use rapidocr_core::types::OcrLine;
-use rapidocr_core::{is_cancelled_error, OcrCancellationToken, RapidOcr};
+use rapidocr_core::{is_cancelled_error, RapidOcr};
 
-use crate::model::{EntrySource, NewEntry, Quad};
+pub use rapidocr_core::OcrCancellationToken;
 
-const MODEL_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/models");
+use scanlateit_model::{EntrySource, NewEntry, Quad};
+
+const MODEL_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../models");
 
 /// Cloneable handle to the shared OCR engine. Only one run may execute at a
 /// time; runs are cancellable via [`OcrCancellationToken`].

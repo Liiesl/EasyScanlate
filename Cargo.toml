@@ -3,13 +3,16 @@ name = "scanlateit"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = ["model", "ocr", "translation", "ui"]
+resolver = "3"
+exclude = ["iced", "rapidocr-core"]
+
 [dependencies]
 iced = { version = "0.14.0", path = "iced", features = ["image", "canvas", "advanced", "tokio"] }
-rapidocr-core = { version = "0.2.2", path = "rapidocr-core", default-features = false }
 image = "0.25"
 rfd = "0.17"
-bytes = "1.6"
-aisdk = { version = "0.5.2", features = ["opencode"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-schemars = "1"
+scanlateit-model = { path = "model" }
+scanlateit-ocr = { path = "ocr" }
+scanlateit-translation = { path = "translation" }
+scanlateit-ui = { path = "ui" }
