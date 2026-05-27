@@ -25,6 +25,9 @@ pub struct OverlayEntry<'a> {
     pub style: EntryStyle,
     /// True when this entry is the one picked in the style panel.
     pub selected: bool,
+    /// True while the entry is being edited inline: only the box is drawn,
+    /// the text is left to the floating text input on top.
+    pub hide_text: bool,
 }
 
 /// Outline drawn around the selected entry.
@@ -65,10 +68,12 @@ const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
 type FitKey = (u64, u32, u32, u64);
 
-/// One memoized fitted font size plus the content it was computed for.
+/// One memoized fitted font size plus the content it was computed for and the
+/// wrapped text height at that size (for vertical centering).
 struct FitCacheEntry {
     content: String,
     size: f32,
+    height: f32,
 }
 
 /// Shared, bounded cache of fitted font sizes, keyed by a content hash plus
@@ -144,9 +149,15 @@ fn fit_key(text: &str, font: Font, bounds: Size) -> FitKey {
 /// Results are memoized in a shared bounded cache keyed by content and the
 /// exact box size, so steady-state frames and re-scrolled tiles hit the cache
 /// instead of re-shaping the text.
-fn fit_font_size(text: &str, font: Font, bounds: Size) -> f32 {
+pub(crate) fn fit_font_size(text: &str, font: Font, bounds: Size) -> f32 {
+    fit_font_metrics(text, font, bounds).0
+}
+
+/// Like [`fit_font_size`], also returning the wrapped text height at the
+/// fitted size, used to vertically center the text inside its box.
+pub(crate) fn fit_font_metrics(text: &str, font: Font, bounds: Size) -> (f32, f32) {
     if text.is_empty() || bounds.width <= 0.0 || bounds.height <= 0.0 {
-        return MIN_FONT_SIZE;
+        return (MIN_FONT_SIZE, 0.0);
     }
 
     let key = fit_key(text, font, bounds);
@@ -155,21 +166,23 @@ fn fit_font_size(text: &str, font: Font, bounds: Size) -> f32 {
             .entries
             .get(&key)
             .filter(|entry| entry.content == text)
-            .map(|entry| entry.size)
+            .map(|entry| (entry.size, entry.height))
     });
-    if let Some(size) = cached {
-        return size;
+    if let Some(metrics) = cached {
+        return metrics;
     }
 
     // Loose cap well above any real fitting size; the search converges on the
     // largest size that actually fits, so the cap only bounds the range.
     let mut low = MIN_FONT_SIZE;
     let mut high = (bounds.width.max(bounds.height) * 2.0).max(MIN_FONT_SIZE);
+    let mut fitted_height = 0.0;
     for _ in 0..FIT_ITERATIONS {
         let mid = (low + high) / 2.0;
         let measured = measure_text(text, font, mid, bounds.width);
         if measured.width <= bounds.width && measured.height <= bounds.height {
             low = mid;
+            fitted_height = measured.height;
         } else {
             high = mid;
         }
@@ -191,15 +204,16 @@ fn fit_font_size(text: &str, font: Font, bounds: Size) -> f32 {
             FitCacheEntry {
                 content: text.to_owned(),
                 size,
+                height: fitted_height,
             },
         );
     });
 
-    size
+    (size, fitted_height)
 }
 
 /// The base font with the entry's weight (bold) and style (italic) applied.
-fn styled_font(font: Font, style: &EntryStyle) -> Font {
+pub(crate) fn styled_font(font: Font, style: &EntryStyle) -> Font {
     Font {
         weight: if style.bold {
             FontWeight::Bold
@@ -219,13 +233,14 @@ fn styled_font(font: Font, style: &EntryStyle) -> Font {
 /// `frame`. Coordinates are image pixels, scaled to the frame's width. Each
 /// label's font size is auto-sized to fill its bounding box (growing or
 /// shrinking as needed).
-pub fn draw_entries<F>(
+pub fn draw_entries<'a, I, F>(
     frame: &mut F,
-    entries: &[OverlayEntry<'_>],
+    entries: I,
     font: Font,
     image_width: f32,
 ) where
     F: geometry::frame::Backend,
+    I: IntoIterator<Item = &'a OverlayEntry<'a>>,
 {
     let scale = frame.width() / image_width.max(1.0);
     for entry in entries {
@@ -254,18 +269,24 @@ pub fn draw_entries<F>(
             );
         }
         let wrap_width = width.max(8.0);
-        let size = fit_font_size(
+        if entry.hide_text {
+            continue;
+        }
+        let styled = styled_font(font, &entry.style);
+        let (size, fitted_height) = fit_font_metrics(
             entry.text,
-            styled_font(font, &entry.style),
+            styled,
             Size::new(wrap_width, height),
         );
+        // Vertically center the wrapped text block inside the box.
+        let y_offset = (height - fitted_height).max(0.0) / 2.0;
         let text = Text {
             content: entry.text.to_string(),
-            position,
+            position: Point::new(position.x, position.y + y_offset),
             max_width: wrap_width,
             size: Pixels(size),
             color: to_color(entry.style.text_color),
-            font: styled_font(font, &entry.style),
+            font: styled,
             ..Text::default()
         };
         if entry.style.stroke_width > 0.0 {

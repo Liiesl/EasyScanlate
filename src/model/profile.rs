@@ -127,6 +127,29 @@ impl Profiles {
         self.profiles.iter().find(|p| p.name == name).map(|p| p.id)
     }
 
+    /// The id of the profile created with the project ("Default"), the only
+    /// profile whose text is never edited in place: edits made while it is
+    /// selected are forked into a fresh profile instead, keeping the source
+    /// of truth (the OCR result) immutable.
+    pub fn original_id(&self) -> ProfileId {
+        self.profiles
+            .first()
+            .map(|p| p.id)
+            .unwrap_or(ProfileId(0))
+    }
+
+    /// The next unused auto-forked profile name: `Profile 1`, `Profile 2`,
+    /// ... continuing past the highest existing number.
+    pub fn next_available_name(&self) -> String {
+        let highest = self
+            .profiles
+            .iter()
+            .filter_map(|p| p.name.strip_prefix("Profile ").and_then(|n| n.parse::<u64>().ok()))
+            .max()
+            .unwrap_or(0);
+        format!("Profile {}", highest + 1)
+    }
+
     pub fn selected_id(&self) -> ProfileId {
         self.selected
     }
@@ -190,5 +213,35 @@ mod tests {
         let default_id = profiles.selected_id();
         assert!(!profiles.remove(default_id));
         assert_eq!(profiles.len(), 1);
+    }
+
+    #[test]
+    fn original_id_is_the_first_profile() {
+        let mut profiles = Profiles::default();
+        let original = profiles.original_id();
+        assert_eq!(original, ProfileId(0));
+        profiles.add("English");
+        assert_eq!(profiles.original_id(), original);
+    }
+
+    #[test]
+    fn next_available_name_counts_past_existing_profiles() {
+        let mut profiles = Profiles::default();
+        assert_eq!(profiles.next_available_name(), "Profile 1");
+        profiles.add("Profile 1");
+        assert_eq!(profiles.next_available_name(), "Profile 2");
+        profiles.add("JP");
+        profiles.add("Profile 2");
+        profiles.add("Profile 5");
+        assert_eq!(profiles.next_available_name(), "Profile 6");
+        assert!(profiles.find_by_name("Profile 6").is_none());
+    }
+
+    #[test]
+    fn next_available_name_ignores_foreign_numbers() {
+        let mut profiles = Profiles::default();
+        profiles.add("Profile alpha");
+        profiles.add("Profile 12abc");
+        assert_eq!(profiles.next_available_name(), "Profile 1");
     }
 }

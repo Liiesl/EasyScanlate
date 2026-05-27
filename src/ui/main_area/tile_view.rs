@@ -7,6 +7,7 @@
 //! exactly the pages that are needed.
 
 use std::ops::Range;
+use std::time::{Duration, Instant};
 
 use iced::advanced::graphics::geometry::frame::Backend as _;
 use iced::advanced::graphics::geometry::{self, Fill, Text};
@@ -28,6 +29,10 @@ const SCROLLBAR_WIDTH: f32 = 8.0;
 const SCROLLBAR_MARGIN: f32 = 2.0;
 const MIN_THUMB_HEIGHT: f32 = 20.0;
 
+/// Maximum gap between two presses on the same entry to count as a
+/// double-click.
+const DOUBLE_CLICK_DELAY: Duration = Duration::from_millis(400);
+
 const PLACEHOLDER_BG: Color = Color::from_rgba8(45, 47, 60, 1.0);
 const PLACEHOLDER_FG: Color = Color::from_rgba8(140, 145, 160, 1.0);
 const FAILED_BG: Color = Color::from_rgba8(70, 40, 45, 1.0);
@@ -45,21 +50,36 @@ pub struct TileSpec<'a> {
 
 /// The tile viewer widget. Scroll state lives in the widget tree and survives
 /// rebuilds; decoded pages are owned by the app (see [`PageDecode`]).
-pub struct TileView<'a, Message, F = fn(Range<usize>) -> Message, G = fn(Option<(usize, EntryId)>) -> Message>
-where
+pub struct TileView<
+    'a,
+    Message,
+    F = fn(Range<usize>) -> Message,
+    G = fn(Option<(usize, EntryId)>) -> Message,
+    H = fn((usize, EntryId)) -> Message,
+    K = fn(Rectangle) -> Message,
+> where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
+    H: Fn((usize, EntryId)) -> Message,
+    K: Fn(Rectangle) -> Message,
 {
     tiles: Vec<TileSpec<'a>>,
     font: Font,
     on_visible_range: Option<F>,
     on_entry_clicked: Option<G>,
+    on_entry_double_clicked: Option<H>,
+    on_edit_rect: Option<K>,
+    /// The overlay entry currently being edited with a floating text input;
+    /// its drawn overlay is hidden and its viewport rect is published.
+    editing: Option<(usize, EntryId)>,
 }
 
-impl<'a, Message, F, G> TileView<'a, Message, F, G>
+impl<'a, Message, F, G, H, K> TileView<'a, Message, F, G, H, K>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
+    H: Fn((usize, EntryId)) -> Message,
+    K: Fn(Rectangle) -> Message,
 {
     pub fn new(tiles: Vec<TileSpec<'a>>, font: Font) -> Self {
         Self {
@@ -67,6 +87,9 @@ where
             font,
             on_visible_range: None,
             on_entry_clicked: None,
+            on_entry_double_clicked: None,
+            on_edit_rect: None,
+            editing: None,
         }
     }
 
@@ -81,6 +104,28 @@ where
     /// the page is clicked outside every entry (`None`).
     pub fn on_entry_clicked(mut self, f: G) -> Self {
         self.on_entry_clicked = Some(f);
+        self
+    }
+
+    /// Called when an overlay entry is double-clicked; the app starts an
+    /// inline text edit for it.
+    pub fn on_entry_double_clicked(mut self, f: H) -> Self {
+        self.on_entry_double_clicked = Some(f);
+        self
+    }
+
+    /// Called whenever the viewport rect (in widget coordinates) of the
+    /// edited overlay entry changes, so the app can reposition the floating
+    /// text input. Only called while `editing` targets a present entry.
+    pub fn on_edit_rect(mut self, f: K) -> Self {
+        self.on_edit_rect = Some(f);
+        self
+    }
+
+    /// Marks the overlay entry being edited; its painted overlay is hidden
+    /// and its live viewport rect is reported through `on_edit_rect`.
+    pub fn editing(mut self, editing: Option<(usize, EntryId)>) -> Self {
+        self.editing = editing;
         self
     }
 }
@@ -100,6 +145,11 @@ struct TileViewState {
     viewport_height: f32,
     interaction: Interaction,
     last_visible: Option<Range<usize>>,
+    /// The previous left-press hit plus when it happened, for double-click
+    /// detection.
+    last_click: Option<(Instant, Option<(usize, EntryId)>)>,
+    /// The last published viewport rect of the edited entry.
+    last_edit_rect: Option<Rectangle>,
 }
 
 impl Default for TileViewState {
@@ -111,6 +161,8 @@ impl Default for TileViewState {
             viewport_height: 0.0,
             interaction: Interaction::None,
             last_visible: None,
+            last_click: None,
+            last_edit_rect: None,
         }
     }
 }
@@ -223,6 +275,53 @@ fn hit_entry(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Opt
     hit
 }
 
+/// Viewport-relative rect of the overlay entry `editing` (widget
+/// coordinates), used to position the floating text input over it. `None`
+/// when the tile or entry is not present.
+fn editing_rect(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    editing: (usize, EntryId),
+) -> Option<Rectangle> {
+    let (index, id) = editing;
+    let tile = tiles.get(index)?;
+    let (layout, _) = tile_layout(tiles, state.width);
+    let (y, _) = layout.get(index)?;
+    let scale = if tile.source_width > 0 {
+        state.width / tile.source_width as f32
+    } else {
+        0.0
+    };
+    let (min_x, min_y, max_x, max_y) = {
+        let [min_x, min_y, max_x, max_y] = tile.overlays.iter().find(|e| e.id == id)?.bounds;
+        (min_x, min_y, max_x, max_y)
+    };
+    Some(Rectangle::new(
+        Point::new(min_x * scale, y + min_y * scale - state.offset),
+        Size::new((max_x - min_x) * scale, (max_y - min_y) * scale),
+    ))
+}
+
+/// Reports the edited entry's current viewport rect through `on_edit_rect`
+/// whenever it changes.
+fn publish_edit_rect<'a, Message, K>(
+    shell: &mut Shell<'_, Message>,
+    tiles: &[TileSpec<'a>],
+    state: &mut TileViewState,
+    editing: Option<(usize, EntryId)>,
+    on_edit_rect: &Option<K>,
+) where
+    K: Fn(Rectangle) -> Message,
+{
+    let rect = editing.and_then(|e| editing_rect(tiles, state, e));
+    if state.last_edit_rect != rect {
+        state.last_edit_rect = rect;
+        if let (Some(rect), Some(callback)) = (rect, on_edit_rect.as_ref()) {
+            shell.publish(callback(rect));
+        }
+    }
+}
+
 fn track_rect(bounds: Rectangle) -> Rectangle {
     Rectangle::new(
         Point::new(
@@ -297,11 +396,13 @@ where
     }
 }
 
-impl<'a, Message, F, G, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for TileView<'a, Message, F, G>
+impl<'a, Message, F, G, H, K, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for TileView<'a, Message, F, G, H, K>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
+    H: Fn((usize, EntryId)) -> Message,
+    K: Fn(Rectangle) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
     fn size(&self) -> Size<Length> {
@@ -468,8 +569,31 @@ where
                             grab_offset: local.y - thumb_rect(bounds, state).y,
                         };
                         shell.capture_event();
-                    } else if let Some(callback) = self.on_entry_clicked.as_ref() {
-                        shell.publish(callback(hit_entry(&self.tiles, state, local)));
+                    } else {
+                        let hit = hit_entry(&self.tiles, state, local);
+                        let now = Instant::now();
+                        let is_double = matches!(&state.last_click, Some((at, prev)) if *prev == hit && now.duration_since(*at) <= DOUBLE_CLICK_DELAY);
+                        state.last_click = Some((now, hit));
+                        if is_double {
+                            if let (Some(hit), Some(callback)) = (hit, self.on_entry_double_clicked.as_ref())
+                            {
+                                shell.publish(callback(hit));
+                            }
+                            // Seed the editor rect in the same update pass so
+                            // the floating input exists (and can be focused)
+                            // on the very next frame.
+                            if let (Some(hit), Some(rect_callback)) = (
+                                hit,
+                                self.on_edit_rect.as_ref(),
+                            ) {
+                                if let Some(rect) = editing_rect(&self.tiles, state, hit) {
+                                    state.last_edit_rect = Some(rect);
+                                    shell.publish(rect_callback(rect));
+                                }
+                            }
+                        } else if let Some(callback) = self.on_entry_clicked.as_ref() {
+                            shell.publish(callback(hit));
+                        }
                         shell.capture_event();
                     }
                 }
@@ -502,6 +626,8 @@ where
             }
             _ => {}
         }
+
+        publish_edit_rect(shell, &self.tiles, state, self.editing, &self.on_edit_rect);
     }
 
     fn mouse_interaction(
@@ -532,14 +658,16 @@ where
     }
 }
 
-impl<'a, Message: 'a, F: 'a, G: 'a, Theme, Renderer> From<TileView<'a, Message, F, G>>
-    for Element<'a, Message, Theme, Renderer>
+impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, Theme, Renderer>
+    From<TileView<'a, Message, F, G, H, K>> for Element<'a, Message, Theme, Renderer>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
+    H: Fn((usize, EntryId)) -> Message,
+    K: Fn(Rectangle) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
-    fn from(view: TileView<'a, Message, F, G>) -> Self {
+    fn from(view: TileView<'a, Message, F, G, H, K>) -> Self {
         Self::new(view)
     }
 }

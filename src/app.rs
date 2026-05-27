@@ -2,7 +2,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use iced::widget::row;
-use iced::{Element, Font, Length, Task};
+use iced::{Element, Font, Length, Rectangle, Task};
 
 use rapidocr_core::OcrCancellationToken;
 
@@ -13,6 +13,9 @@ use crate::ui::main_area::decode::{decode_page, DecodedPage, PageDecode, MAX_DEC
 use crate::ui::{main_area, panel, KOREAN_FONT_NAME, KOREAN_FONT_PATH};
 
 const DECODE_PRELOAD: usize = 2;
+
+/// Widget id of the floating inline editor shown over a double-clicked entry.
+const EDIT_INPUT_ID: &'static str = "overlay-editor";
 
 const IMAGE_FILTERS: &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "avif"];
 
@@ -36,6 +39,14 @@ pub enum Message {
     /// Left-click on an overlay entry in the main area; `Some((image, entry))`
     /// selects it, `None` clears the selection.
     EntryClicked(Option<(usize, EntryId)>),
+    /// Double-click on an overlay entry: starts an inline text edit for it.
+    EntryDoubleClicked((usize, EntryId)),
+    /// The inline editor's text changed, live on every keystroke.
+    EditChanged(String),
+    /// Live viewport rect of the edited entry, published by the tile viewer.
+    EditRect(Rectangle),
+    /// Enter in the inline editor: commits (already applied live) and exits.
+    EditSubmit,
     StyleBold(bool),
     StyleItalic(bool),
     StyleTextHex(String),
@@ -74,6 +85,15 @@ pub struct App {
     /// The currently selected overlay entry as `(image index, entry id)`;
     /// the style panel edits exactly this entry and nothing else.
     pub(crate) selected: Option<(usize, EntryId)>,
+    /// The entry being edited inline as `(image index, entry id)`; `None`
+    /// when no inline edit is active.
+    pub(crate) editing: Option<(usize, EntryId)>,
+    /// True once a keystroke actually changed the edited text. The fork off
+    /// the original profile happens exactly once, on this first change: the
+    /// double-click itself never forks anything.
+    pub(crate) editing_dirty: bool,
+    /// Latest viewport rect of the edited entry, in tile viewer coordinates.
+    pub(crate) editing_rect: Option<Rectangle>,
     /// Staged style of the selected entry. Mirrors the entry's stored style
     /// on selection; mutations are written back to that entry only.
     pub(crate) style_working: EntryStyle,
@@ -105,6 +125,9 @@ impl App {
             translate_lang: translation::LANGUAGES[0].to_string(),
             translate_api_key: String::new(),
             selected: None,
+            editing: None,
+            editing_dirty: false,
+            editing_rect: None,
             style_working: style,
             style_text_hex: hex_to_string(style.text_color),
             style_stroke_hex: hex_to_string(style.stroke_color),
@@ -206,6 +229,89 @@ mod tests {
         assert_eq!(style.stroke_color, [0, 0, 0, 255]);
         assert_eq!(style.stroke_width, 0.0);
         assert_eq!(style.bg_radius, 0.0);
+    }
+
+    fn app_with_entry() -> (App, EntryId) {
+        use crate::model::{EntrySource, NewEntry, Quad};
+        let mut app = App::new();
+        let mut project = Project::new();
+        let id = project.ocr.append(NewEntry {
+            source: EntrySource::AutoOcr,
+            text: "안녕".to_string(),
+            score: 0.9,
+            quad: Quad {
+                points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            },
+        });
+        app.images.push(LoadedImage {
+            width: 100.0,
+            height: 100.0,
+            path: "x.png".to_string(),
+            project,
+            decode: PageDecode::Pending,
+        });
+        (app, id)
+    }
+
+    #[test]
+    fn first_keystroke_forks_off_the_original_profile() {
+        let (mut app, id) = app_with_entry();
+        app.editing = Some((0, id));
+
+        let _ = update(&mut app, Message::EditChanged("안녕하세요".into()));
+
+        let project = &app.images[0].project;
+        assert_eq!(project.profiles.len(), 2);
+        assert_ne!(project.profiles.selected_id(), project.profiles.original_id());
+        assert_eq!(project.profiles.selected().name, "Profile 1");
+        let entry = project.ocr.get(id).unwrap();
+        assert_eq!(project.display_text(entry), "안녕하세요");
+        assert_eq!(entry.text, "안녕", "OCR source of truth must stay untouched");
+    }
+
+    #[test]
+    fn later_keystrokes_stay_on_the_forked_profile() {
+        let (mut app, id) = app_with_entry();
+        app.editing = Some((0, id));
+
+        let _ = update(&mut app, Message::EditChanged("a".into()));
+        let _ = update(&mut app, Message::EditChanged("ab".into()));
+        let _ = update(&mut app, Message::EditChanged("abc".into()));
+
+        let project = &app.images[0].project;
+        assert_eq!(project.profiles.len(), 2, "fork must happen exactly once");
+        assert_eq!(project.profiles.selected().name, "Profile 1");
+        let entry = project.ocr.get(id).unwrap();
+        assert_eq!(project.display_text(entry), "abc");
+    }
+
+    #[test]
+    fn edits_on_a_non_original_profile_apply_in_place() {
+        let (mut app, id) = app_with_entry();
+        app.images[0]
+            .project
+            .profiles
+            .selected_mut()
+            .set_translation(id, Some("Hello".into()));
+        let jp = app.images[0].project.profiles.add("JP");
+        app.images[0].project.profiles.select(jp);
+        app.editing = Some((0, id));
+
+        let _ = update(&mut app, Message::EditChanged("Hi".into()));
+
+        let project = &app.images[0].project;
+        assert_eq!(project.profiles.len(), 2, "no fork on non-original profiles");
+        assert_eq!(project.profiles.selected_id(), jp);
+        let entry = project.ocr.get(id).unwrap();
+        assert_eq!(project.display_text(entry), "Hi");
+    }
+
+    #[test]
+    fn double_click_alone_does_not_fork() {
+        let (mut app, id) = app_with_entry();
+        let _ = update(&mut app, Message::EntryDoubleClicked((0, id)));
+        assert_eq!(app.images[0].project.profiles.len(), 1);
+        assert_eq!(app.editing, Some((0, id)));
     }
 }
 
@@ -512,6 +618,9 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::EntryClicked(selection) => {
+            app.editing = None;
+            app.editing_dirty = false;
+            app.editing_rect = None;
             app.selected = selection.filter(|(index, id)| {
                 app.images
                     .get(*index)
@@ -520,6 +629,60 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             if let Some((index, id)) = app.selected {
                 seed_style_inputs(app, app.images[index].project.entry_style(id));
             }
+            Task::none()
+        }
+        Message::EntryDoubleClicked((index, id)) => {
+            let Some(image) = app.images.get(index) else {
+                return Task::none();
+            };
+            let Some(entry) = image.project.ocr.get(id) else {
+                return Task::none();
+            };
+            let text = image.project.display_text(entry).to_string();
+            app.selected = Some((index, id));
+            seed_style_inputs(app, app.images[index].project.entry_style(id));
+            app.editing = Some((index, id));
+            app.editing_dirty = false;
+            app.editing_rect = None;
+            app.status = format!("Editing \"{text}\" in the overlay.");
+            Task::batch([
+                iced::widget::operation::focus(EDIT_INPUT_ID),
+                iced::widget::operation::select_range(EDIT_INPUT_ID, usize::MAX, 0),
+            ])
+        }
+        Message::EditChanged(text) => {
+            let Some((index, id)) = app.editing else {
+                return Task::none();
+            };
+            if !app.editing_dirty {
+                app.editing_dirty = true;
+                let project = &mut app.images[index].project;
+                if project.profiles.selected_id() == project.profiles.original_id() {
+                    let name = project.profiles.next_available_name();
+                    let forked = project.profiles.add(name.clone());
+                    project.profiles.select(forked);
+                    app.status = format!(
+                        "Edit forked into '{name}': the OCR text stays untouched."
+                    );
+                }
+            }
+            let project = &mut app.images[index].project;
+            project
+                .profiles
+                .selected_mut()
+                .set_translation(id, Some(text));
+            Task::none()
+        }
+        Message::EditRect(rect) => {
+            if app.editing.is_some() {
+                app.editing_rect = Some(rect);
+            }
+            Task::none()
+        }
+        Message::EditSubmit => {
+            app.editing = None;
+            app.editing_dirty = false;
+            app.editing_rect = None;
             Task::none()
         }
         Message::StyleBold(bold) => {
