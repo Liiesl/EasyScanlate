@@ -118,7 +118,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
                     .map(|entry| OverlayEntry {
                         id: entry.id,
                         text: image.project.display_text(entry),
-                        bounds: entry.quad.bounds(),
+                        bounds: image.project.view_bounds(entry),
                         style: image.project.entry_style(entry.id),
                         selected: app.selected == Some((index, entry.id)),
                         hide_text: app.editing == Some((index, entry.id)),
@@ -131,6 +131,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .on_entry_clicked(Message::EntryClicked)
             .on_entry_double_clicked(|(index, id)| Message::EntryDoubleClicked((index, id)))
             .on_edit_rect(Message::EditRect)
+            .on_entry_moved(Message::EntryMoved)
             .editing(app.editing);
         if app.editing.is_some() {
             iced::widget::stack![viewer, edit_overlay(app)].into()

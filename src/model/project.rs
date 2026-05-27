@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::{EntryId, EntryStyle, Extras, NewEntry, OcrEntry, OcrResult, Profiles};
 
 /// The whole document model for one image: immutable OCR results, freely
-/// editable profiles, cross-profile entry styles, and extras.
+/// editable profiles, cross-profile entry styles, view bounds, and extras.
 #[derive(Debug)]
 pub struct Project {
     pub ocr: OcrResult,
@@ -11,6 +11,11 @@ pub struct Project {
     /// Per-OCR-result styles shared by every profile. An entry without an
     /// entry falls back to `EntryStyle::default()`.
     styles: HashMap<EntryId, EntryStyle>,
+    /// Where each entry's overlay box is shown in the view, as
+    /// `[min_x, min_y, max_x, max_y]` in image pixels. Unlike the immutable
+    /// OCR `quad`, this is freely editable (drag/resize); an entry without an
+    /// entry falls back to its quad's axis-aligned bounds.
+    view_bounds: HashMap<EntryId, [f32; 4]>,
     /// Reserved for upcoming features (notes, inpainting, geometries).
     #[allow(dead_code)]
     pub extras: Extras,
@@ -22,6 +27,7 @@ impl Project {
             ocr: OcrResult::new(),
             profiles: Profiles::default(),
             styles: HashMap::new(),
+            view_bounds: HashMap::new(),
             extras: Extras::default(),
         }
     }
@@ -50,6 +56,27 @@ impl Project {
         } else {
             self.styles.insert(entry_id, style);
         }
+    }
+
+    /// The entry's overlay box in the view: the user-adjusted view bounds
+    /// when present, otherwise the OCR quad's axis-aligned bounds.
+    pub fn view_bounds(&self, entry: &OcrEntry) -> [f32; 4] {
+        self.view_bounds
+            .get(&entry.id)
+            .copied()
+            .unwrap_or_else(|| entry.quad.bounds())
+    }
+
+    /// Set the overlay box shown in the view for an entry, in image pixels.
+    /// The OCR quad stays untouched.
+    pub fn set_view_bounds(&mut self, entry_id: EntryId, bounds: [f32; 4]) {
+        self.view_bounds.insert(entry_id, bounds);
+    }
+
+    /// Drop the view-bounds override, falling back to the OCR quad.
+    #[allow(dead_code)]
+    pub fn reset_view_bounds(&mut self, entry_id: EntryId) {
+        self.view_bounds.remove(&entry_id);
     }
 }
 
@@ -97,5 +124,58 @@ mod tests {
 
         project.set_entry_style(EntryId(7), EntryStyle::default());
         assert_eq!(project.entry_style(EntryId(7)), EntryStyle::default());
+    }
+
+    #[test]
+    fn view_bounds_fall_back_to_quad_then_override_then_reset() {
+        let mut project = Project::new();
+        let id = project.ocr.append(NewEntry {
+            source: crate::model::EntrySource::AutoOcr,
+            text: "hi".to_string(),
+            score: 0.9,
+            quad: Quad {
+                points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            },
+        });
+        let entry = project.ocr.get(id).unwrap();
+
+        assert_eq!(project.view_bounds(entry), [0.0, 0.0, 10.0, 10.0]);
+
+        project.set_view_bounds(id, [20.0, 30.0, 60.0, 45.0]);
+        assert_eq!(project.view_bounds(entry), [20.0, 30.0, 60.0, 45.0]);
+        assert_eq!(
+            entry.quad.bounds(),
+            [0.0, 0.0, 10.0, 10.0],
+            "view bounds must never touch the OCR quad"
+        );
+
+        project.reset_view_bounds(id);
+        assert_eq!(project.view_bounds(entry), [0.0, 0.0, 10.0, 10.0]);
+    }
+
+    #[test]
+    fn view_bounds_are_shared_across_profiles() {
+        let mut project = Project::new();
+        let jp = project.profiles.add("JP");
+        project.set_view_bounds(EntryId(3), [5.0, 5.0, 25.0, 20.0]);
+
+        let id = project.ocr.append(NewEntry {
+            source: crate::model::EntrySource::AutoOcr,
+            text: "hi".to_string(),
+            score: 0.9,
+            quad: Quad {
+                points: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            },
+        });
+        let entry = project.ocr.get(id).unwrap();
+        assert_eq!(project.view_bounds(entry), [5.0, 5.0, 25.0, 20.0]);
+
+        project.profiles.select(jp);
+        let entry = project.ocr.get(id).unwrap();
+        assert_eq!(
+            project.view_bounds(entry),
+            [5.0, 5.0, 25.0, 20.0],
+            "geometry must survive profile switch"
+        );
     }
 }

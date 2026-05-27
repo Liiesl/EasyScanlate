@@ -33,6 +33,10 @@ const MIN_THUMB_HEIGHT: f32 = 20.0;
 /// double-click.
 const DOUBLE_CLICK_DELAY: Duration = Duration::from_millis(400);
 
+/// Cursor movement (viewport pixels) needed before a press on an entry turns
+/// into a drag. Presses that stay inside the threshold remain clicks.
+const DRAG_THRESHOLD: f32 = 3.0;
+
 const PLACEHOLDER_BG: Color = Color::from_rgba8(45, 47, 60, 1.0);
 const PLACEHOLDER_FG: Color = Color::from_rgba8(140, 145, 160, 1.0);
 const FAILED_BG: Color = Color::from_rgba8(70, 40, 45, 1.0);
@@ -57,11 +61,13 @@ pub struct TileView<
     G = fn(Option<(usize, EntryId)>) -> Message,
     H = fn((usize, EntryId)) -> Message,
     K = fn(Rectangle) -> Message,
+    L = fn((usize, EntryId, [f32; 4])) -> Message,
 > where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
     H: Fn((usize, EntryId)) -> Message,
     K: Fn(Rectangle) -> Message,
+    L: Fn((usize, EntryId, [f32; 4])) -> Message,
 {
     tiles: Vec<TileSpec<'a>>,
     font: Font,
@@ -69,17 +75,19 @@ pub struct TileView<
     on_entry_clicked: Option<G>,
     on_entry_double_clicked: Option<H>,
     on_edit_rect: Option<K>,
+    on_entry_moved: Option<L>,
     /// The overlay entry currently being edited with a floating text input;
     /// its drawn overlay is hidden and its viewport rect is published.
     editing: Option<(usize, EntryId)>,
 }
 
-impl<'a, Message, F, G, H, K> TileView<'a, Message, F, G, H, K>
+impl<'a, Message, F, G, H, K, L> TileView<'a, Message, F, G, H, K, L>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
     H: Fn((usize, EntryId)) -> Message,
     K: Fn(Rectangle) -> Message,
+    L: Fn((usize, EntryId, [f32; 4])) -> Message,
 {
     pub fn new(tiles: Vec<TileSpec<'a>>, font: Font) -> Self {
         Self {
@@ -89,6 +97,7 @@ where
             on_entry_clicked: None,
             on_entry_double_clicked: None,
             on_edit_rect: None,
+            on_entry_moved: None,
             editing: None,
         }
     }
@@ -122,6 +131,14 @@ where
         self
     }
 
+    /// Called while an overlay entry is dragged, once per cursor move, with
+    /// the entry's new view bounds as `[min_x, min_y, max_x, max_y]` clamped
+    /// to the image, in image pixels.
+    pub fn on_entry_moved(mut self, f: L) -> Self {
+        self.on_entry_moved = Some(f);
+        self
+    }
+
     /// Marks the overlay entry being edited; its painted overlay is hidden
     /// and its live viewport rect is reported through `on_edit_rect`.
     pub fn editing(mut self, editing: Option<(usize, EntryId)>) -> Self {
@@ -135,6 +152,26 @@ enum Interaction {
     None,
     TouchScrolling { origin: Point },
     ScrollerGrabbed { grab_offset: f32 },
+    /// A left press on an entry that could still resolve to a click; turns
+    /// into [`Interaction::Dragging`] once the cursor leaves
+    /// [`DRAG_THRESHOLD`]. `offset` and `size` are in image pixels: the grab
+    /// point relative to the entry's top-left and the box's size, both fixed
+    /// at press so the box tracks the cursor exactly even as it moves.
+    DragPending {
+        index: usize,
+        id: EntryId,
+        offset: [f32; 2],
+        size: [f32; 2],
+        press: Point,
+    },
+    /// A press past the drag threshold: publishes the entry's new view bounds
+    /// on every cursor move.
+    Dragging {
+        index: usize,
+        id: EntryId,
+        offset: [f32; 2],
+        size: [f32; 2],
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -275,6 +312,66 @@ fn hit_entry(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Opt
     hit
 }
 
+/// The grab geometry for starting a drag on `(index, id)` at `local`
+/// (viewport-relative): the cursor's offset from the entry's top-left and the
+/// entry's box size, both in image pixels. `None` when the tile or entry is
+/// not present.
+fn drag_grab(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    index: usize,
+    id: EntryId,
+    local: Point,
+) -> Option<([f32; 2], [f32; 2])> {
+    let tile = tiles.get(index)?;
+    let (layout, _) = tile_layout(tiles, state.width);
+    let (y, _) = layout.get(index)?;
+    let scale = if tile.source_width > 0 {
+        state.width / tile.source_width as f32
+    } else {
+        0.0
+    };
+    if scale <= 0.0 {
+        return None;
+    }
+    let [min_x, min_y, max_x, max_y] = tile.overlays.iter().find(|e| e.id == id)?.bounds;
+    let img_x = local.x / scale;
+    let img_y = (local.y + state.offset - y) / scale;
+    Some((
+        [img_x - min_x, img_y - min_y],
+        [max_x - min_x, max_y - min_y],
+    ))
+}
+
+/// The clamped image-pixel view bounds when the entry whose grab geometry was
+/// captured at press is dragged so its top-left sits under the cursor minus
+/// the grab offset. The box never leaves the image.
+fn drag_bounds(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    index: usize,
+    local: Point,
+    offset: [f32; 2],
+    size: [f32; 2],
+) -> Option<[f32; 4]> {
+    let tile = tiles.get(index)?;
+    let (layout, _) = tile_layout(tiles, state.width);
+    let (y, _) = layout.get(index)?;
+    let scale = if tile.source_width > 0 {
+        state.width / tile.source_width as f32
+    } else {
+        0.0
+    };
+    if scale <= 0.0 {
+        return None;
+    }
+    let img_x = local.x / scale;
+    let img_y = (local.y + state.offset - y) / scale;
+    let min_x = (img_x - offset[0]).clamp(0.0, (tile.source_width as f32 - size[0]).max(0.0));
+    let min_y = (img_y - offset[1]).clamp(0.0, (tile.source_height as f32 - size[1]).max(0.0));
+    Some([min_x, min_y, min_x + size[0], min_y + size[1]])
+}
+
 /// Viewport-relative rect of the overlay entry `editing` (widget
 /// coordinates), used to position the floating text input over it. `None`
 /// when the tile or entry is not present.
@@ -396,13 +493,14 @@ where
     }
 }
 
-impl<'a, Message, F, G, H, K, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for TileView<'a, Message, F, G, H, K>
+impl<'a, Message, F, G, H, K, L, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for TileView<'a, Message, F, G, H, K, L>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
     H: Fn((usize, EntryId)) -> Message,
     K: Fn(Rectangle) -> Message,
+    L: Fn((usize, EntryId, [f32; 4])) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
     fn size(&self) -> Size<Length> {
@@ -594,31 +692,85 @@ where
                         } else if let Some(callback) = self.on_entry_clicked.as_ref() {
                             shell.publish(callback(hit));
                         }
+                        if let Some((index, id)) = hit {
+                            if let Some((offset, size)) =
+                                drag_grab(&self.tiles, state, index, id, local)
+                            {
+                                state.interaction = Interaction::DragPending {
+                                    index,
+                                    id,
+                                    offset,
+                                    size,
+                                    press: local,
+                                };
+                            }
+                        }
                         shell.capture_event();
                     }
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                if matches!(state.interaction, Interaction::ScrollerGrabbed { .. }) {
+                if matches!(
+                    state.interaction,
+                    Interaction::ScrollerGrabbed { .. }
+                        | Interaction::DragPending { .. }
+                        | Interaction::Dragging { .. }
+                ) {
                     state.interaction = Interaction::None;
                     shell.capture_event();
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { position }) => {
-                if let Interaction::ScrollerGrabbed { grab_offset } = state.interaction {
-                    let track = track_rect(bounds);
-                    let thumb = thumb_rect(bounds, state);
-                    let distance = (track.height - thumb.height).max(1.0);
-                    let local_y = position.y - bounds.position().y;
-                    let ratio = ((local_y - track.y - grab_offset) / distance).clamp(0.0, 1.0);
-                    let max_offset = (state.content_height - state.viewport_height).max(0.0);
-                    let new_offset = ratio * max_offset;
-                    if (new_offset - state.offset).abs() > f32::EPSILON {
-                        state.offset = new_offset;
-                        shell.request_redraw();
-                        publish_visible(shell, &self.tiles, state, &self.on_visible_range);
+                match state.interaction {
+                    Interaction::ScrollerGrabbed { grab_offset } => {
+                        let track = track_rect(bounds);
+                        let thumb = thumb_rect(bounds, state);
+                        let distance = (track.height - thumb.height).max(1.0);
+                        let local_y = position.y - bounds.position().y;
+                        let ratio = ((local_y - track.y - grab_offset) / distance).clamp(0.0, 1.0);
+                        let max_offset = (state.content_height - state.viewport_height).max(0.0);
+                        let new_offset = ratio * max_offset;
+                        if (new_offset - state.offset).abs() > f32::EPSILON {
+                            state.offset = new_offset;
+                            shell.request_redraw();
+                            publish_visible(shell, &self.tiles, state, &self.on_visible_range);
+                        }
+                        shell.capture_event();
                     }
-                    shell.capture_event();
+                    Interaction::DragPending {
+                        index,
+                        id,
+                        offset,
+                        size,
+                        press,
+                    } => {
+                        let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        let dx = local.x - press.x;
+                        let dy = local.y - press.y;
+                        if dx * dx + dy * dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
+                            state.interaction = Interaction::Dragging { index, id, offset, size };
+                            if let (Some(callback), Some(bounds)) = (
+                                self.on_entry_moved.as_ref(),
+                                drag_bounds(&self.tiles, state, index, local, offset, size),
+                            ) {
+                                shell.publish(callback((index, id, bounds)));
+                                shell.request_redraw();
+                            }
+                        }
+                        shell.capture_event();
+                    }
+                    Interaction::Dragging { index, id, offset, size } => {
+                        let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        if let (Some(callback), Some(bounds)) = (
+                            self.on_entry_moved.as_ref(),
+                            drag_bounds(&self.tiles, state, index, local, offset, size),
+                        ) {
+                            shell.publish(callback((index, id, bounds)));
+                            shell.request_redraw();
+                        }
+                        shell.capture_event();
+                    }
+                    Interaction::None | Interaction::TouchScrolling { .. } => {}
                 }
             }
             Event::Window(_) => {
@@ -640,7 +792,10 @@ where
     ) -> mouse::Interaction {
         let state = tree.state.downcast_ref::<TileViewState>();
         match state.interaction {
-            Interaction::TouchScrolling { .. } | Interaction::ScrollerGrabbed { .. } => {
+            Interaction::TouchScrolling { .. }
+            | Interaction::ScrollerGrabbed { .. }
+            | Interaction::DragPending { .. }
+            | Interaction::Dragging { .. } => {
                 mouse::Interaction::Grabbing
             }
             Interaction::None => {
@@ -658,16 +813,17 @@ where
     }
 }
 
-impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, Theme, Renderer>
-    From<TileView<'a, Message, F, G, H, K>> for Element<'a, Message, Theme, Renderer>
+impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, Theme, Renderer>
+    From<TileView<'a, Message, F, G, H, K, L>> for Element<'a, Message, Theme, Renderer>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
     H: Fn((usize, EntryId)) -> Message,
     K: Fn(Rectangle) -> Message,
+    L: Fn((usize, EntryId, [f32; 4])) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
-    fn from(view: TileView<'a, Message, F, G, H, K>) -> Self {
+    fn from(view: TileView<'a, Message, F, G, H, K, L>) -> Self {
         Self::new(view)
     }
 }

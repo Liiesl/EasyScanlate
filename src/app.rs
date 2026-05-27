@@ -41,6 +41,10 @@ pub enum Message {
     EntryClicked(Option<(usize, EntryId)>),
     /// Double-click on an overlay entry: starts an inline text edit for it.
     EntryDoubleClicked((usize, EntryId)),
+    /// Drag in the main area moved an overlay entry's box; carries the entry's
+    /// new view bounds `[min_x, min_y, max_x, max_y]` in image pixels,
+    /// published once per cursor move while dragging.
+    EntryMoved((usize, EntryId, [f32; 4])),
     /// The inline editor's content changed, live on every action.
     EditAction(text_editor::Action),
     /// Live viewport rect of the edited entry, published by the tile viewer.
@@ -349,6 +353,21 @@ mod tests {
         assert_eq!(app.images[0].project.profiles.len(), 1);
         assert_eq!(app.editing, Some((0, id)));
         assert!(app.edit_content.is_some(), "double-click must seed the editor");
+    }
+
+    #[test]
+    fn moving_an_entry_updates_view_bounds_but_not_the_quad() {
+        let (mut app, id) = app_with_entry();
+        let _ = update(&mut app, Message::EntryMoved((0, id, [20.0, 25.0, 40.0, 35.0])));
+
+        let image = &app.images[0];
+        let entry = image.project.ocr.get(id).unwrap();
+        assert_eq!(image.project.view_bounds(entry), [20.0, 25.0, 40.0, 35.0]);
+        assert_eq!(
+            entry.quad.bounds(),
+            [0.0, 0.0, 10.0, 10.0],
+            "dragging must never touch the OCR quad"
+        );
     }
 
     #[test]
@@ -718,6 +737,12 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.edit_content = Some(content);
             app.status = format!("Editing \"{text}\" in the overlay.");
             Task::batch([iced::widget::operation::focus(EDIT_INPUT_ID)])
+        }
+        Message::EntryMoved((index, id, bounds)) => {
+            if let Some(image) = app.images.get_mut(index) {
+                image.project.set_view_bounds(id, bounds);
+            }
+            Task::none()
         }
         Message::EditAction(action) => {
             let Some(content) = app.edit_content.as_mut() else {
