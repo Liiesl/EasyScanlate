@@ -135,10 +135,6 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .on_edit_rect(UiEvent::EditRect)
             .on_entry_moved(UiEvent::EntryMoved)
             .editing(state.editing());
-        if state.editing().is_some() {
-            iced::widget::stack![viewer, edit_overlay(state)].into()
-        } else {
-            viewer.into()
-        }
+        iced::widget::stack![viewer, edit_overlay(state)].into()
     }
 }

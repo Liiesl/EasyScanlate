@@ -301,7 +301,7 @@ fn hit_entry(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Opt
         for entry in &tile.overlays {
             let [min_x, min_y, max_x, max_y] = entry.bounds;
             let rect = Rectangle::new(
-                Point::new(min_x * scale, y + min_y * scale),
+                Point::new(min_x * scale, y + min_y * scale - state.offset),
                 Size::new((max_x - min_x) * scale, (max_y - min_y) * scale),
             );
             if rect.contains(local) {
@@ -548,13 +548,13 @@ where
             return;
         };
 
+        let mut overlay_frames: Vec<(usize, Rectangle)> = Vec::new();
         renderer.with_layer(visible_bounds, |renderer| {
             renderer.with_translation(Vector::new(0.0, -state.offset), |renderer| {
                 let top = state.offset;
                 let bottom = state.offset + visible_bounds.height;
                 let content_w = content_width(bounds.width);
                 let (layout, _) = tile_layout(&self.tiles, content_w);
-                let mut overlays: Vec<(usize, Rectangle)> = Vec::new();
                 for (index, tile) in self.tiles.iter().enumerate() {
                     let (y, height) = layout[index];
                     if y + height <= top || y >= bottom {
@@ -570,19 +570,24 @@ where
                                 Rectangle::with_size(frame.size()),
                                 geometry::Image::new(decoded.handle.clone()),
                             );
-                            overlays.push((index, tile_bounds));
+                            overlay_frames.push((index, tile_bounds));
                         }
                         _ => draw_tile(&mut frame, tile, self.font),
                     }
                     renderer.draw_geometry(frame.into_geometry());
                 }
-                // Overlays cannot share a layer with the images: every backend
-                // paints meshes (backgrounds, strokes) below raster images and
-                // only layers on top of them. A dedicated layer keeps the
-                // entries above their page.
-                if !overlays.is_empty() {
-                    renderer.with_layer(visible_bounds, |renderer| {
-                        for (index, tile_bounds) in overlays {
+            });
+            // Overlays cannot share a layer with the images: every backend
+            // paints meshes (backgrounds, strokes) below raster images and
+            // only layers on top of them. A dedicated layer keeps the
+            // entries above their page. The layer must be created outside
+            // the scroll translation: layer clips are transformed by the
+            // current translation at push time, so a layer created inside
+            // it would only ever show the top viewport-height of content.
+            if !overlay_frames.is_empty() {
+                renderer.with_layer(visible_bounds, |renderer| {
+                    renderer.with_translation(Vector::new(0.0, -state.offset), |renderer| {
+                        for (index, tile_bounds) in overlay_frames {
                             let mut overlay_frame = renderer.new_frame(tile_bounds);
                             overlay_frame
                                 .translate(Vector::new(tile_bounds.x, tile_bounds.y));
@@ -595,8 +600,8 @@ where
                             renderer.draw_geometry(overlay_frame.into_geometry());
                         }
                     });
-                }
-            });
+                });
+            }
         });
 
         if state.content_height > visible_bounds.height + 1.0 {
