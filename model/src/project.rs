@@ -78,6 +78,13 @@ impl Project {
     pub fn reset_view_bounds(&mut self, entry_id: EntryId) {
         self.view_bounds.remove(&entry_id);
     }
+
+    /// Soft-delete an entry. Its style and view-bounds overrides are kept in
+    /// place, exactly like the entry itself: everything is hidden, nothing
+    /// is dropped, so a future restore keeps every adjustment.
+    pub fn delete_entry(&mut self, entry_id: EntryId) -> bool {
+        self.ocr.soft_delete(entry_id)
+    }
 }
 
 impl Default for Project {
@@ -180,5 +187,36 @@ mod tests {
             [5.0, 5.0, 25.0, 20.0],
             "geometry must survive profile switch"
         );
+    }
+
+    #[test]
+    fn delete_entry_hides_it_but_keeps_its_overrides() {
+        let mut project = Project::new();
+        let style = EntryStyle { bold: true, ..EntryStyle::default() };
+        let id = project.ocr.append(NewEntry {
+            source: crate::EntrySource::AutoOcr,
+            text: "bye".to_string(),
+            score: 0.9,
+            quad: Quad {
+                points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            },
+        });
+        project.set_entry_style(id, style);
+        project.set_view_bounds(id, [1.0, 2.0, 3.0, 4.0]);
+
+        assert!(project.delete_entry(id));
+        assert_eq!(project.ocr.visible_count(), 0);
+        assert!(project.ocr.get(id).unwrap().deleted);
+        assert_eq!(
+            project.entry_style(id),
+            style,
+            "style override must survive delete"
+        );
+        assert_eq!(
+            project.view_bounds(project.ocr.get(id).unwrap()),
+            [1.0, 2.0, 3.0, 4.0],
+            "view bounds override must survive delete"
+        );
+        assert!(!project.delete_entry(EntryId(999)));
     }
 }

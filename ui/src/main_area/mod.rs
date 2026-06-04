@@ -134,6 +134,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .on_entry_double_clicked(|(index, id)| UiEvent::EntryDoubleClicked((index, id)))
             .on_edit_rect(UiEvent::EditRect)
             .on_entry_moved(UiEvent::EntryMoved)
+            .on_toolbar_action(UiEvent::EntryToolbar)
             .editing(state.editing());
         iced::widget::stack![viewer, edit_overlay(state)].into()
     }

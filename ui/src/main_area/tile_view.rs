@@ -10,16 +10,18 @@ use std::ops::Range;
 use std::time::{Duration, Instant};
 
 use iced::advanced::graphics::geometry::frame::Backend as _;
-use iced::advanced::graphics::geometry::{self, Fill, Text};
+use iced::advanced::graphics::geometry::{self, Fill, Path, Stroke, Text};
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::mouse;
 use iced::advanced::renderer;
 use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::widget::Widget;
 use iced::advanced::{Clipboard, Shell};
+use iced::border::Radius;
 use iced::touch::Event as TouchEvent;
 use iced::{Color, Element, Event, Font, Length, Pixels, Point, Rectangle, Size, Vector};
 
+use crate::event::ToolbarAction;
 use super::decode::PageDecode;
 use super::overlay::{self, OverlayEntry};
 use scanlateit_model::EntryId;
@@ -36,6 +38,21 @@ const DOUBLE_CLICK_DELAY: Duration = Duration::from_millis(400);
 /// Cursor movement (viewport pixels) needed before a press on an entry turns
 /// into a drag. Presses that stay inside the threshold remain clicks.
 const DRAG_THRESHOLD: f32 = 3.0;
+
+/// Side of a resize handle square, in viewport pixels.
+const HANDLE_SIZE: f32 = 8.0;
+/// Smallest box edge allowed while resizing, in viewport pixels.
+const MIN_BOX_EDGE: f32 = 6.0;
+
+/// Selection toolbar geometry, in viewport/tile pixels.
+const TOOLBAR_HEIGHT: f32 = 22.0;
+const TOOLBAR_GAP: f32 = 5.0;
+const TOOLBAR_BTN_PAD: f32 = 10.0;
+const TOOLBAR_BG: Color = Color::from_rgba8(28, 30, 38, 0.96);
+const TOOLBAR_HOVER_BG: Color = Color::from_rgba8(58, 62, 76, 1.0);
+const TOOLBAR_FG: Color = Color::from_rgba8(215, 220, 235, 1.0);
+const HANDLE_FILL: Color = Color::WHITE;
+const HANDLE_BORDER: Color = Color::from_rgba8(92, 190, 255, 1.0);
 
 const PLACEHOLDER_BG: Color = Color::from_rgba8(45, 47, 60, 1.0);
 const PLACEHOLDER_FG: Color = Color::from_rgba8(140, 145, 160, 1.0);
@@ -62,12 +79,14 @@ pub struct TileView<
     H = fn((usize, EntryId)) -> Message,
     K = fn(Rectangle) -> Message,
     L = fn((usize, EntryId, [f32; 4])) -> Message,
+    M = fn((usize, EntryId, ToolbarAction)) -> Message,
 > where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
     H: Fn((usize, EntryId)) -> Message,
     K: Fn(Rectangle) -> Message,
     L: Fn((usize, EntryId, [f32; 4])) -> Message,
+    M: Fn((usize, EntryId, ToolbarAction)) -> Message,
 {
     tiles: Vec<TileSpec<'a>>,
     font: Font,
@@ -76,18 +95,22 @@ pub struct TileView<
     on_entry_double_clicked: Option<H>,
     on_edit_rect: Option<K>,
     on_entry_moved: Option<L>,
+    /// Called when a button of the selection toolbar under the selected entry
+    /// is clicked.
+    on_toolbar_action: Option<M>,
     /// The overlay entry currently being edited with a floating text input;
     /// its drawn overlay is hidden and its viewport rect is published.
     editing: Option<(usize, EntryId)>,
 }
 
-impl<'a, Message, F, G, H, K, L> TileView<'a, Message, F, G, H, K, L>
+impl<'a, Message, F, G, H, K, L, M> TileView<'a, Message, F, G, H, K, L, M>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
     H: Fn((usize, EntryId)) -> Message,
     K: Fn(Rectangle) -> Message,
     L: Fn((usize, EntryId, [f32; 4])) -> Message,
+    M: Fn((usize, EntryId, ToolbarAction)) -> Message,
 {
     pub fn new(tiles: Vec<TileSpec<'a>>, font: Font) -> Self {
         Self {
@@ -98,6 +121,7 @@ where
             on_entry_double_clicked: None,
             on_edit_rect: None,
             on_entry_moved: None,
+            on_toolbar_action: None,
             editing: None,
         }
     }
@@ -139,6 +163,13 @@ where
         self
     }
 
+    /// Called when a button of the selection toolbar (drawn under the
+    /// selected entry's box) is clicked.
+    pub fn on_toolbar_action(mut self, f: M) -> Self {
+        self.on_toolbar_action = Some(f);
+        self
+    }
+
     /// Marks the overlay entry being edited; its painted overlay is hidden
     /// and its live viewport rect is reported through `on_edit_rect`.
     pub fn editing(mut self, editing: Option<(usize, EntryId)>) -> Self {
@@ -172,6 +203,73 @@ enum Interaction {
         offset: [f32; 2],
         size: [f32; 2],
     },
+    /// A press on a resize handle of the selected entry that could still
+    /// resolve into a click of nothing; turns into [`Interaction::Resizing`]
+    /// past the drag threshold. `start` is the entry's view bounds at press.
+    ResizePending {
+        index: usize,
+        id: EntryId,
+        handle: ResizeHandle,
+        start: [f32; 4],
+        press: Point,
+    },
+    /// A press past the drag threshold on a resize handle: publishes the
+    /// entry's new view bounds on every cursor move.
+    Resizing {
+        index: usize,
+        id: EntryId,
+        handle: ResizeHandle,
+        start: [f32; 4],
+    },
+    /// A press on a button of the selection toolbar; resolves (publishes the
+    /// action) on release iff the cursor is still over the same button.
+    ToolbarPressed {
+        index: usize,
+        id: EntryId,
+        action: ToolbarAction,
+    },
+}
+
+/// One of the eight resize handles around the selected entry's box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ResizeHandle {
+    /// The handle moves the box's min-x edge when true.
+    left: bool,
+    /// The handle moves the box's max-x edge when true.
+    right: bool,
+    /// The handle moves the box's min-y edge when true.
+    top: bool,
+    /// The handle moves the box's max-y edge when true.
+    bottom: bool,
+}
+
+impl ResizeHandle {
+    const NW: Self = Self { left: true, right: false, top: true, bottom: false };
+    const N: Self = Self { left: false, right: false, top: true, bottom: false };
+    const NE: Self = Self { left: false, right: true, top: true, bottom: false };
+    const E: Self = Self { left: false, right: true, top: false, bottom: false };
+    const SE: Self = Self { left: false, right: true, top: false, bottom: true };
+    const S: Self = Self { left: false, right: false, top: false, bottom: true };
+    const SW: Self = Self { left: true, right: false, top: false, bottom: true };
+    const W: Self = Self { left: true, right: false, top: false, bottom: false };
+
+    /// The resize cursor for this handle.
+    fn cursor(self) -> mouse::Interaction {
+        match self {
+            Self { left: true, right: false, top: true, bottom: false }
+            | Self { left: false, right: true, top: false, bottom: true } => {
+                mouse::Interaction::ResizingDiagonallyDown
+            }
+            Self { left: false, right: true, top: true, bottom: false }
+            | Self { left: true, right: false, top: false, bottom: true } => {
+                mouse::Interaction::ResizingDiagonallyUp
+            }
+            Self { top: true, .. } | Self { bottom: true, .. } => {
+                mouse::Interaction::ResizingVertically
+            }
+            _ => mouse::Interaction::ResizingHorizontally,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -372,15 +470,16 @@ fn drag_bounds(
     Some([min_x, min_y, min_x + size[0], min_y + size[1]])
 }
 
-/// Viewport-relative rect of the overlay entry `editing` (widget
-/// coordinates), used to position the floating text input over it. `None`
-/// when the tile or entry is not present.
-fn editing_rect(
+/// Viewport-relative rect of an overlay entry (widget coordinates): the
+/// displayed box as `[min_x, min_y, max_x, max_y] * scale`, shifted by the
+/// tile's content position and the scroll offset. `None` when the tile or
+/// entry is not present.
+fn entry_rect(
     tiles: &[TileSpec<'_>],
     state: &TileViewState,
-    editing: (usize, EntryId),
+    index: usize,
+    id: EntryId,
 ) -> Option<Rectangle> {
-    let (index, id) = editing;
     let tile = tiles.get(index)?;
     let (layout, _) = tile_layout(tiles, state.width);
     let (y, _) = layout.get(index)?;
@@ -397,6 +496,182 @@ fn editing_rect(
         Point::new(min_x * scale, y + min_y * scale - state.offset),
         Size::new((max_x - min_x) * scale, (max_y - min_y) * scale),
     ))
+}
+
+/// Viewport-relative rect of the overlay entry `editing` (widget
+/// coordinates), used to position the floating text input over it. `None`
+/// when the tile or entry is not present.
+fn editing_rect(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    editing: (usize, EntryId),
+) -> Option<Rectangle> {
+    let (index, id) = editing;
+    entry_rect(tiles, state, index, id)
+}
+
+/// The viewport-relative rect of the selected overlay entry, plus its tile
+/// index. `None` when nothing is selected.
+fn selected_rect(tiles: &[TileSpec<'_>], state: &TileViewState) -> Option<(usize, Rectangle)> {
+    let (index, entry) = tiles
+        .iter()
+        .enumerate()
+        .find_map(|(index, tile)| tile.overlays.iter().find(|e| e.selected).map(|e| (index, e)))?;
+    Some((index, entry_rect(tiles, state, index, entry.id)?))
+}
+
+/// The centers of the eight resize handles around `rect`. Handle centers sit
+/// exactly on the box's edges (straddling the outline like Figma/Photoshop,
+/// so edge handles read as dashes on the line); for boxes smaller than a
+/// handle the anchors collapse toward the box center.
+fn handle_anchors(rect: Rectangle) -> [(ResizeHandle, Point); 8] {
+    let cx = rect.x + rect.width / 2.0;
+    let cy = rect.y + rect.height / 2.0;
+    let span_x = rect.width.max(HANDLE_SIZE);
+    let span_y = rect.height.max(HANDLE_SIZE);
+    let left = cx - span_x / 2.0;
+    let right = cx + span_x / 2.0;
+    let top = cy - span_y / 2.0;
+    let bottom = cy + span_y / 2.0;
+    [
+        (ResizeHandle::NW, Point::new(left, top)),
+        (ResizeHandle::N, Point::new(cx, top)),
+        (ResizeHandle::NE, Point::new(right, top)),
+        (ResizeHandle::E, Point::new(right, cy)),
+        (ResizeHandle::SE, Point::new(right, bottom)),
+        (ResizeHandle::S, Point::new(cx, bottom)),
+        (ResizeHandle::SW, Point::new(left, bottom)),
+        (ResizeHandle::W, Point::new(left, cy)),
+    ]
+}
+
+fn handle_rect(anchor: Point) -> Rectangle {
+    let half = HANDLE_SIZE / 2.0;
+    Rectangle::new(
+        Point::new(anchor.x - half, anchor.y - half),
+        Size::new(HANDLE_SIZE, HANDLE_SIZE),
+    )
+}
+
+/// The resize handle of the selected entry under `local` (viewport-relative),
+/// if any.
+fn hit_handle(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    local: Point,
+) -> Option<(usize, EntryId, ResizeHandle)> {
+    let (index, rect) = selected_rect(tiles, state)?;
+    let id = tiles[index].overlays.iter().find(|e| e.selected)?.id;
+    for (handle, anchor) in handle_anchors(rect) {
+        if handle_rect(anchor).contains(local) {
+            return Some((index, id, handle));
+        }
+    }
+    None
+}
+
+/// Width of the toolbar: two side-by-side buttons ("Rename", "Delete").
+fn toolbar_width() -> f32 {
+    fn button_width(label: &str) -> f32 {
+        label.chars().count() as f32 * 6.5 + TOOLBAR_BTN_PAD * 2.0
+    }
+    button_width("Rename") + button_width("Delete")
+}
+
+/// The toolbar rect under the selected box: horizontally centered and
+/// clamped inside `width`, flipped above the box when it would cross
+/// `flip_at` (the tile's bottom, in the same coordinate space as `rect`).
+fn toolbar_rect(rect: Rectangle, width: f32, flip_at: f32) -> Rectangle {
+    let tw = toolbar_width();
+    let x = (rect.x + rect.width / 2.0 - tw / 2.0).clamp(0.0, (width - tw).max(0.0));
+    let below = rect.y + rect.height + TOOLBAR_GAP;
+    let y = if below + TOOLBAR_HEIGHT <= flip_at {
+        below
+    } else {
+        (rect.y - TOOLBAR_HEIGHT - TOOLBAR_GAP).max(0.0)
+    };
+    Rectangle::new(Point::new(x, y), Size::new(tw, TOOLBAR_HEIGHT))
+}
+
+/// The toolbar button under `local` (same space as `toolbar`), if any.
+fn hit_toolbar_button(toolbar: Rectangle, local: Point) -> Option<ToolbarAction> {
+    if !toolbar.contains(local) {
+        return None;
+    }
+    let rename_width = "Rename".chars().count() as f32 * 6.5 + TOOLBAR_BTN_PAD * 2.0;
+    if local.x < toolbar.x + rename_width {
+        Some(ToolbarAction::Rename)
+    } else {
+        Some(ToolbarAction::Delete)
+    }
+}
+
+/// The toolbar of the selected entry under `local` (viewport-relative), if
+/// any: its tile index, entry id and the hovered button.
+fn hit_toolbar(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    local: Point,
+) -> Option<(usize, EntryId, ToolbarAction)> {
+    let (index, rect) = selected_rect(tiles, state)?;
+    let (layout, _) = tile_layout(tiles, state.width);
+    let (tile_y, tile_height) = layout.get(index)?;
+    let tile_bottom = tile_y - state.offset + tile_height;
+    let toolbar = toolbar_rect(rect, state.width, tile_bottom);
+    let id = tiles[index].overlays.iter().find(|e| e.selected)?.id;
+    hit_toolbar_button(toolbar, local).map(|action| (index, id, action))
+}
+
+/// The entry's current view bounds, in image pixels, used as the fixed start
+/// geometry of a resize gesture.
+fn entry_bounds(tiles: &[TileSpec<'_>], index: usize, id: EntryId) -> Option<[f32; 4]> {
+    let tile = tiles.get(index)?;
+    tile.overlays.iter().find(|e| e.id == id).map(|e| e.bounds)
+}
+
+/// The clamped image-pixel view bounds when the resize handle captured at
+/// press moves the corresponding edges toward `local` (viewport-relative).
+/// Only the edges owned by `handle` move; the opposite edges keep their
+/// press-time position, and the box never leaves the image nor gets smaller
+/// than [`MIN_BOX_EDGE`] viewport pixels.
+fn resize_bounds(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    index: usize,
+    handle: ResizeHandle,
+    start: [f32; 4],
+    local: Point,
+) -> Option<[f32; 4]> {
+    let tile = tiles.get(index)?;
+    let (layout, _) = tile_layout(tiles, state.width);
+    let (y, _) = layout.get(index)?;
+    let scale = if tile.source_width > 0 {
+        state.width / tile.source_width as f32
+    } else {
+        0.0
+    };
+    if scale <= 0.0 {
+        return None;
+    }
+    let img_x = local.x / scale;
+    let img_y = (local.y + state.offset - y) / scale;
+    let img_width = tile.source_width as f32;
+    let img_height = tile.source_height as f32;
+    let min_edge = (MIN_BOX_EDGE / scale).min(img_width).min(img_height);
+    let [mut min_x, mut min_y, mut max_x, mut max_y] = start;
+    if handle.left {
+        min_x = img_x.clamp(0.0, (max_x - min_edge).max(0.0));
+    }
+    if handle.right {
+        max_x = img_x.clamp((min_x + min_edge).min(img_width), img_width);
+    }
+    if handle.top {
+        min_y = img_y.clamp(0.0, (max_y - min_edge).max(0.0));
+    }
+    if handle.bottom {
+        max_y = img_y.clamp((min_y + min_edge).min(img_height), img_height);
+    }
+    Some([min_x, min_y, max_x, max_y])
 }
 
 /// Reports the edited entry's current viewport rect through `on_edit_rect`
@@ -493,14 +768,117 @@ where
     }
 }
 
-impl<'a, Message, F, G, H, K, L, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for TileView<'a, Message, F, G, H, K, L>
+/// The rect of one toolbar button inside the toolbar.
+fn toolbar_button_rect(toolbar: Rectangle, action: ToolbarAction) -> Rectangle {
+    let rename_width = "Rename".chars().count() as f32 * 6.5 + TOOLBAR_BTN_PAD * 2.0;
+    match action {
+        ToolbarAction::Rename => Rectangle::new(
+            toolbar.position(),
+            Size::new(rename_width, toolbar.height),
+        ),
+        ToolbarAction::Delete => Rectangle::new(
+            Point::new(toolbar.x + rename_width, toolbar.y),
+            Size::new((toolbar.width - rename_width).max(0.0), toolbar.height),
+        ),
+    }
+}
+
+fn draw_toolbar_button<F>(frame: &mut F, toolbar: Rectangle, action: ToolbarAction, hovered: bool)
+where
+    F: geometry::frame::Backend,
+{
+    let rect = toolbar_button_rect(toolbar, action);
+    let label = match action {
+        ToolbarAction::Rename => "Rename",
+        ToolbarAction::Delete => "Delete",
+    };
+    if hovered {
+        frame.fill(
+            &Path::rounded_rectangle(rect.position(), rect.size(), Radius::from(4.0)),
+            Fill::from(TOOLBAR_HOVER_BG),
+        );
+    } else {
+        frame.fill(
+            &Path::rounded_rectangle(rect.position(), rect.size(), Radius::from(4.0)),
+            Fill::from(TOOLBAR_BG),
+        );
+    }
+    frame.fill_text(Text {
+        content: label.to_string(),
+        position: Point::new(rect.x, rect.y + (rect.height - 13.0).max(0.0) / 2.0),
+        max_width: rect.width,
+        size: Pixels(11.0),
+        color: TOOLBAR_FG,
+        ..Text::default()
+    });
+}
+
+/// Draws the resize handles and the Rename/Delete toolbar around the
+/// selected entry, in the tile-local coordinates of its overlay frame.
+///
+/// The decorations are skipped while the entry is being edited inline or
+/// while the user is already moving/resizing it. `cursor_local` is the
+/// cursor in the frame's coordinates (`None` outside the widget), used for
+/// the toolbar's hover highlight.
+fn draw_selection_decorations<'a, F>(
+    frame: &mut F,
+    state: &TileViewState,
+    tiles: &[TileSpec<'a>],
+    tile_index: usize,
+    cursor_local: Option<Point>,
+) where
+    F: geometry::frame::Backend,
+{
+    let Some(entry) = tiles[tile_index].overlays.iter().find(|e| e.selected) else {
+        return;
+    };
+    if entry.hide_text {
+        return;
+    }
+    // Hide the decorations while this entry is actually being moved or
+    // resized; pending presses (not yet past the drag threshold) and
+    // interactions on other entries keep them visible.
+    let interacting_with_selected = match state.interaction {
+        Interaction::Dragging { index, id, .. } | Interaction::Resizing { index, id, .. } => {
+            index == tile_index && id == entry.id
+        }
+        _ => false,
+    };
+    if interacting_with_selected {
+        return;
+    }
+    let scale = frame.width() / tiles[tile_index].source_width.max(1) as f32;
+    let rect = Rectangle::new(
+        Point::new(entry.bounds[0] * scale, entry.bounds[1] * scale),
+        Size::new(
+            (entry.bounds[2] - entry.bounds[0]) * scale,
+            (entry.bounds[3] - entry.bounds[1]) * scale,
+        ),
+    );
+    for (_, anchor) in handle_anchors(rect) {
+        let handle = handle_rect(anchor);
+        frame.fill_rectangle(handle.position(), handle.size(), Fill::from(HANDLE_FILL));
+        frame.stroke(
+            &Path::rectangle(handle.position(), handle.size()),
+            Stroke::default().with_color(HANDLE_BORDER).with_width(1.0),
+        );
+    }
+    let toolbar = toolbar_rect(rect, frame.width(), frame.height());
+    let hover = cursor_local.and_then(|local| hit_toolbar_button(toolbar, local));
+    for action in [ToolbarAction::Rename, ToolbarAction::Delete] {
+        draw_toolbar_button(frame, toolbar, action, hover == Some(action));
+    }
+}
+
+impl<'a, Message, F, G, H, K, L, M, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for TileView<'a, Message, F, G, H, K, L, M>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
     H: Fn((usize, EntryId)) -> Message,
     K: Fn(Rectangle) -> Message,
     L: Fn((usize, EntryId, [f32; 4])) -> Message,
+    M: Fn((usize, EntryId, ToolbarAction)) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
     fn size(&self) -> Size<Length> {
@@ -539,7 +917,7 @@ where
         _theme: &Theme,
         _style: &renderer::Style,
         layout: Layout<'_>,
-        _cursor: mouse::Cursor,
+        cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
         let state = tree.state.downcast_ref::<TileViewState>();
@@ -596,6 +974,24 @@ where
                                 &self.tiles[index].overlays,
                                 self.font,
                                 self.tiles[index].source_width as f32,
+                            );
+                            // The frame is translated to content coordinates;
+                            // bring the cursor into the same tile-local space
+                            // for the selection decorations' hover state.
+                            let cursor_local = cursor
+                                .position_over(bounds)
+                                .map(|position| {
+                                    Point::new(
+                                        position.x - bounds.x,
+                                        position.y - bounds.y + state.offset - tile_bounds.y,
+                                    )
+                                });
+                            draw_selection_decorations(
+                                &mut overlay_frame,
+                                state,
+                                &self.tiles,
+                                index,
+                                cursor_local,
                             );
                             renderer.draw_geometry(overlay_frame.into_geometry());
                         }
@@ -667,6 +1063,26 @@ where
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(position) = cursor.position_over(bounds) {
                     let local = local_point(position, bounds);
+                    if self.editing.is_none() {
+                        if let Some((index, id, action)) = hit_toolbar(&self.tiles, state, local) {
+                            state.interaction = Interaction::ToolbarPressed { index, id, action };
+                            shell.capture_event();
+                            return;
+                        }
+                        if let Some((index, id, handle)) = hit_handle(&self.tiles, state, local) {
+                            if let Some(start) = entry_bounds(&self.tiles, index, id) {
+                                state.interaction = Interaction::ResizePending {
+                                    index,
+                                    id,
+                                    handle,
+                                    start,
+                                    press: local,
+                                };
+                                shell.capture_event();
+                                return;
+                            }
+                        }
+                    }
                     if track_rect(bounds).contains(local) {
                         state.interaction = Interaction::ScrollerGrabbed {
                             grab_offset: local.y - thumb_rect(bounds, state).y,
@@ -715,14 +1131,33 @@ where
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                if let Interaction::ToolbarPressed { index, id, action } = state.interaction {
+                    if let Some(position) = cursor.position_over(bounds) {
+                        let local = local_point(position, bounds);
+                        if hit_toolbar(&self.tiles, state, local) == Some((index, id, action)) {
+                            if let Some(callback) = self.on_toolbar_action.as_ref() {
+                                shell.publish(callback((index, id, action)));
+                                shell.request_redraw();
+                            }
+                        }
+                    }
+                }
                 if matches!(
                     state.interaction,
                     Interaction::ScrollerGrabbed { .. }
                         | Interaction::DragPending { .. }
                         | Interaction::Dragging { .. }
+                        | Interaction::ResizePending { .. }
+                        | Interaction::Resizing { .. }
+                        | Interaction::ToolbarPressed { .. }
                 ) {
                     state.interaction = Interaction::None;
                     shell.capture_event();
+                    // The release ends any press gesture: redraw right away so
+                    // the selection decorations (handles, toolbar) become
+                    // visible immediately after a click instead of waiting
+                    // for the next cursor move or redraw.
+                    shell.request_redraw();
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { position }) => {
@@ -775,6 +1210,42 @@ where
                         }
                         shell.capture_event();
                     }
+                    Interaction::ResizePending {
+                        index,
+                        id,
+                        handle,
+                        start,
+                        press,
+                    } => {
+                        let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        let dx = local.x - press.x;
+                        let dy = local.y - press.y;
+                        if dx * dx + dy * dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
+                            state.interaction = Interaction::Resizing { index, id, handle, start };
+                            if let (Some(callback), Some(bounds)) = (
+                                self.on_entry_moved.as_ref(),
+                                resize_bounds(&self.tiles, state, index, handle, start, local),
+                            ) {
+                                shell.publish(callback((index, id, bounds)));
+                                shell.request_redraw();
+                            }
+                        }
+                        shell.capture_event();
+                    }
+                    Interaction::Resizing { index, id, handle, start } => {
+                        let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        if let (Some(callback), Some(bounds)) = (
+                            self.on_entry_moved.as_ref(),
+                            resize_bounds(&self.tiles, state, index, handle, start, local),
+                        ) {
+                            shell.publish(callback((index, id, bounds)));
+                            shell.request_redraw();
+                        }
+                        shell.capture_event();
+                    }
+                    Interaction::ToolbarPressed { .. } => {
+                        shell.capture_event();
+                    }
                     Interaction::None | Interaction::TouchScrolling { .. } => {}
                 }
             }
@@ -800,13 +1271,24 @@ where
             Interaction::TouchScrolling { .. }
             | Interaction::ScrollerGrabbed { .. }
             | Interaction::DragPending { .. }
-            | Interaction::Dragging { .. } => {
+            | Interaction::Dragging { .. }
+            | Interaction::ResizePending { .. }
+            | Interaction::Resizing { .. }
+            | Interaction::ToolbarPressed { .. } => {
                 mouse::Interaction::Grabbing
             }
             Interaction::None => {
                 let bounds = layout.bounds();
                 if let Some(position) = cursor.position_over(bounds) {
                     let local = local_point(position, bounds);
+                    if self.editing.is_none() {
+                        if hit_toolbar(&self.tiles, state, local).is_some() {
+                            return mouse::Interaction::Pointer;
+                        }
+                        if let Some((_, _, handle)) = hit_handle(&self.tiles, state, local) {
+                            return handle.cursor();
+                        }
+                    }
                     if track_rect(bounds).contains(local) || thumb_rect(bounds, state).contains(local)
                     {
                         return mouse::Interaction::Pointer;
@@ -818,17 +1300,18 @@ where
     }
 }
 
-impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, Theme, Renderer>
-    From<TileView<'a, Message, F, G, H, K, L>> for Element<'a, Message, Theme, Renderer>
+impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, Theme, Renderer>
+    From<TileView<'a, Message, F, G, H, K, L, M>> for Element<'a, Message, Theme, Renderer>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
     H: Fn((usize, EntryId)) -> Message,
     K: Fn(Rectangle) -> Message,
     L: Fn((usize, EntryId, [f32; 4])) -> Message,
+    M: Fn((usize, EntryId, ToolbarAction)) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
-    fn from(view: TileView<'a, Message, F, G, H, K, L>) -> Self {
+    fn from(view: TileView<'a, Message, F, G, H, K, L, M>) -> Self {
         Self::new(view)
     }
 }

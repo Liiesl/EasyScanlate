@@ -7,7 +7,10 @@ use scanlateit_model::{EntryId, EntryStyle, NewEntry, ProfileId, Project};
 use scanlateit_ocr::{self as ocr, Engine, OcrCancellationToken};
 use scanlateit_translation as translation;
 use scanlateit_ui::main_area::decode::{decode_page, DecodedPage, PageDecode, MAX_DECODE_EDGE};
-use scanlateit_ui::{event::UiEvent, main_area, panel, KOREAN_FONT_NAME, KOREAN_FONT_PATH, LoadedImage, UiState};
+use scanlateit_ui::{
+    event::{ToolbarAction, UiEvent},
+    main_area, panel, KOREAN_FONT_NAME, KOREAN_FONT_PATH, LoadedImage, UiState,
+};
 use scanlateit_ui::parse_hex;
 
 const DECODE_PRELOAD: usize = 2;
@@ -111,6 +114,38 @@ impl App {
             style_bg_radius: style.bg_radius.to_string(),
         }
     }
+}
+
+/// Starts an inline edit of `(index, id)`: selects the entry, seeds the
+/// editor buffer with its displayed text and selects it all so the first
+/// keystroke replaces it, then focuses the floating editor. Shared by the
+/// double-click action and the toolbar's "Rename" button.
+fn start_inline_edit(app: &mut App, index: usize, id: EntryId) -> Task<Message> {
+    let Some(image) = app.images.get(index) else {
+        return Task::none();
+    };
+    let Some(entry) = image.project.ocr.get(id) else {
+        return Task::none();
+    };
+    let text = image.project.display_text(entry).to_string();
+    app.selected = Some((index, id));
+    seed_style_inputs(app, app.images[index].project.entry_style(id));
+    app.editing = Some((index, id));
+    app.editing_dirty = false;
+    app.editing_rect = None;
+    let mut content = text_editor::Content::with_text(&text);
+    content.perform(text_editor::Action::SelectAll);
+    app.edit_content = Some(content);
+    app.status = format!("Editing \"{text}\" in the overlay.");
+    Task::batch([iced::widget::operation::focus(EDIT_INPUT_ID)])
+}
+
+/// Clears every piece of inline-editing state in one place.
+fn clear_editing(app: &mut App) {
+    app.editing = None;
+    app.edit_content = None;
+    app.editing_dirty = false;
+    app.editing_rect = None;
 }
 
 /// Reseeds the style panel inputs from `style`, keeping raw strings in sync
@@ -376,6 +411,67 @@ for c in text.chars() {
         assert!(app.edit_content.is_none());
         let entry = app.images[0].project.ocr.get(id).unwrap();
         assert_eq!(app.images[0].project.display_text(entry), "hi");
+    }
+
+    #[test]
+    fn toolbar_rename_starts_an_inline_edit() {
+        let (mut app, id) = app_with_entry();
+        start_edit(&mut app, id);
+        let _ = update(&mut app, Message::Ui(UiEvent::EditSubmit));
+
+        let _ = update(
+            &mut app,
+            Message::Ui(UiEvent::EntryToolbar((0, id, ToolbarAction::Rename))),
+        );
+
+        assert_eq!(app.selected, Some((0, id)));
+        assert_eq!(app.editing, Some((0, id)));
+        assert!(app.edit_content.is_some());
+        assert_eq!(app.images[0].project.profiles.len(), 1, "rename must not fork");
+    }
+
+    #[test]
+    fn toolbar_delete_soft_deletes_and_clears_selection() {
+        let (mut app, id) = app_with_entry();
+        start_edit(&mut app, id);
+        let _ = update(&mut app, Message::Ui(UiEvent::EditSubmit));
+
+        let _ = update(
+            &mut app,
+            Message::Ui(UiEvent::EntryToolbar((0, id, ToolbarAction::Delete))),
+        );
+
+        assert_eq!(app.selected, None);
+        assert_eq!(app.editing, None);
+        assert!(app.edit_content.is_none());
+        assert_eq!(app.images[0].project.ocr.visible_count(), 0);
+        assert!(app.images[0].project.ocr.get(id).unwrap().deleted);
+    }
+
+    #[test]
+    fn toolbar_actions_on_unknown_entries_are_noops() {
+        let (mut app, _id) = app_with_entry();
+        let id = app.images[0].project.ocr.visible().next().unwrap().id;
+        start_edit(&mut app, id);
+        let _ = update(&mut app, Message::Ui(UiEvent::EditSubmit));
+
+        let missing = EntryId(u64::MAX);
+        let _ = update(
+            &mut app,
+            Message::Ui(UiEvent::EntryToolbar((0, missing, ToolbarAction::Rename))),
+        );
+        let _ = update(
+            &mut app,
+            Message::Ui(UiEvent::EntryToolbar((0, missing, ToolbarAction::Delete))),
+        );
+        let _ = update(
+            &mut app,
+            Message::Ui(UiEvent::EntryToolbar((999, missing, ToolbarAction::Delete))),
+        );
+
+        assert_eq!(app.editing, None);
+        assert_eq!(app.selected, None);
+        assert_eq!(app.images[0].project.ocr.visible_count(), 1);
     }
 }
 
@@ -682,10 +778,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::Ui(UiEvent::EntryClicked(selection)) => {
-            app.editing = None;
-            app.edit_content = None;
-            app.editing_dirty = false;
-            app.editing_rect = None;
+            clear_editing(app);
             app.selected = selection.filter(|(index, id)| {
                 app.images
                     .get(*index)
@@ -697,24 +790,23 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::Ui(UiEvent::EntryDoubleClicked((index, id))) => {
-            let Some(image) = app.images.get(index) else {
-                return Task::none();
-            };
-            let Some(entry) = image.project.ocr.get(id) else {
-                return Task::none();
-            };
-            let text = image.project.display_text(entry).to_string();
-            app.selected = Some((index, id));
-            seed_style_inputs(app, app.images[index].project.entry_style(id));
-            app.editing = Some((index, id));
-            app.editing_dirty = false;
-            app.editing_rect = None;
-            let mut content = text_editor::Content::with_text(&text);
-            content.perform(text_editor::Action::SelectAll);
-            app.edit_content = Some(content);
-            app.status = format!("Editing \"{text}\" in the overlay.");
-            Task::batch([iced::widget::operation::focus(EDIT_INPUT_ID)])
+            start_inline_edit(app, index, id)
         }
+        Message::Ui(UiEvent::EntryToolbar((index, id, action))) => match action {
+            ToolbarAction::Rename => start_inline_edit(app, index, id),
+            ToolbarAction::Delete => {
+                let Some(image) = app.images.get_mut(index) else {
+                    return Task::none();
+                };
+                if !image.project.delete_entry(id) {
+                    return Task::none();
+                }
+                app.selected = None;
+                clear_editing(app);
+                app.status = "Deleted entry.".to_string();
+                Task::none()
+            }
+        },
         Message::Ui(UiEvent::EntryMoved((index, id, bounds))) => {
             if let Some(image) = app.images.get_mut(index) {
                 image.project.set_view_bounds(id, bounds);
@@ -756,10 +848,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::Ui(UiEvent::EditSubmit) => {
-            app.editing = None;
-            app.edit_content = None;
-            app.editing_dirty = false;
-            app.editing_rect = None;
+            clear_editing(app);
             Task::none()
         }
         Message::Ui(UiEvent::StyleBold(bold)) => {
