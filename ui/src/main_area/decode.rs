@@ -1,4 +1,10 @@
 //! Downscaled, cached page decoding for the tile viewer.
+//!
+//! Every page is decoded once at a small size and retained forever: that
+//! keeps rapid scrolling smooth (thumbs are always ready) at a memory cost of
+//! ~`THUMB_DECODE_EDGE² * 4` bytes per page. Full-resolution pages are
+//! decoded on demand for the settled viewport neighborhood and freed again
+//! when the viewport moves far away.
 
 use std::sync::Arc;
 
@@ -9,6 +15,11 @@ use iced::widget::image::Handle;
 /// Keeps decode fast and uploads within one wgpu atlas layer.
 pub const MAX_DECODE_EDGE: u32 = 2048;
 
+/// Longest edge of the retained low-resolution tier. Small enough that a
+/// whole chapter stays in memory, large enough to read page composition
+/// while scrolling.
+pub const THUMB_DECODE_EDGE: u32 = 128;
+
 /// A page decoded at display resolution, ready for GPU upload.
 #[derive(Debug, Clone)]
 pub struct DecodedPage {
@@ -17,13 +28,54 @@ pub struct DecodedPage {
     pub height: u32,
 }
 
-/// Per-page decode state, owned by the app so decoded buffers survive
-/// widget rebuilds and scrolling away/back (no blank pages).
-pub enum PageDecode {
-    Pending,
+/// One decode tier of a page.
+pub enum Tier {
+    /// No decode has been requested yet.
+    Absent,
+    /// A decode task is in flight.
     Decoding,
+    /// Decoded; the buffer survives as long as this tier keeps it.
     Ready(Arc<DecodedPage>),
     Failed,
+}
+
+/// Per-page decode state, owned by the app so decoded buffers survive
+/// widget rebuilds and scrolling away/back (no blank pages).
+///
+/// The thumb tier is decoded once and never freed; the full tier is decoded
+/// near the settled viewport and evicted when it scrolls far away.
+pub struct PageDecode {
+    pub thumb: Tier,
+    pub full: Tier,
+}
+
+impl Default for PageDecode {
+    fn default() -> Self {
+        Self {
+            thumb: Tier::Absent,
+            full: Tier::Absent,
+        }
+    }
+}
+
+impl PageDecode {
+    /// The best page currently available for drawing: the full tier when
+    /// ready, otherwise the thumb tier.
+    pub fn image(&self) -> Option<&Arc<DecodedPage>> {
+        match &self.full {
+            Tier::Ready(page) => Some(page),
+            _ => match &self.thumb {
+                Tier::Ready(page) => Some(page),
+                _ => None,
+            },
+        }
+    }
+
+    /// Whether the retained tier failed to load; the page is broken and no
+    /// full decode will ever be requested for it either.
+    pub fn thumb_failed(&self) -> bool {
+        matches!(self.thumb, Tier::Failed)
+    }
 }
 
 /// Decodes `path`, downscaling so the longest edge is at most `max_edge`.

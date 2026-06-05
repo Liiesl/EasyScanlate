@@ -24,6 +24,10 @@ pub enum UiEvent {
     StopOcr,
     CycleProfile,
     TilesVisible(Range<usize>),
+    /// The user finished a scrollbar drag or touch pan: the viewport will
+    /// not move again until a new input, so the app can settle immediately
+    /// without waiting out the debounce.
+    TileScrollEnded,
     Translate,
     TranslateModel(String),
     TranslateLang(String),

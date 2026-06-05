@@ -16,3 +16,4 @@ scanlateit-model = { path = "model" }
 scanlateit-ocr = { path = "ocr" }
 scanlateit-translation = { path = "translation" }
 scanlateit-ui = { path = "ui" }
+tokio = { version = "1", features = ["rt", "time"] }

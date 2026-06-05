@@ -130,6 +130,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .collect();
         let viewer = TileView::new(tiles, state.font().unwrap_or(Font::DEFAULT))
             .on_visible_range(UiEvent::TilesVisible)
+            .on_scroll_ended(|| UiEvent::TileScrollEnded)
             .on_entry_clicked(UiEvent::EntryClicked)
             .on_entry_double_clicked(|(index, id)| UiEvent::EntryDoubleClicked((index, id)))
             .on_edit_rect(UiEvent::EditRect)

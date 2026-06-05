@@ -1,4 +1,6 @@
+use std::ops::Range;
 use std::sync::Arc;
+use std::time::Duration;
 
 use iced::widget::{row, text_editor};
 use iced::{Element, Font, Length, Rectangle, Task};
@@ -6,7 +8,9 @@ use iced::{Element, Font, Length, Rectangle, Task};
 use scanlateit_model::{EntryId, EntryStyle, NewEntry, ProfileId, Project};
 use scanlateit_ocr::{self as ocr, Engine, OcrCancellationToken};
 use scanlateit_translation as translation;
-use scanlateit_ui::main_area::decode::{decode_page, DecodedPage, PageDecode, MAX_DECODE_EDGE};
+use scanlateit_ui::main_area::decode::{
+    decode_page, DecodedPage, PageDecode, Tier, MAX_DECODE_EDGE, THUMB_DECODE_EDGE,
+};
 use scanlateit_ui::{
     event::{ToolbarAction, UiEvent},
     main_area, panel, KOREAN_FONT_NAME, KOREAN_FONT_PATH, LoadedImage, UiState,
@@ -14,6 +18,14 @@ use scanlateit_ui::{
 use scanlateit_ui::parse_hex;
 
 const DECODE_PRELOAD: usize = 2;
+
+/// How long the viewport must stop scrolling before the full-resolution
+/// decode of its neighborhood kicks in.
+const SETTLE_DEBOUNCE: Duration = Duration::from_millis(150);
+
+/// How many pages beyond the full-backed window a full decode survives a
+/// settle before it is evicted.
+const FULL_KEEP_MARGIN: usize = 4;
 
 /// Widget id of the floating inline editor shown over a double-clicked entry.
 const EDIT_INPUT_ID: &'static str = "overlay-editor";
@@ -28,7 +40,11 @@ pub enum Message {
     EngineReady(Result<Engine, String>),
     OcrFinished(usize, Result<Vec<NewEntry>, String>),
     FontLoaded,
-    TileDecoded(usize, Result<Arc<DecodedPage>, String>),
+    ThumbDecoded(usize, Result<Arc<DecodedPage>, String>),
+    FullDecoded(usize, Result<Arc<DecodedPage>, String>),
+    /// The settle debounce elapsed for generation `u64`; stale generations
+    /// (a newer scroll already happened) are ignored.
+    SettleElapsed(u64),
     TranslateFinished(Vec<(usize, EntryId, String)>, Result<Vec<String>, String>),
 }
 
@@ -71,6 +87,14 @@ pub struct App {
     pub(crate) editing_dirty: bool,
     /// Latest viewport rect of the edited entry, in tile viewer coordinates.
     pub(crate) editing_rect: Option<Rectangle>,
+    /// Monotonic generation of the settle debounce: bumped on every visible
+    /// range change, so stale debounce timers no-op.
+    settle_seq: u64,
+    /// The visible range whose settle debounce is still pending.
+    pending_settle: Option<(u64, Range<usize>)>,
+    /// The visible range the last settle backed with full decodes; results
+    /// for pages outside its preload window are dropped on arrival.
+    settled: Option<Range<usize>>,
     /// Staged style of the selected entry. Mirrors the entry's stored style
     /// on selection; mutations are written back to that entry only.
     pub(crate) style_working: EntryStyle,
@@ -106,6 +130,9 @@ impl App {
             edit_content: None,
             editing_dirty: false,
             editing_rect: None,
+            settle_seq: 0,
+            pending_settle: None,
+            settled: None,
             style_working: style,
             style_text_hex: hex_to_string(style.text_color),
             style_stroke_hex: hex_to_string(style.stroke_color),
@@ -269,7 +296,7 @@ mod tests {
             height: 100.0,
             path: "x.png".to_string(),
             project,
-            decode: PageDecode::Pending,
+            decode: PageDecode::default(),
         });
         (app, id)
     }
@@ -522,6 +549,69 @@ fn finalize_run(app: &mut App) {
     };
 }
 
+/// The pages a settled visible range gets backed with full decodes: the
+/// range itself plus [`DECODE_PRELOAD`] pages on each side.
+fn full_window(len: usize, range: &Range<usize>) -> Range<usize> {
+    range.start.saturating_sub(DECODE_PRELOAD)
+        ..range.end.saturating_add(DECODE_PRELOAD).min(len)
+}
+
+/// Decodes `path` through the tokio blocking pool; the CPU-bound decode
+/// never starves the runtime's worker threads (timers, message dispatch).
+async fn decode_async(path: String, max_edge: u32) -> Result<Arc<DecodedPage>, String> {
+    tokio::task::spawn_blocking(move || decode_page(&path, max_edge).map(Arc::new))
+        .await
+        .map_err(|e| format!("decode task cancelled: {e}"))?
+}
+
+/// Spawns full-res decodes for the pending settle window (visible pages
+/// first, then preload pages outward) and evicts far-away full caches.
+fn settle_full(app: &mut App) -> Task<Message> {
+    let Some((_, range)) = app.pending_settle.take() else {
+        return Task::none();
+    };
+    app.settled = Some(range.clone());
+    let window = full_window(app.images.len(), &range);
+    let mut indices: Vec<usize> = window.clone().collect();
+    // Spawn closest-to-visible pages first so the pages under the viewport
+    // swap to full-res before the preload padding.
+    let center = (range.start + range.end) as f64 / 2.0;
+    indices.sort_by_key(|index| {
+        let distance = (*index as f64 - center).abs();
+        (distance * 1000.0) as u64
+    });
+    let mut tasks = Vec::new();
+    for index in indices {
+        let image = &mut app.images[index];
+        if matches!(image.decode.thumb, Tier::Failed)
+            || !matches!(image.decode.full, Tier::Absent)
+        {
+            continue;
+        }
+        image.decode.full = Tier::Decoding;
+        let path = image.path.clone();
+        tasks.push(Task::perform(
+            decode_async(path, MAX_DECODE_EDGE),
+            move |result| Message::FullDecoded(index, result),
+        ));
+    }
+    let keep = range.start.saturating_sub(DECODE_PRELOAD + FULL_KEEP_MARGIN)
+        ..range
+            .end
+            .saturating_add(DECODE_PRELOAD + FULL_KEEP_MARGIN)
+            .min(app.images.len());
+    for (index, image) in app.images.iter_mut().enumerate() {
+        if index < keep.start || index >= keep.end {
+            image.decode.full = Tier::Absent;
+        }
+    }
+    if tasks.is_empty() {
+        Task::none()
+    } else {
+        Task::batch(tasks)
+    }
+}
+
 pub fn update(app: &mut App, message: Message) -> Task<Message> {
     match message {
         Message::Ui(UiEvent::OpenImages) => Task::perform(
@@ -563,19 +653,20 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                         height: height as f32,
                         path,
                         project: Project::new(),
-                        decode: PageDecode::Pending,
+                        decode: PageDecode::default(),
                     });
                 }
                 app.status = format!("Decoding {} image(s)...", app.images.len());
                 let tasks: Vec<Task<Message>> = app
                     .images
-                    .iter()
+                    .iter_mut()
                     .enumerate()
                     .map(|(index, image)| {
+                        image.decode.thumb = Tier::Decoding;
                         let path = image.path.clone();
                         Task::perform(
-                            async move { decode_page(&path, MAX_DECODE_EDGE).map(Arc::new) },
-                            move |result| Message::TileDecoded(index, result),
+                            decode_async(path, THUMB_DECODE_EDGE),
+                            move |result| Message::ThumbDecoded(index, result),
                         )
                     })
                     .collect();
@@ -697,31 +788,45 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::Ui(UiEvent::TilesVisible(range)) => {
-            let start = range.start.saturating_sub(DECODE_PRELOAD);
-            let end = range.end.saturating_add(DECODE_PRELOAD).min(app.images.len());
-            let mut tasks = Vec::new();
-            for index in start..end {
-                let image = &mut app.images[index];
-                if matches!(&image.decode, PageDecode::Pending) {
-                    image.decode = PageDecode::Decoding;
-                    let path = image.path.clone();
-                    tasks.push(Task::perform(
-                        async move { decode_page(&path, MAX_DECODE_EDGE).map(Arc::new) },
-                        move |result| Message::TileDecoded(index, result),
-                    ));
-                }
-            }
-            if tasks.is_empty() {
-                Task::none()
-            } else {
-                Task::batch(tasks)
-            }
+            app.settle_seq += 1;
+            let seq = app.settle_seq;
+            app.pending_settle = Some((seq, range));
+            Task::perform(
+                async move { tokio::time::sleep(SETTLE_DEBOUNCE).await },
+                move |_| Message::SettleElapsed(seq),
+            )
         }
-        Message::TileDecoded(index, result) => {
+        Message::SettleElapsed(seq) => {
+            let Some((pending_seq, _)) = app.pending_settle.as_ref() else {
+                return Task::none();
+            };
+            if *pending_seq != seq {
+                return Task::none();
+            }
+            settle_full(app)
+        }
+        Message::Ui(UiEvent::TileScrollEnded) => settle_full(app),
+        Message::FullDecoded(index, result) => {
             if index < app.images.len() {
-                app.images[index].decode = match result {
-                    Ok(decoded) => PageDecode::Ready(decoded),
-                    Err(_) => PageDecode::Failed,
+                let keep = app.settled.as_ref().is_some_and(|range| {
+                    full_window(app.images.len(), range).contains(&index)
+                });
+                app.images[index].decode.full = if keep {
+                    match result {
+                        Ok(decoded) => Tier::Ready(decoded),
+                        Err(_) => Tier::Failed,
+                    }
+                } else {
+                    Tier::Absent
+                };
+            }
+            Task::none()
+        }
+        Message::ThumbDecoded(index, result) => {
+            if index < app.images.len() {
+                app.images[index].decode.thumb = match result {
+                    Ok(decoded) => Tier::Ready(decoded),
+                    Err(_) => Tier::Failed,
                 };
             }
             Task::none()

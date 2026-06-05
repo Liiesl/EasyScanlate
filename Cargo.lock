@@ -4146,6 +4146,7 @@ dependencies = [
  "scanlateit-ocr",
  "scanlateit-translation",
  "scanlateit-ui",
+ "tokio",
 ]
 
 [[package]]

@@ -80,6 +80,7 @@ pub struct TileView<
     K = fn(Rectangle) -> Message,
     L = fn((usize, EntryId, [f32; 4])) -> Message,
     M = fn((usize, EntryId, ToolbarAction)) -> Message,
+    P = fn() -> Message,
 > where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -87,6 +88,7 @@ pub struct TileView<
     K: Fn(Rectangle) -> Message,
     L: Fn((usize, EntryId, [f32; 4])) -> Message,
     M: Fn((usize, EntryId, ToolbarAction)) -> Message,
+    P: Fn() -> Message,
 {
     tiles: Vec<TileSpec<'a>>,
     font: Font,
@@ -98,12 +100,15 @@ pub struct TileView<
     /// Called when a button of the selection toolbar under the selected entry
     /// is clicked.
     on_toolbar_action: Option<M>,
+    /// Called when a scrollbar drag or touch pan ends, after the final
+    /// `on_visible_range` update.
+    on_scroll_ended: Option<P>,
     /// The overlay entry currently being edited with a floating text input;
     /// its drawn overlay is hidden and its viewport rect is published.
     editing: Option<(usize, EntryId)>,
 }
 
-impl<'a, Message, F, G, H, K, L, M> TileView<'a, Message, F, G, H, K, L, M>
+impl<'a, Message, F, G, H, K, L, M, P> TileView<'a, Message, F, G, H, K, L, M, P>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -111,6 +116,7 @@ where
     K: Fn(Rectangle) -> Message,
     L: Fn((usize, EntryId, [f32; 4])) -> Message,
     M: Fn((usize, EntryId, ToolbarAction)) -> Message,
+    P: Fn() -> Message,
 {
     pub fn new(tiles: Vec<TileSpec<'a>>, font: Font) -> Self {
         Self {
@@ -122,6 +128,7 @@ where
             on_edit_rect: None,
             on_entry_moved: None,
             on_toolbar_action: None,
+            on_scroll_ended: None,
             editing: None,
         }
     }
@@ -167,6 +174,14 @@ where
     /// selected entry's box) is clicked.
     pub fn on_toolbar_action(mut self, f: M) -> Self {
         self.on_toolbar_action = Some(f);
+        self
+    }
+
+    /// Called when a scrollbar drag or touch pan ends. The viewport stops
+    /// moving here, so a full-res settle can start immediately instead of
+    /// waiting out the debounce.
+    pub fn on_scroll_ended(mut self, f: P) -> Self {
+        self.on_scroll_ended = Some(f);
         self
     }
 
@@ -735,37 +750,24 @@ where
     frame.fill_rectangle(thumb.position(), thumb.size(), Fill::from(SCROLLBAR_THUMB));
 }
 
-fn draw_tile<F>(frame: &mut F, tile: &TileSpec<'_>, _font: Font)
+fn draw_placeholder<F>(frame: &mut F, failed: bool, _font: Font)
 where
     F: geometry::frame::Backend,
 {
-    match tile.decode {
-        PageDecode::Failed => {
-            frame.fill_rectangle(Point::ORIGIN, frame.size(), Fill::from(FAILED_BG));
-            frame.fill_text(Text {
-                content: "Failed to load".to_string(),
-                position: frame.center(),
-                max_width: frame.width(),
-                size: Pixels(16.0),
-                color: FAILED_FG,
-                ..Text::default()
-            });
-        }
-        PageDecode::Pending | PageDecode::Decoding => {
-            frame.fill_rectangle(Point::ORIGIN, frame.size(), Fill::from(PLACEHOLDER_BG));
-            frame.fill_text(Text {
-                content: "Loading...".to_string(),
-                position: frame.center(),
-                max_width: frame.width(),
-                size: Pixels(16.0),
-                color: PLACEHOLDER_FG,
-                ..Text::default()
-            });
-        }
-        // `PageDecode::Ready` images are drawn by the caller in the base
-        // layer; overlays go into their own layer on top.
-        PageDecode::Ready(_) => {}
-    }
+    let (bg, fg, label) = if failed {
+        (FAILED_BG, FAILED_FG, "Failed to load")
+    } else {
+        (PLACEHOLDER_BG, PLACEHOLDER_FG, "Loading...")
+    };
+    frame.fill_rectangle(Point::ORIGIN, frame.size(), Fill::from(bg));
+    frame.fill_text(Text {
+        content: label.to_string(),
+        position: frame.center(),
+        max_width: frame.width(),
+        size: Pixels(16.0),
+        color: fg,
+        ..Text::default()
+    });
 }
 
 /// The rect of one toolbar button inside the toolbar.
@@ -870,8 +872,8 @@ fn draw_selection_decorations<'a, F>(
     }
 }
 
-impl<'a, Message, F, G, H, K, L, M, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for TileView<'a, Message, F, G, H, K, L, M>
+impl<'a, Message, F, G, H, K, L, M, P, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for TileView<'a, Message, F, G, H, K, L, M, P>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -879,6 +881,7 @@ where
     K: Fn(Rectangle) -> Message,
     L: Fn((usize, EntryId, [f32; 4])) -> Message,
     M: Fn((usize, EntryId, ToolbarAction)) -> Message,
+    P: Fn() -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
     fn size(&self) -> Size<Length> {
@@ -942,15 +945,15 @@ where
                         Rectangle::new(Point::new(0.0, y), Size::new(content_w, height));
                     let mut frame = renderer.new_frame(tile_bounds);
                     frame.translate(Vector::new(tile_bounds.x, tile_bounds.y));
-                    match tile.decode {
-                        PageDecode::Ready(decoded) => {
+                    match tile.decode.image() {
+                        Some(decoded) => {
                             frame.draw_image(
                                 Rectangle::with_size(frame.size()),
                                 geometry::Image::new(decoded.handle.clone()),
                             );
                             overlay_frames.push((index, tile_bounds));
                         }
-                        _ => draw_tile(&mut frame, tile, self.font),
+                        None => draw_placeholder(&mut frame, tile.decode.thumb_failed(), self.font),
                     }
                     renderer.draw_geometry(frame.into_geometry());
                 }
@@ -1057,6 +1060,9 @@ where
             Event::Touch(TouchEvent::FingerLifted { .. }) | Event::Touch(TouchEvent::FingerLost { .. }) => {
                 if matches!(state.interaction, Interaction::TouchScrolling { .. }) {
                     state.interaction = Interaction::None;
+                    if let Some(callback) = self.on_scroll_ended.as_ref() {
+                        shell.publish(callback());
+                    }
                     shell.capture_event();
                 }
             }
@@ -1142,6 +1148,7 @@ where
                         }
                     }
                 }
+                let ended_scroll = matches!(state.interaction, Interaction::ScrollerGrabbed { .. });
                 if matches!(
                     state.interaction,
                     Interaction::ScrollerGrabbed { .. }
@@ -1158,6 +1165,11 @@ where
                     // visible immediately after a click instead of waiting
                     // for the next cursor move or redraw.
                     shell.request_redraw();
+                }
+                if ended_scroll {
+                    if let Some(callback) = self.on_scroll_ended.as_ref() {
+                        shell.publish(callback());
+                    }
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { position }) => {
@@ -1300,8 +1312,8 @@ where
     }
 }
 
-impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, Theme, Renderer>
-    From<TileView<'a, Message, F, G, H, K, L, M>> for Element<'a, Message, Theme, Renderer>
+impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Theme, Renderer>
+    From<TileView<'a, Message, F, G, H, K, L, M, P>> for Element<'a, Message, Theme, Renderer>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -1309,9 +1321,10 @@ where
     K: Fn(Rectangle) -> Message,
     L: Fn((usize, EntryId, [f32; 4])) -> Message,
     M: Fn((usize, EntryId, ToolbarAction)) -> Message,
+    P: Fn() -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
-    fn from(view: TileView<'a, Message, F, G, H, K, L, M>) -> Self {
+    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P>) -> Self {
         Self::new(view)
     }
 }
