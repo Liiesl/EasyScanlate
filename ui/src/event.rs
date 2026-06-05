@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use iced::widget::pane_grid;
 use iced::widget::text_editor;
 use iced::Rectangle;
 
@@ -53,4 +54,6 @@ pub enum UiEvent {
     StyleStrokeWidth(String),
     StyleBgHex(String),
     StyleBgRadius(String),
+    /// The user dragged the divider between the main area and the side panel.
+    PanelResized(pane_grid::ResizeEvent),
 }

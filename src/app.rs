@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use iced::widget::image::Handle;
-use iced::widget::{row, text_editor};
+use iced::widget::{pane_grid, text_editor};
 use iced::{Element, Font, Length, Rectangle, Task};
 
 use scanlateit_inpaint::Engine as InpaintEngine;
@@ -34,6 +34,17 @@ const FULL_KEEP_MARGIN: usize = 4;
 const EDIT_INPUT_ID: &'static str = "overlay-editor";
 
 const IMAGE_FILTERS: &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "avif"];
+
+/// The pane the side panel occupies at launch: ~300px out of the 1400px
+/// default window, as a fraction of the main area's width.
+const MAIN_AREA_DEFAULT_RATIO: f32 = 0.78;
+
+/// The two panes of the app window: the page viewer and the side panel.
+#[derive(Debug, Clone, Copy)]
+pub enum PaneKind {
+    MainArea,
+    Panel,
+}
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -118,6 +129,8 @@ pub struct App {
     pub(crate) style_bg_hex: String,
     pub(crate) style_stroke_width: String,
     pub(crate) style_bg_radius: String,
+    /// The draggable split between the main area and the side panel.
+    pub(crate) panes: pane_grid::State<PaneKind>,
 }
 impl App {
     fn new() -> Self {
@@ -156,6 +169,14 @@ impl App {
             style_bg_hex: hex_to_string(style.bg_color),
             style_stroke_width: style.stroke_width.to_string(),
             style_bg_radius: style.bg_radius.to_string(),
+            panes: {
+                let (mut panes, main) = pane_grid::State::new(PaneKind::MainArea);
+                let (_, split) = panes
+                    .split(pane_grid::Axis::Vertical, main, PaneKind::Panel)
+                    .expect("initial pane split must succeed");
+                panes.resize(split, MAIN_AREA_DEFAULT_RATIO);
+                panes
+            },
         }
     }
 }
@@ -1176,6 +1197,10 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        Message::Ui(UiEvent::PanelResized(resized)) => {
+            app.panes.resize(resized.split, resized.ratio);
+            Task::none()
+        }
         Message::TranslateFinished(jobs, result) => {
             app.translating = false;
             match result {
@@ -1219,10 +1244,17 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    let content: Element<'_, UiEvent> = row![main_area::view(app), panel::view(app)]
-        .spacing(2)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into();
+    let content: Element<'_, UiEvent> = pane_grid::PaneGrid::new(&app.panes, |_, kind, _| {
+        pane_grid::Content::new(match kind {
+            PaneKind::MainArea => main_area::view(app),
+            PaneKind::Panel => panel::view(app),
+        })
+    })
+    .spacing(2)
+    .min_size(160)
+    .on_resize(8, UiEvent::PanelResized)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into();
     Element::map(content, Message::from)
 }

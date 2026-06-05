@@ -27,7 +27,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .spacing(8)
             .height(FillLength),
     )
-    .width(300)
+    .width(FillLength)
     .height(FillLength)
     .padding(10)
     .style(|_theme| container::Style {
