@@ -45,6 +45,10 @@ const HANDLE_SIZE: f32 = 8.0;
 /// Smallest box edge allowed while resizing, in viewport pixels.
 const MIN_BOX_EDGE: f32 = 6.0;
 
+/// Smallest inpainting range edge, in image pixels; smaller drags are
+/// treated as accidental presses.
+const MIN_INPAINT_EDGE: f32 = 4.0;
+
 /// Selection toolbar geometry, in viewport/tile pixels.
 const TOOLBAR_HEIGHT: f32 = 22.0;
 const TOOLBAR_GAP: f32 = 5.0;
@@ -62,12 +66,18 @@ const FAILED_FG: Color = Color::from_rgba8(200, 120, 120, 1.0);
 const SCROLLBAR_TRACK: Color = Color::from_rgba8(255, 255, 255, 0.07);
 const SCROLLBAR_THUMB: Color = Color::from_rgba8(255, 255, 255, 0.35);
 
+/// Inpainting range marquee colors.
+const INPAINT_FILL: Color = Color::from_rgba8(92, 190, 255, 0.16);
+const INPAINT_STROKE: Color = Color::from_rgba8(92, 190, 255, 1.0);
+
 /// One stacked page in the viewer.
 pub struct TileSpec<'a> {
     pub source_width: u32,
     pub source_height: u32,
     pub decode: &'a PageDecode,
     pub overlays: Vec<OverlayEntry<'a>>,
+    /// Inpaint layers drawn over the page raster, below the entry overlays.
+    pub inpaint: &'a [crate::loaded::InpaintLayer],
 }
 
 /// The tile viewer widget. Scroll state lives in the widget tree and survives
@@ -82,6 +92,7 @@ pub struct TileView<
     L = fn((usize, EntryId, Quad)) -> Message,
     M = fn((usize, EntryId, ToolbarAction)) -> Message,
     P = fn() -> Message,
+    Q = fn((usize, Rectangle)) -> Message,
 > where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -90,6 +101,7 @@ pub struct TileView<
     L: Fn((usize, EntryId, Quad)) -> Message,
     M: Fn((usize, EntryId, ToolbarAction)) -> Message,
     P: Fn() -> Message,
+    Q: Fn((usize, Rectangle)) -> Message,
 {
     tiles: Vec<TileSpec<'a>>,
     font: Font,
@@ -101,15 +113,22 @@ pub struct TileView<
     /// Called when a button of the selection toolbar under the selected entry
     /// is clicked.
     on_toolbar_action: Option<M>,
+    /// Called when the user finishes dragging an inpainting range on the
+    /// tile whose index matches [`TileView::inpaint_mode`]; the rectangle is
+    /// in image pixels.
+    on_inpaint_selection: Option<Q>,
     /// Called when a scrollbar drag or touch pan ends, after the final
     /// `on_visible_range` update.
     on_scroll_ended: Option<P>,
     /// The overlay entry currently being edited with a floating text input;
     /// its drawn overlay is hidden and its viewport rect is published.
     editing: Option<(usize, EntryId)>,
+    /// The image index whose tile accepts inpainting range drags; `None`
+    /// disables the mode. Set by the app from the panel's Inpaint button.
+    inpaint_mode: Option<usize>,
 }
 
-impl<'a, Message, F, G, H, K, L, M, P> TileView<'a, Message, F, G, H, K, L, M, P>
+impl<'a, Message, F, G, H, K, L, M, P, Q> TileView<'a, Message, F, G, H, K, L, M, P, Q>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -118,6 +137,7 @@ where
     L: Fn((usize, EntryId, Quad)) -> Message,
     M: Fn((usize, EntryId, ToolbarAction)) -> Message,
     P: Fn() -> Message,
+    Q: Fn((usize, Rectangle)) -> Message,
 {
     pub fn new(tiles: Vec<TileSpec<'a>>, font: Font) -> Self {
         Self {
@@ -129,8 +149,10 @@ where
             on_edit_rect: None,
             on_entry_moved: None,
             on_toolbar_action: None,
+            on_inpaint_selection: None,
             on_scroll_ended: None,
             editing: None,
+            inpaint_mode: None,
         }
     }
 
@@ -183,6 +205,21 @@ where
     /// waiting out the debounce.
     pub fn on_scroll_ended(mut self, f: P) -> Self {
         self.on_scroll_ended = Some(f);
+        self
+    }
+
+    /// Called when the user finishes dragging an inpainting range on the
+    /// tile whose index matches [`Self::inpaint_mode`]; the rectangle is in
+    /// image pixels.
+    pub fn on_inpaint_selection(mut self, f: Q) -> Self {
+        self.on_inpaint_selection = Some(f);
+        self
+    }
+
+    /// Marks the tile that accepts inpainting range drags; `None` disables
+    /// the mode.
+    pub fn inpaint_mode(mut self, inpaint_mode: Option<usize>) -> Self {
+        self.inpaint_mode = inpaint_mode;
         self
     }
 
@@ -266,6 +303,13 @@ enum Interaction {
         id: EntryId,
         action: ToolbarAction,
     },
+    /// A drag on the tile targeted by `inpaint_mode`: selects the range to
+    /// clean. `start`/`current` are in tile-local (content) coordinates.
+    InpaintSelecting {
+        index: usize,
+        start: Point,
+        current: Point,
+    },
 }
 
 /// One of the eight resize handles around the selected entry's box.
@@ -338,6 +382,17 @@ struct TileViewState {
     /// Current keyboard modifiers, cached from `ModifiersChanged` so a press
     /// can tell a plain handle drag from a Ctrl free-transform drag.
     keyboard_modifiers: keyboard::Modifiers,
+    /// The image index whose tile accepts inpainting range drags (`None`
+    /// disables the mode). Mirrors the widget field every frame.
+    inpaint_mode: Option<usize>,
+}
+
+impl TileViewState {
+    /// The mirror of the widget's inpainting mode when the last frame was
+    /// drawn.
+    fn inpaint_mode(&self) -> Option<usize> {
+        self.inpaint_mode
+    }
 }
 
 impl Default for TileViewState {
@@ -352,6 +407,7 @@ impl Default for TileViewState {
             last_click: None,
             last_edit_rect: None,
             keyboard_modifiers: keyboard::Modifiers::default(),
+            inpaint_mode: None,
         }
     }
 }
@@ -429,6 +485,28 @@ fn publish_visible<'a, Message, F>(
 
 fn local_point(position: Point, bounds: Rectangle) -> Point {
     Point::new(position.x - bounds.position().x, position.y - bounds.position().y)
+}
+
+/// The tile index whose content contains `local` (viewport-relative), if any.
+fn hit_tile(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Option<usize> {
+    let (layout, _) = tile_layout(tiles, state.width);
+    let content_y = local.y + state.offset;
+    layout
+        .iter()
+        .enumerate()
+        .find(|(_, (y, height))| content_y >= *y && content_y < y + height)
+        .map(|(index, _)| index)
+}
+
+/// Converts a viewport-relative point into tile-local (content, unscrolled)
+/// coordinates for tile `index`.
+fn tile_local_point(
+    layout: &[(f32, f32)],
+    index: usize,
+    local: Point,
+    offset: f32,
+) -> Point {
+    Point::new(local.x, local.y + offset - layout[index].0)
 }
 
 /// True when `point` is inside the (possibly convex) quad. Cheap for convex
@@ -658,12 +736,23 @@ fn hit_handle(
     None
 }
 
+/// The toolbar's buttons in drawing order, with their labels.
+fn toolbar_buttons() -> [(ToolbarAction, &'static str); 2] {
+    [
+        (ToolbarAction::Rename, "Rename"),
+        (ToolbarAction::Delete, "Delete"),
+    ]
+}
+
 /// Width of the toolbar: two side-by-side buttons ("Rename", "Delete").
 fn toolbar_width() -> f32 {
     fn button_width(label: &str) -> f32 {
         label.chars().count() as f32 * 6.5 + TOOLBAR_BTN_PAD * 2.0
     }
-    button_width("Rename") + button_width("Delete")
+    toolbar_buttons()
+        .into_iter()
+        .map(|(_, label)| button_width(label))
+        .sum()
 }
 
 /// The toolbar rect under the selected box: horizontally centered and
@@ -686,12 +775,15 @@ fn hit_toolbar_button(toolbar: Rectangle, local: Point) -> Option<ToolbarAction>
     if !toolbar.contains(local) {
         return None;
     }
-    let rename_width = "Rename".chars().count() as f32 * 6.5 + TOOLBAR_BTN_PAD * 2.0;
-    if local.x < toolbar.x + rename_width {
-        Some(ToolbarAction::Rename)
-    } else {
-        Some(ToolbarAction::Delete)
+    let mut x = toolbar.x;
+    for (action, label) in toolbar_buttons() {
+        let width = label.chars().count() as f32 * 6.5 + TOOLBAR_BTN_PAD * 2.0;
+        if local.x < x + width {
+            return Some(action);
+        }
+        x += width;
     }
+    None
 }
 
 /// The toolbar of the selected entry under `local` (viewport-relative), if
@@ -901,19 +993,35 @@ where
     });
 }
 
+/// The inpainting range marquee: a translucent rect between `start` and
+/// `current` (tile-local coordinates), clipped to the tile.
+fn draw_inpaint_marquee<F>(frame: &mut F, start: Point, current: Point, tile: Size)
+where
+    F: geometry::frame::Backend,
+{
+    let x0 = start.x.min(current.x).clamp(0.0, tile.width);
+    let y0 = start.y.min(current.y).clamp(0.0, tile.height);
+    let x1 = start.x.max(current.x).clamp(0.0, tile.width);
+    let y1 = start.y.max(current.y).clamp(0.0, tile.height);
+    let rect = Rectangle::new(Point::new(x0, y0), Size::new(x1 - x0, y1 - y0));
+    frame.fill_rectangle(rect.position(), rect.size(), Fill::from(INPAINT_FILL));
+    frame.stroke(
+        &Path::rectangle(rect.position(), rect.size()),
+        Stroke::default().with_color(INPAINT_STROKE).with_width(1.0),
+    );
+}
+
 /// The rect of one toolbar button inside the toolbar.
 fn toolbar_button_rect(toolbar: Rectangle, action: ToolbarAction) -> Rectangle {
-    let rename_width = "Rename".chars().count() as f32 * 6.5 + TOOLBAR_BTN_PAD * 2.0;
-    match action {
-        ToolbarAction::Rename => Rectangle::new(
-            toolbar.position(),
-            Size::new(rename_width, toolbar.height),
-        ),
-        ToolbarAction::Delete => Rectangle::new(
-            Point::new(toolbar.x + rename_width, toolbar.y),
-            Size::new((toolbar.width - rename_width).max(0.0), toolbar.height),
-        ),
+    let mut x = toolbar.x;
+    for (candidate, label) in toolbar_buttons() {
+        let width = label.chars().count() as f32 * 6.5 + TOOLBAR_BTN_PAD * 2.0;
+        if candidate == action {
+            return Rectangle::new(Point::new(x, toolbar.y), Size::new(width, toolbar.height));
+        }
+        x += width;
     }
+    Rectangle::new(toolbar.position(), Size::new(0.0, toolbar.height))
 }
 
 fn draw_toolbar_button<F>(frame: &mut F, toolbar: Rectangle, action: ToolbarAction, hovered: bool)
@@ -921,10 +1029,11 @@ where
     F: geometry::frame::Backend,
 {
     let rect = toolbar_button_rect(toolbar, action);
-    let label = match action {
-        ToolbarAction::Rename => "Rename",
-        ToolbarAction::Delete => "Delete",
-    };
+    let label = toolbar_buttons()
+        .into_iter()
+        .find(|(candidate, _)| *candidate == action)
+        .map(|(_, label)| label)
+        .unwrap_or("");
     if hovered {
         frame.fill(
             &Path::rounded_rectangle(rect.position(), rect.size(), Radius::from(4.0)),
@@ -982,14 +1091,19 @@ fn draw_selection_decorations<'a, F>(
     }
     let scale = frame.width() / tiles[tile_index].source_width.max(1) as f32;
     let quad = overlay::order_quad(entry.quad.points.map(|p| [p[0] * scale, p[1] * scale]));
-    let anchors = handle_anchors(quad);
-    for (_, anchor) in anchors {
-        let handle = handle_rect(anchor);
-        frame.fill_rectangle(handle.position(), handle.size(), Fill::from(HANDLE_FILL));
-        frame.stroke(
-            &Path::rectangle(handle.position(), handle.size()),
-            Stroke::default().with_color(HANDLE_BORDER).with_width(1.0),
-        );
+    // While inpainting mode is on for this tile, the transform handles are
+    // hidden so the range drag has an uncluttered canvas; the panel's
+    // Inpaint button toggles the mode back off.
+    if state.inpaint_mode() != Some(tile_index) {
+        let anchors = handle_anchors(quad);
+        for (_, anchor) in anchors {
+            let handle = handle_rect(anchor);
+            frame.fill_rectangle(handle.position(), handle.size(), Fill::from(HANDLE_FILL));
+            frame.stroke(
+                &Path::rectangle(handle.position(), handle.size()),
+                Stroke::default().with_color(HANDLE_BORDER).with_width(1.0),
+            );
+        }
     }
     let rect = Rectangle::new(
         Point::new(entry.bounds[0] * scale, entry.bounds[1] * scale),
@@ -1000,13 +1114,13 @@ fn draw_selection_decorations<'a, F>(
     );
     let toolbar = toolbar_rect(rect, frame.width(), frame.height());
     let hover = cursor_local.and_then(|local| hit_toolbar_button(toolbar, local));
-    for action in [ToolbarAction::Rename, ToolbarAction::Delete] {
+    for (action, _) in toolbar_buttons() {
         draw_toolbar_button(frame, toolbar, action, hover == Some(action));
     }
 }
 
-impl<'a, Message, F, G, H, K, L, M, P, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for TileView<'a, Message, F, G, H, K, L, M, P>
+impl<'a, Message, F, G, H, K, L, M, P, Q, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for TileView<'a, Message, F, G, H, K, L, M, P, Q>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -1015,6 +1129,7 @@ where
     L: Fn((usize, EntryId, Quad)) -> Message,
     M: Fn((usize, EntryId, ToolbarAction)) -> Message,
     P: Fn() -> Message,
+    Q: Fn((usize, Rectangle)) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
     fn size(&self) -> Size<Length> {
@@ -1038,6 +1153,7 @@ where
         let width = limits.max().width;
         let state = tree.state.downcast_mut::<TileViewState>();
         state.width = content_width(width);
+        state.inpaint_mode = self.inpaint_mode;
         let (_, content_height) = tile_layout(&self.tiles, state.width);
         state.content_height = content_height;
         if state.viewport_height > 0.0 {
@@ -1084,6 +1200,20 @@ where
                                 Rectangle::with_size(frame.size()),
                                 geometry::Image::new(decoded.handle.clone()),
                             );
+                            // Inpaint layers sit right above the page raster
+                            // and below the entry overlays.
+                            let scale =
+                                frame.width() / tile.source_width.max(1) as f32;
+                            for layer in tile.inpaint {
+                                let bounds = layer.bounds;
+                                frame.draw_image(
+                                    Rectangle::new(
+                                        Point::new(bounds[0] * scale, bounds[1] * scale),
+                                        Size::new(bounds[2] * scale, bounds[3] * scale),
+                                    ),
+                                    geometry::Image::new(layer.handle.clone()),
+                                );
+                            }
                             overlay_frames.push((index, tile_bounds));
                         }
                         None => draw_placeholder(&mut frame, tile.decode.thumb_failed(), self.font),
@@ -1129,6 +1259,26 @@ where
                                 index,
                                 cursor_local,
                             );
+                            // The inpainting range marquee, drawn last so it
+                            // sits on top of the tile's content.
+                            if state.inpaint_mode() == Some(index) {
+                                if let Interaction::InpaintSelecting {
+                                    index: selecting,
+                                    start,
+                                    current,
+                                } = state.interaction
+                                {
+                                    if selecting == index {
+                                        let frame_size = overlay_frame.size();
+                                        draw_inpaint_marquee(
+                                            &mut overlay_frame,
+                                            start,
+                                            current,
+                                            frame_size,
+                                        );
+                                    }
+                                }
+                            }
                             renderer.draw_geometry(overlay_frame.into_geometry());
                         }
                     });
@@ -1207,6 +1357,24 @@ where
                             state.interaction = Interaction::ToolbarPressed { index, id, action };
                             shell.capture_event();
                             return;
+                        }
+                        // Inpainting mode: a drag anywhere on the targeted
+                        // tile selects the range to clean (the scrollbar
+                        // keeps working below).
+                        if let (Some(hover_index), Some(mode_index)) =
+                            (hit_tile(&self.tiles, state, local), self.inpaint_mode)
+                        {
+                            if hover_index == mode_index && !track_rect(bounds).contains(local) {
+                                let (layout, _) = tile_layout(&self.tiles, state.width);
+                                let content = tile_local_point(&layout, mode_index, local, state.offset);
+                                state.interaction = Interaction::InpaintSelecting {
+                                    index: mode_index,
+                                    start: content,
+                                    current: content,
+                                };
+                                shell.capture_event();
+                                return;
+                            }
                         }
                         if let Some((index, id, handle)) = hit_handle(&self.tiles, state, local) {
                             if let Some(quad) = entry_quad(&self.tiles, index, id) {
@@ -1300,6 +1468,34 @@ where
                         }
                     }
                 }
+                if let Interaction::InpaintSelecting { index, start, current } = state.interaction {
+                    let tile = &self.tiles[index];
+                    let (layout, _) = tile_layout(&self.tiles, state.width);
+                    let scale = if tile.source_width > 0 {
+                        state.width / tile.source_width as f32
+                    } else {
+                        0.0
+                    };
+                    if scale > 0.0 {
+                        let tile_height = layout.get(index).map(|(_, h)| *h).unwrap_or(0.0);
+                        let x0 = start.x.min(current.x).clamp(0.0, state.width);
+                        let y0 = start.y.min(current.y).clamp(0.0, tile_height);
+                        let x1 = start.x.max(current.x).clamp(0.0, state.width);
+                        let y1 = start.y.max(current.y).clamp(0.0, tile_height);
+                        // The selected range in image pixels; ranges smaller
+                        // than a few pixels are accidental presses.
+                        let rect = Rectangle::new(
+                            Point::new(x0 / scale, y0 / scale),
+                            Size::new((x1 - x0) / scale, (y1 - y0) / scale),
+                        );
+                        if rect.width >= MIN_INPAINT_EDGE && rect.height >= MIN_INPAINT_EDGE {
+                            if let Some(callback) = self.on_inpaint_selection.as_ref() {
+                                shell.publish(callback((index, rect)));
+                                shell.request_redraw();
+                            }
+                        }
+                    }
+                }
                 let ended_scroll = matches!(state.interaction, Interaction::ScrollerGrabbed { .. });
                 if matches!(
                     state.interaction,
@@ -1311,6 +1507,7 @@ where
                         | Interaction::DistortPending { .. }
                         | Interaction::Distorting { .. }
                         | Interaction::ToolbarPressed { .. }
+                        | Interaction::InpaintSelecting { .. }
                 ) {
                     state.interaction = Interaction::None;
                     shell.capture_event();
@@ -1445,6 +1642,19 @@ where
                         }
                         shell.capture_event();
                     }
+                    Interaction::InpaintSelecting { index, start, .. } => {
+                        let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        let (layout, _) = tile_layout(&self.tiles, state.width);
+                        let current =
+                            tile_local_point(&layout, index, local, state.offset);
+                        state.interaction = Interaction::InpaintSelecting {
+                            index,
+                            start,
+                            current,
+                        };
+                        shell.request_redraw();
+                        shell.capture_event();
+                    }
                     Interaction::ToolbarPressed { .. } => {
                         shell.capture_event();
                     }
@@ -1484,7 +1694,8 @@ where
             | Interaction::Resizing { .. }
             | Interaction::DistortPending { .. }
             | Interaction::Distorting { .. }
-            | Interaction::ToolbarPressed { .. } => {
+            | Interaction::ToolbarPressed { .. }
+            | Interaction::InpaintSelecting { .. } => {
                 mouse::Interaction::Grabbing
             }
             Interaction::None => {
@@ -1498,6 +1709,9 @@ where
                         if let Some((_, _, handle)) = hit_handle(&self.tiles, state, local) {
                             return handle.cursor();
                         }
+                        if hit_tile(&self.tiles, state, local) == self.inpaint_mode {
+                            return mouse::Interaction::Crosshair;
+                        }
                     }
                     if track_rect(bounds).contains(local) || thumb_rect(bounds, state).contains(local)
                     {
@@ -1510,8 +1724,8 @@ where
     }
 }
 
-impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Theme, Renderer>
-    From<TileView<'a, Message, F, G, H, K, L, M, P>> for Element<'a, Message, Theme, Renderer>
+impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Q: 'a, Theme, Renderer>
+    From<TileView<'a, Message, F, G, H, K, L, M, P, Q>> for Element<'a, Message, Theme, Renderer>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -1520,9 +1734,10 @@ where
     L: Fn((usize, EntryId, Quad)) -> Message,
     M: Fn((usize, EntryId, ToolbarAction)) -> Message,
     P: Fn() -> Message,
+    Q: Fn((usize, Rectangle)) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
-    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P>) -> Self {
+    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P, Q>) -> Self {
         Self::new(view)
     }
 }

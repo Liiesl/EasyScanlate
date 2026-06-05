@@ -1,0 +1,11 @@
+[package]
+name = "scanlateit-inpaint"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+image = "0.25"
+imageproc = "0.25"
+ndarray = "0.17"
+ort = "2.0.0-rc.12"
+scanlateit-model = { path = "../model" }

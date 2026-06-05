@@ -62,6 +62,13 @@ impl OcrResult {
         self.entries.iter().filter(|e| !e.deleted)
     }
 
+    /// Every entry in insertion order, including soft-deleted ones. Used by
+    /// inpainting so text removed from the view still contributes to the
+    /// cleanup mask.
+    pub fn all(&self) -> impl Iterator<Item = &OcrEntry> {
+        self.entries.iter()
+    }
+
     pub fn visible_count(&self) -> usize {
         self.entries.iter().filter(|e| !e.deleted).count()
     }

@@ -26,4 +26,7 @@ pub trait UiState {
     fn editing_rect(&self) -> Option<Rectangle>;
     fn edit_content(&self) -> Option<&text_editor::Content>;
     fn font(&self) -> Option<Font>;
+    /// The image whose tile is accepting inpainting range drags; `None`
+    /// disables the mode.
+    fn inpaint_mode(&self) -> Option<usize>;
 }

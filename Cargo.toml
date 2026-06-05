@@ -4,15 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["model", "ocr", "translation", "ui"]
+members = ["model", "inpaint", "ocr", "translation", "ui"]
 resolver = "3"
 exclude = ["iced", "rapidocr-core"]
 
 [dependencies]
 iced = { version = "0.14.0", path = "iced", features = ["image", "canvas", "advanced", "tokio"] }
 image = "0.25"
+bytes = "1.6"
 rfd = "0.17"
 scanlateit-model = { path = "model" }
+scanlateit-inpaint = { path = "inpaint" }
 scanlateit-ocr = { path = "ocr" }
 scanlateit-translation = { path = "translation" }
 scanlateit-ui = { path = "ui" }

@@ -2,12 +2,15 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
+use iced::widget::image::Handle;
 use iced::widget::{row, text_editor};
 use iced::{Element, Font, Length, Rectangle, Task};
 
-use scanlateit_model::{EntryId, EntryStyle, NewEntry, ProfileId, Project};
+use scanlateit_inpaint::Engine as InpaintEngine;
+use scanlateit_model::{EntryId, EntryStyle, InpaintPatch, NewEntry, ProfileId, Project, Quad};
 use scanlateit_ocr::{self as ocr, Engine, OcrCancellationToken};
 use scanlateit_translation as translation;
+use scanlateit_ui::loaded::InpaintLayer;
 use scanlateit_ui::main_area::decode::{
     decode_page, DecodedPage, PageDecode, Tier, MAX_DECODE_EDGE, THUMB_DECODE_EDGE,
 };
@@ -39,6 +42,8 @@ pub enum Message {
     ImagesPicked(Result<Vec<(String, u32, u32)>, String>),
     EngineReady(Result<Engine, String>),
     OcrFinished(usize, Result<Vec<NewEntry>, String>),
+    InpaintEngineReady(Result<InpaintEngine, String>),
+    InpaintFinished(usize, Result<Vec<(image::RgbaImage, [f32; 4])>, String>),
     FontLoaded,
     ThumbDecoded(usize, Result<Arc<DecodedPage>, String>),
     FullDecoded(usize, Result<Arc<DecodedPage>, String>),
@@ -60,6 +65,14 @@ pub struct App {
     pub(crate) images: Vec<LoadedImage>,
     engine: Option<Engine>,
     cancel: Option<OcrCancellationToken>,
+    inpaint_engine: Option<InpaintEngine>,
+    /// Buffered inpainting job waiting for the engine to finish loading,
+    /// as `(image index, path, rect, mask quads)`.
+    pending_inpaint: Option<(usize, String, [f32; 4], Vec<Quad>)>,
+    /// True while an inpainting inference is in flight.
+    pub(crate) inpainting: bool,
+    /// The image whose tile is in inpainting selection mode.
+    pub(crate) inpaint_mode: Option<usize>,
     pub(crate) running: bool,
     pub(crate) font: Option<Font>,
     pub(crate) status: String,
@@ -113,6 +126,10 @@ impl App {
             images: Vec::new(),
             engine: None,
             cancel: None,
+            inpaint_engine: None,
+            pending_inpaint: None,
+            inpainting: false,
+            inpaint_mode: None,
             running: false,
             font: None,
             status: "Idle - open images to begin.".to_string(),
@@ -263,6 +280,10 @@ impl UiState for App {
     fn font(&self) -> Option<Font> {
         self.font
     }
+
+    fn inpaint_mode(&self) -> Option<usize> {
+        self.inpaint_mode
+    }
 }
 
 #[cfg(test)]
@@ -297,6 +318,7 @@ mod tests {
             path: "x.png".to_string(),
             project,
             decode: PageDecode::default(),
+            inpaint: Vec::new(),
         });
         (app, id)
     }
@@ -538,6 +560,39 @@ fn start_ocr_run(app: &mut App, engine: Engine) -> Task<Message> {
     )
 }
 
+/// True when the quad's bounding box overlaps `rect` (image pixels). Used
+/// to pick the text boxes an inpainting range should mask out.
+fn quad_intersects_rect(quad: &Quad, rect: [f32; 4]) -> bool {
+    let [x0, y0, x1, y1] = quad.bounds();
+    !(x1 <= rect[0] || x0 >= rect[0] + rect[2] || y1 <= rect[1] || y0 >= rect[1] + rect[3])
+}
+
+/// Spawns one inpainting run: the full-res decode, mask build and LaMa
+/// inference all happen on the blocking pool, the UI thread only stores the
+/// finished patch.
+fn start_inpaint(
+    app: &mut App,
+    engine: InpaintEngine,
+    index: usize,
+    path: String,
+    rect: [f32; 4],
+    quads: Vec<Quad>,
+) -> Task<Message> {
+    app.inpainting = true;
+    app.status = "inpainting...".to_string();
+    Task::perform(
+        async move {
+            let result = tokio::task::spawn_blocking(move || {
+                engine.run_blocking(&path, rect, &quads)
+            })
+            .await
+            .unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")));
+            (index, result)
+        },
+        |(index, result)| Message::InpaintFinished(index, result),
+    )
+}
+
 fn finalize_run(app: &mut App) {
     app.running = false;
     app.cancel = None;
@@ -658,6 +713,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                         path,
                         project: Project::new(),
                         decode: PageDecode::default(),
+                        inpaint: Vec::new(),
                     });
                 }
                 app.status = format!("Decoding {} image(s)...", app.images.len());
@@ -717,6 +773,58 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 Task::none()
             }
         },
+        Message::InpaintEngineReady(result) => match result {
+            Ok(engine) => {
+                app.inpaint_engine = Some(engine.clone());
+                match app.pending_inpaint.take() {
+                    Some((index, path, rect, quads)) => {
+                        start_inpaint(app, engine, index, path, rect, quads)
+                    }
+                    None => Task::none(),
+                }
+            }
+            Err(e) => {
+                app.pending_inpaint = None;
+                app.status = e;
+                Task::none()
+            }
+        },
+        Message::InpaintFinished(index, result) => {
+            app.inpainting = false;
+            match result {
+                Ok(patches) => {
+                    let Some(image) = app.images.get_mut(index) else {
+                        return Task::none();
+                    };
+                    let count = patches.len();
+                    for (patch, bounds) in patches {
+                        let (width, height) = (patch.width(), patch.height());
+                        let layer = InpaintLayer {
+                            bounds,
+                            handle: Handle::from_rgba(
+                                width,
+                                height,
+                                bytes::Bytes::from(patch.into_raw()),
+                            ),
+                            width,
+                            height,
+                        };
+                        image.inpaint.push(layer);
+                        image
+                            .project
+                            .extras
+                            .inpaint_patches
+                            .push(InpaintPatch { bounds });
+                    }
+                    app.inpaint_mode = None;
+                    app.status = format!("Inpainted {count} region(s).");
+                }
+                Err(e) => {
+                    app.status = e;
+                }
+            }
+            Task::none()
+        }
         Message::Ui(UiEvent::StopOcr) => {
             if let Some(token) = &app.cancel {
                 token.cancel();
@@ -901,6 +1009,24 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::EntryDoubleClicked((index, id))) => {
             start_inline_edit(app, index, id)
         }
+        Message::Ui(UiEvent::Inpaint) => {
+            if app.inpainting || app.running || app.translating || app.images.is_empty() {
+                return Task::none();
+            }
+            let index = app.selected.map(|(i, _)| i).unwrap_or(0);
+            app.inpaint_mode = if app.inpaint_mode == Some(index) {
+                None
+            } else {
+                Some(index)
+            };
+            app.status = match app.inpaint_mode {
+                Some(_) => "Inpaint mode: drag a rectangle over the text to remove; \
+                           click Inpaint again to cancel."
+                    .to_string(),
+                None => "Inpaint mode cancelled.".to_string(),
+            };
+            Task::none()
+        }
         Message::Ui(UiEvent::EntryToolbar((index, id, action))) => match action {
             ToolbarAction::Rename => start_inline_edit(app, index, id),
             ToolbarAction::Delete => {
@@ -921,6 +1047,39 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 image.project.set_view_quad(id, quad);
             }
             Task::none()
+        }
+        Message::Ui(UiEvent::InpaintSelection((index, rect))) => {
+            if app.inpainting || app.running || app.translating {
+                return Task::none();
+            }
+            let rect = [rect.x, rect.y, rect.width, rect.height];
+            let Some(image) = app.images.get(index) else {
+                return Task::none();
+            };
+            let quads: Vec<Quad> = image
+                .project
+                .ocr
+                .all()
+                .map(|entry| image.project.view_quad(entry))
+                .filter(|quad| quad_intersects_rect(quad, rect))
+                .collect();
+            if quads.is_empty() {
+                app.status = "Inpaint: no OCR boxes in the range; the whole selection \
+                              will be cleaned."
+                    .to_string();
+            }
+            let path = image.path.clone();
+            match app.inpaint_engine.clone() {
+                Some(engine) => start_inpaint(app, engine, index, path, rect, quads),
+                None => {
+                    app.pending_inpaint = Some((index, path, rect, quads));
+                    app.status = "Loading the inpainting model...".to_string();
+                    Task::perform(
+                        async move { InpaintEngine::build() },
+                        Message::InpaintEngineReady,
+                    )
+                }
+            }
         }
         Message::Ui(UiEvent::EditAction(action)) => {
             let Some(content) = app.edit_content.as_mut() else {

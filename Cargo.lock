@@ -4139,14 +4139,27 @@ dependencies = [
 name = "scanlateit"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "iced",
  "image",
  "rfd",
+ "scanlateit-inpaint",
  "scanlateit-model",
  "scanlateit-ocr",
  "scanlateit-translation",
  "scanlateit-ui",
  "tokio",
+]
+
+[[package]]
+name = "scanlateit-inpaint"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "imageproc",
+ "ndarray",
+ "ort",
+ "scanlateit-model",
 ]
 
 [[package]]

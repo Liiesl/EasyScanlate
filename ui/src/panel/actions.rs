@@ -1,5 +1,5 @@
-//! Top section: opening images plus the OCR action row (start/stop) and
-//! profile cycling.
+//! Top section: opening images, the OCR action row (start/stop), profile
+//! cycling and the inpainting mode toggle.
 
 use iced::widget::{button, column, row, text};
 use iced::Element;
@@ -13,6 +13,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         .first()
         .map(|i| i.project.profiles.selected().name.clone())
         .unwrap_or_else(|| "Default".to_string());
+    let inpaint_active = state.inpaint_mode().is_some();
     column![
         row![
             text("Scanlateit").size(24),
@@ -27,6 +28,18 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                     .then_some(UiEvent::StartOcr)
             ),
             button("Stop").on_press_maybe(state.running().then_some(UiEvent::StopOcr)),
+        ]
+        .spacing(6),
+        row![
+            button(if inpaint_active {
+                "Cancel Inpaint"
+            } else {
+                "Inpaint"
+            })
+            .on_press_maybe(
+                (!state.images().is_empty() && !state.running() && !state.translating())
+                    .then_some(UiEvent::Inpaint)
+            ),
         ]
         .spacing(6),
         row![

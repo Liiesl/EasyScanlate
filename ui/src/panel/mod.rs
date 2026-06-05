@@ -1,5 +1,6 @@
 //! The right panel, stacked in three sections: an action row on top
-//! (open images, start/stop OCR, profile cycling), a styling placeholder
+//! (open images, start/stop OCR, inpainting toggle, profile cycling), a
+//! styling placeholder
 //! below it (upcoming feature), and the OCR results list combined with the
 //! translation controls on the bottom.
 

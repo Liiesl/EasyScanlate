@@ -113,6 +113,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                 source_width: image.width as u32,
                 source_height: image.height as u32,
                 decode: &image.decode,
+                inpaint: &image.inpaint,
                 overlays: image
                     .project
                     .ocr
@@ -137,6 +138,8 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .on_edit_rect(UiEvent::EditRect)
             .on_entry_moved(UiEvent::EntryMoved)
             .on_toolbar_action(UiEvent::EntryToolbar)
+            .on_inpaint_selection(UiEvent::InpaintSelection)
+            .inpaint_mode(state.inpaint_mode())
             .editing(state.editing());
         iced::widget::stack![viewer, edit_overlay(state)].into()
     }

@@ -18,7 +18,7 @@ pub mod project;
 pub mod style;
 
 pub use entry::{EntryId, EntrySource, NewEntry, OcrEntry, Quad};
-pub use extras::Extras;
+pub use extras::{Extras, InpaintPatch};
 pub use ocr_result::OcrResult;
 pub use profile::{ProfileId, Profiles};
 pub use project::Project;

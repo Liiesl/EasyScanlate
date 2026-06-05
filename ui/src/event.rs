@@ -5,8 +5,8 @@ use iced::Rectangle;
 
 use scanlateit_model::{EntryId, Quad};
 
-/// The two actions offered by the selection toolbar drawn under the selected
-/// overlay box in the main area.
+/// The two actions offered by the selection toolbar drawn under the
+/// selected overlay box in the main area.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolbarAction {
     /// Start the inline text edit for the entry (same as double-click).
@@ -37,6 +37,12 @@ pub enum UiEvent {
     EntryMoved((usize, EntryId, Quad)),
     /// A button of the selection toolbar under the selected entry.
     EntryToolbar((usize, EntryId, ToolbarAction)),
+    /// Toggle inpainting mode from the panel: the next drag on the page
+    /// selects the range to clean.
+    Inpaint,
+    /// The user finished dragging an inpainting range on `index`'s tile;
+    /// `Rectangle` is `(x, y, w, h)` in image pixels.
+    InpaintSelection((usize, Rectangle)),
     EditAction(text_editor::Action),
     EditRect(Rectangle),
     EditSubmit,
