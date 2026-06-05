@@ -395,13 +395,17 @@ for c in text.chars() {
     }
 
     #[test]
-    fn moving_an_entry_updates_view_bounds_but_not_the_quad() {
+    fn moving_an_entry_updates_view_quad_but_not_the_ocr_quad() {
+        use scanlateit_model::Quad;
         let (mut app, id) = app_with_entry();
-        let _ = update(&mut app, Message::Ui(UiEvent::EntryMoved((0, id, [20.0, 25.0, 40.0, 35.0]))));
+        let moved = Quad {
+            points: [[20.0, 25.0], [40.0, 25.0], [40.0, 35.0], [20.0, 35.0]],
+        };
+        let _ = update(&mut app, Message::Ui(UiEvent::EntryMoved((0, id, moved))));
 
         let image = &app.images[0];
         let entry = image.project.ocr.get(id).unwrap();
-        assert_eq!(image.project.view_bounds(entry), [20.0, 25.0, 40.0, 35.0]);
+        assert_eq!(image.project.view_quad(entry), moved);
         assert_eq!(
             entry.quad.bounds(),
             [0.0, 0.0, 10.0, 10.0],
@@ -912,9 +916,9 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 Task::none()
             }
         },
-        Message::Ui(UiEvent::EntryMoved((index, id, bounds))) => {
+        Message::Ui(UiEvent::EntryMoved((index, id, quad))) => {
             if let Some(image) = app.images.get_mut(index) {
-                image.project.set_view_bounds(id, bounds);
+                image.project.set_view_quad(id, quad);
             }
             Task::none()
         }

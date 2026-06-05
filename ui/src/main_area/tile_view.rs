@@ -18,13 +18,14 @@ use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::widget::Widget;
 use iced::advanced::{Clipboard, Shell};
 use iced::border::Radius;
+use iced::keyboard;
 use iced::touch::Event as TouchEvent;
 use iced::{Color, Element, Event, Font, Length, Pixels, Point, Rectangle, Size, Vector};
 
 use crate::event::ToolbarAction;
 use super::decode::PageDecode;
 use super::overlay::{self, OverlayEntry};
-use scanlateit_model::EntryId;
+use scanlateit_model::{EntryId, Quad};
 
 const SCROLL_LINE_HEIGHT: f32 = 180.0;
 const SCROLLBAR_WIDTH: f32 = 8.0;
@@ -78,7 +79,7 @@ pub struct TileView<
     G = fn(Option<(usize, EntryId)>) -> Message,
     H = fn((usize, EntryId)) -> Message,
     K = fn(Rectangle) -> Message,
-    L = fn((usize, EntryId, [f32; 4])) -> Message,
+    L = fn((usize, EntryId, Quad)) -> Message,
     M = fn((usize, EntryId, ToolbarAction)) -> Message,
     P = fn() -> Message,
 > where
@@ -86,7 +87,7 @@ pub struct TileView<
     G: Fn(Option<(usize, EntryId)>) -> Message,
     H: Fn((usize, EntryId)) -> Message,
     K: Fn(Rectangle) -> Message,
-    L: Fn((usize, EntryId, [f32; 4])) -> Message,
+    L: Fn((usize, EntryId, Quad)) -> Message,
     M: Fn((usize, EntryId, ToolbarAction)) -> Message,
     P: Fn() -> Message,
 {
@@ -114,7 +115,7 @@ where
     G: Fn(Option<(usize, EntryId)>) -> Message,
     H: Fn((usize, EntryId)) -> Message,
     K: Fn(Rectangle) -> Message,
-    L: Fn((usize, EntryId, [f32; 4])) -> Message,
+    L: Fn((usize, EntryId, Quad)) -> Message,
     M: Fn((usize, EntryId, ToolbarAction)) -> Message,
     P: Fn() -> Message,
 {
@@ -162,9 +163,9 @@ where
         self
     }
 
-    /// Called while an overlay entry is dragged, once per cursor move, with
-    /// the entry's new view bounds as `[min_x, min_y, max_x, max_y]` clamped
-    /// to the image, in image pixels.
+    /// Called while an overlay entry is dragged, resized, or free-transformed
+    /// (Ctrl+drag a corner), once per cursor move, with the entry's new view
+    /// quad in image pixels.
     pub fn on_entry_moved(mut self, f: L) -> Self {
         self.on_entry_moved = Some(f);
         self
@@ -200,41 +201,63 @@ enum Interaction {
     ScrollerGrabbed { grab_offset: f32 },
     /// A left press on an entry that could still resolve to a click; turns
     /// into [`Interaction::Dragging`] once the cursor leaves
-    /// [`DRAG_THRESHOLD`]. `offset` and `size` are in image pixels: the grab
-    /// point relative to the entry's top-left and the box's size, both fixed
-    /// at press so the box tracks the cursor exactly even as it moves.
+    /// [`DRAG_THRESHOLD`]. `offset` is in image pixels: the grab point
+    /// relative to the entry's box top-left, fixed at press so the box
+    /// tracks the cursor exactly even as it moves. `quad` is the entry's
+    /// view quad at press.
     DragPending {
         index: usize,
         id: EntryId,
         offset: [f32; 2],
-        size: [f32; 2],
+        quad: Quad,
         press: Point,
     },
-    /// A press past the drag threshold: publishes the entry's new view bounds
+    /// A press past the drag threshold: publishes the entry's new view quad
     /// on every cursor move.
     Dragging {
         index: usize,
         id: EntryId,
         offset: [f32; 2],
-        size: [f32; 2],
+        quad: Quad,
     },
     /// A press on a resize handle of the selected entry that could still
     /// resolve into a click of nothing; turns into [`Interaction::Resizing`]
-    /// past the drag threshold. `start` is the entry's view bounds at press.
+    /// past the drag threshold. `quad` is the entry's view quad at press.
     ResizePending {
         index: usize,
         id: EntryId,
         handle: ResizeHandle,
-        start: [f32; 4],
+        quad: Quad,
         press: Point,
     },
     /// A press past the drag threshold on a resize handle: publishes the
-    /// entry's new view bounds on every cursor move.
+    /// entry's new view quad on every cursor move.
     Resizing {
         index: usize,
         id: EntryId,
         handle: ResizeHandle,
-        start: [f32; 4],
+        quad: Quad,
+    },
+    /// A Ctrl+press on a corner handle of the selected entry that could
+    /// still resolve into a click of nothing; turns into
+    /// [`Interaction::Distorting`] past the drag threshold. `quad` is the
+    /// entry's view quad at press, ordered TL/TR/BR/BL; dragging replaces
+    /// the single point at `corner`.
+    DistortPending {
+        index: usize,
+        id: EntryId,
+        corner: usize,
+        quad: Quad,
+        press: Point,
+    },
+    /// A press past the drag threshold on a corner handle with Ctrl held:
+    /// publishes the entry's new view quad (one corner moved) on every
+    /// cursor move.
+    Distorting {
+        index: usize,
+        id: EntryId,
+        corner: usize,
+        quad: Quad,
     },
     /// A press on a button of the selection toolbar; resolves (publishes the
     /// action) on release iff the cursor is still over the same button.
@@ -285,6 +308,18 @@ impl ResizeHandle {
             _ => mouse::Interaction::ResizingHorizontally,
         }
     }
+
+    /// The quad corner this handle anchors, when it is a corner handle. The
+    /// index is into the quad ordered TL/TR/BR/BL (see [`overlay::order_quad`]).
+    fn corner(self) -> Option<usize> {
+        match self {
+            Self::NW => Some(0),
+            Self::NE => Some(1),
+            Self::SE => Some(2),
+            Self::SW => Some(3),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -300,6 +335,9 @@ struct TileViewState {
     last_click: Option<(Instant, Option<(usize, EntryId)>)>,
     /// The last published viewport rect of the edited entry.
     last_edit_rect: Option<Rectangle>,
+    /// Current keyboard modifiers, cached from `ModifiersChanged` so a press
+    /// can tell a plain handle drag from a Ctrl free-transform drag.
+    keyboard_modifiers: keyboard::Modifiers,
 }
 
 impl Default for TileViewState {
@@ -313,6 +351,7 @@ impl Default for TileViewState {
             last_visible: None,
             last_click: None,
             last_edit_rect: None,
+            keyboard_modifiers: keyboard::Modifiers::default(),
         }
     }
 }
@@ -392,6 +431,29 @@ fn local_point(position: Point, bounds: Rectangle) -> Point {
     Point::new(position.x - bounds.position().x, position.y - bounds.position().y)
 }
 
+/// True when `point` is inside the (possibly convex) quad. Cheap for convex
+/// quads: every edge must put the point on the same side. Non-convex quads
+/// simply report the bounding-box-ish result the edge sweep gives.
+fn point_in_quad(point: Point, quad: [[f32; 2]; 4]) -> bool {
+    let p = [point.x, point.y];
+    let mut sign = 0.0;
+    for i in 0..4 {
+        let a = quad[i];
+        let b = quad[(i + 1) % 4];
+        let cross = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+        let side = cross.signum();
+        if side == 0.0 {
+            continue;
+        }
+        if sign == 0.0 {
+            sign = side;
+        } else if side != sign {
+            return false;
+        }
+    }
+    true
+}
+
 /// The topmost overlay entry whose box contains `local` (viewport-relative).
 ///
 /// Tiles below the fold are skipped via the scroll offset; within a tile the
@@ -411,13 +473,24 @@ fn hit_entry(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Opt
         } else {
             0.0
         };
+        if scale <= 0.0 {
+            continue;
+        }
         for entry in &tile.overlays {
             let [min_x, min_y, max_x, max_y] = entry.bounds;
             let rect = Rectangle::new(
                 Point::new(min_x * scale, y + min_y * scale - state.offset),
                 Size::new((max_x - min_x) * scale, (max_y - min_y) * scale),
             );
-            if rect.contains(local) {
+            if !rect.contains(local) {
+                continue;
+            }
+            // The box may be free-transformed: confirm the hit against the
+            // quad, brought into viewport space.
+            let quad = overlay::order_quad(entry.quad.points.map(|p| {
+                [p[0] * scale, y + p[1] * scale - state.offset]
+            }));
+            if point_in_quad(local, quad) {
                 hit = Some((index, entry.id));
             }
         }
@@ -426,16 +499,15 @@ fn hit_entry(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Opt
 }
 
 /// The grab geometry for starting a drag on `(index, id)` at `local`
-/// (viewport-relative): the cursor's offset from the entry's top-left and the
-/// entry's box size, both in image pixels. `None` when the tile or entry is
-/// not present.
+/// (viewport-relative): the cursor's offset from the entry's box top-left,
+/// in image pixels. `None` when the tile or entry is not present.
 fn drag_grab(
     tiles: &[TileSpec<'_>],
     state: &TileViewState,
     index: usize,
     id: EntryId,
     local: Point,
-) -> Option<([f32; 2], [f32; 2])> {
+) -> Option<[f32; 2]> {
     let tile = tiles.get(index)?;
     let (layout, _) = tile_layout(tiles, state.width);
     let (y, _) = layout.get(index)?;
@@ -447,26 +519,24 @@ fn drag_grab(
     if scale <= 0.0 {
         return None;
     }
-    let [min_x, min_y, max_x, max_y] = tile.overlays.iter().find(|e| e.id == id)?.bounds;
+    let entry = tile.overlays.iter().find(|e| e.id == id)?;
+    let [min_x, min_y, _, _] = entry.bounds;
     let img_x = local.x / scale;
     let img_y = (local.y + state.offset - y) / scale;
-    Some((
-        [img_x - min_x, img_y - min_y],
-        [max_x - min_x, max_y - min_y],
-    ))
+    Some([img_x - min_x, img_y - min_y])
 }
 
-/// The clamped image-pixel view bounds when the entry whose grab geometry was
-/// captured at press is dragged so its top-left sits under the cursor minus
-/// the grab offset. The box never leaves the image.
-fn drag_bounds(
+/// The clamped image-pixel view quad when the entry whose grab geometry was
+/// captured at press is dragged so its box top-left sits under the cursor
+/// minus the grab offset. The box never leaves the image.
+fn drag_quad(
     tiles: &[TileSpec<'_>],
     state: &TileViewState,
     index: usize,
     local: Point,
     offset: [f32; 2],
-    size: [f32; 2],
-) -> Option<[f32; 4]> {
+    quad: Quad,
+) -> Option<Quad> {
     let tile = tiles.get(index)?;
     let (layout, _) = tile_layout(tiles, state.width);
     let (y, _) = layout.get(index)?;
@@ -480,9 +550,10 @@ fn drag_bounds(
     }
     let img_x = local.x / scale;
     let img_y = (local.y + state.offset - y) / scale;
-    let min_x = (img_x - offset[0]).clamp(0.0, (tile.source_width as f32 - size[0]).max(0.0));
-    let min_y = (img_y - offset[1]).clamp(0.0, (tile.source_height as f32 - size[1]).max(0.0));
-    Some([min_x, min_y, min_x + size[0], min_y + size[1]])
+    let size = quad.bounds();
+    let min_x = (img_x - offset[0]).clamp(0.0, (tile.source_width as f32 - (size[2] - size[0])).max(0.0));
+    let min_y = (img_y - offset[1]).clamp(0.0, (tile.source_height as f32 - (size[3] - size[1])).max(0.0));
+    Some(quad.translate(min_x - size[0], min_y - size[1]))
 }
 
 /// Viewport-relative rect of an overlay entry (widget coordinates): the
@@ -535,28 +606,27 @@ fn selected_rect(tiles: &[TileSpec<'_>], state: &TileViewState) -> Option<(usize
     Some((index, entry_rect(tiles, state, index, entry.id)?))
 }
 
-/// The centers of the eight resize handles around `rect`. Handle centers sit
-/// exactly on the box's edges (straddling the outline like Figma/Photoshop,
-/// so edge handles read as dashes on the line); for boxes smaller than a
+/// The centers of the eight transform handles around the quad: the four
+/// corners and the four edge midpoints. Handle centers sit on the quad's
+/// outline (straddling it like Figma/Photoshop); for boxes smaller than a
 /// handle the anchors collapse toward the box center.
-fn handle_anchors(rect: Rectangle) -> [(ResizeHandle, Point); 8] {
-    let cx = rect.x + rect.width / 2.0;
-    let cy = rect.y + rect.height / 2.0;
-    let span_x = rect.width.max(HANDLE_SIZE);
-    let span_y = rect.height.max(HANDLE_SIZE);
-    let left = cx - span_x / 2.0;
-    let right = cx + span_x / 2.0;
-    let top = cy - span_y / 2.0;
-    let bottom = cy + span_y / 2.0;
+fn handle_anchors(quad: [[f32; 2]; 4]) -> [(ResizeHandle, Point); 8] {
+    let ordered = overlay::order_quad(quad);
+    let point = |i: usize| Point::new(ordered[i][0], ordered[i][1]);
+    let midpoint = |a: usize, b: usize| {
+        Point::new((ordered[a][0] + ordered[b][0]) / 2.0, (ordered[a][1] + ordered[b][1]) / 2.0)
+    };
+    // The quad is ordered TL/TR/BR/BL; keep the anchors exactly in the old
+    // order so interactions (NW/NE/SE/SW corners, N/E/S/W edges) map 1:1.
     [
-        (ResizeHandle::NW, Point::new(left, top)),
-        (ResizeHandle::N, Point::new(cx, top)),
-        (ResizeHandle::NE, Point::new(right, top)),
-        (ResizeHandle::E, Point::new(right, cy)),
-        (ResizeHandle::SE, Point::new(right, bottom)),
-        (ResizeHandle::S, Point::new(cx, bottom)),
-        (ResizeHandle::SW, Point::new(left, bottom)),
-        (ResizeHandle::W, Point::new(left, cy)),
+        (ResizeHandle::NW, point(0)),
+        (ResizeHandle::N, midpoint(0, 1)),
+        (ResizeHandle::NE, point(1)),
+        (ResizeHandle::E, midpoint(1, 2)),
+        (ResizeHandle::SE, point(2)),
+        (ResizeHandle::S, midpoint(2, 3)),
+        (ResizeHandle::SW, point(3)),
+        (ResizeHandle::W, midpoint(3, 0)),
     ]
 }
 
@@ -568,16 +638,19 @@ fn handle_rect(anchor: Point) -> Rectangle {
     )
 }
 
-/// The resize handle of the selected entry under `local` (viewport-relative),
-/// if any.
+/// The transform handle of the selected entry under `local`
+/// (viewport-relative), if any.
 fn hit_handle(
     tiles: &[TileSpec<'_>],
     state: &TileViewState,
     local: Point,
 ) -> Option<(usize, EntryId, ResizeHandle)> {
-    let (index, rect) = selected_rect(tiles, state)?;
-    let id = tiles[index].overlays.iter().find(|e| e.selected)?.id;
-    for (handle, anchor) in handle_anchors(rect) {
+    let (index, entry) = tiles.iter().enumerate().find_map(|(index, tile)| {
+        tile.overlays.iter().find(|e| e.selected).map(|e| (index, e))
+    })?;
+    let id = entry.id;
+    let quad = selected_quad_view(tiles, state, index)?;
+    for (handle, anchor) in handle_anchors(quad) {
         if handle_rect(anchor).contains(local) {
             return Some((index, id, handle));
         }
@@ -637,26 +710,51 @@ fn hit_toolbar(
     hit_toolbar_button(toolbar, local).map(|action| (index, id, action))
 }
 
-/// The entry's current view bounds, in image pixels, used as the fixed start
-/// geometry of a resize gesture.
-fn entry_bounds(tiles: &[TileSpec<'_>], index: usize, id: EntryId) -> Option<[f32; 4]> {
+/// The entry quad's full viewport-relative polygon (ordered TL/TR/BR/BL),
+/// used to place the resize/free-transform handles.
+fn selected_quad_view(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    index: usize,
+) -> Option<[[f32; 2]; 4]> {
     let tile = tiles.get(index)?;
-    tile.overlays.iter().find(|e| e.id == id).map(|e| e.bounds)
+    let (layout, _) = tile_layout(tiles, state.width);
+    let (y, _) = layout.get(index)?;
+    let scale = if tile.source_width > 0 {
+        state.width / tile.source_width as f32
+    } else {
+        0.0
+    };
+    if scale <= 0.0 {
+        return None;
+    }
+    let entry = tile.overlays.iter().find(|e| e.selected)?;
+    Some(overlay::order_quad(entry.quad.points.map(|p| {
+        [p[0] * scale, y + p[1] * scale - state.offset]
+    })))
 }
 
-/// The clamped image-pixel view bounds when the resize handle captured at
+/// The entry's current view quad, in image pixels, used as the fixed start
+/// geometry of a move/resize/free-transform gesture.
+fn entry_quad(tiles: &[TileSpec<'_>], index: usize, id: EntryId) -> Option<Quad> {
+    let tile = tiles.get(index)?;
+    tile.overlays.iter().find(|e| e.id == id).map(|e| e.quad)
+}
+
+/// The clamped image-pixel view quad when the resize handle captured at
 /// press moves the corresponding edges toward `local` (viewport-relative).
 /// Only the edges owned by `handle` move; the opposite edges keep their
-/// press-time position, and the box never leaves the image nor gets smaller
-/// than [`MIN_BOX_EDGE`] viewport pixels.
-fn resize_bounds(
+/// press-time position, the box never leaves the image nor gets smaller
+/// than [`MIN_BOX_EDGE`] viewport pixels, and the quad's shape is refit
+/// into the new bounds proportionally.
+fn resize_quad(
     tiles: &[TileSpec<'_>],
     state: &TileViewState,
     index: usize,
     handle: ResizeHandle,
-    start: [f32; 4],
+    quad: Quad,
     local: Point,
-) -> Option<[f32; 4]> {
+) -> Option<Quad> {
     let tile = tiles.get(index)?;
     let (layout, _) = tile_layout(tiles, state.width);
     let (y, _) = layout.get(index)?;
@@ -673,6 +771,7 @@ fn resize_bounds(
     let img_width = tile.source_width as f32;
     let img_height = tile.source_height as f32;
     let min_edge = (MIN_BOX_EDGE / scale).min(img_width).min(img_height);
+    let start = quad.bounds();
     let [mut min_x, mut min_y, mut max_x, mut max_y] = start;
     if handle.left {
         min_x = img_x.clamp(0.0, (max_x - min_edge).max(0.0));
@@ -686,7 +785,39 @@ fn resize_bounds(
     if handle.bottom {
         max_y = img_y.clamp((min_y + min_edge).min(img_height), img_height);
     }
-    Some([min_x, min_y, max_x, max_y])
+    Some(quad.refit(start, [min_x, min_y, max_x, max_y]))
+}
+
+/// The image-pixel view quad when the corner captured with Ctrl held moves
+/// to `local` (viewport-relative): the quad with that single corner dragged
+/// to the cursor, clamped to the image. The other corners stay put.
+fn distort_quad(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    index: usize,
+    corner: usize,
+    quad: Quad,
+    local: Point,
+) -> Option<Quad> {
+    let tile = tiles.get(index)?;
+    let (layout, _) = tile_layout(tiles, state.width);
+    let (y, _) = layout.get(index)?;
+    let scale = if tile.source_width > 0 {
+        state.width / tile.source_width as f32
+    } else {
+        0.0
+    };
+    if scale <= 0.0 {
+        return None;
+    }
+    let img_x = local.x / scale;
+    let img_y = (local.y + state.offset - y) / scale;
+    let mut points = quad.points;
+    points[corner] = [
+        img_x.clamp(0.0, tile.source_width as f32),
+        img_y.clamp(0.0, tile.source_height as f32),
+    ];
+    Some(Quad { points })
 }
 
 /// Reports the edited entry's current viewport rect through `on_edit_rect`
@@ -837,27 +968,22 @@ fn draw_selection_decorations<'a, F>(
     if entry.hide_text {
         return;
     }
-    // Hide the decorations while this entry is actually being moved or
-    // resized; pending presses (not yet past the drag threshold) and
-    // interactions on other entries keep them visible.
+    // Hide the decorations while this entry is actually being moved,
+    // resized or free-transformed; pending presses (not yet past the drag
+    // threshold) and interactions on other entries keep them visible.
     let interacting_with_selected = match state.interaction {
-        Interaction::Dragging { index, id, .. } | Interaction::Resizing { index, id, .. } => {
-            index == tile_index && id == entry.id
-        }
+        Interaction::Dragging { index, id, .. }
+        | Interaction::Resizing { index, id, .. }
+        | Interaction::Distorting { index, id, .. } => index == tile_index && id == entry.id,
         _ => false,
     };
     if interacting_with_selected {
         return;
     }
     let scale = frame.width() / tiles[tile_index].source_width.max(1) as f32;
-    let rect = Rectangle::new(
-        Point::new(entry.bounds[0] * scale, entry.bounds[1] * scale),
-        Size::new(
-            (entry.bounds[2] - entry.bounds[0]) * scale,
-            (entry.bounds[3] - entry.bounds[1]) * scale,
-        ),
-    );
-    for (_, anchor) in handle_anchors(rect) {
+    let quad = overlay::order_quad(entry.quad.points.map(|p| [p[0] * scale, p[1] * scale]));
+    let anchors = handle_anchors(quad);
+    for (_, anchor) in anchors {
         let handle = handle_rect(anchor);
         frame.fill_rectangle(handle.position(), handle.size(), Fill::from(HANDLE_FILL));
         frame.stroke(
@@ -865,6 +991,13 @@ fn draw_selection_decorations<'a, F>(
             Stroke::default().with_color(HANDLE_BORDER).with_width(1.0),
         );
     }
+    let rect = Rectangle::new(
+        Point::new(entry.bounds[0] * scale, entry.bounds[1] * scale),
+        Size::new(
+            (entry.bounds[2] - entry.bounds[0]) * scale,
+            (entry.bounds[3] - entry.bounds[1]) * scale,
+        ),
+    );
     let toolbar = toolbar_rect(rect, frame.width(), frame.height());
     let hover = cursor_local.and_then(|local| hit_toolbar_button(toolbar, local));
     for action in [ToolbarAction::Rename, ToolbarAction::Delete] {
@@ -879,7 +1012,7 @@ where
     G: Fn(Option<(usize, EntryId)>) -> Message,
     H: Fn((usize, EntryId)) -> Message,
     K: Fn(Rectangle) -> Message,
-    L: Fn((usize, EntryId, [f32; 4])) -> Message,
+    L: Fn((usize, EntryId, Quad)) -> Message,
     M: Fn((usize, EntryId, ToolbarAction)) -> Message,
     P: Fn() -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
@@ -1076,12 +1209,29 @@ where
                             return;
                         }
                         if let Some((index, id, handle)) = hit_handle(&self.tiles, state, local) {
-                            if let Some(start) = entry_bounds(&self.tiles, index, id) {
+                            if let Some(quad) = entry_quad(&self.tiles, index, id) {
+                                // Ctrl turns a corner handle into a free
+                                // transform: that corner follows the cursor.
+                                if let Some(corner) = handle.corner() {
+                                    if state.keyboard_modifiers.command() {
+                                        state.interaction = Interaction::DistortPending {
+                                            index,
+                                            id,
+                                            corner,
+                                            quad: Quad {
+                                                points: overlay::order_quad(quad.points),
+                                            },
+                                            press: local,
+                                        };
+                                        shell.capture_event();
+                                        return;
+                                    }
+                                }
                                 state.interaction = Interaction::ResizePending {
                                     index,
                                     id,
                                     handle,
-                                    start,
+                                    quad,
                                     press: local,
                                 };
                                 shell.capture_event();
@@ -1120,16 +1270,18 @@ where
                             shell.publish(callback(hit));
                         }
                         if let Some((index, id)) = hit {
-                            if let Some((offset, size)) =
+                            if let Some(offset) =
                                 drag_grab(&self.tiles, state, index, id, local)
                             {
-                                state.interaction = Interaction::DragPending {
-                                    index,
-                                    id,
-                                    offset,
-                                    size,
-                                    press: local,
-                                };
+                                if let Some(quad) = entry_quad(&self.tiles, index, id) {
+                                    state.interaction = Interaction::DragPending {
+                                        index,
+                                        id,
+                                        offset,
+                                        quad,
+                                        press: local,
+                                    };
+                                }
                             }
                         }
                         shell.capture_event();
@@ -1156,6 +1308,8 @@ where
                         | Interaction::Dragging { .. }
                         | Interaction::ResizePending { .. }
                         | Interaction::Resizing { .. }
+                        | Interaction::DistortPending { .. }
+                        | Interaction::Distorting { .. }
                         | Interaction::ToolbarPressed { .. }
                 ) {
                     state.interaction = Interaction::None;
@@ -1193,31 +1347,32 @@ where
                         index,
                         id,
                         offset,
-                        size,
+                        quad,
                         press,
                     } => {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         let dx = local.x - press.x;
                         let dy = local.y - press.y;
                         if dx * dx + dy * dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
-                            state.interaction = Interaction::Dragging { index, id, offset, size };
-                            if let (Some(callback), Some(bounds)) = (
+                            state.interaction =
+                                Interaction::Dragging { index, id, offset, quad };
+                            if let (Some(callback), Some(quad)) = (
                                 self.on_entry_moved.as_ref(),
-                                drag_bounds(&self.tiles, state, index, local, offset, size),
+                                drag_quad(&self.tiles, state, index, local, offset, quad),
                             ) {
-                                shell.publish(callback((index, id, bounds)));
+                                shell.publish(callback((index, id, quad)));
                                 shell.request_redraw();
                             }
                         }
                         shell.capture_event();
                     }
-                    Interaction::Dragging { index, id, offset, size } => {
+                    Interaction::Dragging { index, id, offset, quad } => {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
-                        if let (Some(callback), Some(bounds)) = (
+                        if let (Some(callback), Some(quad)) = (
                             self.on_entry_moved.as_ref(),
-                            drag_bounds(&self.tiles, state, index, local, offset, size),
+                            drag_quad(&self.tiles, state, index, local, offset, quad),
                         ) {
-                            shell.publish(callback((index, id, bounds)));
+                            shell.publish(callback((index, id, quad)));
                             shell.request_redraw();
                         }
                         shell.capture_event();
@@ -1226,31 +1381,66 @@ where
                         index,
                         id,
                         handle,
-                        start,
+                        quad,
                         press,
                     } => {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         let dx = local.x - press.x;
                         let dy = local.y - press.y;
                         if dx * dx + dy * dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
-                            state.interaction = Interaction::Resizing { index, id, handle, start };
-                            if let (Some(callback), Some(bounds)) = (
+                            state.interaction =
+                                Interaction::Resizing { index, id, handle, quad };
+                            if let (Some(callback), Some(quad)) = (
                                 self.on_entry_moved.as_ref(),
-                                resize_bounds(&self.tiles, state, index, handle, start, local),
+                                resize_quad(&self.tiles, state, index, handle, quad, local),
                             ) {
-                                shell.publish(callback((index, id, bounds)));
+                                shell.publish(callback((index, id, quad)));
                                 shell.request_redraw();
                             }
                         }
                         shell.capture_event();
                     }
-                    Interaction::Resizing { index, id, handle, start } => {
+                    Interaction::Resizing { index, id, handle, quad } => {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
-                        if let (Some(callback), Some(bounds)) = (
+                        if let (Some(callback), Some(quad)) = (
                             self.on_entry_moved.as_ref(),
-                            resize_bounds(&self.tiles, state, index, handle, start, local),
+                            resize_quad(&self.tiles, state, index, handle, quad, local),
                         ) {
-                            shell.publish(callback((index, id, bounds)));
+                            shell.publish(callback((index, id, quad)));
+                            shell.request_redraw();
+                        }
+                        shell.capture_event();
+                    }
+                    Interaction::DistortPending {
+                        index,
+                        id,
+                        corner,
+                        quad,
+                        press,
+                    } => {
+                        let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        let dx = local.x - press.x;
+                        let dy = local.y - press.y;
+                        if dx * dx + dy * dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
+                            state.interaction =
+                                Interaction::Distorting { index, id, corner, quad };
+                            if let (Some(callback), Some(quad)) = (
+                                self.on_entry_moved.as_ref(),
+                                distort_quad(&self.tiles, state, index, corner, quad, local),
+                            ) {
+                                shell.publish(callback((index, id, quad)));
+                                shell.request_redraw();
+                            }
+                        }
+                        shell.capture_event();
+                    }
+                    Interaction::Distorting { index, id, corner, quad } => {
+                        let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        if let (Some(callback), Some(quad)) = (
+                            self.on_entry_moved.as_ref(),
+                            distort_quad(&self.tiles, state, index, corner, quad, local),
+                        ) {
+                            shell.publish(callback((index, id, quad)));
                             shell.request_redraw();
                         }
                         shell.capture_event();
@@ -1260,6 +1450,12 @@ where
                     }
                     Interaction::None | Interaction::TouchScrolling { .. } => {}
                 }
+            }
+            Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+                // Ctrl (Cmd on macOS) turns a corner-handle press into the
+                // free-transform drag; cache the modifiers here so the press
+                // handler can tell the two apart.
+                state.keyboard_modifiers = *modifiers;
             }
             Event::Window(_) => {
                 publish_visible(shell, &self.tiles, state, &self.on_visible_range);
@@ -1286,6 +1482,8 @@ where
             | Interaction::Dragging { .. }
             | Interaction::ResizePending { .. }
             | Interaction::Resizing { .. }
+            | Interaction::DistortPending { .. }
+            | Interaction::Distorting { .. }
             | Interaction::ToolbarPressed { .. } => {
                 mouse::Interaction::Grabbing
             }
@@ -1319,7 +1517,7 @@ where
     G: Fn(Option<(usize, EntryId)>) -> Message,
     H: Fn((usize, EntryId)) -> Message,
     K: Fn(Rectangle) -> Message,
-    L: Fn((usize, EntryId, [f32; 4])) -> Message,
+    L: Fn((usize, EntryId, Quad)) -> Message,
     M: Fn((usize, EntryId, ToolbarAction)) -> Message,
     P: Fn() -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,

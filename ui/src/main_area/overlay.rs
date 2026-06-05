@@ -10,9 +10,9 @@ use iced::advanced::text::{
 };
 use iced::border::Radius;
 use iced::font::{Style as FontStyle, Weight as FontWeight};
-use iced::{alignment, Color, Font, Pixels, Point, Size};
+use iced::{alignment, Color, Font, Pixels, Point, Size, Vector};
 
-use scanlateit_model::{EntryId, EntryStyle};
+use scanlateit_model::{EntryId, EntryStyle, Quad};
 
 /// View-model entry: what the overlay draws, resolved from the model with the
 /// selected profile's translation and the per-entry style already applied.
@@ -20,7 +20,10 @@ use scanlateit_model::{EntryId, EntryStyle};
 pub struct OverlayEntry<'a> {
     pub id: EntryId,
     pub text: &'a str,
-    /// `[min_x, min_y, max_x, max_y]` in image pixels.
+    /// The entry's free-transformed box in image pixels (may be skewed).
+    pub quad: Quad,
+    /// `[min_x, min_y, max_x, max_y]` of [`OverlayEntry::quad`], in image
+    /// pixels: the box the text is fitted to.
     pub bounds: [f32; 4],
     pub style: EntryStyle,
     /// True when this entry is the one picked in the style panel.
@@ -248,21 +251,27 @@ pub fn draw_entries<'a, I, F>(
         let width = (max_x - min_x).max(0.0) * scale;
         let height = (max_y - min_y).max(0.0) * scale;
         let position = Point::new(min_x * scale, min_y * scale);
-        frame.fill(
-            &Path::rounded_rectangle(
+        // The entry's quad scaled to viewport pixels. When it is not an
+        // axis-aligned box (free transform), the box is the quad itself and
+        // the text is mapped onto it by an affine transform, so the text
+        // skews and rotates with the box.
+        let quad = entry.quad.points.map(|p| [p[0] * scale, p[1] * scale]);
+        let transform = quad_transform(quad, width, height);
+        // The quad path is already in screen space at the box's real
+        // corners: it must be drawn without the text transform, or the
+        // polygon gets pushed through the rect->quad map a second time.
+        let path = match transform {
+            Some(_) => quad_path(quad),
+            None => Path::rounded_rectangle(
                 position,
                 Size::new(width, height),
                 Radius::from(entry.style.bg_radius * scale),
             ),
-            Fill::from(to_color(entry.style.bg_color)),
-        );
+        };
+        frame.fill(&path, Fill::from(to_color(entry.style.bg_color)));
         if entry.selected {
             frame.stroke(
-                &Path::rounded_rectangle(
-                    position,
-                    Size::new(width, height),
-                    Radius::from(entry.style.bg_radius * scale),
-                ),
+                &path,
                 Stroke::default()
                     .with_color(SELECTED_COLOR)
                     .with_width(SELECTED_WIDTH),
@@ -289,6 +298,34 @@ pub fn draw_entries<'a, I, F>(
             font: styled,
             ..Text::default()
         };
+        // Only the text lives in the axis-aligned rect space and needs the
+        // map onto the skewed quad.
+        if let Some(transform) = &transform {
+            frame.push_transform();
+            apply_quad_transform(frame, transform, position, width, height);
+        }
+        // DEBUG markers: green square = text position drawn WITHOUT the
+        // transform (raw AABB coords); red squares = same local rect under
+        // the transform (must land exactly on the quad's envelope).
+        if entry.selected {
+            frame.fill_rectangle(
+                Point::new(text.position.x - 4.0, text.position.y - 4.0),
+                Size::new(8.0, 8.0),
+                Fill::from(Color::from_rgba8(0, 255, 0, 1.0)),
+            );
+            if transform.is_some() {
+                frame.fill_rectangle(
+                    Point::new(text.position.x - 4.0, text.position.y - 4.0),
+                    Size::new(8.0, 8.0),
+                    Fill::from(Color::from_rgba8(255, 0, 0, 1.0)),
+                );
+                frame.fill_rectangle(
+                    Point::new(text.position.x + wrap_width - 4.0, text.position.y + fitted_height - 4.0),
+                    Size::new(8.0, 8.0),
+                    Fill::from(Color::from_rgba8(255, 0, 0, 1.0)),
+                );
+            }
+        }
         if entry.style.stroke_width > 0.0 {
             frame.stroke_text(
                 text.clone(),
@@ -298,7 +335,207 @@ pub fn draw_entries<'a, I, F>(
             );
         }
         frame.fill_text(text);
+        if transform.is_some() {
+            frame.pop_transform();
+        }
     }
+}
+
+/// The entry's quad as a closed 4-point path, in whatever space the caller
+/// provides.
+fn quad_path(quad: [[f32; 2]; 4]) -> Path {
+    Path::new(|builder| {
+        builder.move_to(Point::new(quad[0][0], quad[0][1]));
+        builder.line_to(Point::new(quad[1][0], quad[1][1]));
+        builder.line_to(Point::new(quad[2][0], quad[2][1]));
+        builder.line_to(Point::new(quad[3][0], quad[3][1]));
+        builder.close();
+    })
+}
+
+/// An affine map `M = R(angle2) * S(scale_x, scale_y) * R(angle1)` that maps
+/// an axis-aligned rect onto a free-transformed quad.
+struct QuadTransform {
+    angle1: f32,
+    scale_x: f32,
+    scale_y: f32,
+    angle2: f32,
+}
+
+/// Rotates and skews the current frame transform so that drawing in the
+/// axis-aligned rect of size `width` x `height` at `position` lands on the
+/// quad the transform was fitted to.
+fn apply_quad_transform<F>(
+    frame: &mut F,
+    transform: &QuadTransform,
+    position: Point,
+    width: f32,
+    height: f32,
+) where
+    F: geometry::frame::Backend,
+{
+    let center = Point::new(position.x + width / 2.0, position.y + height / 2.0);
+    // Backend frame transforms compose as M = M * op, so later calls apply
+    // first to points: the sequence composes to
+    // T(center) * R(angle2) * S * R(angle1) * T(-center), i.e. the affine map
+    // applied around the box center.
+    frame.translate(Vector::new(center.x, center.y));
+    frame.rotate(transform.angle2);
+    frame.scale_nonuniform(Vector::new(transform.scale_x, transform.scale_y));
+    frame.rotate(transform.angle1);
+    frame.translate(Vector::new(-center.x, -center.y));
+}
+
+/// The bounding box of a quad as `[min_x, min_y, max_x, max_y]`.
+fn quad_bounds(quad: [[f32; 2]; 4]) -> [f32; 4] {
+    let min_x = quad.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min);
+    let min_y = quad.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min);
+    let max_x = quad.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max);
+    let max_y = quad.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max);
+    [min_x, min_y, max_x, max_y]
+}
+
+/// Reorders the quad's points so index `0..4` matches the bounding-box
+/// corners TL, TR, BR, BL, by assigning each AABB corner its nearest unused
+/// quad point (correct for any convex quad).
+pub(crate) fn order_quad(quad: [[f32; 2]; 4]) -> [[f32; 2]; 4] {
+    let [min_x, min_y, max_x, max_y] = quad_bounds(quad);
+    let corners = [
+        [min_x, min_y],
+        [max_x, min_y],
+        [max_x, max_y],
+        [min_x, max_y],
+    ];
+    let mut used = [false; 4];
+    let mut ordered = [[0.0; 2]; 4];
+    for (corner_index, corner) in corners.iter().enumerate() {
+        let mut best = None;
+        for (index, point) in quad.iter().enumerate() {
+            if used[index] {
+                continue;
+            }
+            let dx = point[0] - corner[0];
+            let dy = point[1] - corner[1];
+            if best.is_none_or(|(_, best_d2)| dx * dx + dy * dy < best_d2) {
+                best = Some((index, dx * dx + dy * dy));
+            }
+        }
+        let (index, _) = best.expect("quad has four points");
+        used[index] = true;
+        ordered[corner_index] = quad[index];
+    }
+    ordered
+}
+
+/// The affine 2x2 matrix (least squares) mapping the corners of the
+/// `width` x `height` rect onto the quad: returns
+/// `(m00, m01, m10, m11)` with `x' = m00*x + m01*y` etc. Exact for
+/// parallelograms; best fit for perspective quads.
+///
+/// The rect corners are relative to the rect center and the quad points
+/// relative to the quad's bounding-box center, so the returned matrix needs
+/// no translation.
+fn fit_affine(quad: [[f32; 2]; 4], width: f32, height: f32) -> Option<(f32, f32, f32, f32)> {
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    let half_w = width / 2.0;
+    let half_h = height / 2.0;
+    let [min_x, min_y, max_x, max_y] = quad_bounds(quad);
+    let center = ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0);
+    // Rect corners relative to the rect center: (-hw,-hh), (hw,-hh), (hw,hh),
+    // (-hw,hh). Because they are symmetric, the normal matrix is diagonal:
+    // sum(lx*lx) = width^2 and sum(ly*ly) = height^2, so the least-squares
+    // solution is the average of the corner ratios along each axis.
+    let lx = [-half_w, half_w, half_w, -half_w];
+    let ly = [-half_h, -half_h, half_h, half_h];
+    let mut m00 = 0.0;
+    let mut m10 = 0.0;
+    let mut m01 = 0.0;
+    let mut m11 = 0.0;
+    for index in 0..4 {
+        let (qx, qy) = (quad[index][0] - center.0, quad[index][1] - center.1);
+        m00 += lx[index] * qx;
+        m10 += lx[index] * qy;
+        m01 += ly[index] * qx;
+        m11 += ly[index] * qy;
+    }
+    m00 /= width * width;
+    m10 /= width * width;
+    m01 /= height * height;
+    m11 /= height * height;
+    Some((m00, m01, m10, m11))
+}
+
+/// Singular value decomposition of a 2x2 matrix: `A = U * S * V^T` with
+/// `U = R(beta)` and `V = R(alpha)`. Returns `(s1, s2, beta, alpha)`.
+fn svd2(m00: f32, m01: f32, m10: f32, m11: f32) -> (f32, f32, f32, f32) {
+    // A^T A = [[a, b], [b, c]]
+    let a = m00 * m00 + m10 * m10;
+    let b = m00 * m01 + m10 * m11;
+    let c = m01 * m01 + m11 * m11;
+    let trace = a + c;
+    let discriminant = ((a - c) * (a - c) + 4.0 * b * b).sqrt();
+    let lambda1 = (trace + discriminant) / 2.0;
+    let lambda2 = (trace - discriminant) / 2.0;
+    let s1 = lambda1.sqrt();
+    let s2 = lambda2.sqrt();
+    // Eigenvector of the larger eigenvalue: (b, lambda1 - a).
+    let (v1x, v1y) = if b.abs() > f32::EPSILON {
+        let len = (b * b + (lambda1 - a) * (lambda1 - a)).sqrt();
+        (b / len, (lambda1 - a) / len)
+    } else {
+        (1.0, 0.0)
+    };
+    let alpha = v1y.atan2(v1x);
+    // U columns: u1 = A·v1 / s1, u2 = A·v2 / s2 with v2 = (-v1y, v1x).
+    let u1x = (m00 * v1x + m01 * v1y) / s1;
+    let u1y = (m10 * v1x + m11 * v1y) / s1;
+    let mut u2x = (-m00 * v1y + m01 * v1x) / s2;
+    let mut u2y = (-m10 * v1y + m11 * v1x) / s2;
+    if u1x * u2y - u1y * u2x < 0.0 {
+        u2x = -u2x;
+        u2y = -u2y;
+    }
+    let beta = u1y.atan2(u1x);
+    (s1, s2, beta, alpha)
+}
+
+/// The affine transform mapping the `width` x `height` rect onto `quad` in
+/// the same space, as rotate/scale/rotate factors the frame can apply.
+/// `None` when the quad is axis-aligned (keep the exact rounded-rect draw
+/// path), degenerate, or mirrored.
+fn quad_transform(quad: [[f32; 2]; 4], width: f32, height: f32) -> Option<QuadTransform> {
+    let ordered = order_quad(quad);
+    let [min_x, min_y, max_x, max_y] = quad_bounds(quad);
+    let corners = [[min_x, min_y], [max_x, min_y], [max_x, max_y], [min_x, max_y]];
+    let axis_aligned = ordered
+        .iter()
+        .zip(corners.iter())
+        .all(|(point, corner)| (point[0] - corner[0]).abs() < 0.5 && (point[1] - corner[1]).abs() < 0.5);
+    if axis_aligned {
+        return None;
+    }
+    let (m00, m01, m10, m11) = fit_affine(ordered, width, height)?;
+    // Mirroring maps (det <= 0) would flip the text; the rounded-rect path
+    // with axis-aligned text is the safer fallback.
+    if m00 * m11 - m01 * m10 <= 0.0 {
+        return None;
+    }
+    let (mut s1, mut s2, beta, alpha) = svd2(m00, m01, m10, m11);
+    s1 = s1.max(0.01);
+    s2 = s2.max(0.01);
+    // Text backends only rasterize glyphs through the transform when it is
+    // not a pure scale+translation: a pure rotation (s1 == s2) would render
+    // glyphs axis-aligned at a rotated position. The 0.05% anisotropy is
+    // invisible and forces the transform-aware glyph path.
+    let stretch = 1.0005;
+    Some(QuadTransform {
+        angle1: -alpha,
+        scale_x: s1 * stretch,
+        scale_y: s2 / stretch,
+        angle2: beta,
+    })
 }
 
 #[cfg(test)]
@@ -349,5 +586,76 @@ mod tests {
         let wider = Size::new(600.0, 100.0);
         let grown = fit_font_size("hello world", Font::DEFAULT, wider);
         assert!(grown > first, "wider box should fit larger text: {grown} <= {first}");
+    }
+
+    #[test]
+    fn axis_aligned_quad_has_no_transform() {
+        let quad = [[0.0, 0.0], [100.0, 0.0], [100.0, 50.0], [0.0, 50.0]];
+        assert!(quad_transform(quad, 100.0, 50.0).is_none());
+
+        let quad = [[10.0, 20.0], [110.0, 20.0], [110.0, 70.0], [10.0, 70.0]];
+        assert!(quad_transform(quad, 100.0, 50.0).is_none());
+    }
+
+    #[test]
+    fn svd2_reconstructs_the_matrix() {
+        // A = R(beta) . S(1.6, 0.5) . R(-alpha) with alpha = -0.9, beta = 0.4
+        let (s1, s2, beta, alpha) = (1.6, 0.5, 0.4, -0.9);
+        let (ca, sa) = (alpha.cos(), alpha.sin());
+        let (cb, sb) = (beta.cos(), beta.sin());
+        let m00 = cb * s1 * ca + sb * s2 * sa;
+        let m01 = -cb * s1 * sa + sb * s2 * ca;
+        let m10 = -sb * s1 * ca + cb * s2 * sa;
+        let m11 = sb * s1 * sa + cb * s2 * ca;
+
+        let (got_s1, got_s2, got_beta, got_alpha) = svd2(m00, m01, m10, m11);
+        assert!((got_s1 - s1).abs() < 1e-3, "s1: {got_s1} != {s1}");
+        assert!((got_s2 - s2).abs() < 1e-3, "s2: {got_s2} != {s2}");
+        assert!((got_alpha - alpha).abs() < 1e-3, "alpha: {got_alpha} != {alpha}");
+        assert!((got_beta - beta).abs() < 1e-3, "beta: {got_beta} != {beta}");
+    }
+
+    #[test]
+    fn transform_maps_box_corners_onto_the_skewed_quad() {
+        // A skewed quad: top edge tilted, bottom edge straight.
+        let quad = [[0.0, 0.0], [200.0, 30.0], [180.0, 100.0], [-20.0, 70.0]];
+        let width = 200.0;
+        let height = 100.0;
+        let transform = quad_transform(quad, width, height).expect("skewed quad transforms");
+
+        // Apply T(c) . R(angle2) . S . R(angle1) . T(-c) to the rect corners
+        // and check they land on the quad corners (the transform composes
+        // with pre-concatenation, same as the backends).
+        let apply = |x: f32, y: f32| -> [f32; 2] {
+            let [min_x, min_y, max_x, max_y] = quad_bounds(quad);
+            let center = [(min_x + max_x) / 2.0, (min_y + max_y) / 2.0];
+            let (mut lx, mut ly) = (x - center[0], y - center[1]);
+            let (a1, a2) = (transform.angle1, transform.angle2);
+            let (c1, s1) = (a1.cos(), a1.sin());
+            (lx, ly) = (
+                c1 * lx - s1 * ly,
+                s1 * lx + c1 * ly,
+            );
+            (lx, ly) = (lx * transform.scale_x, ly * transform.scale_y);
+            let (c2, s2) = (a2.cos(), a2.sin());
+            (lx, ly) = (c2 * lx - s2 * ly, s2 * lx + c2 * ly);
+            [lx + center[0], ly + center[1]]
+        };
+
+        let corners = [[0.0, 0.0], [width, 0.0], [width, height], [0.0, height]];
+        for (mapped, expected) in corners.iter().zip(quad.iter()) {
+            let got = apply(mapped[0], mapped[1]);
+            assert!(
+                (got[0] - expected[0]).abs() < 1.0 && (got[1] - expected[1]).abs() < 1.0,
+                "mapped {mapped:?} -> {got:?}, expected {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn mirrored_quad_falls_back() {
+        // Self-crossing / mirroring quad must not produce a flipped text map.
+        let quad = [[0.0, 0.0], [200.0, 0.0], [0.0, 100.0], [200.0, 100.0]];
+        assert!(quad_transform(quad, 200.0, 100.0).is_none());
     }
 }

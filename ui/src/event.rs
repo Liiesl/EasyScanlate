@@ -3,7 +3,7 @@ use std::ops::Range;
 use iced::widget::text_editor;
 use iced::Rectangle;
 
-use scanlateit_model::EntryId;
+use scanlateit_model::{EntryId, Quad};
 
 /// The two actions offered by the selection toolbar drawn under the selected
 /// overlay box in the main area.
@@ -34,7 +34,7 @@ pub enum UiEvent {
     TranslateApiKey(String),
     EntryClicked(Option<(usize, EntryId)>),
     EntryDoubleClicked((usize, EntryId)),
-    EntryMoved((usize, EntryId, [f32; 4])),
+    EntryMoved((usize, EntryId, Quad)),
     /// A button of the selection toolbar under the selected entry.
     EntryToolbar((usize, EntryId, ToolbarAction)),
     EditAction(text_editor::Action),

@@ -30,6 +30,27 @@ impl Quad {
         let max_y = self.points.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max);
         [min_x, min_y, max_x, max_y]
     }
+
+    /// Move every point by `(dx, dy)`.
+    pub fn translate(mut self, dx: f32, dy: f32) -> Self {
+        for point in &mut self.points {
+            point[0] += dx;
+            point[1] += dy;
+        }
+        self
+    }
+
+    /// Refit the quad inside `new_bounds` by scaling each point's offset from
+    /// `old_bounds`' top-left, so the shape's proportions are preserved.
+    pub fn refit(mut self, old: [f32; 4], new: [f32; 4]) -> Self {
+        let scale_x = (new[2] - new[0]) / (old[2] - old[0]).max(f32::EPSILON);
+        let scale_y = (new[3] - new[1]) / (old[3] - old[1]).max(f32::EPSILON);
+        for point in &mut self.points {
+            point[0] = new[0] + (point[0] - old[0]) * scale_x;
+            point[1] = new[1] + (point[1] - old[1]) * scale_y;
+        }
+        self
+    }
 }
 
 /// A single OCR result line. Entries are immutable once appended; edits are

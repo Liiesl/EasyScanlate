@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::{EntryId, EntryStyle, Extras, NewEntry, OcrEntry, OcrResult, Profiles};
+use super::{EntryId, EntryStyle, Extras, NewEntry, OcrEntry, OcrResult, Profiles, Quad};
 
 /// The whole document model for one image: immutable OCR results, freely
 /// editable profiles, cross-profile entry styles, view bounds, and extras.
@@ -11,11 +11,11 @@ pub struct Project {
     /// Per-OCR-result styles shared by every profile. An entry without an
     /// entry falls back to `EntryStyle::default()`.
     styles: HashMap<EntryId, EntryStyle>,
-    /// Where each entry's overlay box is shown in the view, as
-    /// `[min_x, min_y, max_x, max_y]` in image pixels. Unlike the immutable
-    /// OCR `quad`, this is freely editable (drag/resize); an entry without an
-    /// entry falls back to its quad's axis-aligned bounds.
-    view_bounds: HashMap<EntryId, [f32; 4]>,
+    /// Where each entry's overlay box is shown in the view, as a freely
+    /// editable quadrilateral in image pixels. Unlike the immutable OCR
+    /// `quad`, this supports free transform (move, resize, corner distort);
+    /// an entry without an override falls back to its OCR quad.
+    view_quads: HashMap<EntryId, Quad>,
     /// Reserved for upcoming features (notes, inpainting, geometries).
     #[allow(dead_code)]
     pub extras: Extras,
@@ -27,7 +27,7 @@ impl Project {
             ocr: OcrResult::new(),
             profiles: Profiles::default(),
             styles: HashMap::new(),
-            view_bounds: HashMap::new(),
+            view_quads: HashMap::new(),
             extras: Extras::default(),
         }
     }
@@ -58,25 +58,23 @@ impl Project {
         }
     }
 
-    /// The entry's overlay box in the view: the user-adjusted view bounds
-    /// when present, otherwise the OCR quad's axis-aligned bounds.
-    pub fn view_bounds(&self, entry: &OcrEntry) -> [f32; 4] {
-        self.view_bounds
-            .get(&entry.id)
-            .copied()
-            .unwrap_or_else(|| entry.quad.bounds())
+    /// The entry's overlay box in the view: the user-adjusted view quad when
+    /// present, otherwise the OCR quad itself (which may be rotated or
+    /// skewed).
+    pub fn view_quad<'a>(&'a self, entry: &'a OcrEntry) -> Quad {
+        self.view_quads.get(&entry.id).copied().unwrap_or(entry.quad)
     }
 
     /// Set the overlay box shown in the view for an entry, in image pixels.
     /// The OCR quad stays untouched.
-    pub fn set_view_bounds(&mut self, entry_id: EntryId, bounds: [f32; 4]) {
-        self.view_bounds.insert(entry_id, bounds);
+    pub fn set_view_quad(&mut self, entry_id: EntryId, quad: Quad) {
+        self.view_quads.insert(entry_id, quad);
     }
 
-    /// Drop the view-bounds override, falling back to the OCR quad.
+    /// Drop the view-quad override, falling back to the OCR quad.
     #[allow(dead_code)]
-    pub fn reset_view_bounds(&mut self, entry_id: EntryId) {
-        self.view_bounds.remove(&entry_id);
+    pub fn reset_view_quad(&mut self, entry_id: EntryId) {
+        self.view_quads.remove(&entry_id);
     }
 
     /// Soft-delete an entry. Its style and view-bounds overrides are kept in
@@ -134,7 +132,7 @@ mod tests {
     }
 
     #[test]
-    fn view_bounds_fall_back_to_quad_then_override_then_reset() {
+    fn view_quad_falls_back_to_quad_then_override_then_reset() {
         let mut project = Project::new();
         let id = project.ocr.append(NewEntry {
             source: crate::EntrySource::AutoOcr,
@@ -146,24 +144,29 @@ mod tests {
         });
         let entry = project.ocr.get(id).unwrap();
 
-        assert_eq!(project.view_bounds(entry), [0.0, 0.0, 10.0, 10.0]);
+        assert_eq!(project.view_quad(entry), entry.quad);
 
-        project.set_view_bounds(id, [20.0, 30.0, 60.0, 45.0]);
+        let distorted = Quad {
+            points: [[0.0, 0.0], [12.0, 1.0], [10.0, 10.0], [2.0, 9.0]],
+        };
+        project.set_view_quad(id, distorted);
         let entry = project.ocr.get(id).unwrap();
-        assert_eq!(project.view_bounds(entry), [20.0, 30.0, 60.0, 45.0]);
+        assert_eq!(project.view_quad(entry), distorted);
         assert_eq!(
-            entry.quad.bounds(),
-            [0.0, 0.0, 10.0, 10.0],
-            "view bounds must never touch the OCR quad"
+            entry.quad,
+            Quad {
+                points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            },
+            "view quad must never touch the OCR quad"
         );
 
-        project.reset_view_bounds(id);
+        project.reset_view_quad(id);
         let entry = project.ocr.get(id).unwrap();
-        assert_eq!(project.view_bounds(entry), [0.0, 0.0, 10.0, 10.0]);
+        assert_eq!(project.view_quad(entry), entry.quad);
     }
 
     #[test]
-    fn view_bounds_are_shared_across_profiles() {
+    fn view_quads_are_shared_across_profiles() {
         let mut project = Project::new();
         let jp = project.profiles.add("JP");
 
@@ -175,16 +178,19 @@ mod tests {
                 points: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
             },
         });
-        project.set_view_bounds(id, [5.0, 5.0, 25.0, 20.0]);
+        let distorted = Quad {
+            points: [[5.0, 5.0], [25.0, 6.0], [24.0, 20.0], [6.0, 19.0]],
+        };
+        project.set_view_quad(id, distorted);
 
         let entry = project.ocr.get(id).unwrap();
-        assert_eq!(project.view_bounds(entry), [5.0, 5.0, 25.0, 20.0]);
+        assert_eq!(project.view_quad(entry), distorted);
 
         project.profiles.select(jp);
         let entry = project.ocr.get(id).unwrap();
         assert_eq!(
-            project.view_bounds(entry),
-            [5.0, 5.0, 25.0, 20.0],
+            project.view_quad(entry),
+            distorted,
             "geometry must survive profile switch"
         );
     }
@@ -202,7 +208,10 @@ mod tests {
             },
         });
         project.set_entry_style(id, style);
-        project.set_view_bounds(id, [1.0, 2.0, 3.0, 4.0]);
+        let distorted = Quad {
+            points: [[1.0, 2.0], [11.0, 3.0], [10.0, 12.0], [2.0, 11.0]],
+        };
+        project.set_view_quad(id, distorted);
 
         assert!(project.delete_entry(id));
         assert_eq!(project.ocr.visible_count(), 0);
@@ -213,9 +222,9 @@ mod tests {
             "style override must survive delete"
         );
         assert_eq!(
-            project.view_bounds(project.ocr.get(id).unwrap()),
-            [1.0, 2.0, 3.0, 4.0],
-            "view bounds override must survive delete"
+            project.view_quad(project.ocr.get(id).unwrap()),
+            distorted,
+            "view quad override must survive delete"
         );
         assert!(!project.delete_entry(EntryId(999)));
     }

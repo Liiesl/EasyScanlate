@@ -120,7 +120,8 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                     .map(|entry| OverlayEntry {
                         id: entry.id,
                         text: image.project.display_text(entry),
-                        bounds: image.project.view_bounds(entry),
+                        quad: image.project.view_quad(entry),
+                        bounds: image.project.view_quad(entry).bounds(),
                         style: image.project.entry_style(entry.id),
                         selected: state.selected() == Some((index, entry.id)),
                         hide_text: state.editing() == Some((index, entry.id)),
