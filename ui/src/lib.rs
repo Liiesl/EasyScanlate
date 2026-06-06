@@ -8,6 +8,7 @@ pub mod event;
 pub mod loaded;
 pub mod main_area;
 pub mod panel;
+pub mod settings;
 pub mod state;
 pub mod toolbar;
 

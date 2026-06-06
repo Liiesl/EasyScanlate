@@ -600,7 +600,7 @@ mod tests {
     #[test]
     fn svd2_reconstructs_the_matrix() {
         // A = R(beta) . S(1.6, 0.5) . R(-alpha) with alpha = -0.9, beta = 0.4
-        let (s1, s2, beta, alpha) = (1.6, 0.5, 0.4, -0.9);
+        let (s1, s2, beta, alpha) = (1.6f32, 0.5f32, 0.4f32, -0.9f32);
         let (ca, sa) = (alpha.cos(), alpha.sin());
         let (cb, sb) = (beta.cos(), beta.sin());
         let m00 = cb * s1 * ca + sb * s2 * sa;

@@ -3,7 +3,7 @@ use iced::{Font, Rectangle};
 
 use scanlateit_model::{EntryId, EntryStyle};
 
-use crate::event::EditOrigin;
+use crate::event::{EditOrigin, SettingsTab};
 use crate::loaded::LoadedImage;
 
 /// Read-only view of the app state that the widgets render from. Implemented
@@ -31,4 +31,8 @@ pub trait UiState {
     /// The image whose tile is accepting inpainting range drags; `None`
     /// disables the mode.
     fn inpaint_mode(&self) -> Option<usize>;
+    /// True while the settings modal is open.
+    fn settings_open(&self) -> bool;
+    /// The settings tab currently shown in the modal.
+    fn settings_tab(&self) -> SettingsTab;
 }

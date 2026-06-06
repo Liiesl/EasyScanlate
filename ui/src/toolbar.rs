@@ -1,5 +1,5 @@
 //! The vertical toolbar pinned to the left edge of the window: a fixed-width
-//! column of tool buttons (only the inpainting toggle for now). Unlike the
+//! column of tool buttons (inpainting toggle, settings). Unlike the
 //! side panel, it lives outside the pane grid and is never resizable.
 
 use iced::widget::text::Wrapping;
@@ -31,7 +31,12 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .then_some(UiEvent::Inpaint),
     );
 
-    container(column![inpaint].spacing(6).padding(8))
+    let settings = button(text("Settings").size(13).wrapping(Wrapping::Word))
+        .width(Length::Fill)
+        .padding(4)
+        .on_press(UiEvent::SettingsOpen);
+
+    container(column![inpaint, settings].spacing(6).padding(8))
         .width(Length::Fixed(TOOLBAR_WIDTH))
         .height(Length::Fill)
         .style(|_theme| container::Style {

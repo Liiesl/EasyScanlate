@@ -1,0 +1,64 @@
+//! Persisted app settings: a JSON file saved next to the executable. Loaded
+//! once at boot, saved whenever the settings modal closes.
+
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Settings {
+    /// API key for the translation provider; empty falls back to the
+    /// `OPENCODE_API_KEY` environment variable.
+    #[serde(default)]
+    pub api_key: String,
+}
+
+impl Settings {
+    /// `settings.json` in the directory of the running executable.
+    fn path() -> Result<PathBuf, String> {
+        let mut path = std::env::current_exe()
+            .map_err(|e| format!("Cannot locate executable: {e}"))?;
+        path.pop();
+        Ok(path.join("settings.json"))
+    }
+
+    /// Loads the settings file; a missing or corrupt file yields defaults.
+    pub fn load() -> Self {
+        let Ok(path) = Self::path() else {
+            return Self::default();
+        };
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default()
+    }
+
+    /// Writes the settings JSON next to the executable.
+    pub fn save(&self) -> Result<(), String> {
+        let path = Self::path()?;
+        let text = serde_json::to_string_pretty(self)
+            .map_err(|e| format!("Failed to serialize settings: {e}"))?;
+        std::fs::write(&path, text)
+            .map_err(|e| format!("Failed to write {}: {e}", path.display()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_round_trips_through_json() {
+        let settings = Settings {
+            api_key: "sk-test-123".to_string(),
+        };
+        let text = serde_json::to_string(&settings).unwrap();
+        let back: Settings = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.api_key, "sk-test-123");
+    }
+
+    #[test]
+    fn missing_fields_default() {
+        let back: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(back.api_key, "");
+    }
+}

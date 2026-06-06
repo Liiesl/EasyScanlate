@@ -16,6 +16,15 @@ pub enum ToolbarAction {
     Delete,
 }
 
+/// The tabs shown inside the settings modal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsTab {
+    /// Placeholder tab; nothing configurable yet.
+    General,
+    /// Machine-translation settings (API key).
+    Translation,
+}
+
 /// Where an inline text edit was started; decides which editor widget
 /// renders and receives the focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,4 +78,10 @@ pub enum UiEvent {
     StyleBgRadius(String),
     /// The user dragged the divider between the main area and the side panel.
     PanelResized(pane_grid::ResizeEvent),
+    /// Open the settings modal from the toolbar.
+    SettingsOpen,
+    /// Close the settings modal; the app persists the settings.
+    SettingsClose,
+    /// Switch the visible settings tab.
+    SettingsTab(SettingsTab),
 }

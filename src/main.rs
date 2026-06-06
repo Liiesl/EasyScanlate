@@ -1,4 +1,5 @@
 mod app;
+mod settings;
 
 use iced::{Size, Theme};
 

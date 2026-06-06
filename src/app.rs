@@ -15,8 +15,9 @@ use scanlateit_ui::main_area::decode::{
     decode_page, DecodedPage, PageDecode, Tier, MAX_DECODE_EDGE, THUMB_DECODE_EDGE,
 };
 use scanlateit_ui::{
-    event::{EditOrigin, ToolbarAction, UiEvent},
-    main_area, panel, toolbar, KOREAN_FONT_NAME, KOREAN_FONT_PATH, LoadedImage, UiState,
+    event::{EditOrigin, SettingsTab, ToolbarAction, UiEvent},
+    main_area, panel, settings as settings_modal, toolbar, KOREAN_FONT_NAME, KOREAN_FONT_PATH,
+    LoadedImage, UiState,
 };
 use scanlateit_ui::parse_hex;
 
@@ -100,6 +101,10 @@ pub struct App {
     pub(crate) translate_model: String,
     pub(crate) translate_lang: String,
     pub(crate) translate_api_key: String,
+    /// True while the settings modal is open.
+    pub(crate) settings_open: bool,
+    /// The settings tab shown inside the modal.
+    pub(crate) settings_tab: SettingsTab,
     /// The currently selected overlay entry as `(image index, entry id)`;
     /// the style panel edits exactly this entry and nothing else.
     pub(crate) selected: Option<(usize, EntryId)>,
@@ -162,6 +167,8 @@ impl App {
             translate_model: translation::MODELS[0].to_string(),
             translate_lang: translation::LANGUAGES[0].to_string(),
             translate_api_key: String::new(),
+            settings_open: false,
+            settings_tab: SettingsTab::General,
             selected: None,
             editing: None,
             editing_origin: EditOrigin::Overlay,
@@ -323,6 +330,14 @@ impl UiState for App {
 
     fn inpaint_mode(&self) -> Option<usize> {
         self.inpaint_mode
+    }
+
+    fn settings_open(&self) -> bool {
+        self.settings_open
+    }
+
+    fn settings_tab(&self) -> SettingsTab {
+        self.settings_tab
     }
 }
 
@@ -580,6 +595,7 @@ for c in text.chars() {
         let id = app.images[0].project.ocr.visible().next().unwrap().id;
         start_edit(&mut app, id);
         let _ = update(&mut app, Message::Ui(UiEvent::EditSubmit));
+        app.selected = None;
 
         let missing = EntryId(u64::MAX);
         let _ = update(
@@ -606,7 +622,9 @@ pub fn boot() -> (App, Task<Message>) {
         Ok(bytes) => iced::font::load(bytes).map(|_| Message::FontLoaded),
         Err(_) => Task::none(),
     };
-    (App::new(), font_task)
+    let mut app = App::new();
+    app.translate_api_key = crate::settings::Settings::load().api_key;
+    (app, font_task)
 }
 
 /// Spawns OCR for exactly one image (the next in the queue). At most one task
@@ -1256,6 +1274,24 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.panes.resize(resized.split, resized.ratio);
             Task::none()
         }
+        Message::Ui(UiEvent::SettingsOpen) => {
+            app.settings_open = true;
+            Task::none()
+        }
+        Message::Ui(UiEvent::SettingsClose) => {
+            app.settings_open = false;
+            let settings = crate::settings::Settings {
+                api_key: app.translate_api_key.clone(),
+            };
+            if let Err(e) = settings.save() {
+                app.status = e;
+            }
+            Task::none()
+        }
+        Message::Ui(UiEvent::SettingsTab(tab)) => {
+            app.settings_tab = tab;
+            Task::none()
+        }
         Message::TranslateFinished(jobs, result) => {
             app.translating = false;
             match result {
@@ -1315,5 +1351,10 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .spacing(2)
         .height(Length::Fill)
         .into();
-    Element::map(content, Message::from)
+    let view: Element<'_, UiEvent> = if app.settings_open {
+        settings_modal::view(app, content)
+    } else {
+        content
+    };
+    Element::map(view, Message::from)
 }

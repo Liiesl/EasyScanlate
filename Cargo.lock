@@ -4148,6 +4148,8 @@ dependencies = [
  "scanlateit-ocr",
  "scanlateit-translation",
  "scanlateit-ui",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
