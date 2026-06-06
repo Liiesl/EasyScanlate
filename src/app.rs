@@ -15,7 +15,7 @@ use scanlateit_ui::main_area::decode::{
     decode_page, DecodedPage, PageDecode, Tier, MAX_DECODE_EDGE, THUMB_DECODE_EDGE,
 };
 use scanlateit_ui::{
-    event::{ToolbarAction, UiEvent},
+    event::{EditOrigin, ToolbarAction, UiEvent},
     main_area, panel, toolbar, KOREAN_FONT_NAME, KOREAN_FONT_PATH, LoadedImage, UiState,
 };
 use scanlateit_ui::parse_hex;
@@ -32,6 +32,10 @@ const FULL_KEEP_MARGIN: usize = 4;
 
 /// Widget id of the floating inline editor shown over a double-clicked entry.
 const EDIT_INPUT_ID: &'static str = "overlay-editor";
+
+/// Widget id of the multi-line editor shown in a results-list row while the
+/// entry is edited from the panel.
+const PANEL_EDIT_INPUT_ID: &'static str = "panel-editor";
 
 const IMAGE_FILTERS: &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "avif"];
 
@@ -102,6 +106,9 @@ pub struct App {
     /// The entry being edited inline as `(image index, entry id)`; `None`
     /// when no inline edit is active.
     pub(crate) editing: Option<(usize, EntryId)>,
+    /// Where the active inline edit was started: the overlay floating
+    /// editor or the panel's results list row. `clear_editing` resets it.
+    pub(crate) editing_origin: EditOrigin,
     /// The multi-line editor buffer backing the inline edit; always `Some`
     /// while `editing` is. Owned here so the widget can mutate it in place.
     pub(crate) edit_content: Option<text_editor::Content>,
@@ -157,6 +164,7 @@ impl App {
             translate_api_key: String::new(),
             selected: None,
             editing: None,
+            editing_origin: EditOrigin::Overlay,
             edit_content: None,
             editing_dirty: false,
             editing_rect: None,
@@ -183,9 +191,10 @@ impl App {
 
 /// Starts an inline edit of `(index, id)`: selects the entry, seeds the
 /// editor buffer with its displayed text and selects it all so the first
-/// keystroke replaces it, then focuses the floating editor. Shared by the
-/// double-click action and the toolbar's "Rename" button.
-fn start_inline_edit(app: &mut App, index: usize, id: EntryId) -> Task<Message> {
+/// keystroke replaces it, then focuses the editor of `origin` (the floating
+/// overlay editor or the panel's results-row editor). Shared by the
+/// double-click action, the toolbar's "Rename" button and the panel rows.
+fn start_inline_edit(app: &mut App, index: usize, id: EntryId, origin: EditOrigin) -> Task<Message> {
     let Some(image) = app.images.get(index) else {
         return Task::none();
     };
@@ -196,18 +205,24 @@ fn start_inline_edit(app: &mut App, index: usize, id: EntryId) -> Task<Message> 
     app.selected = Some((index, id));
     seed_style_inputs(app, app.images[index].project.entry_style(id));
     app.editing = Some((index, id));
+    app.editing_origin = origin;
     app.editing_dirty = false;
     app.editing_rect = None;
     let mut content = text_editor::Content::with_text(&text);
     content.perform(text_editor::Action::SelectAll);
     app.edit_content = Some(content);
     app.status = format!("Editing \"{text}\" in the overlay.");
-    Task::batch([iced::widget::operation::focus(EDIT_INPUT_ID)])
+    let focus_id = match origin {
+        EditOrigin::Overlay => EDIT_INPUT_ID,
+        EditOrigin::Panel => PANEL_EDIT_INPUT_ID,
+    };
+    Task::batch([iced::widget::operation::focus(focus_id)])
 }
 
 /// Clears every piece of inline-editing state in one place.
 fn clear_editing(app: &mut App) {
     app.editing = None;
+    app.editing_origin = EditOrigin::Overlay;
     app.edit_content = None;
     app.editing_dirty = false;
     app.editing_rect = None;
@@ -288,6 +303,10 @@ impl UiState for App {
 
     fn editing(&self) -> Option<(usize, EntryId)> {
         self.editing
+    }
+
+    fn editing_origin(&self) -> EditOrigin {
+        self.editing_origin
     }
 
     fn editing_rect(&self) -> Option<Rectangle> {
@@ -434,7 +453,40 @@ for c in text.chars() {
         let _ = update(&mut app, Message::Ui(UiEvent::EntryDoubleClicked((0, id))));
         assert_eq!(app.images[0].project.profiles.len(), 1);
         assert_eq!(app.editing, Some((0, id)));
+        assert_eq!(app.editing_origin, EditOrigin::Overlay);
         assert!(app.edit_content.is_some(), "double-click must seed the editor");
+    }
+
+    #[test]
+    fn panel_edit_forks_on_first_keystroke() {
+        let (mut app, id) = app_with_entry();
+        let _ = update(&mut app, Message::Ui(UiEvent::PanelEntryEdit((0, id))));
+
+        assert_eq!(app.editing, Some((0, id)));
+        assert_eq!(app.editing_origin, EditOrigin::Panel);
+        assert_eq!(app.selected, Some((0, id)), "panel edit must select the row");
+        type_text(&mut app, "안녕하세요");
+
+        let project = &app.images[0].project;
+        assert_eq!(project.profiles.len(), 2, "fork must happen on first keystroke");
+        assert_ne!(project.profiles.selected_id(), project.profiles.original_id());
+        let entry = project.ocr.get(id).unwrap();
+        assert_eq!(project.display_text(entry), "안녕하세요");
+        assert_eq!(entry.text, "안녕", "OCR source of truth must stay untouched");
+    }
+
+    #[test]
+    fn panel_edit_submit_clears_editing_state() {
+        let (mut app, id) = app_with_entry();
+        let _ = update(&mut app, Message::Ui(UiEvent::PanelEntryEdit((0, id))));
+        type_text(&mut app, "hi");
+        let _ = update(&mut app, Message::Ui(UiEvent::EditSubmit));
+
+        assert_eq!(app.editing, None);
+        assert_eq!(app.editing_origin, EditOrigin::Overlay);
+        assert!(app.edit_content.is_none());
+        let entry = app.images[0].project.ocr.get(id).unwrap();
+        assert_eq!(app.images[0].project.display_text(entry), "hi");
     }
 
     #[test]
@@ -1028,7 +1080,10 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::Ui(UiEvent::EntryDoubleClicked((index, id))) => {
-            start_inline_edit(app, index, id)
+            start_inline_edit(app, index, id, EditOrigin::Overlay)
+        }
+        Message::Ui(UiEvent::PanelEntryEdit((index, id))) => {
+            start_inline_edit(app, index, id, EditOrigin::Panel)
         }
         Message::Ui(UiEvent::Inpaint) => {
             if app.inpainting || app.running || app.translating || app.images.is_empty() {
@@ -1049,7 +1104,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::Ui(UiEvent::EntryToolbar((index, id, action))) => match action {
-            ToolbarAction::Rename => start_inline_edit(app, index, id),
+            ToolbarAction::Rename => start_inline_edit(app, index, id, EditOrigin::Overlay),
             ToolbarAction::Delete => {
                 let Some(image) = app.images.get_mut(index) else {
                     return Task::none();

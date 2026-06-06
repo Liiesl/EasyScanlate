@@ -3,6 +3,7 @@ use iced::{Font, Rectangle};
 
 use scanlateit_model::{EntryId, EntryStyle};
 
+use crate::event::EditOrigin;
 use crate::loaded::LoadedImage;
 
 /// Read-only view of the app state that the widgets render from. Implemented
@@ -23,6 +24,7 @@ pub trait UiState {
     fn style_stroke_width(&self) -> &str;
     fn style_bg_radius(&self) -> &str;
     fn editing(&self) -> Option<(usize, EntryId)>;
+    fn editing_origin(&self) -> EditOrigin;
     fn editing_rect(&self) -> Option<Rectangle>;
     fn edit_content(&self) -> Option<&text_editor::Content>;
     fn font(&self) -> Option<Font>;

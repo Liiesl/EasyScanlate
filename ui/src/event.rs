@@ -16,6 +16,16 @@ pub enum ToolbarAction {
     Delete,
 }
 
+/// Where an inline text edit was started; decides which editor widget
+/// renders and receives the focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditOrigin {
+    /// The floating editor pinned over the entry's box in the main area.
+    Overlay,
+    /// The multi-line editor in the panel's results list row.
+    Panel,
+}
+
 /// Widget-level events produced by the ui crate. The app maps these into its
 /// own `Message` and owns all state changes; widgets never see the app.
 #[derive(Debug, Clone)]
@@ -35,6 +45,9 @@ pub enum UiEvent {
     TranslateApiKey(String),
     EntryClicked(Option<(usize, EntryId)>),
     EntryDoubleClicked((usize, EntryId)),
+    /// Start the inline text edit from the panel's results list instead of
+    /// the overlay: the row's current-profile side becomes the live editor.
+    PanelEntryEdit((usize, EntryId)),
     EntryMoved((usize, EntryId, Quad)),
     /// A button of the selection toolbar under the selected entry.
     EntryToolbar((usize, EntryId, ToolbarAction)),

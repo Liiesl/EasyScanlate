@@ -11,7 +11,7 @@ use iced::{Background, Border, Color, Element, Font, Length, Size};
 
 use scanlateit_model::EntryStyle;
 
-use crate::event::UiEvent;
+use crate::event::{EditOrigin, UiEvent};
 use crate::main_area::overlay::OverlayEntry;
 use crate::main_area::tile_view::{TileSpec, TileView};
 use crate::state::UiState;
@@ -34,11 +34,15 @@ const EDIT_INPUT_ID: &'static str = "overlay-editor";
 /// color, background, radius) so it looks like the static overlay.
 ///
 /// Enter inserts a newline (the editor is multi-line); Escape or Ctrl+Enter
-/// commit and exit.
+/// commit and exit. Only rendered when the edit started from the overlay:
+/// panel edits keep the page's text visible (the panel row shows the editor).
 fn edit_overlay<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let (Some((index, id)), Some(rect)) = (state.editing(), state.editing_rect()) else {
         return space().into();
     };
+    if state.editing_origin() != EditOrigin::Overlay {
+        return space().into();
+    }
     let Some(content) = state.edit_content() else {
         return space().into();
     };
@@ -125,7 +129,11 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                         bounds: image.project.view_quad(entry).bounds(),
                         style: image.project.entry_style(entry.id),
                         selected: state.selected() == Some((index, entry.id)),
-                        hide_text: state.editing() == Some((index, entry.id)),
+                        // During an overlay-origin edit the floating editor
+                        // replaces the drawn text; panel edits leave the page
+                        // text visible and updating live.
+                        hide_text: state.editing() == Some((index, entry.id))
+                            && state.editing_origin() == EditOrigin::Overlay,
                     })
                     .collect(),
             })
