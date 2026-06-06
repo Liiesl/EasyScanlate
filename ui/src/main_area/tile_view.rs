@@ -1179,7 +1179,12 @@ where
         };
 
         let mut overlay_frames: Vec<(usize, Rectangle)> = Vec::new();
-        renderer.with_layer(visible_bounds, |renderer| {
+        let local_bounds = Rectangle::new(
+            Point::new(visible_bounds.x - bounds.x, visible_bounds.y - bounds.y),
+            visible_bounds.size(),
+        );
+        renderer.with_translation(Vector::new(bounds.x, bounds.y), |renderer| {
+            renderer.with_layer(local_bounds, |renderer| {
             renderer.with_translation(Vector::new(0.0, -state.offset), |renderer| {
                 let top = state.offset;
                 let bottom = state.offset + visible_bounds.height;
@@ -1229,7 +1234,7 @@ where
             // current translation at push time, so a layer created inside
             // it would only ever show the top viewport-height of content.
             if !overlay_frames.is_empty() {
-                renderer.with_layer(visible_bounds, |renderer| {
+                renderer.with_layer(local_bounds, |renderer| {
                     renderer.with_translation(Vector::new(0.0, -state.offset), |renderer| {
                         for (index, tile_bounds) in overlay_frames {
                             let mut overlay_frame = renderer.new_frame(tile_bounds);
@@ -1287,12 +1292,13 @@ where
         });
 
         if state.content_height > visible_bounds.height + 1.0 {
-            renderer.with_layer(visible_bounds, |renderer| {
-                let mut frame = renderer.new_frame(visible_bounds);
-                draw_scrollbar(&mut frame, state, visible_bounds);
+            renderer.with_layer(local_bounds, |renderer| {
+                let mut frame = renderer.new_frame(local_bounds);
+                draw_scrollbar(&mut frame, state, local_bounds);
                 renderer.draw_geometry(frame.into_geometry());
             });
         }
+        });
     }
 
     fn update(
