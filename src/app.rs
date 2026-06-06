@@ -16,7 +16,7 @@ use scanlateit_ui::main_area::decode::{
 };
 use scanlateit_ui::{
     event::{ToolbarAction, UiEvent},
-    main_area, panel, KOREAN_FONT_NAME, KOREAN_FONT_PATH, LoadedImage, UiState,
+    main_area, panel, toolbar, KOREAN_FONT_NAME, KOREAN_FONT_PATH, LoadedImage, UiState,
 };
 use scanlateit_ui::parse_hex;
 
@@ -1244,7 +1244,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    let content: Element<'_, UiEvent> = pane_grid::PaneGrid::new(&app.panes, |_, kind, _| {
+    let grid: Element<'_, UiEvent> = pane_grid::PaneGrid::new(&app.panes, |_, kind, _| {
         pane_grid::Content::new(match kind {
             PaneKind::MainArea => main_area::view(app),
             PaneKind::Panel => panel::view(app),
@@ -1256,5 +1256,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
     .width(Length::Fill)
     .height(Length::Fill)
     .into();
+    let content: Element<'_, UiEvent> = iced::widget::row![toolbar::view(app), grid]
+        .spacing(2)
+        .height(Length::Fill)
+        .into();
     Element::map(content, Message::from)
 }

@@ -9,6 +9,7 @@ pub mod loaded;
 pub mod main_area;
 pub mod panel;
 pub mod state;
+pub mod toolbar;
 
 pub use loaded::LoadedImage;
 pub use state::UiState;
