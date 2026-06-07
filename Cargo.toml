@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["model", "inpaint", "ocr", "translation", "ui"]
+members = ["model", "inpaint", "ocr", "translation", "ui", "NeverLiieIcedWidgets"]
 resolver = "3"
-exclude = ["iced", "rapidocr-core"]
+exclude = ["iced", "rapidocr-core", "NeverLiieIcedWidgets/examples"]
 
 [dependencies]
 iced = { version = "0.14.0", path = "iced", features = ["image", "canvas", "advanced", "tokio"] }

@@ -7,5 +7,6 @@ edition = "2024"
 iced = { version = "0.14.0", path = "../iced", features = ["image", "canvas", "advanced", "tokio"] }
 bytes = "1.6"
 image = "0.25"
+neverliie-iced-widgets = { path = "../NeverLiieIcedWidgets" }
 scanlateit-model = { path = "../model" }
 scanlateit-translation = { path = "../translation" }

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use iced::widget::image::Handle;
 use iced::widget::{pane_grid, text_editor};
-use iced::{Element, Font, Length, Rectangle, Task};
+use iced::{Color, Element, Font, Length, Rectangle, Task};
 
 use scanlateit_inpaint::Engine as InpaintEngine;
 use scanlateit_model::{EntryId, EntryStyle, InpaintPatch, NewEntry, ProfileId, Project, Quad};
@@ -15,11 +15,10 @@ use scanlateit_ui::main_area::decode::{
     decode_page, DecodedPage, PageDecode, Tier, MAX_DECODE_EDGE, THUMB_DECODE_EDGE,
 };
 use scanlateit_ui::{
-    event::{EditOrigin, SettingsTab, ToolbarAction, UiEvent},
+    event::{EditOrigin, SettingsTab, StyleField, ToolbarAction, UiEvent},
     main_area, panel, settings as settings_modal, toolbar, KOREAN_FONT_NAME, KOREAN_FONT_PATH,
     LoadedImage, UiState,
 };
-use scanlateit_ui::parse_hex;
 
 const DECODE_PRELOAD: usize = 2;
 
@@ -134,11 +133,9 @@ pub struct App {
     /// Staged style of the selected entry. Mirrors the entry's stored style
     /// on selection; mutations are written back to that entry only.
     pub(crate) style_working: EntryStyle,
-    /// Raw hex text of the styling inputs; kept as typed, only applied to
-    /// `style_working` while it parses.
-    pub(crate) style_text_hex: String,
-    pub(crate) style_stroke_hex: String,
-    pub(crate) style_bg_hex: String,
+    /// The styling color picker currently open (which color field it edits);
+    /// `None` means no picker is shown.
+    pub(crate) style_picker: Option<StyleField>,
     pub(crate) style_stroke_width: String,
     pub(crate) style_bg_radius: String,
     /// The draggable split between the main area and the side panel.
@@ -179,9 +176,7 @@ impl App {
             pending_settle: None,
             settled: None,
             style_working: style,
-            style_text_hex: hex_to_string(style.text_color),
-            style_stroke_hex: hex_to_string(style.stroke_color),
-            style_bg_hex: hex_to_string(style.bg_color),
+            style_picker: None,
             style_stroke_width: style.stroke_width.to_string(),
             style_bg_radius: style.bg_radius.to_string(),
             panes: {
@@ -235,20 +230,18 @@ fn clear_editing(app: &mut App) {
     app.editing_rect = None;
 }
 
-/// Reseeds the style panel inputs from `style`, keeping raw strings in sync
-/// with the resolved values.
+/// Reseeds the style panel inputs from `style`, closing any open picker and
+/// keeping the raw number strings in sync with the resolved values.
 fn seed_style_inputs(app: &mut App, style: EntryStyle) {
     app.style_working = style;
-    app.style_text_hex = hex_to_string(style.text_color);
-    app.style_stroke_hex = hex_to_string(style.stroke_color);
-    app.style_bg_hex = hex_to_string(style.bg_color);
+    app.style_picker = None;
     app.style_stroke_width = style.stroke_width.to_string();
     app.style_bg_radius = style.bg_radius.to_string();
 }
 
-/// Formats an RGBA color as `#RRGGBBAA`.
-fn hex_to_string(rgba: [u8; 4]) -> String {
-    format!("#{:02X}{:02X}{:02X}{:02X}", rgba[0], rgba[1], rgba[2], rgba[3])
+/// Converts an RGBA color value to an iced [`Color`].
+fn rgba_to_color(rgba: [u8; 4]) -> Color {
+    Color::from_rgba8(rgba[0], rgba[1], rgba[2], rgba[3] as f32 / 255.0)
 }
 
 impl UiState for App {
@@ -288,16 +281,20 @@ impl UiState for App {
         &self.style_working
     }
 
-    fn style_text_hex(&self) -> &str {
-        &self.style_text_hex
+    fn style_text_color(&self) -> Color {
+        rgba_to_color(self.style_working.text_color)
     }
 
-    fn style_stroke_hex(&self) -> &str {
-        &self.style_stroke_hex
+    fn style_stroke_color(&self) -> Color {
+        rgba_to_color(self.style_working.stroke_color)
     }
 
-    fn style_bg_hex(&self) -> &str {
-        &self.style_bg_hex
+    fn style_bg_color(&self) -> Color {
+        rgba_to_color(self.style_working.bg_color)
+    }
+
+    fn style_picker_open(&self) -> Option<StyleField> {
+        self.style_picker
     }
 
     fn style_stroke_width(&self) -> &str {
@@ -1225,31 +1222,24 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.images[index].project.set_entry_style(id, app.style_working);
             Task::none()
         }
-        Message::Ui(UiEvent::StyleTextHex(text)) => {
-            let Some((index, id)) = app.selected else { return Task::none() };
-            app.style_text_hex = text;
-            if let Some(color) = parse_hex(&app.style_text_hex) {
-                app.style_working.text_color = color;
-                app.images[index].project.set_entry_style(id, app.style_working);
-            }
+        Message::Ui(UiEvent::StyleColorOpen(field)) => {
+            app.style_picker = Some(field);
             Task::none()
         }
-        Message::Ui(UiEvent::StyleStrokeHex(text)) => {
-            let Some((index, id)) = app.selected else { return Task::none() };
-            app.style_stroke_hex = text;
-            if let Some(color) = parse_hex(&app.style_stroke_hex) {
-                app.style_working.stroke_color = color;
-                app.images[index].project.set_entry_style(id, app.style_working);
-            }
+        Message::Ui(UiEvent::StyleColorCancel(field)) => {
+            app.style_picker = None;
             Task::none()
         }
-        Message::Ui(UiEvent::StyleBgHex(text)) => {
+        Message::Ui(UiEvent::StyleColorSubmit(field, color)) => {
+            app.style_picker = None;
             let Some((index, id)) = app.selected else { return Task::none() };
-            app.style_bg_hex = text;
-            if let Some(color) = parse_hex(&app.style_bg_hex) {
-                app.style_working.bg_color = color;
-                app.images[index].project.set_entry_style(id, app.style_working);
+            let rgba = color.into_rgba8();
+            match field {
+                StyleField::Text => app.style_working.text_color = rgba,
+                StyleField::Stroke => app.style_working.stroke_color = rgba,
+                StyleField::Background => app.style_working.bg_color = rgba,
             }
+            app.images[index].project.set_entry_style(id, app.style_working);
             Task::none()
         }
         Message::Ui(UiEvent::StyleStrokeWidth(text)) => {

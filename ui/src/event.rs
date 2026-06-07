@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use iced::widget::pane_grid;
 use iced::widget::text_editor;
-use iced::Rectangle;
+use iced::{Color, Rectangle};
 
 use scanlateit_model::{EntryId, Quad};
 
@@ -33,6 +33,18 @@ pub enum EditOrigin {
     Overlay,
     /// The multi-line editor in the panel's results list row.
     Panel,
+}
+
+/// The color field a styling [`ColorPicker`] edits: the text color, the
+/// stroke (outline) color, or the background color of the selected entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StyleField {
+    /// The entry's text color.
+    Text,
+    /// The entry's stroke (outline) color.
+    Stroke,
+    /// The entry's background color.
+    Background,
 }
 
 /// Widget-level events produced by the ui crate. The app maps these into its
@@ -71,10 +83,13 @@ pub enum UiEvent {
     EditSubmit,
     StyleBold(bool),
     StyleItalic(bool),
-    StyleTextHex(String),
-    StyleStrokeHex(String),
+    /// The user requested the color picker for `field` to open.
+    StyleColorOpen(StyleField),
+    /// The user cancelled the color picker for `field`; discard any change.
+    StyleColorCancel(StyleField),
+    /// The user confirmed a color for `field` in its color picker.
+    StyleColorSubmit(StyleField, Color),
     StyleStrokeWidth(String),
-    StyleBgHex(String),
     StyleBgRadius(String),
     /// The user dragged the divider between the main area and the side panel.
     PanelResized(pane_grid::ResizeEvent),

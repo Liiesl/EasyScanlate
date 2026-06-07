@@ -1,9 +1,9 @@
 use iced::widget::text_editor;
-use iced::{Font, Rectangle};
+use iced::{Color, Font, Rectangle};
 
 use scanlateit_model::{EntryId, EntryStyle};
 
-use crate::event::{EditOrigin, SettingsTab};
+use crate::event::{EditOrigin, SettingsTab, StyleField};
 use crate::loaded::LoadedImage;
 
 /// Read-only view of the app state that the widgets render from. Implemented
@@ -18,9 +18,11 @@ pub trait UiState {
     fn translate_api_key(&self) -> &str;
     fn selected(&self) -> Option<(usize, EntryId)>;
     fn style_working(&self) -> &EntryStyle;
-    fn style_text_hex(&self) -> &str;
-    fn style_stroke_hex(&self) -> &str;
-    fn style_bg_hex(&self) -> &str;
+    fn style_text_color(&self) -> Color;
+    fn style_stroke_color(&self) -> Color;
+    fn style_bg_color(&self) -> Color;
+    /// The styling color picker currently open (if any).
+    fn style_picker_open(&self) -> Option<StyleField>;
     fn style_stroke_width(&self) -> &str;
     fn style_bg_radius(&self) -> &str;
     fn editing(&self) -> Option<(usize, EntryId)>;
