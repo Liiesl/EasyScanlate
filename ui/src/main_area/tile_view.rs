@@ -535,17 +535,15 @@ fn point_in_quad(point: Point, quad: [[f32; 2]; 4]) -> bool {
 /// The topmost overlay entry whose box contains `local` (viewport-relative).
 ///
 /// Tiles below the fold are skipped via the scroll offset; within a tile the
-/// scale is the frame's width over the image width. Entries in later tiles
-/// and later positions are drawn on top, so the last hit wins.
+/// scale is the frame's width over the image width. Entries are not bounded
+/// by their page image: an entry sticking out past the page's edges stays
+/// hit-testable there. Entries in later tiles and later positions are drawn
+/// on top, so the last hit wins.
 fn hit_entry(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Option<(usize, EntryId)> {
     let (layout, _) = tile_layout(tiles, state.width);
-    let content_y = local.y + state.offset;
     let mut hit = None;
     for (index, tile) in tiles.iter().enumerate() {
-        let (y, height) = layout[index];
-        if content_y < y || content_y >= y + height {
-            continue;
-        }
+        let (y, _) = layout[index];
         let scale = if tile.source_width > 0 {
             state.width / tile.source_width as f32
         } else {
@@ -604,9 +602,10 @@ fn drag_grab(
     Some([img_x - min_x, img_y - min_y])
 }
 
-/// The clamped image-pixel view quad when the entry whose grab geometry was
+/// The image-pixel view quad when the entry whose grab geometry was
 /// captured at press is dragged so its box top-left sits under the cursor
-/// minus the grab offset. The box never leaves the image.
+/// minus the grab offset. The box follows the cursor freely and may leave
+/// the image.
 fn drag_quad(
     tiles: &[TileSpec<'_>],
     state: &TileViewState,
@@ -629,8 +628,8 @@ fn drag_quad(
     let img_x = local.x / scale;
     let img_y = (local.y + state.offset - y) / scale;
     let size = quad.bounds();
-    let min_x = (img_x - offset[0]).clamp(0.0, (tile.source_width as f32 - (size[2] - size[0])).max(0.0));
-    let min_y = (img_y - offset[1]).clamp(0.0, (tile.source_height as f32 - (size[3] - size[1])).max(0.0));
+    let min_x = img_x - offset[0];
+    let min_y = img_y - offset[1];
     Some(quad.translate(min_x - size[0], min_y - size[1]))
 }
 
@@ -794,10 +793,9 @@ fn hit_toolbar(
     local: Point,
 ) -> Option<(usize, EntryId, ToolbarAction)> {
     let (index, rect) = selected_rect(tiles, state)?;
-    let (layout, _) = tile_layout(tiles, state.width);
-    let (tile_y, tile_height) = layout.get(index)?;
-    let tile_bottom = tile_y - state.offset + tile_height;
-    let toolbar = toolbar_rect(rect, state.width, tile_bottom);
+    // The toolbar flips above the box at the viewport's bottom, matching
+    // how it is drawn: entries may sit far below their page image.
+    let toolbar = toolbar_rect(rect, state.width, state.viewport_height);
     let id = tiles[index].overlays.iter().find(|e| e.selected)?.id;
     hit_toolbar_button(toolbar, local).map(|action| (index, id, action))
 }
@@ -833,12 +831,12 @@ fn entry_quad(tiles: &[TileSpec<'_>], index: usize, id: EntryId) -> Option<Quad>
     tile.overlays.iter().find(|e| e.id == id).map(|e| e.quad)
 }
 
-/// The clamped image-pixel view quad when the resize handle captured at
-/// press moves the corresponding edges toward `local` (viewport-relative).
-/// Only the edges owned by `handle` move; the opposite edges keep their
-/// press-time position, the box never leaves the image nor gets smaller
-/// than [`MIN_BOX_EDGE`] viewport pixels, and the quad's shape is refit
-/// into the new bounds proportionally.
+/// The image-pixel view quad when the resize handle captured at press moves
+/// the corresponding edges toward `local` (viewport-relative). Only the
+/// edges owned by `handle` move; the opposite edges keep their press-time
+/// position, the box may leave the image and never gets smaller than
+/// [`MIN_BOX_EDGE`] viewport pixels, and the quad's shape is refit into the
+/// new bounds proportionally.
 fn resize_quad(
     tiles: &[TileSpec<'_>],
     state: &TileViewState,
@@ -860,29 +858,27 @@ fn resize_quad(
     }
     let img_x = local.x / scale;
     let img_y = (local.y + state.offset - y) / scale;
-    let img_width = tile.source_width as f32;
-    let img_height = tile.source_height as f32;
-    let min_edge = (MIN_BOX_EDGE / scale).min(img_width).min(img_height);
+    let min_edge = MIN_BOX_EDGE / scale;
     let start = quad.bounds();
     let [mut min_x, mut min_y, mut max_x, mut max_y] = start;
     if handle.left {
-        min_x = img_x.clamp(0.0, (max_x - min_edge).max(0.0));
+        min_x = img_x.min(max_x - min_edge);
     }
     if handle.right {
-        max_x = img_x.clamp((min_x + min_edge).min(img_width), img_width);
+        max_x = img_x.max(min_x + min_edge);
     }
     if handle.top {
-        min_y = img_y.clamp(0.0, (max_y - min_edge).max(0.0));
+        min_y = img_y.min(max_y - min_edge);
     }
     if handle.bottom {
-        max_y = img_y.clamp((min_y + min_edge).min(img_height), img_height);
+        max_y = img_y.max(min_y + min_edge);
     }
     Some(quad.refit(start, [min_x, min_y, max_x, max_y]))
 }
 
 /// The image-pixel view quad when the corner captured with Ctrl held moves
 /// to `local` (viewport-relative): the quad with that single corner dragged
-/// to the cursor, clamped to the image. The other corners stay put.
+/// to the cursor, possibly outside the image. The other corners stay put.
 fn distort_quad(
     tiles: &[TileSpec<'_>],
     state: &TileViewState,
@@ -905,10 +901,7 @@ fn distort_quad(
     let img_x = local.x / scale;
     let img_y = (local.y + state.offset - y) / scale;
     let mut points = quad.points;
-    points[corner] = [
-        img_x.clamp(0.0, tile.source_width as f32),
-        img_y.clamp(0.0, tile.source_height as f32),
-    ];
+    points[corner] = [img_x, img_y];
     Some(Quad { points })
 }
 
@@ -1061,13 +1054,16 @@ where
 /// The decorations are skipped while the entry is being edited inline or
 /// while the user is already moving/resizing it. `cursor_local` is the
 /// cursor in the frame's coordinates (`None` outside the widget), used for
-/// the toolbar's hover highlight.
+/// the toolbar's hover highlight. `flip_at` is the viewer viewport's bottom
+/// in the frame's coordinates: the toolbar hangs below the box and flips
+/// above only when it would cross the viewport's bottom edge.
 fn draw_selection_decorations<'a, F>(
     frame: &mut F,
     state: &TileViewState,
     tiles: &[TileSpec<'a>],
     tile_index: usize,
     cursor_local: Option<Point>,
+    flip_at: f32,
 ) where
     F: geometry::frame::Backend,
 {
@@ -1112,7 +1108,7 @@ fn draw_selection_decorations<'a, F>(
             (entry.bounds[3] - entry.bounds[1]) * scale,
         ),
     );
-    let toolbar = toolbar_rect(rect, frame.width(), frame.height());
+    let toolbar = toolbar_rect(rect, frame.width(), flip_at);
     let hover = cursor_local.and_then(|local| hit_toolbar_button(toolbar, local));
     for (action, _) in toolbar_buttons() {
         draw_toolbar_button(frame, toolbar, action, hover == Some(action));
@@ -1178,7 +1174,6 @@ where
             return;
         };
 
-        let mut overlay_frames: Vec<(usize, Rectangle)> = Vec::new();
         let local_bounds = Rectangle::new(
             Point::new(visible_bounds.x - bounds.x, visible_bounds.y - bounds.y),
             visible_bounds.size(),
@@ -1219,7 +1214,6 @@ where
                                     geometry::Image::new(layer.handle.clone()),
                                 );
                             }
-                            overlay_frames.push((index, tile_bounds));
                         }
                         None => draw_placeholder(&mut frame, tile.decode.thumb_failed(), self.font),
                     }
@@ -1233,11 +1227,59 @@ where
             // the scroll translation: layer clips are transformed by the
             // current translation at push time, so a layer created inside
             // it would only ever show the top viewport-height of content.
-            if !overlay_frames.is_empty() {
+            //
+            // The pass is independent of the image pass: entries are not
+            // bounded by their page image, so a tile scrolled out of view
+            // (or not yet decoded) can still have entries sticking into the
+            // viewport. Tiles are culled by their entries' content-space
+            // bounding boxes against the visible content region, so
+            // off-screen entries never reach the text shaper.
+            let content_w = content_width(bounds.width);
+            let (layout, _) = tile_layout(&self.tiles, content_w);
+            let visible_top = state.offset;
+            let visible_bottom = state.offset + visible_bounds.height;
+            let visible_tiles: Vec<usize> = self
+                .tiles
+                .iter()
+                .enumerate()
+                .filter_map(|(index, tile)| {
+                    let (y, _) = layout[index];
+                    let scale = state.width / tile.source_width.max(1) as f32;
+                    let has_visible_entry = tile.overlays.iter().any(|entry| {
+                        let [min_x, min_y, max_x, max_y] = entry.bounds;
+                        let left = min_x * scale;
+                        let right = max_x * scale;
+                        let top = y + min_y * scale;
+                        let bottom = y + max_y * scale;
+                        right >= 0.0
+                            && left <= content_w
+                            && bottom >= visible_top
+                            && top <= visible_bottom
+                    });
+                    has_visible_entry.then_some(index)
+                })
+                .collect();
+            if !visible_tiles.is_empty() {
                 renderer.with_layer(local_bounds, |renderer| {
                     renderer.with_translation(Vector::new(0.0, -state.offset), |renderer| {
-                        for (index, tile_bounds) in overlay_frames {
-                            let mut overlay_frame = renderer.new_frame(tile_bounds);
+                        // One frame over the visible content region instead
+                        // of one per tile: overlays are clipped only by the
+                        // viewer viewport, not by their page image, so
+                        // entries may extend past the page edges. The frame
+                        // width still equals every tile's display width, so
+                        // the scale derived from it stays correct.
+                        let overlay_clip = Rectangle::new(
+                            Point::new(0.0, state.offset),
+                            Size::new(content_w, visible_bounds.height),
+                        );
+                        let mut overlay_frame = renderer.new_frame(overlay_clip);
+                        for index in visible_tiles {
+                            let (y, height) = layout[index];
+                            let tile_bounds = Rectangle::new(
+                                Point::new(0.0, y),
+                                Size::new(content_w, height),
+                            );
+                            overlay_frame.push_transform();
                             overlay_frame
                                 .translate(Vector::new(tile_bounds.x, tile_bounds.y));
                             overlay::draw_entries(
@@ -1257,12 +1299,20 @@ where
                                         position.y - bounds.y + state.offset - tile_bounds.y,
                                     )
                                 });
+                            // The toolbar flips above the box only when it
+                            // would cross the viewer viewport's bottom, not
+                            // the page's bottom: entries may sit far below
+                            // their page and the actions should still hang
+                            // below the box.
+                            let flip_at =
+                                state.offset + visible_bounds.height - tile_bounds.y;
                             draw_selection_decorations(
                                 &mut overlay_frame,
                                 state,
                                 &self.tiles,
                                 index,
                                 cursor_local,
+                                flip_at,
                             );
                             // The inpainting range marquee, drawn last so it
                             // sits on top of the tile's content.
@@ -1274,18 +1324,18 @@ where
                                 } = state.interaction
                                 {
                                     if selecting == index {
-                                        let frame_size = overlay_frame.size();
                                         draw_inpaint_marquee(
                                             &mut overlay_frame,
                                             start,
                                             current,
-                                            frame_size,
+                                            tile_bounds.size(),
                                         );
                                     }
                                 }
                             }
-                            renderer.draw_geometry(overlay_frame.into_geometry());
+                            overlay_frame.pop_transform();
                         }
+                        renderer.draw_geometry(overlay_frame.into_geometry());
                     });
                 });
             }
