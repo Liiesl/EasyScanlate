@@ -4,7 +4,8 @@
 //! `settings.json` next to the executable when the modal closes.
 
 use iced::widget::{
-    button, center, column, container, mouse_area, opaque, row, space, stack, text, text_input,
+    button, center, checkbox, column, container, mouse_area, opaque, row, space, stack, text,
+    text_input,
 };
 use iced::{Color, Element, Fill as FillLength, Length};
 
@@ -59,7 +60,14 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     match state.settings_tab() {
         SettingsTab::General => column![
             text("General").size(14),
-            text("No general settings yet.").size(12).color(MUTED_FG),
+            text("Classify newly OCR-detected entries with the ONNX styling \
+                  model and set their text style from the prediction.")
+                .size(12)
+                .color(MUTED_FG),
+            checkbox(state.auto_style_detect())
+                .label("Auto-detect entry styles")
+                .text_size(12)
+                .on_toggle(UiEvent::StyleAutoDetectToggle),
         ]
         .spacing(6)
         .into(),

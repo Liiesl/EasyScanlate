@@ -139,6 +139,10 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
 
     column![
         text(heading).size(14),
+        button(text("Auto-detect style").size(12))
+            .on_press(UiEvent::StyleAutoDetect)
+            .padding(6)
+            .width(FillLength),
         row![
             checkbox(style.bold)
                 .label("Bold")

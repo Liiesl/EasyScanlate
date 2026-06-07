@@ -10,6 +10,10 @@ pub struct Settings {
     /// `OPENCODE_API_KEY` environment variable.
     #[serde(default)]
     pub api_key: String,
+    /// When enabled, OCR-detected entries are auto-classified by the ONNX
+    /// styling model and their style set from the prediction.
+    #[serde(default)]
+    pub auto_style_detect: bool,
 }
 
 impl Settings {
@@ -50,15 +54,18 @@ mod tests {
     fn settings_round_trips_through_json() {
         let settings = Settings {
             api_key: "sk-test-123".to_string(),
+            auto_style_detect: true,
         };
         let text = serde_json::to_string(&settings).unwrap();
         let back: Settings = serde_json::from_str(&text).unwrap();
         assert_eq!(back.api_key, "sk-test-123");
+        assert_eq!(back.auto_style_detect, true);
     }
 
     #[test]
     fn missing_fields_default() {
         let back: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(back.api_key, "");
+        assert_eq!(back.auto_style_detect, false);
     }
 }

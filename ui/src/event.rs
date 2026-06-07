@@ -91,6 +91,11 @@ pub enum UiEvent {
     StyleColorSubmit(StyleField, Color),
     StyleStrokeWidth(String),
     StyleBgRadius(String),
+    /// Run the ONNX style classifier on the selected entry and apply the
+    /// result. Works regardless of the auto-detect setting.
+    StyleAutoDetect,
+    /// Toggle automatic style detection for new OCR entries.
+    StyleAutoDetectToggle(bool),
     /// The user dragged the divider between the main area and the side panel.
     PanelResized(pane_grid::ResizeEvent),
     /// Open the settings modal from the toolbar.

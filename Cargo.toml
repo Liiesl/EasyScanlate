@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["model", "inpaint", "ocr", "translation", "ui", "NeverLiieIcedWidgets"]
+members = ["model", "inpaint", "ocr", "styling", "translation", "ui", "NeverLiieIcedWidgets"]
 resolver = "3"
 exclude = ["iced", "rapidocr-core", "NeverLiieIcedWidgets/examples"]
 
@@ -18,6 +18,7 @@ serde_json = "1"
 scanlateit-model = { path = "model" }
 scanlateit-inpaint = { path = "inpaint" }
 scanlateit-ocr = { path = "ocr" }
+scanlateit-styling = { path = "styling" }
 scanlateit-translation = { path = "translation" }
 scanlateit-ui = { path = "ui" }
 tokio = { version = "1", features = ["rt", "time"] }

@@ -4253,6 +4253,7 @@ dependencies = [
  "scanlateit-inpaint",
  "scanlateit-model",
  "scanlateit-ocr",
+ "scanlateit-styling",
  "scanlateit-translation",
  "scanlateit-ui",
  "serde",
@@ -4279,7 +4280,18 @@ version = "0.1.0"
 name = "scanlateit-ocr"
 version = "0.1.0"
 dependencies = [
+ "image",
  "rapidocr-core",
+ "scanlateit-model",
+]
+
+[[package]]
+name = "scanlateit-styling"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "ndarray",
+ "ort",
  "scanlateit-model",
 ]
 

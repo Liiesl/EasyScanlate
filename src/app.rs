@@ -7,8 +7,9 @@ use iced::widget::{pane_grid, text_editor};
 use iced::{Color, Element, Font, Length, Rectangle, Task};
 
 use scanlateit_inpaint::Engine as InpaintEngine;
-use scanlateit_model::{EntryId, EntryStyle, InpaintPatch, NewEntry, ProfileId, Project, Quad};
+use scanlateit_model::{EntryId, EntryStyle, InpaintPatch, ProfileId, Project, Quad};
 use scanlateit_ocr::{self as ocr, Engine, OcrCancellationToken};
+use scanlateit_styling::Engine as StylingEngine;
 use scanlateit_translation as translation;
 use scanlateit_ui::loaded::InpaintLayer;
 use scanlateit_ui::main_area::decode::{
@@ -57,9 +58,13 @@ pub enum Message {
     Ui(UiEvent),
     ImagesPicked(Result<Vec<(String, u32, u32)>, String>),
     EngineReady(Result<Engine, String>),
-    OcrFinished(usize, Result<Vec<NewEntry>, String>),
+    /// One OCR run finished: entries grouped per page plus the boundary
+    /// candidates held for the next run (see [`ocr::RunResult`]).
+    OcrFinished(usize, Result<ocr::RunResult, String>),
     InpaintEngineReady(Result<InpaintEngine, String>),
     InpaintFinished(usize, Result<Vec<(image::RgbaImage, [f32; 4])>, String>),
+    StylingEngineReady(Result<StylingEngine, String>),
+    StyleDetected(usize, EntryId, Result<EntryStyle, String>),
     FontLoaded,
     ThumbDecoded(usize, Result<Arc<DecodedPage>, String>),
     FullDecoded(usize, Result<Arc<DecodedPage>, String>),
@@ -89,6 +94,17 @@ pub struct App {
     pub(crate) inpainting: bool,
     /// The image whose tile is in inpainting selection mode.
     pub(crate) inpaint_mode: Option<usize>,
+    /// The shared ONNX text-styling classifier, built lazily on first use.
+    styling_engine: Option<StylingEngine>,
+    /// True when a styling classification is queued but the engine is still
+    /// loading; jobs start once `StylingEngineReady` arrives.
+    styling_pending: bool,
+    /// When enabled, newly OCR-detected entries are auto-classified and their
+    /// style set from the prediction.
+    pub(crate) auto_style_detect: bool,
+    /// `(image index, entry id)` pairs whose style has already been set by
+    /// the classifier, so auto-run never overrides a manual tweak.
+    styled: std::collections::HashSet<(usize, EntryId)>,
     pub(crate) running: bool,
     pub(crate) font: Option<Font>,
     pub(crate) status: String,
@@ -96,7 +112,16 @@ pub struct App {
     ocr_total: usize,
     ocr_failed: usize,
     ocr_cancelled: bool,
+    /// Next OCR run to schedule (an index into `ocr::plan_runs`).
     ocr_index: usize,
+    /// Total OCR runs in the current run's plan; `pending` counts down from
+    /// this (one run may cover several images).
+    ocr_runs: usize,
+    /// Boundary candidates of the last completed run, awaiting the next run's
+    /// re-detections in its top margin (see [`ocr::resolve_boundary`]). Taken
+    /// by the next run's task; flushed if the run fails or is cancelled so no
+    /// captured bubble is lost.
+    held_boundary: Option<ocr::BoundaryState>,
     pub(crate) translating: bool,
     pub(crate) translate_model: String,
     pub(crate) translate_lang: String,
@@ -153,6 +178,10 @@ impl App {
             pending_inpaint: None,
             inpainting: false,
             inpaint_mode: None,
+            styling_engine: None,
+            styling_pending: false,
+            auto_style_detect: false,
+            styled: std::collections::HashSet::new(),
             running: false,
             font: None,
             status: "Idle - open images to begin.".to_string(),
@@ -161,6 +190,8 @@ impl App {
             ocr_failed: 0,
             ocr_cancelled: false,
             ocr_index: 0,
+            ocr_runs: 0,
+            held_boundary: None,
             translating: false,
             translate_model: translation::MODELS[0].to_string(),
             translate_lang: translation::LANGUAGES[0].to_string(),
@@ -304,6 +335,10 @@ impl UiState for App {
 
     fn style_bg_radius(&self) -> &str {
         &self.style_bg_radius
+    }
+
+    fn auto_style_detect(&self) -> bool {
+        self.auto_style_detect
     }
 
     fn editing(&self) -> Option<(usize, EntryId)> {
@@ -621,28 +656,144 @@ pub fn boot() -> (App, Task<Message>) {
         Err(_) => Task::none(),
     };
     let mut app = App::new();
-    app.translate_api_key = crate::settings::Settings::load().api_key;
+    let settings = crate::settings::Settings::load();
+    app.translate_api_key = settings.api_key;
+    app.auto_style_detect = settings.auto_style_detect;
     (app, font_task)
 }
 
-/// Spawns OCR for exactly one image (the next in the queue). At most one task
-/// is in flight at a time: the next image is only scheduled from inside the
+/// Spawns OCR for exactly one run (the next in the plan). At most one task
+/// is in flight at a time: the next run is only scheduled from inside the
 /// `OcrFinished` handler, so each result reaches the UI before the next OCR
 /// starts. The shared token is created once per run in the `StartOcr` arm.
+///
+/// Runs are picked by aspect ratio (see [`ocr::plan_runs`]): a page shorter
+/// than 2:1 is stitched with the next pages until the combined ratio fits,
+/// a page taller than 6:1 is split into chunks. Every run OCRs a stitched
+/// canvas: 20% of the body's height of the page content above and below the
+/// span are glued on, so speech bubbles split by a run boundary stay whole
+/// and OCR fully instead of yielding cropped text. Boxes found in the content
+/// above the span are either already stored there (deduplicated by position
+/// overlap) or are re-detections of the previous run's held boundary
+/// candidates — per bubble the fuller capture wins ([`ocr::resolve_boundary`])
+/// and is assigned to the page holding more of the bubble. The surviving
+/// entries are distributed back to the pages they cover, and this run's own
+/// boundary candidates are held for the next run.
 fn start_ocr_run(app: &mut App, engine: Engine) -> Task<Message> {
     let index = app.ocr_index;
     app.ocr_index += 1;
-    let path = app.images[index].path.clone();
+    let dims: Vec<(u32, u32)> = app
+        .images
+        .iter()
+        .map(|image| (image.width as u32, image.height as u32))
+        .collect();
+    let run = ocr::plan_runs(&dims)[index];
+    let page_start = run.page_start;
+    let page_end = run.page_end;
+    let paths: Vec<String> = (page_start..=page_end)
+        .map(|i| app.images[i].path.clone())
+        .collect();
+    let run_dims: Vec<(usize, u32, u32)> = (page_start..=page_end)
+        .map(|i| (i, app.images[i].width as u32, app.images[i].height as u32))
+        .collect();
+    let above_path = run.above.map(|(page, _)| app.images[page].path.clone());
+    let below_path = run.below.map(|(page, _)| app.images[page].path.clone());
+    let prev_data = run.dedup.map(|(page, offset)| {
+        (
+            app.images[page]
+                .project
+                .ocr
+                .all()
+                .map(|entry| entry.quad)
+                .collect::<Vec<Quad>>(),
+            app.images[page].width as u32,
+            offset,
+        )
+    });
     let token = app
         .cancel
         .as_ref()
         .expect("cancellation token set before run")
         .clone();
+    let prev_held = app.held_boundary.take();
     Task::perform(
         async move {
+            let mut loaded = Vec::with_capacity(paths.len());
+            for path in &paths {
+                match ocr::load_rgb(path) {
+                    Some(image) => loaded.push(image),
+                    None => {
+                        // Un-decodable page: fall back to raw per-page OCR.
+                        // No canvas means no boundary candidates.
+                        let mut out = Vec::with_capacity(paths.len());
+                        for (offset, path) in paths.iter().enumerate() {
+                            match engine.run_path_cancellable(path, &token) {
+                                Ok(lines) => out.push((page_start + offset, ocr::to_entries(lines))),
+                                Err(e) => return (index, Err(e)),
+                            }
+                        }
+                        return (index, Ok(ocr::RunResult { per_page: out, held: None }));
+                    }
+                }
+            }
+            let width = loaded[0].width();
+            let body_h = ocr::body_height(&dims[page_start..=page_end], width, run.band);
+            let margin = (ocr::STITCH_MARGIN_RATIO * body_h as f32).round().max(1.0) as u32;
+            let above = match (&above_path, run.above) {
+                (Some(path), Some((_, band))) => ocr::load_rgb(path)
+                    .and_then(|image| ocr::top_margin_strip(&image, band, width, margin)),
+                _ => None,
+            };
+            let below = match (&below_path, run.below) {
+                (Some(path), Some((_, band))) => ocr::load_rgb(path)
+                    .and_then(|image| ocr::bottom_margin_strip(&image, band, width, margin)),
+                _ => None,
+            };
+            let margin_top = above.as_ref().map_or(0, |strip| strip.height());
+            let canvas = ocr::stack_run(above, &loaded, below, width, run.band);
             let result = engine
-                .run_path_cancellable(&path, &token)
-                .map(ocr::to_entries);
+                .run_image_cancellable(&canvas, &token)
+                .map(|lines| {
+                    let merged = ocr::merge(lines, ocr::MergeConfig::default());
+                    let (resolved, kept) = match &prev_held {
+                        Some(state) => {
+                            let transformed = ocr::transform_candidates(
+                                &state.candidates,
+                                state.width,
+                                state.boundary,
+                                width,
+                            );
+                            let resolution =
+                                ocr::resolve_boundary(&state.candidates, &transformed, merged);
+                            (resolution.append, resolution.kept)
+                        }
+                        None => (Vec::new(), merged),
+                    };
+                    let deduped = match &prev_data {
+                        Some((quads, prev_width, offset)) => {
+                            ocr::dedup_with_previous(kept, quads, *prev_width, *offset, width)
+                        }
+                        None => kept,
+                    };
+                    let out = ocr::distribute(deduped, &run_dims, run.band, margin_top);
+                    let mut per_page = out.per_page;
+                    for candidate in resolved {
+                        match per_page
+                            .iter_mut()
+                            .find(|(page, _)| *page == candidate.page)
+                        {
+                            Some((_, entries)) => entries.push(candidate.entry),
+                            None => per_page.push((candidate.page, vec![candidate.entry])),
+                        }
+                    }
+                    per_page.sort_by_key(|(page, _)| *page);
+                    let held = (!out.held.is_empty()).then(|| ocr::BoundaryState {
+                        candidates: out.held,
+                        width,
+                        boundary: out.boundary,
+                    });
+                    ocr::RunResult { per_page, held }
+                });
             (index, result)
         },
         |(index, result)| Message::OcrFinished(index, result),
@@ -682,14 +833,94 @@ fn start_inpaint(
     )
 }
 
+/// Spawns per-entry style-classification jobs for every visible entry whose
+/// style has not already been set by the classifier. Builds the engine lazily
+/// on first use; queued jobs start when the engine finishes loading.
+fn classify_entries(app: &mut App) -> Task<Message> {
+    match app.styling_engine.clone() {
+        Some(engine) => start_style_jobs(app, engine),
+        None => {
+            app.styling_pending = true;
+            app.status = "Loading the styling model...".to_string();
+            Task::perform(async move { StylingEngine::build() }, Message::StylingEngineReady)
+        }
+    }
+}
+
+/// Spawns one classification `Task` per unclassified visible entry, each on
+/// the blocking pool. Entries are marked in-flight up front so a later
+/// auto-run never schedules the same entry twice.
+fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
+    // Immutable reference captured by the inner closures so a `move` does not
+    // move `app` itself; disjoint-field borrows of the images and the set
+    // coexist until `collect` finishes.
+    let styled = &app.styled;
+    let jobs: Vec<(usize, EntryId, String, Quad)> = app
+        .images
+        .iter()
+        .enumerate()
+        .flat_map(|(index, image)| {
+            image
+                .project
+                .ocr
+                .visible()
+                .filter(move |entry| !styled.contains(&(index, entry.id)))
+                .map(move |entry| {
+                    (
+                        index,
+                        entry.id,
+                        image.path.clone(),
+                        image.project.view_quad(entry),
+                    )
+                })
+        })
+        .collect();
+    if jobs.is_empty() {
+        return Task::none();
+    }
+    for (index, id, _, _) in &jobs {
+        app.styled.insert((*index, *id));
+    }
+    let tasks: Vec<Task<Message>> = jobs
+        .into_iter()
+        .map(|(index, id, path, quad)| {
+            let engine = engine.clone();
+            Task::perform(
+                async move {
+                    let classified = tokio::task::spawn_blocking(move || {
+                        engine.predict_entry(&path, &quad).map(|pred| {
+                            pred.to_entry_style(scanlateit_model::EntryStyle::default())
+                        })
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
+                    (index, id, classified)
+                },
+                |(index, id, result)| Message::StyleDetected(index, id, result),
+            )
+        })
+        .collect();
+    Task::batch(tasks)
+}
+
 fn finalize_run(app: &mut App) {
+    // Flush any boundary candidates still held — the next run failed, was
+    // cancelled or never started: their bubbles were captured whole on the
+    // page above the seam and must not be lost.
+    if let Some(state) = app.held_boundary.take() {
+        for candidate in state.candidates {
+            if let Some(image) = app.images.get_mut(candidate.page) {
+                app.ocr_total += image.project.append_ocr(vec![candidate.entry]);
+            }
+        }
+    }
     app.running = false;
     app.cancel = None;
     app.status = if app.ocr_cancelled {
         "OCR cancelled.".to_string()
     } else if app.ocr_failed > 0 {
         format!(
-            "OCR done: {} line(s), {} image(s) failed.",
+            "OCR done: {} line(s), {} run(s) failed.",
             app.ocr_total, app.ocr_failed
         )
     } else {
@@ -836,12 +1067,24 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             app.cancel = Some(OcrCancellationToken::new());
             app.running = true;
-            app.pending = app.images.len();
+            let dims: Vec<(u32, u32)> = app
+                .images
+                .iter()
+                .map(|image| (image.width as u32, image.height as u32))
+                .collect();
+            let runs = ocr::plan_runs(&dims).len();
+            app.ocr_runs = runs;
+            app.pending = runs;
             app.ocr_total = 0;
             app.ocr_failed = 0;
             app.ocr_cancelled = false;
             app.ocr_index = 0;
-            app.status = format!("Running OCR on {} image(s)...", app.images.len());
+            app.held_boundary = None;
+            app.status = format!(
+                "Running OCR on {} run(s) covering {} image(s)...",
+                runs,
+                app.images.len()
+            );
             match app.engine.clone() {
                 Some(engine) => start_ocr_run(app, engine),
                 None => Task::perform(async move { Engine::build() }, Message::EngineReady),
@@ -878,6 +1121,30 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 Task::none()
             }
         },
+        Message::StylingEngineReady(result) => match result {
+            Ok(engine) => {
+                app.styling_engine = Some(engine.clone());
+                if app.styling_pending {
+                    app.styling_pending = false;
+                    start_style_jobs(app, engine)
+                } else {
+                    Task::none()
+                }
+            }
+            Err(e) => {
+                app.styling_pending = false;
+                app.status = e;
+                Task::none()
+            }
+        },
+        Message::StyleDetected(index, id, result) => {
+            if let (Some(image), Ok(style)) = (app.images.get_mut(index), result) {
+                image.project.set_entry_style(id, style);
+                app.styled.insert((index, id));
+                app.status = "Applied auto-detected text style.".to_string();
+            }
+            Task::none()
+        }
         Message::InpaintFinished(index, result) => {
             app.inpainting = false;
             match result {
@@ -922,12 +1189,17 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.status = "Cancelling OCR...".to_string();
             Task::none()
         }
-        Message::OcrFinished(index, result) => {
+        Message::OcrFinished(_index, result) => {
             app.pending = app.pending.saturating_sub(1);
             match result {
-                Ok(entries) => {
-                    let count = app.images[index].project.append_ocr(entries);
-                    app.ocr_total += count;
+                Ok(run_result) => {
+                    app.held_boundary = run_result.held;
+                    for (page, entries) in run_result.per_page {
+                        let Some(image) = app.images.get_mut(page) else {
+                            continue;
+                        };
+                        app.ocr_total += image.project.append_ocr(entries);
+                    }
                 }
                 Err(e) => {
                     app.ocr_failed += 1;
@@ -936,23 +1208,33 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     }
                 }
             }
+            let mut tasks: Vec<Task<Message>> = Vec::new();
             if app.pending == 0 || app.ocr_cancelled {
                 finalize_run(app);
-                return Task::none();
-            }
-            app.status = format!(
-                "OCR in progress: {} of {} image(s) done ({} line(s)).",
-                app.images.len() - app.pending,
-                app.images.len(),
-                app.ocr_total
-            );
-            match app.engine.clone() {
-                Some(engine) => start_ocr_run(app, engine),
-                None => {
-                    app.ocr_failed += 1;
-                    finalize_run(app);
-                    Task::none()
+            } else {
+                app.status = format!(
+                    "OCR in progress: {} of {} run(s) done ({} line(s)).",
+                    app.ocr_runs - app.pending,
+                    app.ocr_runs,
+                    app.ocr_total
+                );
+                match app.engine.clone() {
+                    Some(engine) => tasks.push(start_ocr_run(app, engine)),
+                    None => {
+                        app.ocr_failed += 1;
+                        finalize_run(app);
+                    }
                 }
+            }
+            // Classify newly appended entries (including those resolved across
+            // a run boundary) when auto-detect is enabled.
+            if app.auto_style_detect {
+                tasks.push(classify_entries(app));
+            }
+            if tasks.is_empty() {
+                Task::none()
+            } else {
+                Task::batch(tasks)
             }
         }
         Message::FontLoaded => {
@@ -1261,6 +1543,22 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        Message::Ui(UiEvent::StyleAutoDetect) => {
+            let Some((index, id)) = app.selected else { return Task::none() };
+            // The entry must leave the done set so it is eligible again, even
+            // if auto-detect already classified it.
+            app.styled.remove(&(index, id));
+            classify_entries(app)
+        }
+        Message::Ui(UiEvent::StyleAutoDetectToggle(enabled)) => {
+            app.auto_style_detect = enabled;
+            app.status = if enabled {
+                "Auto style detection enabled.".to_string()
+            } else {
+                "Auto style detection disabled.".to_string()
+            };
+            Task::none()
+        }
         Message::Ui(UiEvent::PanelResized(resized)) => {
             app.panes.resize(resized.split, resized.ratio);
             Task::none()
@@ -1273,6 +1571,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.settings_open = false;
             let settings = crate::settings::Settings {
                 api_key: app.translate_api_key.clone(),
+                auto_style_detect: app.auto_style_detect,
             };
             if let Err(e) = settings.save() {
                 app.status = e;
