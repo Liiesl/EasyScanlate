@@ -71,6 +71,12 @@ pub enum Message {
     /// The settle debounce elapsed for generation `u64`; stale generations
     /// (a newer scroll already happened) are ignored.
     SettleElapsed(u64),
+    /// A request to (re)fetch the translation model lists from the models
+    /// mirror; handled the same way as the boot fetch.
+    FetchModels,
+    /// The fetched translation gateway configs, keyed by provider id (each
+    /// already filtered and sorted, or the fallback on failure).
+    ModelsFetched(std::collections::HashMap<String, translation::Provider>),
     TranslateFinished(Vec<(usize, EntryId, String)>, Result<Vec<String>, String>),
 }
 
@@ -123,9 +129,19 @@ pub struct App {
     /// captured bubble is lost.
     held_boundary: Option<ocr::BoundaryState>,
     pub(crate) translating: bool,
+    pub(crate) translate_provider: String,
+    /// All translation gateways offered in the UI (provider ids).
+    pub(crate) translate_providers: Vec<String>,
+    /// Fetched gateway configs (api base, key env var, model ids), keyed by
+    /// provider id; every [`translation::PROVIDERS`] id is always present.
+    pub(crate) translate_providers_map: std::collections::HashMap<String, translation::Provider>,
     pub(crate) translate_model: String,
     pub(crate) translate_lang: String,
     pub(crate) translate_api_key: String,
+    /// Selectable translation models of the current provider (fetched from
+    /// the models mirror, with [`translation::MODELS`] as the offline
+    /// fallback).
+    pub(crate) translate_models: Vec<String>,
     /// True while the settings modal is open.
     pub(crate) settings_open: bool,
     /// The settings tab shown inside the modal.
@@ -193,9 +209,19 @@ impl App {
             ocr_runs: 0,
             held_boundary: None,
             translating: false,
+            translate_provider: translation::PROVIDERS[0].to_string(),
+            translate_providers: translation::PROVIDERS
+                .iter()
+                .map(|p| (*p).to_string())
+                .collect(),
+            translate_providers_map: std::collections::HashMap::new(),
             translate_model: translation::MODELS[0].to_string(),
             translate_lang: translation::LANGUAGES[0].to_string(),
             translate_api_key: String::new(),
+            translate_models: translation::MODELS
+                .iter()
+                .map(|m| (*m).to_string())
+                .collect(),
             settings_open: false,
             settings_tab: SettingsTab::General,
             selected: None,
@@ -271,6 +297,29 @@ fn seed_style_inputs(app: &mut App, style: EntryStyle) {
     app.style_bg_radius = style.bg_radius.to_string();
 }
 
+/// Points the model picker at the current provider's (already fetched)
+/// model list, falling back to the offline list if the provider is missing.
+/// The selected model is reset when it is no longer on the list.
+fn sync_translate_models(app: &mut App) {
+    let models = app
+        .translate_providers_map
+        .get(&app.translate_provider)
+        .map(|provider| provider.models.clone())
+        .unwrap_or_else(|| {
+            translation::MODELS
+                .iter()
+                .map(|m| (*m).to_string())
+                .collect()
+        });
+    if models.is_empty() {
+        return;
+    }
+    app.translate_models = models;
+    if !app.translate_models.contains(&app.translate_model) {
+        app.translate_model = app.translate_models[0].clone();
+    }
+}
+
 /// Converts an RGBA color value to an iced [`Color`].
 fn rgba_to_color(rgba: [u8; 4]) -> Color {
     Color::from_rgba8(rgba[0], rgba[1], rgba[2], rgba[3] as f32 / 255.0)
@@ -293,8 +342,20 @@ impl UiState for App {
         &self.status
     }
 
-    fn translate_model(&self) -> &str {
+    fn translate_provider(&self) -> &String {
+        &self.translate_provider
+    }
+
+    fn translate_providers(&self) -> &[String] {
+        &self.translate_providers
+    }
+
+    fn translate_model(&self) -> &String {
         &self.translate_model
+    }
+
+    fn translate_models(&self) -> &[String] {
+        &self.translate_models
     }
 
     fn translate_lang(&self) -> &str {
@@ -659,7 +720,8 @@ pub fn boot() -> (App, Task<Message>) {
     let settings = crate::settings::Settings::load();
     app.translate_api_key = settings.api_key;
     app.auto_style_detect = settings.auto_style_detect;
-    (app, font_task)
+    let models_task = Task::perform(translation::fetch_all_providers(), Message::ModelsFetched);
+    (app, Task::batch([font_task, models_task]))
 }
 
 /// Spawns OCR for exactly one run (the next in the plan). At most one task
@@ -993,6 +1055,14 @@ fn settle_full(app: &mut App) -> Task<Message> {
 
 pub fn update(app: &mut App, message: Message) -> Task<Message> {
     match message {
+        Message::FetchModels => {
+            Task::perform(translation::fetch_all_providers(), Message::ModelsFetched)
+        }
+        Message::ModelsFetched(providers) => {
+            app.translate_providers_map = providers;
+            sync_translate_models(app);
+            Task::none()
+        }
         Message::Ui(UiEvent::OpenImages) => Task::perform(
             async {
                 let files = rfd::AsyncFileDialog::new()
@@ -1337,21 +1407,44 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.translating = true;
             let texts: Vec<String> = jobs.iter().map(|(_, _, text)| text.clone()).collect();
             let target = app.translate_lang.clone();
+            let provider = app
+                .translate_providers_map
+                .get(&app.translate_provider)
+                .cloned()
+                .unwrap_or_else(|| {
+                    // Cannot happen after boot, but keeps the task well-typed.
+                    translation::Provider {
+                        id: app.translate_provider.clone(),
+                        api: "https://opencode.ai/zen/v1".to_string(),
+                        api_key_env: "OPENCODE_API_KEY".to_string(),
+                        models: Vec::new(),
+                    }
+                });
             let model = app.translate_model.clone();
             let api_key = (!app.translate_api_key.is_empty())
                 .then(|| app.translate_api_key.clone());
             app.status = format!(
-                "Translating {} line(s) to {} via {model}...",
+                "Translating {} line(s) to {} via {model} ({})...",
                 jobs.len(),
-                app.translate_lang
+                app.translate_lang,
+                provider.id
             );
             Task::perform(
                 async move {
-                    let result = translation::translate_all(&texts, &target, &model, api_key).await;
+                    let result =
+                        translation::translate_all(&texts, &target, &provider, &model, api_key)
+                            .await;
                     (jobs, result)
                 },
                 |(jobs, result)| Message::TranslateFinished(jobs, result),
             )
+        }
+        Message::Ui(UiEvent::TranslateProvider(provider)) => {
+            if app.translate_provider != provider {
+                app.translate_provider = provider;
+                sync_translate_models(app);
+            }
+            Task::none()
         }
         Message::Ui(UiEvent::TranslateModel(model)) => {
             app.translate_model = model;

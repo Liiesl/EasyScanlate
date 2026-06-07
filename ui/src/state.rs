@@ -13,7 +13,10 @@ pub trait UiState {
     fn running(&self) -> bool;
     fn translating(&self) -> bool;
     fn status(&self) -> &str;
-    fn translate_model(&self) -> &str;
+    fn translate_provider(&self) -> &String;
+    fn translate_providers(&self) -> &[String];
+    fn translate_model(&self) -> &String;
+    fn translate_models(&self) -> &[String];
     fn translate_lang(&self) -> &str;
     fn translate_api_key(&self) -> &str;
     fn selected(&self) -> Option<(usize, EntryId)>;

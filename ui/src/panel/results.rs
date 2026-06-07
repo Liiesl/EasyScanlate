@@ -217,14 +217,25 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let translate = container(
         column![
             row![
+                text("Provider:").size(12),
+                pick_list(
+                    state.translate_providers(),
+                    Some(state.translate_provider()),
+                    |p| UiEvent::TranslateProvider(p.to_string()),
+                )
+                .text_size(12)
+                .width(FillLength),
                 text("Model:").size(12),
                 pick_list(
-                    translation::MODELS,
+                    state.translate_models(),
                     Some(state.translate_model()),
                     |m| UiEvent::TranslateModel(m.to_string()),
                 )
                 .text_size(12)
                 .width(FillLength),
+            ]
+            .spacing(6),
+            row![
                 text("To:").size(12),
                 pick_list(
                     translation::LANGUAGES,

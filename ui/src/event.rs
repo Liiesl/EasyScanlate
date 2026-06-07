@@ -61,6 +61,7 @@ pub enum UiEvent {
     /// without waiting out the debounce.
     TileScrollEnded,
     Translate,
+    TranslateProvider(String),
     TranslateModel(String),
     TranslateLang(String),
     TranslateApiKey(String),
