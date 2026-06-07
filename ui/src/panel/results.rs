@@ -1,13 +1,15 @@
-//! Bottom section: translation controls (model, target language, API key,
-//! start button) above the scrollable OCR results list. The list shows one
-//! row per entry with two side-by-side inputs: the read-only original OCR
-//! text on the left and the selected profile's text on the right. The right
-//! side starts the same multi-line inline edit as the main area (fork on
-//! first keystroke, Enter = newline, Escape/Ctrl+Enter to commit); clicking
-//! a row selects the entry, highlighted with a border.
+//! Right column: the tall scrollable OCR results list on top and the short
+//! translation controls (model/language pickers, translate button) below it.
+//! The list shows one row per entry with two side-by-side inputs: the
+//! read-only original OCR text on the left and the selected profile's text
+//! on the right. The right side starts the same multi-line inline edit as
+//! the main area (fork on first keystroke, Enter = newline,
+//! Escape/Ctrl+Enter to commit); clicking a row selects the entry,
+//! highlighted with a border. The API key is configured in the settings
+//! modal, not here.
 
 use iced::widget::text_editor;
-use iced::widget::{button, column, container, mouse_area, pick_list, row, scrollable, text, text_input, Column};
+use iced::widget::{button, column, container, mouse_area, pick_list, row, scrollable, text, Column};
 use iced::{keyboard, Background, Border, Color, Element, Fill as FillLength, Font, Padding};
 
 use crate::event::{EditOrigin, UiEvent};
@@ -212,51 +214,54 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         );
     }
 
-    column![
-        text("Translate").size(16),
-        row![
-            text("Model:").size(12),
-            pick_list(
-                translation::MODELS,
-                Some(state.translate_model()),
-                |m| UiEvent::TranslateModel(m.to_string()),
-            )
-            .text_size(12)
-            .width(FillLength),
-        ]
-        .spacing(6),
-        row![
-            text("To:").size(12),
-            pick_list(
-                translation::LANGUAGES,
-                Some(state.translate_lang()),
-                |l| UiEvent::TranslateLang(l.to_string()),
-            )
-            .text_size(12)
-            .width(FillLength),
-        ]
-        .spacing(6),
-        text_input("API key (optional, in-memory)", state.translate_api_key())
-            .on_input(UiEvent::TranslateApiKey)
-            .padding(4)
-            .size(12)
-            .width(FillLength),
-        row![
-            button("Translate").on_press_maybe(
-                (has_entries && !state.translating() && !state.running()).then_some(UiEvent::Translate)
-            ),
+    let translate = container(
+        column![
+            row![
+                text("Model:").size(12),
+                pick_list(
+                    translation::MODELS,
+                    Some(state.translate_model()),
+                    |m| UiEvent::TranslateModel(m.to_string()),
+                )
+                .text_size(12)
+                .width(FillLength),
+                text("To:").size(12),
+                pick_list(
+                    translation::LANGUAGES,
+                    Some(state.translate_lang()),
+                    |l| UiEvent::TranslateLang(l.to_string()),
+                )
+                .text_size(12)
+                .width(FillLength),
+                button("Translate").on_press_maybe(
+                    (has_entries && !state.translating() && !state.running())
+                        .then_some(UiEvent::Translate)
+                ),
+            ]
+            .spacing(6),
             text(format!(
                 "{} image(s), {} result(s)",
                 state.images().len(),
                 total_results
             ))
-            .size(12),
+            .size(12)
+            .color(MUTED_FG),
         ]
         .spacing(6),
-        text(state.status()).size(12),
+    )
+    .width(FillLength)
+    .padding(6)
+    .style(|_theme| container::Style {
+        background: Some(BOX_BG.into()),
+        border: Border::default().rounded(4.0),
+        ..container::Style::default()
+    });
+
+    column![
         scrollable(Column::with_children(results_list).spacing(4))
             .height(FillLength)
             .width(FillLength),
+        translate,
     ]
     .spacing(8)
     .height(FillLength)

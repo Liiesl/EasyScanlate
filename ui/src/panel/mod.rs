@@ -1,15 +1,16 @@
-//! The right panel, stacked in three sections: an action row on top
-//! (open images, start/stop OCR, inpainting toggle, profile cycling), a
-//! styling placeholder
-//! below it (upcoming feature), and the OCR results list combined with the
-//! translation controls on the bottom.
+//! The right panel, laid out in two rows. The top row holds the action
+//! buttons (open images, start/stop OCR, live status, profile cycling,
+//! settings). Below it two columns share the remaining height: the styling
+//! controls on the left and, on the right, the tall scrollable OCR results
+//! list over the short translation controls (model/language pickers and the
+//! translate button).
 
 pub mod actions;
 pub mod results;
 pub mod styling;
 
-use iced::widget::{column, container};
-use iced::{Color, Element, Fill as FillLength};
+use iced::widget::{column, container, row};
+use iced::{Color, Element, Fill as FillLength, Length};
 
 use crate::event::UiEvent;
 use crate::state::UiState;
@@ -17,15 +18,29 @@ use crate::state::UiState;
 pub const PANEL_BG: Color = Color::from_rgb8(34, 36, 44);
 pub const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);
 
+/// Width share of the styling column vs the results column (weighted so the
+/// results list keeps each row's two side-by-side boxes readable).
+pub const STYLE_COL_PORTS: u16 = 5;
+pub const RESULTS_COL_PORTS: u16 = 9;
+
 pub fn file_name(path: &str) -> &str {
     path.rsplit(['\\', '/']).next().unwrap_or(path)
 }
 
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     container(
-        column![actions::view(state), styling::view(state), results::view(state)]
+        column![
+            actions::view(state),
+            row![
+                container(styling::view(state)).width(Length::FillPortion(STYLE_COL_PORTS)),
+                container(results::view(state)).width(Length::FillPortion(RESULTS_COL_PORTS)),
+            ]
             .spacing(8)
             .height(FillLength),
+        ]
+        .spacing(8)
+        .width(FillLength)
+        .height(FillLength),
     )
     .width(FillLength)
     .height(FillLength)

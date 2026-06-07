@@ -39,9 +39,10 @@ const PANEL_EDIT_INPUT_ID: &'static str = "panel-editor";
 
 const IMAGE_FILTERS: &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "avif"];
 
-/// The pane the side panel occupies at launch: ~300px out of the 1400px
-/// default window, as a fraction of the main area's width.
-const MAIN_AREA_DEFAULT_RATIO: f32 = 0.78;
+/// The pane the side panel occupies at launch: ~74% of the default window
+/// width (about 1036px of the 1400px window), leaving the main area a third
+/// of its previous ~1120px default.
+const MAIN_AREA_DEFAULT_RATIO: f32 = 0.26;
 
 /// The two panes of the app window: the page viewer and the side panel.
 #[derive(Debug, Clone, Copy)]
