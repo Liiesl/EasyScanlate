@@ -37,6 +37,13 @@ pub struct OverlayEntry<'a> {
 const SELECTED_COLOR: Color = Color::from_rgba8(92, 190, 255, 1.0);
 const SELECTED_WIDTH: f32 = 2.0;
 
+/// Global manhwa-style rendering: overlay text is laid out in centered lines
+/// that follow the curve of the entry's box (each line's width matches the
+/// ellipse chord at its height), like text inside a manhwa speech bubble.
+/// The box background itself is unchanged. Set to `false` to restore plain
+/// rectangular wrapping.
+pub(crate) const CIRCULAR_OVERLAYS: bool = true;
+
 fn to_color(rgba: [u8; 4]) -> Color {
     Color::from_rgba8(rgba[0], rgba[1], rgba[2], rgba[3] as f32 / 255.0)
 }
@@ -60,6 +67,8 @@ fn measure_text(text: &str, font: Font, size: f32, max_width: f32) -> Size {
 
 const MIN_FONT_SIZE: f32 = 1.0;
 const FIT_ITERATIONS: u32 = 14;
+/// Relative line height shared by [`measure_text`] and the circular layout.
+const LINE_HEIGHT: f32 = 1.2;
 
 /// Upper bound on the number of entries in the shared fit cache.
 /// Each entry holds one string plus a size, so a few thousand are cheap;
@@ -232,15 +241,219 @@ pub(crate) fn styled_font(font: Font, style: &EntryStyle) -> Font {
     }
 }
 
+/// One laid-out line of a circular bubble: the line's text, its top y offset
+/// inside the bubble (box pixels), and the ellipse chord width it was wrapped
+/// to, which is also the `max_width` used to center it when drawn.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CircleLine {
+    content: String,
+    y: f32,
+    chord: f32,
+}
+
+/// Memoized fit for a circular bubble: the fitted font size plus the lines it
+/// produced. The cache mirrors [`FitCache`] (same key, eviction and
+/// collision-safety) but lives in its own thread-local slot, since the two
+/// caches store different payload types.
+struct CircleFitCacheEntry {
+    content: String,
+    size: f32,
+    lines: Vec<CircleLine>,
+}
+
+struct CircleFitCache {
+    entries: HashMap<FitKey, CircleFitCacheEntry>,
+    order: VecDeque<FitKey>,
+}
+
+fn with_circle_cache<R>(f: impl FnOnce(&mut CircleFitCache) -> R) -> R {
+    thread_local! {
+        static CACHE: RefCell<Option<Box<dyn std::any::Any>>> = RefCell::new(None);
+    }
+
+    CACHE.with(|cell| {
+        let mut borrowed = cell.borrow_mut();
+        let cache: &mut CircleFitCache = borrowed
+            .get_or_insert_with(|| {
+                Box::new(CircleFitCache {
+                    entries: HashMap::new(),
+                    order: VecDeque::new(),
+                })
+            })
+            .downcast_mut()
+            .expect("circle fit cache holds an incompatible type");
+
+        f(cache)
+    })
+}
+
+/// The ellipse chord width at the vertical position `yc` (box pixels from the
+/// top), for an ellipse of the box's size.
+fn chord_at(rx: f32, ry: f32, yc: f32) -> f32 {
+    let t = 1.0 - ((yc - ry) / ry).powi(2);
+    if t <= 0.0 {
+        0.0
+    } else {
+        2.0 * rx * t.sqrt()
+    }
+}
+
+/// Splits `text` into atomic wrap units: whitespace-separated words, with any
+/// word wider than `max_width` further split per character (so CJK runs
+/// without spaces can still wrap).
+fn circle_tokens(text: &str, font: Font, size: f32, max_width: f32) -> Vec<String> {
+    let mut tokens = Vec::new();
+    for word in text.split_whitespace() {
+        if measure_text(word, font, size, f32::INFINITY).width <= max_width {
+            tokens.push(word.to_string());
+            continue;
+        }
+        let mut sub = String::new();
+        let mut sub_width = 0.0;
+        for ch in word.chars() {
+            let char_width = measure_text(&ch.to_string(), font, size, f32::INFINITY).width;
+            if !sub.is_empty() && sub_width + char_width > max_width {
+                tokens.push(std::mem::take(&mut sub));
+                sub_width = 0.0;
+            }
+            sub.push(ch);
+            sub_width += char_width;
+        }
+        if !sub.is_empty() {
+            tokens.push(sub);
+        }
+    }
+    tokens
+}
+
+/// Lays `text` into lines following the ellipse of size `bounds`, at font
+/// `size`. `None` when the text cannot fit: a row's chord shrinks to zero
+/// (line center outside the bubble) or the block would exceed the bubble's
+/// height.
+fn layout_circle_lines(
+    text: &str,
+    font: Font,
+    size: f32,
+    bounds: Size,
+) -> Option<Vec<CircleLine>> {
+    let rx = bounds.width / 2.0;
+    let ry = bounds.height / 2.0;
+    let line_height = size * LINE_HEIGHT;
+    let tokens = circle_tokens(text, font, size, bounds.width);
+    let widths: Vec<f32> = tokens
+        .iter()
+        .map(|token| measure_text(token, font, size, f32::INFINITY).width)
+        .collect();
+    let space_width = measure_text(" ", font, size, f32::INFINITY).width;
+
+    let mut lines = Vec::new();
+    let mut y = 0.0;
+    let mut index = 0;
+    while index < tokens.len() {
+        let chord = chord_at(rx, ry, y + line_height / 2.0);
+        if chord <= 0.0 {
+            return None;
+        }
+        let mut content = String::new();
+        let mut width = 0.0;
+        // The first token of a row may overflow the chord (it can only be
+        // narrower than the box); later tokens must fit.
+        while index < tokens.len() {
+            let add = widths[index] + if content.is_empty() { 0.0 } else { space_width };
+            if !content.is_empty() && width + add > chord {
+                break;
+            }
+            if !content.is_empty() {
+                content.push(' ');
+            }
+            content.push_str(&tokens[index]);
+            width += add;
+            index += 1;
+        }
+        lines.push(CircleLine { content, y, chord });
+        y += line_height;
+        if y > bounds.height {
+            return None;
+        }
+    }
+    Some(lines)
+}
+
+/// Largest font size at which `text` fits `bounds` as a manhwa-style circular
+/// bubble: lines are wrapped to the ellipse chord at their height and
+/// centered horizontally when drawn (see [`draw_entries`]). Returns the size
+/// plus the laid-out lines at that size, memoized like [`fit_font_metrics`].
+pub(crate) fn fit_circle_metrics(text: &str, font: Font, bounds: Size) -> (f32, Vec<CircleLine>) {
+    if text.is_empty() || bounds.width <= 0.0 || bounds.height <= 0.0 {
+        return (MIN_FONT_SIZE, Vec::new());
+    }
+
+    let key = fit_key(text, font, bounds);
+    let cached = with_circle_cache(|cache| {
+        cache
+            .entries
+            .get(&key)
+            .filter(|entry| entry.content == text)
+            .map(|entry| (entry.size, entry.lines.clone()))
+    });
+    if let Some(metrics) = cached {
+        return metrics;
+    }
+
+    let mut low = MIN_FONT_SIZE;
+    let mut high = (bounds.width.max(bounds.height) * 2.0).max(MIN_FONT_SIZE);
+    let mut best: Vec<CircleLine> = Vec::new();
+    for _ in 0..FIT_ITERATIONS {
+        let mid = (low + high) / 2.0;
+        match layout_circle_lines(text, font, mid, bounds) {
+            Some(lines) => {
+                low = mid;
+                best = lines;
+            }
+            None => high = mid,
+        }
+    }
+    let size = low;
+    let lines = if best.is_empty() {
+        layout_circle_lines(text, font, MIN_FONT_SIZE, bounds).unwrap_or_default()
+    } else {
+        best
+    };
+
+    with_circle_cache(|cache| {
+        if !cache.entries.contains_key(&key) {
+            if cache.entries.len() >= FIT_CACHE_CAP {
+                if let Some(evicted) = cache.order.pop_front() {
+                    cache.entries.remove(&evicted);
+                }
+            }
+            cache.order.push_back(key);
+        }
+        cache.entries.insert(
+            key,
+            CircleFitCacheEntry {
+                content: text.to_owned(),
+                size,
+                lines: lines.clone(),
+            },
+        );
+    });
+
+    (size, lines)
+}
+
 /// Draws one translucent box + label per entry on top of the image inside
 /// `frame`. Coordinates are image pixels, scaled to the frame's width. Each
 /// label's font size is auto-sized to fill its bounding box (growing or
-/// shrinking as needed).
+/// shrinking as needed). When `circular` is set, the text is wrapped
+/// manhwa-style: one centered line per row, each line's width following the
+/// ellipse chord at its height inside the box.
 pub fn draw_entries<'a, I, F>(
     frame: &mut F,
     entries: I,
     font: Font,
     image_width: f32,
+    circular: bool,
 ) where
     F: geometry::frame::Backend,
     I: IntoIterator<Item = &'a OverlayEntry<'a>>,
@@ -282,6 +495,49 @@ pub fn draw_entries<'a, I, F>(
             continue;
         }
         let styled = styled_font(font, &entry.style);
+        if circular {
+            let (size, lines) =
+                fit_circle_metrics(entry.text, styled, Size::new(wrap_width, height));
+            let line_height = size * LINE_HEIGHT;
+            let total_height = lines.last().map_or(0.0, |line| line.y + line_height);
+            // Vertically center the whole block inside the ellipse.
+            let y_offset = (height - total_height).max(0.0) / 2.0;
+            if let Some(transform) = &transform {
+                frame.push_transform();
+                apply_quad_transform(frame, transform, position, width, height);
+            }
+            for line in &lines {
+                // `align_x: Center` treats the position's x as the line's
+                // center (not its left edge), so it must be the bubble's
+                // horizontal center, not the box's left corner.
+                let text = Text {
+                    content: line.content.clone(),
+                    position: Point::new(
+                        position.x + wrap_width / 2.0,
+                        position.y + y_offset + line.y,
+                    ),
+                    max_width: line.chord,
+                    size: Pixels(size),
+                    color: to_color(entry.style.text_color),
+                    font: styled,
+                    align_x: TextAlignment::Center,
+                    ..Text::default()
+                };
+                if entry.style.stroke_width > 0.0 {
+                    frame.stroke_text(
+                        text.clone(),
+                        Stroke::default()
+                            .with_color(to_color(entry.style.stroke_color))
+                            .with_width(entry.style.stroke_width * scale),
+                    );
+                }
+                frame.fill_text(text);
+            }
+            if transform.is_some() {
+                frame.pop_transform();
+            }
+            continue;
+        }
         let (size, fitted_height) = fit_font_metrics(
             entry.text,
             styled,
@@ -549,6 +805,70 @@ mod tests {
         assert!(size.width < 300.0, "width {} too large", size.width);
         assert!(size.height > 15.0, "height {} too small", size.height);
         assert!(size.height < 45.0, "height {} too large", size.height);
+    }
+
+    #[test]
+    fn chord_at_is_full_at_center_and_zero_at_edges() {
+        assert!((chord_at(50.0, 25.0, 25.0) - 100.0).abs() < 1e-3);
+        assert!(chord_at(50.0, 25.0, 0.0) < 1e-3);
+        assert!(chord_at(50.0, 25.0, 50.0) < 1e-3);
+        // At quarter height the chord is sqrt(0.75) of the full width.
+        let quarter = chord_at(50.0, 25.0, 12.5);
+        assert!((quarter - 100.0 * 0.75f32.sqrt()).abs() < 1e-2);
+    }
+
+    #[test]
+    fn circle_lines_follow_the_chords() {
+        let bounds = Size::new(300.0, 150.0);
+        let (size, lines) = fit_circle_metrics(
+            "hello world this is a longer bubble line for manhwa",
+            Font::DEFAULT,
+            bounds,
+        );
+        assert!(lines.len() >= 2, "expected several lines, got {}", lines.len());
+        assert!(size > 8.0, "size {size} too small for a big bubble");
+        let line_height = size * LINE_HEIGHT;
+        for line in &lines {
+            let measured = measure_text(&line.content, Font::DEFAULT, size, f32::INFINITY).width;
+            // The first token of a row may overflow its chord, everything
+            // else must stay inside the ellipse.
+            assert!(
+                measured <= line.chord + 0.5 || !line.content.contains(' '),
+                "line {:?} width {measured} exceeds chord {}",
+                line.content,
+                line.chord
+            );
+            assert!(line.y + line_height <= bounds.height + 0.5);
+        }
+    }
+
+    #[test]
+    fn circle_fit_shrinks_to_fit_small_bubble() {
+        let text = "hello world this is a longer bubble line for manhwa";
+        let big = fit_circle_metrics(text, Font::DEFAULT, Size::new(300.0, 150.0)).0;
+        let small = fit_circle_metrics(text, Font::DEFAULT, Size::new(120.0, 60.0)).0;
+        assert!(small < big, "small bubble must fit smaller text: {small} >= {big}");
+    }
+
+    #[test]
+    fn circle_fit_is_cached_and_consistent() {
+        let bounds = Size::new(200.0, 100.0);
+        let text = "cached circle text goes here";
+        let first = fit_circle_metrics(text, Font::DEFAULT, bounds);
+        let second = fit_circle_metrics(text, Font::DEFAULT, bounds);
+        assert_eq!(first.0, second.0);
+        assert_eq!(first.1, second.1);
+    }
+
+    #[test]
+    fn circle_wraps_unspaced_runs() {
+        // A single unspaced run wider than the bubble must still lay out in
+        // per-character lines instead of overflowing or failing.
+        let bounds = Size::new(120.0, 120.0);
+        let long = "aaaaaaaaaa".repeat(6);
+        let (_, lines) = fit_circle_metrics(&long, Font::DEFAULT, bounds);
+        assert!(!lines.is_empty());
+        assert!(lines.iter().all(|line| !line.content.is_empty()));
     }
 
     #[test]
