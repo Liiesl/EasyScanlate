@@ -195,7 +195,19 @@ fn read_rgb(out: &ArrayD<f32>) -> [u8; 3] {
     let flat: Vec<f32> = out.iter().copied().collect();
     let mut rgb = [0u8; 3];
     for (i, channel) in rgb.iter_mut().enumerate() {
-        *channel = (flat.get(i).copied().unwrap_or(0.0).clamp(0.0, 1.0) * 255.0).round() as u8;
+        let v = flat.get(i).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+        // The model regresses colors with L1 loss, so it converges to the
+        // median of a color cluster (~0.96-0.98 for white, ~0.02-0.04 for
+        // black) and almost never saturates to the exact corner. Snap the
+        // extremes so pure-white / pure-black come out as 255 / 0.
+        let v = if v >= 0.95 {
+            1.0
+        } else if v <= 0.05 {
+            0.0
+        } else {
+            v
+        };
+        *channel = (v * 255.0).round() as u8;
     }
     rgb
 }
