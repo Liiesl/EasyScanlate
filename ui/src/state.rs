@@ -19,6 +19,8 @@ pub trait UiState {
     fn translate_models(&self) -> &[String];
     fn translate_lang(&self) -> &str;
     fn translate_api_key(&self) -> &str;
+    /// Whether the translation model picker only lists free models.
+    fn free_models_only(&self) -> bool;
     fn selected(&self) -> Option<(usize, EntryId)>;
     fn style_working(&self) -> &EntryStyle;
     fn style_text_color(&self) -> Color;

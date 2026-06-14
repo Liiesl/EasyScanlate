@@ -27,6 +27,9 @@ const MODELS_MIRROR: &str = "https://models.pileofthings.top";
 /// Fallback model choices shown in the UI while the listing is unavailable.
 pub const MODELS: [&str; 3] = ["big-pickle", "mimo-v2.5-free", "deepseek-v4-flash-free"];
 
+/// The free models of the [`MODELS`] fallback list.
+pub const MODELS_FREE: [&str; 2] = ["mimo-v2.5-free", "deepseek-v4-flash-free"];
+
 /// Translation gateways offered in the UI (models.dev provider ids, which
 /// double as the mirror path segments).
 pub const PROVIDERS: [&str; 2] = ["opencode", "kilo"];
@@ -48,9 +51,17 @@ pub const LANGUAGES: [&str; 13] = [
     "Vietnamese",
 ];
 
+/// One selectable translation model: its id as shown in the UI and whether
+/// it is free (input or output cost 0).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Model {
+    pub id: String,
+    pub free: bool,
+}
+
 /// One translation gateway: where to call, which environment variable holds
-/// its API key, and the selectable model ids (already filtered and sorted,
-/// or the fallback list when the mirror is unreachable).
+/// its API key, and the selectable models (already filtered and sorted, or
+/// the fallback list when the mirror is unreachable).
 #[derive(Debug, Clone)]
 pub struct Provider {
     /// models.dev provider id.
@@ -59,8 +70,8 @@ pub struct Provider {
     pub api: String,
     /// API key environment variable.
     pub api_key_env: String,
-    /// Selectable model ids.
-    pub models: Vec<String>,
+    /// Selectable models.
+    pub models: Vec<Model>,
 }
 
 /// Profile name convention for machine translations: `english(auto)`.
@@ -176,22 +187,31 @@ fn fallback_provider(id: &str) -> Provider {
         id: id.to_string(),
         api: api.to_string(),
         api_key_env: api_key_env.to_string(),
-        models: MODELS.iter().map(|m| (*m).to_string()).collect(),
+        models: MODELS
+            .iter()
+            .map(|m| Model {
+                id: (*m).to_string(),
+                free: MODELS_FREE.contains(m),
+            })
+            .collect(),
     }
 }
 
 /// Applies the listing filters: drops deprecated models, keeps only the
 /// newest release of each family for paid models, always lists free models
 /// (input or output cost 0), and sorts the result by id.
-fn select_models(listing: &ProviderListing) -> Vec<String> {
-    let mut ids: Vec<String> = Vec::new();
+fn select_models(listing: &ProviderListing) -> Vec<Model> {
+    let mut ids: Vec<Model> = Vec::new();
     let mut latest: BTreeMap<String, (&str, &ModelInfo)> = BTreeMap::new();
     for (id, info) in &listing.models {
         if info.status.as_deref() == Some("deprecated") {
             continue;
         }
         if is_free(info) {
-            ids.push(id.clone());
+            ids.push(Model {
+                id: id.clone(),
+                free: true,
+            });
             continue;
         }
         let family = info.family.clone().unwrap_or_else(|| id.clone());
@@ -203,8 +223,15 @@ fn select_models(listing: &ProviderListing) -> Vec<String> {
             latest.insert(family, (id, info));
         }
     }
-    ids.extend(latest.into_values().map(|(id, _)| id.to_string()));
-    ids.sort();
+    ids.extend(
+        latest
+            .into_values()
+            .map(|(id, _)| Model {
+                id: id.to_string(),
+                free: false,
+            }),
+    );
+    ids.sort_by(|a, b| a.id.cmp(&b.id));
     ids
 }
 
@@ -653,15 +680,24 @@ mod tests {
             ]),
         };
         let selected = select_models(&listing);
-        assert!(selected.contains(&"paid-v2".to_string()));
-        assert!(!selected.contains(&"paid-v1".to_string()));
-        assert!(selected.contains(&"free-old".to_string()));
-        assert!(selected.contains(&"free-new".to_string()));
-        assert!(!selected.contains(&"retired".to_string()));
+        let ids: Vec<&str> = selected.iter().map(|m| m.id.as_str()).collect();
+        assert!(ids.contains(&"paid-v2"));
+        assert!(!ids.contains(&"paid-v1"));
+        assert!(ids.contains(&"free-old"));
+        assert!(ids.contains(&"free-new"));
+        assert!(!ids.contains(&"retired"));
         // Models without a family are their own family: all of them are kept.
-        assert!(selected.contains(&"loner-v2".to_string()));
-        assert!(selected.contains(&"loner-v1".to_string()));
-        assert!(selected.is_sorted());
+        assert!(ids.contains(&"loner-v2"));
+        assert!(ids.contains(&"loner-v1"));
+        assert!(ids.windows(2).all(|w| w[0] <= w[1]));
+        assert_eq!(
+            selected
+                .iter()
+                .filter(|m| m.free)
+                .map(|m| m.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["free-new", "free-old"]
+        );
     }
 
     #[test]
@@ -689,7 +725,10 @@ mod tests {
         assert!(is_free(info));
         assert_eq!(
             select_models(&listing),
-            vec!["deepseek-v4-flash-free".to_string()]
+            vec![Model {
+                id: "deepseek-v4-flash-free".to_string(),
+                free: true
+            }]
         );
     }
 }

@@ -14,6 +14,9 @@ pub struct Settings {
     /// styling model and their style set from the prediction.
     #[serde(default)]
     pub auto_style_detect: bool,
+    /// When enabled, the translation model picker only lists free models.
+    #[serde(default)]
+    pub free_models_only: bool,
 }
 
 impl Settings {
@@ -55,11 +58,13 @@ mod tests {
         let settings = Settings {
             api_key: "sk-test-123".to_string(),
             auto_style_detect: true,
+            free_models_only: true,
         };
         let text = serde_json::to_string(&settings).unwrap();
         let back: Settings = serde_json::from_str(&text).unwrap();
         assert_eq!(back.api_key, "sk-test-123");
         assert_eq!(back.auto_style_detect, true);
+        assert_eq!(back.free_models_only, true);
     }
 
     #[test]
@@ -67,5 +72,6 @@ mod tests {
         let back: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(back.api_key, "");
         assert_eq!(back.auto_style_detect, false);
+        assert_eq!(back.free_models_only, false);
     }
 }

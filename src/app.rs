@@ -145,6 +145,8 @@ pub struct App {
     /// the models mirror, with [`translation::MODELS`] as the offline
     /// fallback).
     pub(crate) translate_models: Vec<String>,
+    /// When enabled, only free models are offered in the picker.
+    pub(crate) free_models_only: bool,
     /// True while the settings modal is open.
     pub(crate) settings_open: bool,
     /// The settings tab shown inside the modal.
@@ -225,6 +227,7 @@ impl App {
                 .iter()
                 .map(|m| (*m).to_string())
                 .collect(),
+            free_models_only: false,
             settings_open: false,
             settings_tab: SettingsTab::General,
             selected: None,
@@ -308,15 +311,25 @@ fn seed_style_inputs(app: &mut App, style: EntryStyle) {
 
 /// Points the model picker at the current provider's (already fetched)
 /// model list, falling back to the offline list if the provider is missing.
-/// The selected model is reset when it is no longer on the list.
+/// The selected model is reset when it is no longer on the list. When
+/// `free_models_only` is enabled, only free models are offered.
 fn sync_translate_models(app: &mut App) {
-    let models = app
+    let free_only = app.free_models_only;
+    let models: Vec<String> = app
         .translate_providers_map
         .get(&app.translate_provider)
-        .map(|provider| provider.models.clone())
+        .map(|provider| {
+            provider
+                .models
+                .iter()
+                .filter(|model| !free_only || model.free)
+                .map(|model| model.id.clone())
+                .collect()
+        })
         .unwrap_or_else(|| {
             translation::MODELS
                 .iter()
+                .filter(|m| !free_only || translation::MODELS_FREE.contains(m))
                 .map(|m| (*m).to_string())
                 .collect()
         });
@@ -373,6 +386,10 @@ impl UiState for App {
 
     fn translate_api_key(&self) -> &str {
         &self.translate_api_key
+    }
+
+    fn free_models_only(&self) -> bool {
+        self.free_models_only
     }
 
     fn selected(&self) -> Option<(usize, EntryId)> {
@@ -729,6 +746,7 @@ pub fn boot() -> (App, Task<Message>) {
     let settings = crate::settings::Settings::load();
     app.translate_api_key = settings.api_key;
     app.auto_style_detect = settings.auto_style_detect;
+    app.free_models_only = settings.free_models_only;
     let models_task = Task::perform(translation::fetch_all_providers(), Message::ModelsFetched);
     (app, Task::batch([font_task, models_task]))
 }
@@ -1545,6 +1563,13 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.translate_api_key = key;
             Task::none()
         }
+        Message::Ui(UiEvent::FreeModelsOnlyToggle(enabled)) => {
+            if app.free_models_only != enabled {
+                app.free_models_only = enabled;
+                sync_translate_models(app);
+            }
+            Task::none()
+        }
         Message::Ui(UiEvent::EntryClicked(selection)) => {
             clear_editing(app);
             app.selected = selection.filter(|(index, id)| {
@@ -1752,6 +1777,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             let settings = crate::settings::Settings {
                 api_key: app.translate_api_key.clone(),
                 auto_style_detect: app.auto_style_detect,
+                free_models_only: app.free_models_only,
             };
             if let Err(e) = settings.save() {
                 app.status = e;

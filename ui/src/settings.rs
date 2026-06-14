@@ -14,7 +14,7 @@ use crate::panel::PANEL_BG;
 use crate::state::UiState;
 
 const MODAL_WIDTH: f32 = 520.0;
-const MODAL_HEIGHT: f32 = 340.0;
+const MODAL_HEIGHT: f32 = 400.0;
 const TAB_WIDTH: f32 = 140.0;
 const ACCENT: Color = Color::from_rgb8(92, 190, 255);
 const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);
@@ -88,6 +88,13 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                     .width(FillLength),
             ]
             .spacing(6),
+            checkbox(state.free_models_only())
+                .label("Only show free models")
+                .text_size(12)
+                .on_toggle(UiEvent::FreeModelsOnlyToggle),
+            text("Hide paid models from the translation picker.")
+                .size(11)
+                .color(MUTED_FG),
             text("Saved to settings.json beside the executable.").size(11).color(MUTED_FG),
         ]
         .spacing(8)

@@ -65,6 +65,8 @@ pub enum UiEvent {
     TranslateModel(String),
     TranslateLang(String),
     TranslateApiKey(String),
+    /// The user toggled the "only free models" filter in the settings modal.
+    FreeModelsOnlyToggle(bool),
     EntryClicked(Option<(usize, EntryId)>),
     EntryDoubleClicked((usize, EntryId)),
     /// Start the inline text edit from the panel's results list instead of
