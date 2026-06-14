@@ -77,7 +77,10 @@ pub enum Message {
     /// The fetched translation gateway configs, keyed by provider id (each
     /// already filtered and sorted, or the fallback on failure).
     ModelsFetched(std::collections::HashMap<String, translation::Provider>),
-    TranslateFinished(Vec<(usize, EntryId, String)>, Result<Vec<String>, String>),
+    TranslateFinished(
+        Vec<(usize, EntryId, String, String)>,
+        Result<Vec<String>, String>,
+    ),
 }
 
 impl From<UiEvent> for Message {
@@ -247,6 +250,12 @@ impl App {
             },
         }
     }
+}
+
+/// The file name (last path component) of an image path, stripped of both
+/// separator styles; used as the file tag in translation requests.
+fn file_name(path: &str) -> String {
+    path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
 }
 
 /// Starts an inline edit of `(index, id)`: selects the entry, seeds the
@@ -1451,16 +1460,24 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             if app.translating || app.running {
                 return Task::none();
             }
-            let jobs: Vec<(usize, EntryId, String)> = app
+            let jobs: Vec<(usize, EntryId, String, String)> = app
                 .images
                 .iter()
                 .enumerate()
                 .flat_map(|(index, image)| {
+                    let filename = file_name(&image.path);
                     image
                         .project
                         .ocr
                         .visible()
-                        .map(move |entry| (index, entry.id, entry.text.clone()))
+                        .map(move |entry| {
+                            (
+                                index,
+                                entry.id,
+                                filename.clone(),
+                                entry.text.clone(),
+                            )
+                        })
                 })
                 .collect();
             if jobs.is_empty() {
@@ -1468,7 +1485,14 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 return Task::none();
             }
             app.translating = true;
-            let texts: Vec<String> = jobs.iter().map(|(_, _, text)| text.clone()).collect();
+            let items: Vec<translation::TranslateItem> = jobs
+                .iter()
+                .map(|(_, id, filename, text)| translation::TranslateItem {
+                    filename: filename.clone(),
+                    id: id.0,
+                    text: text.clone(),
+                })
+                .collect();
             let target = app.translate_lang.clone();
             let provider = app
                 .translate_providers_map
@@ -1495,7 +1519,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             Task::perform(
                 async move {
                     let result =
-                        translation::translate_all(&texts, &target, &provider, &model, api_key)
+                        translation::translate_all(&items, &target, &provider, &model, api_key)
                             .await;
                     (jobs, result)
                 },
@@ -1748,7 +1772,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     }
                     let profile_name = translation::profile_name(&app.translate_lang);
                     let mut current_image: Option<usize> = None;
-                    for ((image_index, entry_id, _), translation) in
+                    for ((image_index, entry_id, _path, _text), translation) in
                         jobs.iter().zip(translations.iter())
                     {
                         if current_image != Some(*image_index) {

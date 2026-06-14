@@ -4505,7 +4505,6 @@ version = "0.1.0"
 dependencies = [
  "reqwest",
  "rig",
- "schemars",
  "serde",
  "serde_json",
 ]

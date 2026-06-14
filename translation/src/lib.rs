@@ -2,7 +2,11 @@
 //! for now; the rest of the app only ever sees the functions in this module.
 //!
 //! All OCR lines of all loaded images are translated in a single request.
-//! The result is a `Vec<String>` aligned with the input order, which the app
+//! The prompt embeds the lines in an XML-like file structure (grouped per
+//! image, each line tagged with its entry id), and the model is asked to
+//! return the same file with translations in place. The answer is parsed back
+//! by tag, so the order the model emits the lines in does not matter. The
+//! result is a `Vec<String>` aligned with the input order, which the app
 //! stores into the selected profile named `english(auto)` style.
 
 use std::collections::{BTreeMap, HashMap};
@@ -10,8 +14,7 @@ use std::collections::{BTreeMap, HashMap};
 use rig::completion::{AssistantContent, CompletionResponse};
 use rig::prelude::*;
 use rig::providers::openai;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 /// Hard cap on lines per request; a single unbounded prompt is guaranteed to
 /// blow the model's context window on big projects.
@@ -67,13 +70,18 @@ pub fn profile_name(lang: &str) -> String {
 
 const SYSTEM: &str = "You are a professional scanlation translator for comics, manga and manhwa. \
 Translate every line into the requested target language; detect the source language of each line \
-yourself (most lines are Korean). Preserve meaning, tone, and the exact order and number of lines. \
-Do not add, merge, drop or summarize any line. Do not add commentary, explanations, notes or any \
-formatting such as markdown or code blocks. Output only the translations.";
+yourself (most lines are Korean). Preserve meaning, tone, and the exact structure of the file. \
+Do not add, merge, drop or reorder any line. Do not add commentary, explanations, notes or any \
+formatting such as markdown or code blocks. Output only the file.";
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-struct TranslationBatch {
-    translations: Vec<String>,
+/// One OCR line to translate: the image it belongs to (used as the file tag
+/// in the wire format), its stable entry id (used as the row tag) and the
+/// source text.
+#[derive(Debug, Clone)]
+pub struct TranslateItem {
+    pub filename: String,
+    pub id: u64,
+    pub text: String,
 }
 
 /// Model listing wire format (models.dev schema, served by the mirror).
@@ -221,24 +229,24 @@ fn is_newer(info: &ModelInfo, current: &ModelInfo) -> bool {
     }
 }
 
-/// Translates every line in `texts` into `target` using `model` on the given
+/// Translates every line in `items` into `target` using `model` on the given
 /// gateway. `api_key` overrides the provider's environment variable when set
 /// (in-memory only; never persisted). On success returns one translation per
 /// input line, in the same order.
 pub async fn translate_all(
-    texts: &[String],
+    items: &[TranslateItem],
     target: &str,
     provider: &Provider,
     model: &str,
     api_key: Option<String>,
 ) -> Result<Vec<String>, String> {
-    if texts.is_empty() {
+    if items.is_empty() {
         return Ok(Vec::new());
     }
-    if texts.len() > MAX_LINES {
+    if items.len() > MAX_LINES {
         return Err(format!(
             "Too many lines for a single translation request ({}, max {MAX_LINES}).",
-            texts.len()
+            items.len()
         ));
     }
 
@@ -260,84 +268,170 @@ pub async fn translate_all(
         .map_err(|e| format!("Translation init failed: {e}"))?;
     let completion = client.completion_model(model);
 
-    let prompt = build_prompt(texts, target);
+    let prompt = build_prompt(items, target);
     eprintln!(
         "[translation] request: provider={} model={model} target={target} lines={}\nprompt:\n{prompt}\n---",
         provider.id,
-        texts.len()
+        items.len()
     );
 
-    match structured(&completion, &prompt, texts.len()).await {
-        Ok(translations) => {
-            eprintln!("[translation] structured OK ({} lines)", translations.len());
-            return Ok(translations);
-        }
-        Err(e) => eprintln!("[translation] structured attempt failed: {e}"),
-    }
-
-    let result = plain(&completion, &prompt, texts.len()).await;
-    eprintln!(
-        "[translation] plain attempt: {}",
-        match &result {
-            Ok(lines) => format!("OK ({} lines)", lines.len()),
-            Err(e) => format!("failed: {e}"),
-        }
-    );
-    result
-}
-
-fn build_prompt(texts: &[String], target: &str) -> String {
-    let mut prompt = format!(
-        "Translate the following {n} line(s) into {target}.\n\nReturn a JSON object with a \
-\"translations\" array containing exactly {n} strings in the same order, one per line.\n\n",
-        n = texts.len(),
-    );
-    for (i, text) in texts.iter().enumerate() {
-        let clean = text.replace(['\r', '\n'], " ");
-        prompt.push_str(&format!("{}. {clean}\n", i + 1));
-    }
-    prompt
-}
-
-/// Attempt 1: structured JSON output via the provider's schema support.
-async fn structured(
-    model: &openai::completion::CompletionModel<reqwest::Client>,
-    prompt: &str,
-    expected: usize,
-) -> Result<Vec<String>, String> {
-    let request = model
-        .completion_request(prompt)
-        .preamble(SYSTEM.to_string())
-        .temperature(1.0)
-        .output_schema(TranslationBatch::json_schema(
-            &mut schemars::SchemaGenerator::default(),
-        ));
-    let response = request.send().await.map_err(|e| e.to_string())?;
-    let output = choice_text(&response);
-    eprintln!("[translation] structured response ({expected}):\n{output}\n---");
-    let batch: TranslationBatch =
-        serde_json::from_str(&output).map_err(|e| format!("Bad JSON response: {e}"))?;
-    validate_count(batch.translations, expected)
-}
-
-/// Attempt 2: the same JSON prompt but without the `response_format` param,
-/// which some endpoints (e.g. the opencode console gateway) reject. Models that
-/// ignore the JSON instruction may still answer with numbered or plain lines,
-/// which [`parse_response`] recovers.
-async fn plain(
-    model: &openai::completion::CompletionModel<reqwest::Client>,
-    prompt: &str,
-    expected: usize,
-) -> Result<Vec<String>, String> {
-    let request = model
-        .completion_request(prompt)
+    let request = completion
+        .completion_request(&prompt)
         .preamble(SYSTEM.to_string())
         .temperature(1.0);
     let response = request.send().await.map_err(|e| e.to_string())?;
     let output = choice_text(&response);
-    eprintln!("[translation] plain response ({expected} expected):\n{output}\n---");
-    let translations = parse_response(&output);
-    validate_count(translations, expected)
+    eprintln!("[translation] response:\n{output}\n---");
+
+    let parsed = parse_translation_file(&output);
+    let translations = align(items, parsed)?;
+    eprintln!("[translation] OK ({} lines)", translations.len());
+    Ok(translations)
+}
+
+fn build_prompt(items: &[TranslateItem], target: &str) -> String {
+    format!(
+        "Translate the text to {target}. Keep everything else exactly as it is; \
+do not add, merge, drop or reorder any line. Respond only with the file.\n\n{}",
+        build_content(items)
+    )
+}
+
+/// Serializes the lines into the XML-like wire format: a `<translations>`
+/// root holding one `<filename>` block per image, each line inside it tagged
+/// with its entry id. Mirrors the ManhwaOCR translation file format.
+fn build_content(items: &[TranslateItem]) -> String {
+    let mut content = String::from("<translations>\n");
+    let mut current: Option<&str> = None;
+    for item in items {
+        if current != Some(item.filename.as_str()) {
+            if let Some(filename) = current {
+                content.push_str(&format!("</{}>\n", escape(filename)));
+            }
+            content.push_str(&format!("<{}>\n", escape(&item.filename)));
+            current = Some(&item.filename);
+        }
+        let text = item.text.replace(['\r', '\n'], " ");
+        content.push_str(&format!("<{}>{}</{}>\n", item.id, escape(&text), item.id));
+    }
+    if let Some(filename) = current {
+        content.push_str(&format!("</{}>\n", escape(filename)));
+    }
+    content.push_str("</translations>\n");
+    content
+}
+
+/// Best-effort parsing of whatever the model actually output, tolerant of
+/// missing closing tags and of the optional `<translate>` wrapper inside a
+/// row. Returns every recovered `(filename, entry id) -> text` pair; row
+/// order in the answer does not matter.
+fn parse_translation_file(output: &str) -> HashMap<(String, u64), String> {
+    let mut translations = HashMap::new();
+    let mut current: Option<String> = None;
+    for raw_line in output.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some(inner) = line.strip_prefix('<') else {
+            continue;
+        };
+        let Some(gt) = inner.find('>') else {
+            continue;
+        };
+        let tag = &inner[..gt];
+        let tail = &inner[gt + 1..];
+        if tag.starts_with('/') {
+            // Closing tags (`</filename>`, `</1>`, `</translations>`).
+            continue;
+        }
+
+        // Row tag: `<123>text</123>` or `<123>text` (missing closing tag).
+        if let Ok(id) = tag.parse::<u64>() {
+            if let Some(filename) = current.as_ref() {
+                let closing = format!("</{tag}>");
+                let content_end = tail.rfind(&closing).unwrap_or(tail.len());
+                let text = translate_wrapped(&tail[..content_end]);
+                if !text.is_empty() {
+                    translations.insert((filename.clone(), id), text);
+                }
+            }
+            continue;
+        }
+
+        // File tag: `<filename>`; structural tags are ignored.
+        let name = unescape(tag);
+        if matches!(
+            name.to_lowercase().as_str(),
+            "translations" | "translate" | "context" | "re-translation"
+        ) {
+            continue;
+        }
+        if !name.is_empty() {
+            current = Some(name);
+        }
+    }
+    translations
+}
+
+/// Extracts the translated text from a row's content, honoring the optional
+/// `<translate>` wrapper ManhwaOCR-style models sometimes emit.
+fn translate_wrapped(content: &str) -> String {
+    let lower = content.to_lowercase();
+    if let Some(start) = lower.find("<translate>") {
+        let inner = &content[start + "<translate>".len()..];
+        let end = inner.to_lowercase().find("</translate>");
+        let inner = match end {
+            Some(i) => &inner[..i],
+            None => inner,
+        };
+        return unescape(inner).trim().to_string();
+    }
+    unescape(content).trim().to_string()
+}
+
+fn escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn unescape(text: &str) -> String {
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
+/// Reorders the parsed translations to the input order, failing loudly when
+/// the model dropped or renamed any row. Extra rows in the answer are
+/// ignored, matching the ManhwaOCR import behaviour.
+fn align(items: &[TranslateItem], parsed: HashMap<(String, u64), String>) -> Result<Vec<String>, String> {
+    let mut missing = Vec::new();
+    let mut translations = Vec::with_capacity(items.len());
+    for item in items {
+        match parsed.get(&(item.filename.clone(), item.id)) {
+            Some(text) => translations.push(text.clone()),
+            None => missing.push(item.id),
+        }
+    }
+    if missing.is_empty() {
+        Ok(translations)
+    } else {
+        Err(format!(
+            "Model returned {} translation(s) for {} line(s); missing {}; skipping.",
+            parsed.len(),
+            items.len(),
+            missing
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+    }
 }
 
 /// Extracts the assistant's text from a completion response.
@@ -347,55 +441,6 @@ fn choice_text(
     match response.choice.first_ref() {
         AssistantContent::Text(text) => text.text.clone(),
         _ => String::new(),
-    }
-}
-
-/// Best-effort parsing of whatever the model actually output: a JSON object or
-/// array first, then numbered lines, then plain lines as-is.
-fn parse_response(output: &str) -> Vec<String> {
-    parse_json_batch(output).unwrap_or_else(|| parse_numbered(output))
-}
-
-fn parse_json_batch(output: &str) -> Option<Vec<String>> {
-    let trimmed = output.trim();
-    let candidate = trimmed
-        .strip_prefix("```json")
-        .or_else(|| trimmed.strip_prefix("```"))
-        .and_then(|s| s.strip_suffix("```"))
-        .unwrap_or(trimmed)
-        .trim();
-    if let Ok(batch) = serde_json::from_str::<TranslationBatch>(candidate) {
-        return Some(batch.translations);
-    }
-    serde_json::from_str::<Vec<String>>(candidate).ok()
-}
-
-fn parse_numbered(output: &str) -> Vec<String> {
-    output
-        .lines()
-        .map(|line| line.trim())
-        .filter(|line| !line.is_empty())
-        .map(|line| {
-            let rest = line.trim_start_matches(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']);
-            let rest = rest.trim_start_matches(['.', ')', ':', ' ', '"']);
-            let rest = rest.trim_end_matches([' ', ',', '"']);
-            if rest.is_empty() {
-                line.to_string()
-            } else {
-                rest.to_string()
-            }
-        })
-        .collect()
-}
-
-fn validate_count(lines: Vec<String>, expected: usize) -> Result<Vec<String>, String> {
-    if lines.len() == expected {
-        Ok(lines)
-    } else {
-        Err(format!(
-            "Model returned {} translation(s) for {expected} line(s); skipping.",
-            lines.len()
-        ))
     }
 }
 
@@ -409,41 +454,103 @@ mod tests {
         assert_eq!(profile_name("Chinese (Simplified)"), "chinese (simplified)(auto)");
     }
 
-    #[test]
-    fn numbered_lines_are_parsed_in_order() {
-        let out = parse_numbered(
-            "1. Hello\n2. How are you?\n\n3. Goodbye",
-        );
-        assert_eq!(out, vec!["Hello", "How are you?", "Goodbye"]);
+    fn item(filename: &str, id: u64, text: &str) -> TranslateItem {
+        TranslateItem {
+            filename: filename.to_string(),
+            id,
+            text: text.to_string(),
+        }
     }
 
     #[test]
-    fn unnumbered_output_is_kept_as_is() {
-        let out = parse_numbered("Hello\nHow are you?\nGoodbye");
-        assert_eq!(out, vec!["Hello", "How are you?", "Goodbye"]);
-    }
-
-    #[test]
-    fn count_mismatch_is_rejected() {
-        assert!(validate_count(vec!["a".to_string()], 2).is_err());
-        assert_eq!(validate_count(vec!["a".to_string()], 1).unwrap(), vec!["a"]);
-    }
-
-    #[test]
-    fn json_object_is_recovered_from_plain_response() {
-        let out = parse_response(
-            "{\n  \"translations\": [\n    \"Protect His Majesty.\",\n    \"Sukbin\",\n    \"You\"\n  ]\n}",
-        );
-        assert_eq!(out, vec!["Protect His Majesty.", "Sukbin", "You"]);
-    }
-
-    #[test]
-    fn fenced_json_and_bare_arrays_are_recovered() {
+    fn content_groups_lines_by_file_in_input_order() {
+        let items = vec![
+            item("a.png", 1, "안녕"),
+            item("a.png", 2, "하세요"),
+            item("b.png", 3, "안녕"),
+        ];
         assert_eq!(
-            parse_response("```json\n{\"translations\": [\"a\", \"b\"]}\n```"),
-            vec!["a", "b"]
+            build_content(&items),
+            "<translations>\n<a.png>\n<1>안녕</1>\n<2>하세요</2>\n</a.png>\n\
+             <b.png>\n<3>안녕</3>\n</b.png>\n</translations>\n"
         );
-        assert_eq!(parse_response("[\"a\", \"b\"]"), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn content_escapes_special_characters() {
+        let items = vec![item("a&b.png", 1, "3 < 5 & 7 > 2 \"q\" 's'")];
+        assert_eq!(
+            build_content(&items),
+            "<translations>\n<a&amp;b.png>\n<1>3 &lt; 5 &amp; 7 &gt; 2 &quot;q&quot; \
+             &apos;s&apos;</1>\n</a&amp;b.png>\n</translations>\n"
+        );
+        let parsed = parse_translation_file(&build_content(&items));
+        assert_eq!(parsed[&("a&b.png".to_string(), 1)], "3 < 5 & 7 > 2 \"q\" 's'");
+    }
+
+    #[test]
+    fn parse_recovers_rows_and_files() {
+        let out = parse_translation_file(
+            "<translations>\n<a.png>\n<1>Hello</1>\n<2>How are you?</2>\n</a.png>\n\
+             <b.png>\n<3>Goodbye</3>\n</b.png>\n</translations>",
+        );
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[&("a.png".to_string(), 1)], "Hello");
+        assert_eq!(out[&("a.png".to_string(), 2)], "How are you?");
+        assert_eq!(out[&("b.png".to_string(), 3)], "Goodbye");
+    }
+
+    #[test]
+    fn parse_tolerates_missing_closing_tags_and_translate_wrappers() {
+        let out = parse_translation_file(
+            "<translations>\n<a.png>\n<1>Plain\n<2><translate>Wrapped</translate>\n</a.png>",
+        );
+        assert_eq!(out[&("a.png".to_string(), 1)], "Plain");
+        assert_eq!(out[&("a.png".to_string(), 2)], "Wrapped");
+    }
+
+    #[test]
+    fn parse_ignores_structural_and_closing_tags() {
+        let out = parse_translation_file(
+            "<translations>\n</translations>\n</a.png>\n<b.png>\n<1>x</1>\n</b.png>",
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[&("b.png".to_string(), 1)], "x");
+    }
+
+    #[test]
+    fn rows_outside_any_file_are_dropped() {
+        let out = parse_translation_file("<1>orphan</1>\n<a.png>\n<2>kept</2>");
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[&("a.png".to_string(), 2)], "kept");
+    }
+
+    #[test]
+    fn align_maps_response_back_to_input_order() {
+        let items = vec![item("a.png", 1, "x"), item("a.png", 2, "y"), item("b.png", 3, "z")];
+        let parsed = HashMap::from([
+            (("b.png".to_string(), 3), "C".to_string()),
+            (("a.png".to_string(), 1), "A".to_string()),
+            (("a.png".to_string(), 2), "B".to_string()),
+        ]);
+        assert_eq!(align(&items, parsed).unwrap(), vec!["A", "B", "C"]);
+    }
+
+    #[test]
+    fn align_rejects_missing_rows() {
+        let items = vec![item("a.png", 1, "x")];
+        let parsed = HashMap::from([(("a.png".to_string(), 2), "A".to_string())]);
+        let err = align(&items, parsed).unwrap_err();
+        assert!(err.contains("missing 1"), "{err}");
+    }
+
+    #[test]
+    fn prompt_embeds_the_file() {
+        let items = vec![item("a.png", 1, "안녕")];
+        let prompt = build_prompt(&items, "English");
+        assert!(prompt.contains("Translate the text to English"));
+        assert!(prompt.contains("<translations>"));
+        assert!(prompt.contains("<1>안녕</1>"));
     }
 
     #[test]
