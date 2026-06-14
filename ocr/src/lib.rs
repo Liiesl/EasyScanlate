@@ -563,12 +563,15 @@ pub fn distribute(
 
 /// Maps boundary candidates of the producing run into the next run's canvas
 /// space: both canvases contain the same pixels at the seam, so `y' = (y -
-/// `prev_boundary`) * scale` with `scale = new_width / prev_width` is exact.
+/// `prev_boundary`) * scale + `new_margin_top` with `scale = new_width /
+/// prev_width` is exact — the seam sits at the new canvas's top-margin strip
+/// height, not at 0.
 pub fn transform_candidates(
     candidates: &[BoundaryCandidate],
     prev_width: u32,
     prev_boundary: u32,
     new_width: u32,
+    new_margin_top: u32,
 ) -> Vec<[f32; 4]> {
     let scale = new_width as f32 / prev_width.max(1) as f32;
     candidates
@@ -577,9 +580,9 @@ pub fn transform_candidates(
             let [x0, y0, x1, y1] = candidate.canvas_quad;
             [
                 x0 * scale,
-                (y0 - prev_boundary as f32) * scale,
+                (y0 - prev_boundary as f32) * scale + new_margin_top as f32,
                 x1 * scale,
-                (y1 - prev_boundary as f32) * scale,
+                (y1 - prev_boundary as f32) * scale + new_margin_top as f32,
             ]
         })
         .collect()
@@ -616,7 +619,7 @@ pub fn resolve_boundary(
     transformed: &[[f32; 4]],
     lines: Vec<OcrLine>,
 ) -> Resolution {
-    let kept = lines;
+    let mut kept = lines;
     // `matched[i]`: line already paired with a candidate (not re-matchable);
     // `dropped[i]`: line consumed by a winning candidate (removed from kept).
     let mut matched = vec![false; kept.len()];
@@ -655,12 +658,27 @@ pub fn resolve_boundary(
         } else {
             line_area > cand_area
         };
-        if !below_wins {
+        let merged_text = merge_texts(&kept[i].text, &candidate.entry.text);
+        if below_wins {
+            // The re-detection won: it survives with the candidate's extra
+            // text and bbox merged in, then flows through dedup and
+            // distribute.
+            kept[i].text = merged_text;
+            let [x0, y0, x1, y1] = box_bounds(&kept[i].bbox);
+            kept[i].bbox = rapidocr_core::types::Quad::from_xyxy(
+                x0.min(quad[0]),
+                y0.min(quad[1]),
+                x1.max(quad[2]),
+                y1.max(quad[3]),
+            );
+        } else {
             // The candidate's capture won: drop the re-detection and append
-            // the ready-to-append entry. A winning re-detection simply
-            // survives and continues through dedup and distribute.
+            // the ready-to-append entry, carrying the re-detection's fuller
+            // text when it covers the candidate's.
             dropped[i] = true;
-            append.push(candidate.clone());
+            let mut entry = candidate.clone();
+            entry.entry.text = merge_texts(&candidate.entry.text, &kept[i].text);
+            append.push(entry);
         }
     }
 
@@ -678,6 +696,19 @@ pub fn resolve_boundary(
 /// Area of an AABB (zero for degenerate boxes).
 fn quad_area(bounds: [f32; 4]) -> f32 {
     (bounds[2] - bounds[0]).max(0.0) * (bounds[3] - bounds[1]).max(0.0)
+}
+
+/// The more complete of two captures of the same bubble: when one text
+/// contains the other (the seam cut one read short), the containing one wins;
+/// otherwise the reads differ too much to merge safely and `winner` stays.
+fn merge_texts(winner: &str, loser: &str) -> String {
+    if winner.contains(loser) && !loser.is_empty() {
+        winner.to_string()
+    } else if loser.contains(winner) && !winner.is_empty() {
+        loser.to_string()
+    } else {
+        winner.to_string()
+    }
 }
 
 /// Area of the intersection of two AABBs (zero when disjoint).
@@ -1305,11 +1336,15 @@ mod tests {
     }
 
     fn candidate(canvas: [f32; 4], page: usize) -> BoundaryCandidate {
+        candidate_text(canvas, page, "held")
+    }
+
+    fn candidate_text(canvas: [f32; 4], page: usize, text: &str) -> BoundaryCandidate {
         BoundaryCandidate {
             canvas_quad: canvas,
             entry: NewEntry {
                 source: EntrySource::AutoOcr,
-                text: "held".to_string(),
+                text: text.to_string(),
                 score: 0.9,
                 quad: Quad {
                     points: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
@@ -1336,7 +1371,7 @@ mod tests {
     #[test]
     fn transform_candidates_maps_candidates_into_the_next_canvas() {
         let candidates = vec![candidate([10.0, 590.0, 90.0, 650.0], 0)];
-        let transformed = transform_candidates(&candidates, 100, 600, 200);
+        let transformed = transform_candidates(&candidates, 100, 600, 200, 0);
         assert_eq!(transformed, vec![[20.0, -20.0, 180.0, 100.0]], "scale + seam shift");
     }
 
@@ -1345,8 +1380,17 @@ mod tests {
         // Different widths: everything above the seam maps negative, below
         // positive; the seam itself maps to 0.
         let candidates = vec![candidate([0.0, 100.0, 50.0, 700.0], 0)];
-        let transformed = transform_candidates(&candidates, 200, 600, 100);
+        let transformed = transform_candidates(&candidates, 200, 600, 100, 0);
         assert_eq!(transformed, vec![[0.0, -250.0, 25.0, 50.0]]);
+    }
+
+    #[test]
+    fn transform_candidates_shifts_by_the_new_canvas_top_margin() {
+        // The next run's canvas starts with its own top-margin strip, so the
+        // seam lands at the strip's height, not at 0.
+        let candidates = vec![candidate([10.0, 590.0, 90.0, 650.0], 0)];
+        let transformed = transform_candidates(&candidates, 100, 600, 200, 320);
+        assert_eq!(transformed, vec![[20.0, 300.0, 180.0, 420.0]]);
     }
 
     #[test]
@@ -1418,5 +1462,57 @@ mod tests {
         ]);
         assert_eq!(append.len(), 2, "winner plus the unmatched flush");
         assert!(kept.is_empty());
+    }
+
+    #[test]
+    fn resolve_merges_the_full_containing_text_into_a_winning_candidate() {
+        // The candidate's capture is fuller but was cut differently: the
+        // re-detection read the leading dots the candidate missed. The
+        // candidate wins the area but its text must carry the dots.
+        let candidates = vec![candidate_text([0.0, -150.0, 100.0, 90.0], 0, "떠나시는 겁니까")];
+        let (append, kept) = resolve(&candidates, &[[0.0, -150.0, 100.0, 90.0]], vec![
+            line("..떠나시는 겁니까", 0.0, -100.0, 100.0, 90.0, 0.9),
+        ]);
+        assert_eq!(append, vec!["..떠나시는 겁니까".to_string()]);
+        assert!(kept.is_empty(), "losing re-detection must be dropped");
+    }
+
+    #[test]
+    fn resolve_merges_the_candidate_text_into_a_winning_redetection() {
+        // The re-detection is fuller; the candidate's text adds a part the
+        // re-detection's canvas cut. The kept line must carry both.
+        let candidates = vec![candidate_text([0.0, -150.0, 100.0, 90.0], 0, "떠나시는")];
+        let (append, kept) = resolve(&candidates, &[[0.0, -150.0, 100.0, 90.0]], vec![
+            line("..떠나시는 겁니까", 0.0, -150.0, 100.0, 200.0, 0.9),
+        ]);
+        assert!(append.is_empty());
+        assert_eq!(kept, vec!["..떠나시는 겁니까".to_string()]);
+    }
+
+    #[test]
+    fn resolve_unions_the_winning_redetection_bbox_with_the_candidate() {
+        let candidates = vec![candidate([0.0, -150.0, 100.0, 90.0], 0)];
+        let out = resolve_boundary(&candidates, &[[0.0, -150.0, 100.0, 90.0]], vec![
+            line("redo", 0.0, -150.0, 100.0, 200.0, 0.9),
+        ]);
+        assert!(out.append.is_empty());
+        assert_eq!(out.kept.len(), 1);
+        assert_eq!(
+            box_bounds(&out.kept[0].bbox),
+            [0.0, -150.0, 100.0, 200.0],
+            "union of the candidate and re-detection boxes"
+        );
+    }
+
+    #[test]
+    fn resolve_keeps_the_winner_text_when_neither_capture_contains_the_other() {
+        // The re-detection wins; the candidate's text is a cut misread of the
+        // same sliver, not extra text — it must not be concatenated in.
+        let candidates = vec![candidate_text([0.0, -150.0, 100.0, 90.0], 0, "전하를 지켜즈게")];
+        let (append, kept) = resolve(&candidates, &[[0.0, -150.0, 100.0, 90.0]], vec![
+            line("..전하를 지켜주게 숙빈", 0.0, -150.0, 100.0, 200.0, 0.9),
+        ]);
+        assert!(append.is_empty());
+        assert_eq!(kept, vec!["..전하를 지켜주게 숙빈".to_string()]);
     }
 }

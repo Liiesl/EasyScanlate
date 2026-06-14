@@ -750,6 +750,10 @@ fn start_ocr_run(app: &mut App, engine: Engine) -> Task<Message> {
         .map(|image| (image.width as u32, image.height as u32))
         .collect();
     let run = ocr::plan_runs(&dims)[index];
+    eprintln!(
+        "[ocr-run {index}] pages {}..={} band {:?} above={:?} below={:?} dedup={:?}",
+        run.page_start, run.page_end, run.band, run.above, run.below, run.dedup
+    );
     let page_start = run.page_start;
     let page_end = run.page_end;
     let paths: Vec<String> = (page_start..=page_end)
@@ -761,16 +765,20 @@ fn start_ocr_run(app: &mut App, engine: Engine) -> Task<Message> {
     let above_path = run.above.map(|(page, _)| app.images[page].path.clone());
     let below_path = run.below.map(|(page, _)| app.images[page].path.clone());
     let prev_data = run.dedup.map(|(page, offset)| {
-        (
-            app.images[page]
-                .project
-                .ocr
-                .all()
-                .map(|entry| entry.quad)
-                .collect::<Vec<Quad>>(),
-            app.images[page].width as u32,
-            offset,
-        )
+        let quads: Vec<Quad> = app.images[page]
+            .project
+            .ocr
+            .all()
+            .map(|entry| entry.quad)
+            .collect();
+        eprintln!(
+            "[ocr-run {index}] dedup source page {page}: {} stored quads ({:?} visible of {:?} total, {:?} deleted), offset {offset}",
+            quads.len(),
+            app.images[page].project.ocr.visible_count(),
+            app.images[page].project.ocr.total_count(),
+            app.images[page].project.ocr.total_count() - app.images[page].project.ocr.visible_count(),
+        );
+        (quads, app.images[page].width as u32, offset)
     });
     let token = app
         .cancel
@@ -778,6 +786,11 @@ fn start_ocr_run(app: &mut App, engine: Engine) -> Task<Message> {
         .expect("cancellation token set before run")
         .clone();
     let prev_held = app.held_boundary.take();
+    eprintln!(
+        "[ocr-run {index}] held candidates from prev run: {}",
+        prev_held.as_ref().map_or(0, |s| s.candidates.len())
+    );
+    let page_hs: Vec<u32> = app.images.iter().map(|image| image.height as u32).collect();
     Task::perform(
         async move {
             let mut loaded = Vec::with_capacity(paths.len());
@@ -816,7 +829,9 @@ fn start_ocr_run(app: &mut App, engine: Engine) -> Task<Message> {
             let result = engine
                 .run_image_cancellable(&canvas, &token)
                 .map(|lines| {
+                    eprintln!("[ocr-run {index}] raw lines: {}", lines.len());
                     let merged = ocr::merge(lines, ocr::MergeConfig::default());
+                    eprintln!("[ocr-run {index}] after merge: {}", merged.len());
                     let (resolved, kept) = match &prev_held {
                         Some(state) => {
                             let transformed = ocr::transform_candidates(
@@ -824,20 +839,40 @@ fn start_ocr_run(app: &mut App, engine: Engine) -> Task<Message> {
                                 state.width,
                                 state.boundary,
                                 width,
+                                margin_top,
                             );
                             let resolution =
                                 ocr::resolve_boundary(&state.candidates, &transformed, merged);
+                            eprintln!(
+                                "[ocr-run {index}] boundary resolve: {} appended (candidate won), {} kept lines",
+                                resolution.append.len(),
+                                resolution.kept.len()
+                            );
                             (resolution.append, resolution.kept)
                         }
                         None => (Vec::new(), merged),
                     };
                     let deduped = match &prev_data {
                         Some((quads, prev_width, offset)) => {
-                            ocr::dedup_with_previous(kept, quads, *prev_width, *offset, width)
+                            let kept_len = kept.len();
+                            let out = ocr::dedup_with_previous(kept, quads, *prev_width, *offset, width);
+                            eprintln!(
+                                "[ocr-run {index}] dedup vs {} stored quads: {} dropped, {} kept",
+                                quads.len(),
+                                kept_len - out.len(),
+                                out.len()
+                            );
+                            out
                         }
                         None => kept,
                     };
                     let out = ocr::distribute(deduped, &run_dims, run.band, margin_top);
+                    eprintln!(
+                        "[ocr-run {index}] distribute: {} pages, {} entries, {} held candidates",
+                        out.per_page.len(),
+                        out.per_page.iter().map(|(_, e)| e.len()).sum::<usize>(),
+                        out.held.len()
+                    );
                     let mut per_page = out.per_page;
                     for candidate in resolved {
                         match per_page
@@ -849,6 +884,24 @@ fn start_ocr_run(app: &mut App, engine: Engine) -> Task<Message> {
                         }
                     }
                     per_page.sort_by_key(|(page, _)| *page);
+                    eprintln!(
+                        "[ocr-run {index}] final per-page: {:?}",
+                        per_page
+                            .iter()
+                            .map(|(p, e)| format!("p{p}:{}", e.len()))
+                            .collect::<Vec<_>>()
+                    );
+                    for (page, entries) in &per_page {
+                        for entry in entries {
+                            let b = entry.quad.bounds();
+                            if b[1] < 0.0 || b[3] > page_hs[*page] as f32 {
+                                eprintln!(
+                                    "[ocr-run {index}] margin entry on page {page}: text={:?} bounds={:?} page_h={}",
+                                    entry.text, b, page_hs[*page]
+                                );
+                            }
+                        }
+                    }
                     let held = (!out.held.is_empty()).then(|| ocr::BoundaryState {
                         candidates: out.held,
                         width,
@@ -970,6 +1023,10 @@ fn finalize_run(app: &mut App) {
     // cancelled or never started: their bubbles were captured whole on the
     // page above the seam and must not be lost.
     if let Some(state) = app.held_boundary.take() {
+        eprintln!(
+            "[ocr-finalize] flushing {} held candidate(s)",
+            state.candidates.len()
+        );
         for candidate in state.candidates {
             if let Some(image) = app.images.get_mut(candidate.page) {
                 app.ocr_total += image.project.append_ocr(vec![candidate.entry]);
@@ -1268,6 +1325,12 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                         let Some(image) = app.images.get_mut(page) else {
                             continue;
                         };
+                        eprintln!(
+                            "[ocr-finish {page}] appending {} entry(ies) to page {page} (had {} total, {} visible)",
+                            entries.len(),
+                            image.project.ocr.total_count(),
+                            image.project.ocr.visible_count()
+                        );
                         app.ocr_total += image.project.append_ocr(entries);
                     }
                 }
