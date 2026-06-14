@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     /// API key for the translation provider; empty falls back to the
     /// `OPENCODE_API_KEY` environment variable.
@@ -14,9 +14,28 @@ pub struct Settings {
     /// styling model and their style set from the prediction.
     #[serde(default)]
     pub auto_style_detect: bool,
+    /// Number of parallel OCR detection sessions (one thread each) feeding
+    /// the single recognition session.
+    #[serde(default = "default_ocr_workers")]
+    pub ocr_workers: usize,
     /// When enabled, the translation model picker only lists free models.
     #[serde(default)]
     pub free_models_only: bool,
+}
+
+fn default_ocr_workers() -> usize {
+    2
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            auto_style_detect: false,
+            ocr_workers: default_ocr_workers(),
+            free_models_only: false,
+        }
+    }
 }
 
 impl Settings {
@@ -58,12 +77,14 @@ mod tests {
         let settings = Settings {
             api_key: "sk-test-123".to_string(),
             auto_style_detect: true,
+            ocr_workers: 3,
             free_models_only: true,
         };
         let text = serde_json::to_string(&settings).unwrap();
         let back: Settings = serde_json::from_str(&text).unwrap();
         assert_eq!(back.api_key, "sk-test-123");
         assert_eq!(back.auto_style_detect, true);
+        assert_eq!(back.ocr_workers, 3);
         assert_eq!(back.free_models_only, true);
     }
 
@@ -72,6 +93,7 @@ mod tests {
         let back: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(back.api_key, "");
         assert_eq!(back.auto_style_detect, false);
+        assert_eq!(back.ocr_workers, 2);
         assert_eq!(back.free_models_only, false);
     }
 }

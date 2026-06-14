@@ -8,5 +8,6 @@ fn main() -> iced::Result {
         .title("Scanlateit")
         .window_size(Size::new(1400.0, 900.0))
         .theme(Theme::Dark)
+        .subscription(app::subscription)
         .run()
 }

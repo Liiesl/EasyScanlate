@@ -32,6 +32,9 @@ pub trait UiState {
     fn style_bg_radius(&self) -> &str;
     /// Whether automatic style detection for new OCR entries is enabled.
     fn auto_style_detect(&self) -> bool;
+    /// The configured number of parallel OCR detection workers, as typed in
+    /// the settings modal (parsed when OCR starts).
+    fn ocr_workers(&self) -> &str;
     fn editing(&self) -> Option<(usize, EntryId)>;
     fn editing_origin(&self) -> EditOrigin;
     fn editing_rect(&self) -> Option<Rectangle>;

@@ -99,6 +99,9 @@ pub enum UiEvent {
     StyleAutoDetect,
     /// Toggle automatic style detection for new OCR entries.
     StyleAutoDetectToggle(bool),
+    /// The user typed in the OCR detection workers field of the settings
+    /// modal; the string is parsed (with a fallback) when OCR starts.
+    OcrWorkers(String),
     /// The user dragged the divider between the main area and the side panel.
     PanelResized(pane_grid::ResizeEvent),
     /// Open the settings modal from the toolbar.

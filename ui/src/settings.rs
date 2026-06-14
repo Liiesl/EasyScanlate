@@ -68,6 +68,19 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                 .label("Auto-detect entry styles")
                 .text_size(12)
                 .on_toggle(UiEvent::StyleAutoDetectToggle),
+            row![
+                container(text("OCR detection workers").size(12).color(MUTED_FG))
+                    .width(Length::Fixed(150.0)),
+                text_input("2", state.ocr_workers())
+                    .on_input(UiEvent::OcrWorkers)
+                    .padding(4)
+                    .size(12)
+                    .width(Length::Fixed(64.0)),
+            ]
+            .spacing(6),
+            text("Parallel OCR detection sessions; 2 fits a potato-laptop CPU.")
+                .size(11)
+                .color(MUTED_FG),
         ]
         .spacing(6)
         .into(),

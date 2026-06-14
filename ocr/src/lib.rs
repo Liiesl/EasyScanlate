@@ -10,7 +10,8 @@ use image::{imageops, RgbImage};
 use rapidocr_core::config::{
     DetConfig, InferenceOptions, LimitType, PipelineConfig, RapidOcrConfig, RecConfig,
 };
-use rapidocr_core::types::OcrLine;
+use rapidocr_core::pipeline::{DetRecPipeline, PipelineError};
+pub use rapidocr_core::types::OcrLine;
 use rapidocr_core::{is_cancelled_error, RapidOcr};
 
 pub use rapidocr_core::OcrCancellationToken;
@@ -93,6 +94,64 @@ impl Engine {
                     format!("OCR failed: {e}")
                 }
             })
+    }
+}
+
+/// Cloneable handle to the parallel OCR pipeline: `workers` detection
+/// sessions on dedicated threads feeding one recognition session, results
+/// returned strictly in submission order. Only one stream of runs may
+/// execute at a time; runs are cancellable via [`OcrCancellationToken`].
+#[derive(Clone)]
+pub struct ParallelEngine(Arc<DetRecPipeline>);
+
+impl fmt::Debug for ParallelEngine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ParallelEngine")
+    }
+}
+
+impl ParallelEngine {
+    /// Builds `workers` detection sessions plus one recognition session, one
+    /// thread per session. Each session uses a single ONNX Runtime intra-op
+    /// thread, so the whole pipeline fits a modest CPU.
+    pub fn build(workers: usize) -> Result<Self, String> {
+        let cfg = config();
+        let inference = InferenceOptions {
+            intra_threads: 1,
+            inter_threads: 1,
+            ..cfg.inference
+        };
+        let pipeline = DetRecPipeline::new(&cfg, inference, inference, workers)
+            .map_err(|e| format!("Parallel engine init failed: {e}"))?;
+        Ok(Self(Arc::new(pipeline)))
+    }
+
+    /// Submits one canvas for detection and recognition, tagged with the
+    /// caller's run index. Results arrive in ascending run order via
+    /// [`ParallelEngine::recv`].
+    pub fn submit(&self, run: usize, canvas: RgbImage) -> Result<(), String> {
+        self.0.submit(run, canvas).map_err(|e| e.to_string())
+    }
+
+    /// Blocks until the next run's lines are ready, in submission order.
+    /// On cancel returns `Err("cancelled")`.
+    pub fn recv(&self) -> Result<(usize, Vec<OcrLine>), String> {
+        self.0.recv().map_err(|e| match e {
+            PipelineError::Cancelled => "cancelled".to_string(),
+            other => other.to_string(),
+        })
+    }
+
+    /// Cancels in-flight inference; the workers exit once they observe the
+    /// cancellation at their next checkpoint.
+    pub fn cancel(&self) {
+        self.0.cancel();
+    }
+
+    /// The pipeline's cancellation token; cancelling it aborts in-flight
+    /// inference and makes [`ParallelEngine::recv`] return `"cancelled"`.
+    pub fn cancellation_token(&self) -> &OcrCancellationToken {
+        self.0.cancellation_token()
     }
 }
 

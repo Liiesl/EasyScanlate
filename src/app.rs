@@ -1,14 +1,16 @@
+use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
 use iced::widget::image::Handle;
 use iced::widget::{pane_grid, text_editor};
-use iced::{Color, Element, Font, Length, Rectangle, Task};
+use iced::futures::{SinkExt, StreamExt};
+use iced::{Color, Element, Font, Length, Rectangle, Subscription, Task};
 
 use scanlateit_inpaint::Engine as InpaintEngine;
 use scanlateit_model::{EntryId, EntryStyle, InpaintPatch, ProfileId, Project, Quad};
-use scanlateit_ocr::{self as ocr, Engine, OcrCancellationToken};
+use scanlateit_ocr::{self as ocr, Engine, OcrCancellationToken, ParallelEngine};
 use scanlateit_styling::Engine as StylingEngine;
 use scanlateit_translation as translation;
 use scanlateit_ui::loaded::InpaintLayer;
@@ -58,9 +60,17 @@ pub enum Message {
     Ui(UiEvent),
     ImagesPicked(Result<Vec<(String, u32, u32)>, String>),
     EngineReady(Result<Engine, String>),
-    /// One OCR run finished: entries grouped per page plus the boundary
-    /// candidates held for the next run (see [`ocr::RunResult`]).
-    OcrFinished(usize, Result<ocr::RunResult, String>),
+    ParallelEngineReady(Result<ParallelEngine, String>),
+    /// One parallel-pipeline OCR run's inference output: raw lines assembled
+    /// in the handler, or an already-assembled result from the fallback path
+    /// (see [`OcrRunOutcome`]).
+    OcrStreamRun(usize, Result<OcrRunOutcome, String>),
+    /// The OCR stream ended without delivering every run (pipeline error or
+    /// cancellation); the handler finalizes the run.
+    OcrStreamFailed(String),
+    /// Frame tick while the OCR stream is running: keeps the iced frame loop
+    /// alive so queued `OcrStreamRun` messages are drained per run.
+    OcrTick,
     InpaintEngineReady(Result<InpaintEngine, String>),
     InpaintFinished(usize, Result<Vec<(image::RgbaImage, [f32; 4])>, String>),
     StylingEngineReady(Result<StylingEngine, String>),
@@ -89,12 +99,43 @@ impl From<UiEvent> for Message {
     }
 }
 
+/// One OCR run's inference outcome from the parallel pipeline.
+#[derive(Debug, Clone)]
+pub enum OcrRunOutcome {
+    /// Raw lines plus the canvas metrics the handler needs for assembly.
+    /// The handler resolves the previous run's boundary candidates, dedups
+    /// against committed quads, distributes to pages and commits — strictly
+    /// in run order, on the UI thread where the committed state is
+    /// authoritative.
+    Canvas {
+        width: u32,
+        margin_top: u32,
+        lines: Vec<ocr::OcrLine>,
+    },
+    /// Fallback of the undecodable-page path: per-page entries ready to
+    /// commit directly, with no boundary candidates (the previous run's held
+    /// candidates are flushed instead of resolved).
+    Fallback(ocr::RunResult),
+}
+
 /// Session state: one loaded image plus everything iced/OCR related that the
 /// model doesn't know about (engine handle, per-image canvas cache).
 pub struct App {
     pub(crate) images: Vec<LoadedImage>,
     engine: Option<Engine>,
+    /// The parallel OCR pipeline (K detection workers + one recognition
+    /// worker). Built lazily on first OCR run; dropped (workers exit) when a
+    /// run finishes, so the next run rebuilds it fresh.
+    pipeline: Option<ParallelEngine>,
     cancel: Option<OcrCancellationToken>,
+    /// Number of parallel OCR detection workers, as typed in the settings
+    /// modal; parsed (fallback 2) when OCR starts.
+    ocr_workers: String,
+    /// The current run plan, indexed by run number; the stream closure
+    /// captures a clone, the handler reads it back for assembly.
+    ocr_plans: Vec<ocr::RunPlan>,
+    /// All images' `(width, height)` of the current run, in image order.
+    ocr_dims: Vec<(u32, u32)>,
     inpaint_engine: Option<InpaintEngine>,
     /// Buffered inpainting job waiting for the engine to finish loading,
     /// as `(image index, path, rect, mask quads)`.
@@ -121,8 +162,6 @@ pub struct App {
     ocr_total: usize,
     ocr_failed: usize,
     ocr_cancelled: bool,
-    /// Next OCR run to schedule (an index into `ocr::plan_runs`).
-    ocr_index: usize,
     /// Total OCR runs in the current run's plan; `pending` counts down from
     /// this (one run may cover several images).
     ocr_runs: usize,
@@ -194,7 +233,11 @@ impl App {
         Self {
             images: Vec::new(),
             engine: None,
+            pipeline: None,
             cancel: None,
+            ocr_workers: "2".to_string(),
+            ocr_plans: Vec::new(),
+            ocr_dims: Vec::new(),
             inpaint_engine: None,
             pending_inpaint: None,
             inpainting: false,
@@ -210,7 +253,6 @@ impl App {
             ocr_total: 0,
             ocr_failed: 0,
             ocr_cancelled: false,
-            ocr_index: 0,
             ocr_runs: 0,
             held_boundary: None,
             translating: false,
@@ -426,6 +468,10 @@ impl UiState for App {
 
     fn auto_style_detect(&self) -> bool {
         self.auto_style_detect
+    }
+
+    fn ocr_workers(&self) -> &str {
+        &self.ocr_workers
     }
 
     fn editing(&self) -> Option<(usize, EntryId)> {
@@ -746,200 +792,264 @@ pub fn boot() -> (App, Task<Message>) {
     let settings = crate::settings::Settings::load();
     app.translate_api_key = settings.api_key;
     app.auto_style_detect = settings.auto_style_detect;
+    app.ocr_workers = settings.ocr_workers.to_string();
     app.free_models_only = settings.free_models_only;
     let models_task = Task::perform(translation::fetch_all_providers(), Message::ModelsFetched);
     (app, Task::batch([font_task, models_task]))
 }
 
-/// Spawns OCR for exactly one run (the next in the plan). At most one task
-/// is in flight at a time: the next run is only scheduled from inside the
-/// `OcrFinished` handler, so each result reaches the UI before the next OCR
-/// starts. The shared token is created once per run in the `StartOcr` arm.
-///
-/// Runs are picked by aspect ratio (see [`ocr::plan_runs`]): a page shorter
-/// than 2:1 is stitched with the next pages until the combined ratio fits,
-/// a page taller than 6:1 is split into chunks. Every run OCRs a stitched
-/// canvas: 20% of the body's height of the page content above and below the
-/// span are glued on, so speech bubbles split by a run boundary stay whole
-/// and OCR fully instead of yielding cropped text. Boxes found in the content
-/// above the span are either already stored there (deduplicated by position
-/// overlap) or are re-detections of the previous run's held boundary
-/// candidates — per bubble the fuller capture wins ([`ocr::resolve_boundary`])
-/// and is assigned to the page holding more of the bubble. The surviving
-/// entries are distributed back to the pages they cover, and this run's own
-/// boundary candidates are held for the next run.
-fn start_ocr_run(app: &mut App, engine: Engine) -> Task<Message> {
-    let index = app.ocr_index;
-    app.ocr_index += 1;
-    let dims: Vec<(u32, u32)> = app
-        .images
-        .iter()
-        .map(|image| (image.width as u32, image.height as u32))
-        .collect();
-    let run = ocr::plan_runs(&dims)[index];
-    eprintln!(
-        "[ocr-run {index}] pages {}..={} band {:?} above={:?} below={:?} dedup={:?}",
-        run.page_start, run.page_end, run.band, run.above, run.below, run.dedup
-    );
-    let page_start = run.page_start;
-    let page_end = run.page_end;
-    let paths: Vec<String> = (page_start..=page_end)
-        .map(|i| app.images[i].path.clone())
-        .collect();
-    let run_dims: Vec<(usize, u32, u32)> = (page_start..=page_end)
-        .map(|i| (i, app.images[i].width as u32, app.images[i].height as u32))
-        .collect();
-    let above_path = run.above.map(|(page, _)| app.images[page].path.clone());
-    let below_path = run.below.map(|(page, _)| app.images[page].path.clone());
-    let prev_data = run.dedup.map(|(page, offset)| {
-        let quads: Vec<Quad> = app.images[page]
-            .project
-            .ocr
-            .all()
-            .map(|entry| entry.quad)
-            .collect();
-        eprintln!(
-            "[ocr-run {index}] dedup source page {page}: {} stored quads ({:?} visible of {:?} total, {:?} deleted), offset {offset}",
-            quads.len(),
-            app.images[page].project.ocr.visible_count(),
-            app.images[page].project.ocr.total_count(),
-            app.images[page].project.ocr.total_count() - app.images[page].project.ocr.visible_count(),
-        );
-        (quads, app.images[page].width as u32, offset)
-    });
+/// Spawns the parallel OCR stream for the whole planned run set. The stream
+/// keeps a window of canvases in flight (one ahead per detection worker):
+/// canvases are built and submitted as results arrive, and per-run results
+/// are yielded in run order to the UI. Only the inference (detect + recognize
+/// on a stitched canvas) runs on the pipeline's worker threads; assembly —
+/// boundary resolution, dedup, distribution and commit — happens in the
+/// `OcrStreamRun` handler, on the UI thread, where the committed state is
+/// authoritative. The old [`Engine`] is kept for the undecodable-page
+/// fallback path only.
+fn start_ocr_stream(app: &mut App) -> Task<Message> {
+    let pipeline = app
+        .pipeline
+        .clone()
+        .expect("pipeline must be built before starting the stream");
+    let fallback = app.engine.clone().expect("engine must be built");
     let token = app
         .cancel
-        .as_ref()
-        .expect("cancellation token set before run")
-        .clone();
-    let prev_held = app.held_boundary.take();
+        .clone()
+        .expect("cancellation token set before starting the stream");
+    let runs = app.ocr_plans.clone();
+    let dims = app.ocr_dims.clone();
+    let paths: Vec<Vec<String>> = runs
+        .iter()
+        .map(|run| (run.page_start..=run.page_end).map(|i| app.images[i].path.clone()).collect())
+        .collect();
+    let above_paths: Vec<Option<String>> = runs
+        .iter()
+        .map(|run| run.above.map(|(page, _)| app.images[page].path.clone()))
+        .collect();
+    let below_paths: Vec<Option<String>> = runs
+        .iter()
+        .map(|run| run.below.map(|(page, _)| app.images[page].path.clone()))
+        .collect();
+    let workers = app.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
+    let window = workers + 1;
+    let total = runs.len();
     eprintln!(
-        "[ocr-run {index}] held candidates from prev run: {}",
-        prev_held.as_ref().map_or(0, |s| s.candidates.len())
+        "[ocr-stream] {total} run(s), {workers} det worker(s), window {window}"
     );
-    let page_hs: Vec<u32> = app.images.iter().map(|image| image.height as u32).collect();
-    Task::perform(
-        async move {
-            let mut loaded = Vec::with_capacity(paths.len());
-            for path in &paths {
-                match ocr::load_rgb(path) {
-                    Some(image) => loaded.push(image),
-                    None => {
-                        // Un-decodable page: fall back to raw per-page OCR.
-                        // No canvas means no boundary candidates.
-                        let mut out = Vec::with_capacity(paths.len());
-                        for (offset, path) in paths.iter().enumerate() {
-                            match engine.run_path_cancellable(path, &token) {
-                                Ok(lines) => out.push((page_start + offset, ocr::to_entries(lines))),
-                                Err(e) => return (index, Err(e)),
-                            }
-                        }
-                        return (index, Ok(ocr::RunResult { per_page: out, held: None }));
+    for (index, run) in runs.iter().enumerate() {
+        eprintln!(
+            "[ocr-run {index}] pages {}..={} band {:?} above={:?} below={:?} dedup={:?}",
+            run.page_start, run.page_end, run.band, run.above, run.below, run.dedup
+        );
+    }
+    Task::stream(
+        iced::stream::try_channel(1, move |mut sender| async move {
+            let mut dispatched = 0usize;
+            let mut pending = total;
+            let mut in_flight = 0usize;
+            let mut canvas_meta: VecDeque<(u32, u32)> = VecDeque::new();
+            // Fill the submission window before the first receive.
+            while dispatched < total && in_flight < window {
+                let outcome = dispatch_run(
+                    &mut sender,
+                    &pipeline,
+                    &fallback,
+                    &token,
+                    dispatched,
+                    &runs,
+                    &paths,
+                    &above_paths,
+                    &below_paths,
+                    &dims,
+                    &mut canvas_meta,
+                    &mut in_flight,
+                )
+                .await;
+                match outcome {
+                    Ok(true) => {}
+                    // The UI channel closed; the app is gone or restarting.
+                    Ok(false) => return Ok(()),
+                    Err(e) => return Err(e),
+                }
+                dispatched += 1;
+            }
+            while pending > 0 {
+                eprintln!("[ocr-stream] waiting for recv (in_flight={in_flight}, pending={pending})");
+                let (idx, lines) = match pipeline.recv() {
+                    Ok(received) => received,
+                    Err(e) => return Err(e),
+                };
+                eprintln!("[ocr-stream] recv got run {idx} ({}) lines", lines.len());
+                pending -= 1;
+                in_flight -= 1;
+                let (width, margin_top) = canvas_meta
+                    .pop_front()
+                    .expect("canvas metadata arrives in submission order");
+                let send_t0 = std::time::Instant::now();
+                if sender
+                    .send(Message::OcrStreamRun(
+                        idx,
+                        Ok(OcrRunOutcome::Canvas {
+                            width,
+                            margin_top,
+                            lines,
+                        }),
+                    ))
+                    .await
+                    .is_err()
+                {
+                    return Ok(());
+                }
+                eprintln!(
+                    "[ocr-stream] sent run {idx} to UI channel, send took {:?}",
+                    send_t0.elapsed()
+                );
+                if dispatched < total {
+                    eprintln!("[ocr-stream] dispatching run {dispatched}");
+                    let outcome = dispatch_run(
+                        &mut sender,
+                        &pipeline,
+                        &fallback,
+                        &token,
+                        dispatched,
+                        &runs,
+                        &paths,
+                        &above_paths,
+                        &below_paths,
+                        &dims,
+                        &mut canvas_meta,
+                        &mut in_flight,
+                    )
+                    .await;
+                    match outcome {
+                        Ok(true) => {}
+                        Ok(false) => return Ok(()),
+                        Err(e) => return Err(e),
                     }
+                    dispatched += 1;
                 }
             }
-            let width = loaded[0].width();
-            let body_h = ocr::body_height(&dims[page_start..=page_end], width, run.band);
-            let margin = (ocr::STITCH_MARGIN_RATIO * body_h as f32).round().max(1.0) as u32;
-            let above = match (&above_path, run.above) {
-                (Some(path), Some((_, band))) => ocr::load_rgb(path)
-                    .and_then(|image| ocr::top_margin_strip(&image, band, width, margin)),
-                _ => None,
-            };
-            let below = match (&below_path, run.below) {
-                (Some(path), Some((_, band))) => ocr::load_rgb(path)
-                    .and_then(|image| ocr::bottom_margin_strip(&image, band, width, margin)),
-                _ => None,
-            };
-            let margin_top = above.as_ref().map_or(0, |strip| strip.height());
-            let canvas = ocr::stack_run(above, &loaded, below, width, run.band);
-            let result = engine
-                .run_image_cancellable(&canvas, &token)
-                .map(|lines| {
-                    eprintln!("[ocr-run {index}] raw lines: {}", lines.len());
-                    let merged = ocr::merge(lines, ocr::MergeConfig::default());
-                    eprintln!("[ocr-run {index}] after merge: {}", merged.len());
-                    let (resolved, kept) = match &prev_held {
-                        Some(state) => {
-                            let transformed = ocr::transform_candidates(
-                                &state.candidates,
-                                state.width,
-                                state.boundary,
-                                width,
-                                margin_top,
-                            );
-                            let resolution =
-                                ocr::resolve_boundary(&state.candidates, &transformed, merged);
-                            eprintln!(
-                                "[ocr-run {index}] boundary resolve: {} appended (candidate won), {} kept lines",
-                                resolution.append.len(),
-                                resolution.kept.len()
-                            );
-                            (resolution.append, resolution.kept)
-                        }
-                        None => (Vec::new(), merged),
-                    };
-                    let deduped = match &prev_data {
-                        Some((quads, prev_width, offset)) => {
-                            let kept_len = kept.len();
-                            let out = ocr::dedup_with_previous(kept, quads, *prev_width, *offset, width);
-                            eprintln!(
-                                "[ocr-run {index}] dedup vs {} stored quads: {} dropped, {} kept",
-                                quads.len(),
-                                kept_len - out.len(),
-                                out.len()
-                            );
-                            out
-                        }
-                        None => kept,
-                    };
-                    let out = ocr::distribute(deduped, &run_dims, run.band, margin_top);
-                    eprintln!(
-                        "[ocr-run {index}] distribute: {} pages, {} entries, {} held candidates",
-                        out.per_page.len(),
-                        out.per_page.iter().map(|(_, e)| e.len()).sum::<usize>(),
-                        out.held.len()
-                    );
-                    let mut per_page = out.per_page;
-                    for candidate in resolved {
-                        match per_page
-                            .iter_mut()
-                            .find(|(page, _)| *page == candidate.page)
-                        {
-                            Some((_, entries)) => entries.push(candidate.entry),
-                            None => per_page.push((candidate.page, vec![candidate.entry])),
-                        }
-                    }
-                    per_page.sort_by_key(|(page, _)| *page);
-                    eprintln!(
-                        "[ocr-run {index}] final per-page: {:?}",
-                        per_page
-                            .iter()
-                            .map(|(p, e)| format!("p{p}:{}", e.len()))
-                            .collect::<Vec<_>>()
-                    );
-                    for (page, entries) in &per_page {
-                        for entry in entries {
-                            let b = entry.quad.bounds();
-                            if b[1] < 0.0 || b[3] > page_hs[*page] as f32 {
-                                eprintln!(
-                                    "[ocr-run {index}] margin entry on page {page}: text={:?} bounds={:?} page_h={}",
-                                    entry.text, b, page_hs[*page]
-                                );
-                            }
-                        }
-                    }
-                    let held = (!out.held.is_empty()).then(|| ocr::BoundaryState {
-                        candidates: out.held,
-                        width,
-                        boundary: out.boundary,
-                    });
-                    ocr::RunResult { per_page, held }
-                });
-            (index, result)
-        },
-        |(index, result)| Message::OcrFinished(index, result),
+            Ok(())
+        })
+        .map(|item| match item {
+            Ok(message) => message,
+            Err(e) => Message::OcrStreamFailed(e),
+        }),
     )
+}
+
+/// What [`build_canvas`] produced for one run.
+enum CanvasBuild {
+    /// The stitched canvas plus its `(width, margin_top)` for submission.
+    Ready(image::RgbImage, u32, u32),
+    /// The undecodable-page fallback result, ready to commit directly.
+    Fallback(ocr::RunResult),
+}
+
+/// Builds the stitched canvas of one run: its pages stacked at the first
+/// page's width with the margin strips of the neighboring content above and
+/// below (see [`ocr::stack_run`]). When a page fails to decode, falls back
+/// to raw per-page OCR through the old engine and returns the ready-to-commit
+/// result instead (no canvas, no boundary candidates).
+fn build_canvas(
+    fallback: &Engine,
+    token: &OcrCancellationToken,
+    index: usize,
+    run: &ocr::RunPlan,
+    paths: &[String],
+    above_path: Option<&str>,
+    below_path: Option<&str>,
+    dims: &[(u32, u32)],
+) -> Result<CanvasBuild, String> {
+    let mut loaded = Vec::with_capacity(paths.len());
+    for path in paths {
+        match ocr::load_rgb(path) {
+            Some(image) => loaded.push(image),
+            None => {
+                eprintln!(
+                    "[ocr-run {index}] undecodable page {path}: falling back to per-page OCR"
+                );
+                let mut out = Vec::with_capacity(paths.len());
+                for (offset, path) in paths.iter().enumerate() {
+                    match fallback.run_path_cancellable(path, token) {
+                        Ok(lines) => out.push((run.page_start + offset, ocr::to_entries(lines))),
+                        Err(e) => return Err(e),
+                    }
+                }
+                return Ok(CanvasBuild::Fallback(ocr::RunResult {
+                    per_page: out,
+                    held: None,
+                }));
+            }
+        }
+    }
+    let width = loaded[0].width();
+    let body_h = ocr::body_height(&dims[run.page_start..=run.page_end], width, run.band);
+    let margin = (ocr::STITCH_MARGIN_RATIO * body_h as f32).round().max(1.0) as u32;
+    let above = match (above_path, run.above) {
+        (Some(path), Some((_, band))) => ocr::load_rgb(path)
+            .and_then(|image| ocr::top_margin_strip(&image, band, width, margin)),
+        _ => None,
+    };
+    let below = match (below_path, run.below) {
+        (Some(path), Some((_, band))) => ocr::load_rgb(path)
+            .and_then(|image| ocr::bottom_margin_strip(&image, band, width, margin)),
+        _ => None,
+    };
+    let margin_top = above.as_ref().map_or(0, |strip| strip.height());
+    let canvas = ocr::stack_run(above, &loaded, below, width, run.band);
+    Ok(CanvasBuild::Ready(canvas, width, margin_top))
+}
+
+/// Builds and dispatches one run: submits its canvas to the pipeline, or —
+/// when the run took the fallback path — emits its ready result to the UI
+/// directly. Returns `false` when the UI channel closed (the stream should
+/// end quietly), `true` otherwise.
+async fn dispatch_run(
+    sender: &mut iced::futures::channel::mpsc::Sender<Message>,
+    pipeline: &ParallelEngine,
+    fallback: &Engine,
+    token: &OcrCancellationToken,
+    index: usize,
+    runs: &[ocr::RunPlan],
+    paths: &[Vec<String>],
+    above_paths: &[Option<String>],
+    below_paths: &[Option<String>],
+    dims: &[(u32, u32)],
+    canvas_meta: &mut VecDeque<(u32, u32)>,
+    in_flight: &mut usize,
+) -> Result<bool, String> {
+    let run = &runs[index];
+    match build_canvas(
+        fallback,
+        token,
+        index,
+        run,
+        &paths[index],
+        above_paths[index].as_deref(),
+        below_paths[index].as_deref(),
+        dims,
+    ) {
+        Ok(CanvasBuild::Ready(canvas, width, margin_top)) => {
+            canvas_meta.push_back((width, margin_top));
+            pipeline
+                .submit(index, canvas)
+                .map_err(|e| format!("OCR pipeline submit failed: {e}"))?;
+            *in_flight += 1;
+            Ok(true)
+        }
+        Ok(CanvasBuild::Fallback(result)) => {
+            let sent = sender
+                .send(Message::OcrStreamRun(
+                    index,
+                    Ok(OcrRunOutcome::Fallback(result)),
+                ))
+                .await;
+            Ok(sent.is_ok())
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// True when the quad's bounding box overlaps `rect` (image pixels). Used
@@ -1045,10 +1155,148 @@ fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
     Task::batch(tasks)
 }
 
-fn finalize_run(app: &mut App) {
-    // Flush any boundary candidates still held — the next run failed, was
-    // cancelled or never started: their bubbles were captured whole on the
-    // page above the seam and must not be lost.
+/// Assembles one run's raw lines into a commit-ready [`ocr::RunResult`],
+/// strictly in run order on the UI thread: merges nearby boxes, resolves the
+/// previous run's held boundary candidates against this run's re-detections
+/// in its top margin, dedups against the committed quads of the page above,
+/// distributes the survivors to their pages and holds this run's own
+/// boundary candidates for the next run. Reads the authoritative committed
+/// state (`app.held_boundary`, `app.images[..].project.ocr`).
+fn assemble_run(
+    app: &mut App,
+    index: usize,
+    width: u32,
+    margin_top: u32,
+    lines: Vec<ocr::OcrLine>,
+) -> ocr::RunResult {
+    let run = app.ocr_plans[index];
+    let run_dims: Vec<(usize, u32, u32)> = (run.page_start..=run.page_end)
+        .map(|i| (i, app.ocr_dims[i].0, app.ocr_dims[i].1))
+        .collect();
+    let page_hs: Vec<u32> = app.images.iter().map(|image| image.height as u32).collect();
+    let prev_held = app.held_boundary.take();
+    eprintln!(
+        "[ocr-run {index}] held candidates from prev run: {}",
+        prev_held.as_ref().map_or(0, |s| s.candidates.len())
+    );
+    let prev_data = run.dedup.map(|(page, offset)| {
+        let quads: Vec<Quad> = app.images[page]
+            .project
+            .ocr
+            .all()
+            .map(|entry| entry.quad)
+            .collect();
+        eprintln!(
+            "[ocr-run {index}] dedup source page {page}: {} stored quads ({:?} visible of {:?} total, {:?} deleted), offset {offset}",
+            quads.len(),
+            app.images[page].project.ocr.visible_count(),
+            app.images[page].project.ocr.total_count(),
+            app.images[page].project.ocr.total_count() - app.images[page].project.ocr.visible_count(),
+        );
+        (quads, app.images[page].width as u32, offset)
+    });
+    eprintln!("[ocr-run {index}] raw lines: {}", lines.len());
+    let merged = ocr::merge(lines, ocr::MergeConfig::default());
+    eprintln!("[ocr-run {index}] after merge: {}", merged.len());
+    let (resolved, kept) = match &prev_held {
+        Some(state) => {
+            let transformed = ocr::transform_candidates(
+                &state.candidates,
+                state.width,
+                state.boundary,
+                width,
+                margin_top,
+            );
+            let resolution = ocr::resolve_boundary(&state.candidates, &transformed, merged);
+            eprintln!(
+                "[ocr-run {index}] boundary resolve: {} appended (candidate won), {} kept lines",
+                resolution.append.len(),
+                resolution.kept.len()
+            );
+            (resolution.append, resolution.kept)
+        }
+        None => (Vec::new(), merged),
+    };
+    let deduped = match &prev_data {
+        Some((quads, prev_width, offset)) => {
+            let kept_len = kept.len();
+            let out = ocr::dedup_with_previous(kept, quads, *prev_width, *offset, width);
+            eprintln!(
+                "[ocr-run {index}] dedup vs {} stored quads: {} dropped, {} kept",
+                quads.len(),
+                kept_len - out.len(),
+                out.len()
+            );
+            out
+        }
+        None => kept,
+    };
+    let out = ocr::distribute(deduped, &run_dims, run.band, margin_top);
+    eprintln!(
+        "[ocr-run {index}] distribute: {} pages, {} entries, {} held candidates",
+        out.per_page.len(),
+        out.per_page.iter().map(|(_, e)| e.len()).sum::<usize>(),
+        out.held.len()
+    );
+    let mut per_page = out.per_page;
+    for candidate in resolved {
+        match per_page
+            .iter_mut()
+            .find(|(page, _)| *page == candidate.page)
+        {
+            Some((_, entries)) => entries.push(candidate.entry),
+            None => per_page.push((candidate.page, vec![candidate.entry])),
+        }
+    }
+    per_page.sort_by_key(|(page, _)| *page);
+    eprintln!(
+        "[ocr-run {index}] final per-page: {:?}",
+        per_page
+            .iter()
+            .map(|(p, e)| format!("p{p}:{}", e.len()))
+            .collect::<Vec<_>>()
+    );
+    for (page, entries) in &per_page {
+        for entry in entries {
+            let b = entry.quad.bounds();
+            if b[1] < 0.0 || b[3] > page_hs[*page] as f32 {
+                eprintln!(
+                    "[ocr-run {index}] margin entry on page {page}: text={:?} bounds={:?} page_h={}",
+                    entry.text, b, page_hs[*page]
+                );
+            }
+        }
+    }
+    let held = (!out.held.is_empty()).then(|| ocr::BoundaryState {
+        candidates: out.held,
+        width,
+        boundary: out.boundary,
+    });
+    ocr::RunResult { per_page, held }
+}
+
+/// Commits one run's result: stores the boundary candidates for the next run
+/// and appends the per-page entries to their projects, updating `ocr_total`.
+fn commit_run_result(app: &mut App, run_result: ocr::RunResult) {
+    app.held_boundary = run_result.held;
+    for (page, entries) in run_result.per_page {
+        let Some(image) = app.images.get_mut(page) else {
+            continue;
+        };
+        eprintln!(
+            "[ocr-finish {page}] appending {} entry(ies) to page {page} (had {} total, {} visible)",
+            entries.len(),
+            image.project.ocr.total_count(),
+            image.project.ocr.visible_count()
+        );
+        app.ocr_total += image.project.append_ocr(entries);
+    }
+}
+
+/// Appends any boundary candidates still held — their bubbles were captured
+/// whole on the page above the seam and must not be lost when the next run
+/// fails, is cancelled, never starts or took the fallback path.
+fn flush_held_boundary(app: &mut App) {
     if let Some(state) = app.held_boundary.take() {
         eprintln!(
             "[ocr-finalize] flushing {} held candidate(s)",
@@ -1060,8 +1308,41 @@ fn finalize_run(app: &mut App) {
             }
         }
     }
+}
+
+/// Starts the OCR stream once both engines (the parallel pipeline and the
+/// fallback engine) are ready; called from `StartOcr`, `EngineReady` and
+/// `ParallelEngineReady`.
+fn maybe_start_ocr(app: &mut App) -> Task<Message> {
+    if app.running && app.pipeline.is_some() && app.engine.is_some() {
+        app.cancel = app
+            .pipeline
+            .as_ref()
+            .map(|pipeline| pipeline.cancellation_token().clone());
+        start_ocr_stream(app)
+    } else if !app.running {
+        // OCR was cancelled while the engines were still loading; drop any
+        // freshly built pipeline so its workers exit instead of idling.
+        if let Some(pipeline) = app.pipeline.take() {
+            pipeline.cancel();
+        }
+        Task::none()
+    } else {
+        // Still waiting on the other engine; keep the pipeline.
+        Task::none()
+    }
+}
+
+fn finalize_run(app: &mut App) {
+    // Flush any boundary candidates still held — the next run failed, was
+    // cancelled or never started: their bubbles were captured whole on the
+    // page above the seam and must not be lost.
+    flush_held_boundary(app);
     app.running = false;
     app.cancel = None;
+    // Drop the pipeline so its worker threads (and ONNX sessions) exit.
+    // The next OCR run builds a fresh one.
+    app.pipeline = None;
     app.status = if app.ocr_cancelled {
         "OCR cancelled.".to_string()
     } else if app.ocr_failed > 0 {
@@ -1219,39 +1500,67 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             if app.running {
                 return Task::none();
             }
-            app.cancel = Some(OcrCancellationToken::new());
             app.running = true;
             let dims: Vec<(u32, u32)> = app
                 .images
                 .iter()
                 .map(|image| (image.width as u32, image.height as u32))
                 .collect();
-            let runs = ocr::plan_runs(&dims).len();
-            app.ocr_runs = runs;
-            app.pending = runs;
+            let runs = ocr::plan_runs(&dims);
+            let run_count = runs.len();
+            app.ocr_plans = runs;
+            app.ocr_dims = dims;
+            app.ocr_runs = run_count;
+            app.pending = run_count;
             app.ocr_total = 0;
             app.ocr_failed = 0;
             app.ocr_cancelled = false;
-            app.ocr_index = 0;
             app.held_boundary = None;
             app.status = format!(
                 "Running OCR on {} run(s) covering {} image(s)...",
-                runs,
+                run_count,
                 app.images.len()
             );
-            match app.engine.clone() {
-                Some(engine) => start_ocr_run(app, engine),
-                None => Task::perform(async move { Engine::build() }, Message::EngineReady),
+            let mut tasks: Vec<Task<Message>> = Vec::new();
+            if app.pipeline.is_none() {
+                let workers = app.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
+                app.status = format!(
+                    "Loading the OCR engine ({workers} detection worker(s))..."
+                );
+                tasks.push(Task::perform(
+                    async move { ParallelEngine::build(workers) },
+                    Message::ParallelEngineReady,
+                ));
+            }
+            if app.engine.is_none() {
+                tasks.push(Task::perform(
+                    async move { Engine::build() },
+                    Message::EngineReady,
+                ));
+            }
+            if app.pipeline.is_some() && app.engine.is_some() {
+                maybe_start_ocr(app)
+            } else if tasks.is_empty() {
+                Task::none()
+            } else {
+                Task::batch(tasks)
             }
         }
         Message::EngineReady(result) => match result {
             Ok(engine) => {
                 app.engine = Some(engine.clone());
-                if app.running {
-                    start_ocr_run(app, engine)
-                } else {
-                    Task::none()
-                }
+                maybe_start_ocr(app)
+            }
+            Err(e) => {
+                app.running = false;
+                app.status = e;
+                Task::none()
+            }
+        },
+        Message::ParallelEngineReady(result) => match result {
+            Ok(pipeline) => {
+                app.pipeline = Some(pipeline.clone());
+                maybe_start_ocr(app)
             }
             Err(e) => {
                 app.running = false;
@@ -1343,23 +1652,24 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.status = "Cancelling OCR...".to_string();
             Task::none()
         }
-        Message::OcrFinished(_index, result) => {
+        Message::OcrStreamRun(index, result) => {
+            eprintln!("[ui-update] OcrStreamRun #{index} entered handler");
             app.pending = app.pending.saturating_sub(1);
             match result {
-                Ok(run_result) => {
-                    app.held_boundary = run_result.held;
-                    for (page, entries) in run_result.per_page {
-                        let Some(image) = app.images.get_mut(page) else {
-                            continue;
-                        };
-                        eprintln!(
-                            "[ocr-finish {page}] appending {} entry(ies) to page {page} (had {} total, {} visible)",
-                            entries.len(),
-                            image.project.ocr.total_count(),
-                            image.project.ocr.visible_count()
-                        );
-                        app.ocr_total += image.project.append_ocr(entries);
-                    }
+                Ok(OcrRunOutcome::Canvas {
+                    width,
+                    margin_top,
+                    lines,
+                }) => {
+                    let run_result = assemble_run(app, index, width, margin_top, lines);
+                    commit_run_result(app, run_result);
+                }
+                Ok(OcrRunOutcome::Fallback(run_result)) => {
+                    // The fallback produced no re-detections; the previous
+                    // run's held candidates cannot be resolved against them
+                    // and are flushed so no captured bubble is lost.
+                    flush_held_boundary(app);
+                    commit_run_result(app, run_result);
                 }
                 Err(e) => {
                     app.ocr_failed += 1;
@@ -1378,13 +1688,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     app.ocr_runs,
                     app.ocr_total
                 );
-                match app.engine.clone() {
-                    Some(engine) => tasks.push(start_ocr_run(app, engine)),
-                    None => {
-                        app.ocr_failed += 1;
-                        finalize_run(app);
-                    }
-                }
             }
             // Classify newly appended entries (including those resolved across
             // a run boundary) when auto-detect is enabled.
@@ -1397,6 +1700,20 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 Task::batch(tasks)
             }
         }
+        Message::OcrStreamFailed(e) => {
+            app.ocr_failed += 1;
+            if e == "cancelled" {
+                app.ocr_cancelled = true;
+            }
+            // The stream aborted before every run was delivered; finalize
+            // unless the runs already completed.
+            if app.pending > 0 {
+                app.pending = 0;
+                finalize_run(app);
+            }
+            Task::none()
+        }
+        Message::OcrTick => Task::none(),
         Message::FontLoaded => {
             app.font = Some(Font::with_name(KOREAN_FONT_NAME));
             app.status = format!(
@@ -1764,6 +2081,10 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             };
             Task::none()
         }
+        Message::Ui(UiEvent::OcrWorkers(text)) => {
+            app.ocr_workers = text;
+            Task::none()
+        }
         Message::Ui(UiEvent::PanelResized(resized)) => {
             app.panes.resize(resized.split, resized.ratio);
             Task::none()
@@ -1777,6 +2098,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             let settings = crate::settings::Settings {
                 api_key: app.translate_api_key.clone(),
                 auto_style_detect: app.auto_style_detect,
+                ocr_workers: app.ocr_workers.parse().unwrap_or(2),
                 free_models_only: app.free_models_only,
             };
             if let Err(e) = settings.save() {
@@ -1827,6 +2149,17 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+    }
+}
+
+/// Keeps the frame loop alive while the OCR stream is running so queued
+/// `OcrStreamRun` messages are drained and assembled per run instead of all
+/// at once when the stream finishes.
+pub fn subscription(app: &App) -> Subscription<Message> {
+    if app.running {
+        iced::time::every(Duration::from_millis(16)).map(|_| Message::OcrTick)
+    } else {
+        Subscription::none()
     }
 }
 
