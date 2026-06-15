@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -7,9 +7,11 @@ use iced::widget::{pane_grid, text_editor};
 use iced::futures::{SinkExt, StreamExt};
 use iced::{Color, Element, Font, Length, Rectangle, Subscription, Task};
 
+use fontdb;
 use scanlateit_inpaint::Engine as InpaintEngine;
 use scanlateit_model::{
     EntryId, EntryStyle, InpaintPatch, NewEntry, ProfileId, Project, Quad, StylePresets,
+    TextAlign, TextGradientDir,
 };
 use scanlateit_ocr::{self as ocr, Engine, OcrCancellationToken, ParallelEngine};
 use scanlateit_styling::{Engine as StylingEngine, JobTracker};
@@ -67,6 +69,11 @@ pub enum Message {
     StylingEngineReady(Result<StylingEngine, String>),
     StyleDetected(usize, EntryId, Result<EntryStyle, String>),
     FontLoaded,
+    /// The boot-time enumeration of installed system fonts as
+    /// `(family name, font file path)` pairs.
+    SystemFonts(Vec<(String, String)>),
+    /// A picked font family was loaded into iced's font system.
+    StyleFontLoaded(String),
     ThumbDecoded(usize, Result<Arc<DecodedPage>, String>),
     FullDecoded(usize, Result<Arc<DecodedPage>, String>),
     /// The settle debounce elapsed for generation `u64`; stale generations
@@ -178,6 +185,13 @@ pub struct App {
     /// Staged style of the selected entry. Mirrors the entry's stored style
     /// on selection; mutations are written back to that entry only.
     pub(crate) style_working: EntryStyle,
+    /// Installed system fonts: family name -> font file path, from the boot
+    /// fontdb scan. Used to load a picked font into iced on demand.
+    pub(crate) system_fonts: HashMap<String, String>,
+    /// Installed font family names, sorted, for the styling panel picker.
+    pub(crate) installed_fonts: Vec<String>,
+    /// Font families already handed to `iced::font::load`.
+    pub(crate) loaded_fonts: HashSet<String>,
     /// The styling color picker currently open (which color field it edits);
     /// `None` means no picker is shown.
     pub(crate) style_picker: Option<StyleField>,
@@ -234,7 +248,10 @@ impl App {
             editing_dirty: false,
             editing_rect: None,
             scheduler: Scheduler::new(),
-            style_working: style,
+            style_working: style.clone(),
+            system_fonts: HashMap::new(),
+            installed_fonts: Vec::new(),
+            loaded_fonts: HashSet::new(),
             style_picker: None,
             style_stroke_width: style.stroke_width.to_string(),
             style_bg_radius: style.bg_radius.to_string(),
@@ -298,10 +315,10 @@ fn clear_editing(app: &mut App) {
 /// Reseeds the style panel inputs from `style`, closing any open picker and
 /// keeping the raw number strings in sync with the resolved values.
 fn seed_style_inputs(app: &mut App, style: EntryStyle) {
-    app.style_working = style;
-    app.style_picker = None;
     app.style_stroke_width = style.stroke_width.to_string();
     app.style_bg_radius = style.bg_radius.to_string();
+    app.style_working = style;
+    app.style_picker = None;
 }
 
 /// Selects `(index, id)`: seeds the style inputs and, when the entry's page
@@ -406,6 +423,30 @@ impl UiState for App {
 
     fn style_presets(&self) -> &[Option<EntryStyle>] {
         self.presets.as_slice()
+    }
+
+    fn installed_fonts(&self) -> &[String] {
+        &self.installed_fonts
+    }
+
+    fn style_font_family(&self) -> Option<&str> {
+        self.style_working.font_family.as_deref()
+    }
+
+    fn style_text_align(&self) -> TextAlign {
+        self.style_working.text_align
+    }
+
+    fn style_gradient_a(&self) -> Color {
+        rgba_to_color(self.style_working.gradient_a)
+    }
+
+    fn style_gradient_b(&self) -> Color {
+        rgba_to_color(self.style_working.gradient_b)
+    }
+
+    fn style_gradient_dir(&self) -> TextGradientDir {
+        self.style_working.gradient_dir
     }
 
     fn auto_style_detect(&self) -> bool {
@@ -754,7 +795,7 @@ for c in text.chars() {
         let (mut app, id) = app_with_entry();
         app.selected = Some((0, id));
         app.style_working.bg_color = [1, 2, 3, 255];
-        app.images[0].project.set_entry_style(id, app.style_working);
+        app.images[0].project.set_entry_style(id, app.style_working.clone());
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetApply(5)));
 
         assert_eq!(app.style_working.bg_color, [1, 2, 3, 255]);
@@ -770,9 +811,9 @@ for c in text.chars() {
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetAdd));
 
         assert_eq!(app.presets.len(), INITIAL_PRESET_SLOTS);
-        assert_eq!(app.presets.get(5), Some(app.style_working));
-        assert_eq!(app.presets.get(6), Some(app.style_working));
-        assert_eq!(app.presets.get(7), Some(app.style_working));
+        assert_eq!(app.presets.get(5), Some(app.style_working.clone()));
+        assert_eq!(app.presets.get(6), Some(app.style_working.clone()));
+        assert_eq!(app.presets.get(7), Some(app.style_working.clone()));
     }
 
     #[test]
@@ -786,7 +827,7 @@ for c in text.chars() {
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetAdd));
 
         assert_eq!(app.presets.len(), INITIAL_PRESET_SLOTS + 1);
-        assert_eq!(app.presets.get(INITIAL_PRESET_SLOTS), Some(app.style_working));
+        assert_eq!(app.presets.get(INITIAL_PRESET_SLOTS), Some(app.style_working.clone()));
     }
 
     #[test]
@@ -797,7 +838,7 @@ for c in text.chars() {
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetAdd));
 
         assert_eq!(app.presets.len(), INITIAL_PRESET_SLOTS);
-        assert_eq!(app.presets.get(2), Some(app.style_working));
+        assert_eq!(app.presets.get(2), Some(app.style_working.clone()));
     }
 
     #[test]
@@ -806,10 +847,10 @@ for c in text.chars() {
         app.style_working.text_color = [42, 0, 0, 255];
 
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetReplace(1)));
-        assert_eq!(app.presets.get(1), Some(app.style_working));
+        assert_eq!(app.presets.get(1), Some(app.style_working.clone()));
 
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetReplace(6)));
-        assert_eq!(app.presets.get(6), Some(app.style_working));
+        assert_eq!(app.presets.get(6), Some(app.style_working.clone()));
 
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetReplace(999)));
         assert_eq!(app.presets.len(), INITIAL_PRESET_SLOTS);
@@ -823,6 +864,56 @@ for c in text.chars() {
 
         assert!(app.presets.get(0).is_none());
         assert_eq!(app.presets.len(), INITIAL_PRESET_SLOTS);
+    }
+
+    #[test]
+    fn style_font_sets_family_and_loads_font() {
+        let (mut app, id) = app_with_entry();
+        app.selected = Some((0, id));
+        app.system_fonts
+            .insert("Test".into(), "C:\\Windows\\Fonts\\arial.ttf".into());
+
+        let _ = update(&mut app, Message::Ui(UiEvent::StyleFont("Test".to_string())));
+
+        assert_eq!(app.style_working.font_family.as_deref(), Some("Test"));
+        assert_eq!(
+            app.images[0].project.entry_style(id).font_family.as_deref(),
+            Some("Test")
+        );
+    }
+
+    #[test]
+    fn style_text_align_sets_alignment() {
+        let (mut app, id) = app_with_entry();
+        app.selected = Some((0, id));
+
+        let _ = update(&mut app, Message::Ui(UiEvent::StyleTextAlign(TextAlign::Right)));
+
+        assert_eq!(app.style_working.text_align, TextAlign::Right);
+        assert_eq!(
+            app.images[0].project.entry_style(id).text_align,
+            TextAlign::Right
+        );
+    }
+
+    #[test]
+    fn style_gradient_dir_and_toggle_set_fields() {
+        let (mut app, id) = app_with_entry();
+        app.selected = Some((0, id));
+
+        let _ = update(&mut app, Message::Ui(UiEvent::StyleGradientToggle(true)));
+        assert!(app.style_working.text_gradient);
+        assert!(app.images[0].project.entry_style(id).text_gradient);
+
+        let _ = update(
+            &mut app,
+            Message::Ui(UiEvent::StyleGradientDir(TextGradientDir::LeftToRight)),
+        );
+        assert_eq!(app.style_working.gradient_dir, TextGradientDir::LeftToRight);
+        assert_eq!(
+            app.images[0].project.entry_style(id).gradient_dir,
+            TextGradientDir::LeftToRight
+        );
     }
 }
 
@@ -844,7 +935,29 @@ pub fn boot() -> (App, Task<Message>) {
     } else {
         Task::perform(translation::fetch_providers(fetch_ids), Message::ModelsFetched)
     };
-    (app, Task::batch([font_task, models_task]))
+    let fonts_task =
+        Task::perform(async move { enumerate_system_fonts() }, Message::SystemFonts);
+    (app, Task::batch([font_task, models_task, fonts_task]))
+}
+
+/// Enumerates installed system fonts (family name + file path) with fontdb
+/// (the same version iced's text stack uses), off the UI thread, once at
+/// boot. Duplicate family names are deduped by the caller.
+fn enumerate_system_fonts() -> Vec<(String, String)> {
+    let mut db = fontdb::Database::new();
+    db.load_system_fonts();
+    let mut out = Vec::new();
+    for face in db.faces() {
+        let path = match &face.source {
+            fontdb::Source::File(path) => path.to_string_lossy().into_owned(),
+            fontdb::Source::SharedFile(path, _) => path.to_string_lossy().into_owned(),
+            fontdb::Source::Binary(_) => continue,
+        };
+        for (name, _language) in &face.families {
+            out.push((name.clone(), path.clone()));
+        }
+    }
+    out
 }
 
 /// Spawns the parallel OCR stream: the [`ocr::RunSession`] does the
@@ -1384,6 +1497,18 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             );
             Task::none()
         }
+        Message::SystemFonts(fonts) => {
+            app.system_fonts = fonts.into_iter().collect();
+            let mut names: Vec<String> = app.system_fonts.keys().cloned().collect();
+            names.sort();
+            names.dedup();
+            app.installed_fonts = names;
+            Task::none()
+        }
+        Message::StyleFontLoaded(name) => {
+            app.status = format!("Font \"{name}\" loaded.");
+            Task::none()
+        }
         Message::Ui(UiEvent::CycleProfile) => {
             let Some(first) = app.images.first() else {
                 return Task::none();
@@ -1770,20 +1895,55 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::StyleBold(bold)) => {
             let Some((index, id)) = app.selected else { return Task::none() };
             app.style_working.bold = bold;
-            app.images[index].project.set_entry_style(id, app.style_working);
+            app.images[index].project.set_entry_style(id, app.style_working.clone());
             Task::none()
         }
         Message::Ui(UiEvent::StyleItalic(italic)) => {
             let Some((index, id)) = app.selected else { return Task::none() };
             app.style_working.italic = italic;
-            app.images[index].project.set_entry_style(id, app.style_working);
+            app.images[index].project.set_entry_style(id, app.style_working.clone());
+            Task::none()
+        }
+        Message::Ui(UiEvent::StyleFont(name)) => {
+            let Some((index, id)) = app.selected else { return Task::none() };
+            app.style_working.font_family = Some(name.clone());
+            app.images[index].project.set_entry_style(id, app.style_working.clone());
+            if !app.loaded_fonts.contains(&name) {
+                app.loaded_fonts.insert(name.clone());
+                let Some(path) = app.system_fonts.get(&name).cloned() else {
+                    return Task::none();
+                };
+                match std::fs::read(path) {
+                    Ok(bytes) => iced::font::load(bytes).map(move |_| Message::StyleFontLoaded(name.clone())),
+                    Err(_) => Task::none(),
+                }
+            } else {
+                Task::none()
+            }
+        }
+        Message::Ui(UiEvent::StyleTextAlign(align)) => {
+            let Some((index, id)) = app.selected else { return Task::none() };
+            app.style_working.text_align = align;
+            app.images[index].project.set_entry_style(id, app.style_working.clone());
+            Task::none()
+        }
+        Message::Ui(UiEvent::StyleGradientToggle(enabled)) => {
+            let Some((index, id)) = app.selected else { return Task::none() };
+            app.style_working.text_gradient = enabled;
+            app.images[index].project.set_entry_style(id, app.style_working.clone());
+            Task::none()
+        }
+        Message::Ui(UiEvent::StyleGradientDir(dir)) => {
+            let Some((index, id)) = app.selected else { return Task::none() };
+            app.style_working.gradient_dir = dir;
+            app.images[index].project.set_entry_style(id, app.style_working.clone());
             Task::none()
         }
         Message::Ui(UiEvent::StyleColorOpen(field)) => {
             app.style_picker = Some(field);
             Task::none()
         }
-        Message::Ui(UiEvent::StyleColorCancel(field)) => {
+        Message::Ui(UiEvent::StyleColorCancel(_field)) => {
             app.style_picker = None;
             Task::none()
         }
@@ -1795,8 +1955,10 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 StyleField::Text => app.style_working.text_color = rgba,
                 StyleField::Stroke => app.style_working.stroke_color = rgba,
                 StyleField::Background => app.style_working.bg_color = rgba,
+                StyleField::GradientA => app.style_working.gradient_a = rgba,
+                StyleField::GradientB => app.style_working.gradient_b = rgba,
             }
-            app.images[index].project.set_entry_style(id, app.style_working);
+            app.images[index].project.set_entry_style(id, app.style_working.clone());
             Task::none()
         }
         Message::Ui(UiEvent::StyleStrokeWidth(text)) => {
@@ -1804,7 +1966,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.style_stroke_width = text;
             if let Ok(width) = app.style_stroke_width.parse::<f32>() {
                 app.style_working.stroke_width = width.max(0.0);
-                app.images[index].project.set_entry_style(id, app.style_working);
+                app.images[index].project.set_entry_style(id, app.style_working.clone());
             }
             Task::none()
         }
@@ -1813,7 +1975,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.style_bg_radius = text;
             if let Ok(radius) = app.style_bg_radius.parse::<f32>() {
                 app.style_working.bg_radius = radius.max(0.0);
-                app.images[index].project.set_entry_style(id, app.style_working);
+                app.images[index].project.set_entry_style(id, app.style_working.clone());
             }
             Task::none()
         }
@@ -1822,16 +1984,16 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             let Some(preset_style) = app.presets.get(preset) else {
                 return Task::none();
             };
-            seed_style_inputs(app, preset_style);
+            seed_style_inputs(app, preset_style.clone());
             app.images[index].project.set_entry_style(id, preset_style);
             Task::none()
         }
         Message::Ui(UiEvent::StylePresetAdd) => {
-            app.presets.add(app.style_working);
+            app.presets.add(app.style_working.clone());
             Task::none()
         }
         Message::Ui(UiEvent::StylePresetReplace(preset)) => {
-            app.presets.replace(preset, app.style_working);
+            app.presets.replace(preset, app.style_working.clone());
             Task::none()
         }
         Message::Ui(UiEvent::StylePresetRemove(preset)) => {

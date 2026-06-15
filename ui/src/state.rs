@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use iced::widget::text_editor;
 use iced::{Color, Font, Rectangle};
 
-use scanlateit_model::{EntryId, EntryStyle};
+use scanlateit_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
 use scanlateit_translation::Connection;
 
 use crate::connect::ConnectModal;
@@ -44,6 +44,19 @@ pub trait UiState {
     /// The saved style presets shown in the styling panel, in memory only:
     /// a fixed set of slots, `None` for an empty slot.
     fn style_presets(&self) -> &[Option<EntryStyle>];
+    /// Installed system font family names (from the boot fontdb scan),
+    /// sorted, as offered by the styling panel's font picker.
+    fn installed_fonts(&self) -> &[String];
+    /// The working style's font family, if set.
+    fn style_font_family(&self) -> Option<&str>;
+    /// The working style's text alignment.
+    fn style_text_align(&self) -> TextAlign;
+    /// The working style's gradient start color.
+    fn style_gradient_a(&self) -> Color;
+    /// The working style's gradient end color.
+    fn style_gradient_b(&self) -> Color;
+    /// The working style's gradient direction.
+    fn style_gradient_dir(&self) -> TextGradientDir;
     /// Whether automatic style detection for new OCR entries is enabled.
     fn auto_style_detect(&self) -> bool;
     /// The configured number of parallel OCR detection workers, as typed in

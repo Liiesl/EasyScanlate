@@ -10,9 +10,9 @@ use iced::advanced::text::{
 };
 use iced::border::Radius;
 use iced::font::{Style as FontStyle, Weight as FontWeight};
-use iced::{alignment, Color, Font, Pixels, Point, Size, Vector};
+use iced::{alignment, Color, Font, Pixels, Point, Rectangle, Size, Vector};
 
-use scanlateit_model::{EntryId, EntryStyle, Quad};
+use scanlateit_model::{EntryId, EntryStyle, Quad, TextAlign, TextGradientDir};
 
 /// View-model entry: what the overlay draws, resolved from the model with the
 /// selected profile's translation and the per-entry style already applied.
@@ -36,13 +36,6 @@ pub struct OverlayEntry<'a> {
 /// Outline drawn around the selected entry.
 const SELECTED_COLOR: Color = Color::from_rgba8(92, 190, 255, 1.0);
 const SELECTED_WIDTH: f32 = 2.0;
-
-/// Global manhwa-style rendering: overlay text is laid out in centered lines
-/// that follow the curve of the entry's box (each line's width matches the
-/// ellipse chord at its height), like text inside a manhwa speech bubble.
-/// The box background itself is unchanged. Set to `false` to restore plain
-/// rectangular wrapping.
-pub(crate) const CIRCULAR_OVERLAYS: bool = true;
 
 fn to_color(rgba: [u8; 4]) -> Color {
     Color::from_rgba8(rgba[0], rgba[1], rgba[2], rgba[3] as f32 / 255.0)
@@ -224,21 +217,39 @@ pub(crate) fn fit_font_metrics(text: &str, font: Font, bounds: Size) -> (f32, f3
     (size, fitted_height)
 }
 
-/// The base font with the entry's weight (bold) and style (italic) applied.
+/// A `Font` for the installed family `name`, memoized: iced's
+/// `Font::with_name` requires a `&'static str`, so each distinct family name
+/// is leaked once and cached (the set of installed families is finite).
+fn family_font(name: &str) -> Font {
+    static NAMES: std::sync::OnceLock<std::sync::Mutex<HashMap<String, &'static str>>> =
+        std::sync::OnceLock::new();
+    let names = NAMES.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let mut guard = names.lock().expect("font name cache poisoned");
+    let leaked = guard
+        .entry(name.to_owned())
+        .or_insert_with(|| Box::leak(name.to_owned().into_boxed_str()));
+    Font::with_name(leaked)
+}
+
+/// The entry's font family (when set), weight (bold) and style (italic)
+/// applied on top of the base font.
 pub(crate) fn styled_font(font: Font, style: &EntryStyle) -> Font {
-    Font {
-        weight: if style.bold {
-            FontWeight::Bold
-        } else {
-            FontWeight::Normal
-        },
-        style: if style.italic {
-            FontStyle::Italic
-        } else {
-            FontStyle::Normal
-        },
-        ..font
-    }
+    let mut font = style
+        .font_family
+        .as_deref()
+        .map(family_font)
+        .unwrap_or(font);
+    font.weight = if style.bold {
+        FontWeight::Bold
+    } else {
+        FontWeight::Normal
+    };
+    font.style = if style.italic {
+        FontStyle::Italic
+    } else {
+        FontStyle::Normal
+    };
+    font
 }
 
 /// One laid-out line of a circular bubble: the line's text, its top y offset
@@ -442,22 +453,239 @@ pub(crate) fn fit_circle_metrics(text: &str, font: Font, bounds: Size) -> (f32, 
     (size, lines)
 }
 
+/// Number of color bands a gradient text is split into (axis directions).
+const GRADIENT_BANDS: u32 = 16;
+
+fn lerp_color(a: [u8; 4], b: [u8; 4], t: f32) -> Color {
+    let t = t.clamp(0.0, 1.0);
+    Color::from_rgba8(
+        (a[0] as f32 + (b[0] as f32 - a[0] as f32) * t).round() as u8,
+        (a[1] as f32 + (b[1] as f32 - a[1] as f32) * t).round() as u8,
+        (a[2] as f32 + (b[2] as f32 - a[2] as f32) * t).round() as u8,
+        (a[3] as f32 + (b[3] as f32 - a[3] as f32) * t) / 255.0,
+    )
+}
+
+/// Runs `f` on a fresh draft frame clipped to `region` and pastes it back:
+/// the `Backend`-trait equivalent of `Frame::with_clip`. The draft is a
+/// fresh frame with an identity transform, so the caller must re-apply any
+/// parent transform inside `f`.
+fn with_clip<F, R>(frame: &mut F, region: Rectangle, f: impl FnOnce(&mut F) -> R) -> R
+where
+    F: geometry::frame::Backend,
+{
+    let mut draft = frame.draft(region);
+    let result = f(&mut draft);
+    frame.paste(draft);
+    result
+}
+
+/// The gradient parameter `t` at the local point `p` inside `box_rect`.
+fn gradient_t(dir: TextGradientDir, box_rect: Rectangle, p: Point) -> f32 {
+    let w = box_rect.width.max(1.0);
+    let h = box_rect.height.max(1.0);
+    let x = (p.x - box_rect.x) / w;
+    let y = (p.y - box_rect.y) / h;
+    let t = match dir {
+        TextGradientDir::TopToBottom => y,
+        TextGradientDir::BottomToTop => 1.0 - y,
+        TextGradientDir::LeftToRight => x,
+        TextGradientDir::RightToLeft => 1.0 - x,
+        TextGradientDir::TopLeftToBottomRight => (x + y) / 2.0,
+        TextGradientDir::BottomRightToTopLeft => 1.0 - (x + y) / 2.0,
+        TextGradientDir::TopRightToBottomLeft => ((1.0 - x) + y) / 2.0,
+        TextGradientDir::BottomLeftToTopRight => 1.0 - ((1.0 - x) + y) / 2.0,
+    };
+    t.clamp(0.0, 1.0)
+}
+
+/// Draws `text` with a two-color gradient over `box_rect`. Axis directions
+/// (t→b, b→t, l→r, r→l) split the box into `GRADIENT_BANDS` clipped slabs and
+/// redraw the text once per slab with the band color (smooth within glyphs);
+/// diagonal directions draw one fill per glyph, colored at the glyph's
+/// center (their bands are rotated rectangles, which `with_clip` cannot
+/// express). `transform` is re-applied inside each clipped draft (drafts are
+/// fresh frames without the parent's transform); pass it only for skewed
+/// quads. `stroke` is `(color, width)` when the entry has a stroke.
+fn fill_gradient_text<F>(
+    frame: &mut F,
+    text: &Text,
+    box_rect: Rectangle,
+    dir: TextGradientDir,
+    a: [u8; 4],
+    b: [u8; 4],
+    stroke: Option<(Color, f32)>,
+    transform: Option<&QuadTransform>,
+    position: Point,
+    width: f32,
+    height: f32,
+) where
+    F: geometry::frame::Backend,
+{
+    match dir {
+        TextGradientDir::TopToBottom
+        | TextGradientDir::BottomToTop
+        | TextGradientDir::LeftToRight
+        | TextGradientDir::RightToLeft => {
+            let vertical = matches!(dir, TextGradientDir::TopToBottom | TextGradientDir::BottomToTop);
+            let reversed = matches!(dir, TextGradientDir::BottomToTop | TextGradientDir::RightToLeft);
+            for band in 0..GRADIENT_BANDS {
+                let t0 = band as f32 / GRADIENT_BANDS as f32;
+                let t1 = (band + 1) as f32 / GRADIENT_BANDS as f32;
+                let t = if reversed { 1.0 - (t0 + t1) / 2.0 } else { (t0 + t1) / 2.0 };
+                let color = lerp_color(a, b, t);
+                let strip = if vertical {
+                    Rectangle::new(
+                        Point::new(box_rect.x, box_rect.y + t0 * box_rect.height),
+                        Size::new(box_rect.width, (t1 - t0) * box_rect.height),
+                    )
+                } else {
+                    Rectangle::new(
+                        Point::new(box_rect.x + t0 * box_rect.width, box_rect.y),
+                        Size::new((t1 - t0) * box_rect.width, box_rect.height),
+                    )
+                };
+                with_clip(frame, strip, |f| {
+                    if let Some(transform) = transform {
+                        f.push_transform();
+                        apply_quad_transform(f, transform, position, width, height);
+                    }
+                    let colored = Text { color, ..text.clone() };
+                    if let Some((stroke_color, stroke_width)) = stroke {
+                        f.stroke_text(
+                            colored.clone(),
+                            Stroke::default().with_color(stroke_color).with_width(stroke_width),
+                        );
+                    }
+                    f.fill_text(colored);
+                });
+            }
+        }
+        _ => fill_gradient_glyphs(frame, text, box_rect, dir, a, b, stroke),
+    }
+}
+
+/// Per-glyph gradient fill for the diagonal directions: mirrors
+/// `geometry::Text::draw_with` (iced/graphics/src/geometry/text.rs:48) but
+/// colors each glyph by the gradient sampled at the glyph's center.
+fn fill_gradient_glyphs<F>(
+    frame: &mut F,
+    text: &Text,
+    box_rect: Rectangle,
+    dir: TextGradientDir,
+    a: [u8; 4],
+    b: [u8; 4],
+    stroke: Option<(Color, f32)>,
+) where
+    F: geometry::frame::Backend,
+{
+    use iced::advanced::graphics::text::{self as gfx_text, cosmic_text, Paragraph as GfxParagraph};
+
+    let paragraph = GfxParagraph::with_text(ParagraphText {
+        content: text.content.as_str(),
+        bounds: Size::new(text.max_width, f32::INFINITY),
+        size: text.size,
+        line_height: text.line_height,
+        font: text.font,
+        align_x: text.align_x,
+        align_y: alignment::Vertical::Top,
+        shaping: text.shaping,
+        wrapping: Wrapping::Word,
+    });
+    let translation_x = match text.align_x {
+        TextAlignment::Default | TextAlignment::Left | TextAlignment::Justified => text.position.x,
+        TextAlignment::Center => text.position.x - paragraph.min_width() / 2.0,
+        TextAlignment::Right => text.position.x - paragraph.min_width(),
+    };
+    let translation_y = text.position.y;
+    let buffer = paragraph.buffer();
+    let mut swash_cache = cosmic_text::SwashCache::new();
+    let mut font_system = gfx_text::font_system().write().expect("Write font system");
+    for run in buffer.layout_runs() {
+        for glyph in run.glyphs.iter() {
+            let physical_glyph = glyph.physical((0.0, 0.0), 1.0);
+            let start_x = translation_x + glyph.x + glyph.x_offset;
+            let start_y = translation_y + glyph.y_offset + run.line_y;
+            let offset = Vector::new(start_x, start_y);
+            let color = lerp_color(
+                a,
+                b,
+                gradient_t(dir, box_rect, Point::new(start_x + glyph.w / 2.0, start_y + text.size.0 / 2.0)),
+            );
+            if let Some(commands) =
+                swash_cache.get_outline_commands(font_system.raw(), physical_glyph.cache_key)
+            {
+                let glyph_path = Path::new(|path| {
+                    use cosmic_text::Command;
+                    for command in commands {
+                        match command {
+                            Command::MoveTo(p) => path.move_to(Point::new(p.x, -p.y) + offset),
+                            Command::LineTo(p) => path.line_to(Point::new(p.x, -p.y) + offset),
+                            Command::CurveTo(control_a, control_b, to) => {
+                                path.bezier_curve_to(
+                                    Point::new(control_a.x, -control_a.y) + offset,
+                                    Point::new(control_b.x, -control_b.y) + offset,
+                                    Point::new(to.x, -to.y) + offset,
+                                );
+                            }
+                            Command::QuadTo(control, to) => {
+                                path.quadratic_curve_to(
+                                    Point::new(control.x, -control.y) + offset,
+                                    Point::new(to.x, -to.y) + offset,
+                                );
+                            }
+                            Command::Close => path.close(),
+                        }
+                    }
+                });
+                if let Some((stroke_color, stroke_width)) = stroke {
+                    frame.stroke(
+                        &glyph_path,
+                        Stroke::default().with_color(stroke_color).with_width(stroke_width),
+                    );
+                }
+                frame.fill(&glyph_path, Fill::from(color));
+            } else {
+                let [r, g, bl, al] = color.into_rgba8();
+                swash_cache.with_pixels(
+                    font_system.raw(),
+                    physical_glyph.cache_key,
+                    cosmic_text::Color::rgba(r, g, bl, al),
+                    |x, y, pixel| {
+                        frame.fill(
+                            &Path::rectangle(
+                                Point::new(x as f32, y as f32) + offset,
+                                Size::new(1.0, 1.0),
+                            ),
+                            Fill::from(Color::from_rgba8(
+                                pixel.r(),
+                                pixel.g(),
+                                pixel.b(),
+                                pixel.a() as f32 / 255.0,
+                            )),
+                        );
+                    },
+                );
+            }
+        }
+    }
+}
+
 /// Draws one translucent box + label per entry on top of the image inside
 /// `frame`. Coordinates are image pixels, scaled to the frame's width. Each
 /// label's font size is auto-sized to fill its bounding box (growing or
-/// shrinking as needed). When `circular` is set, the text is wrapped
-/// manhwa-style: one centered line per row, each line's width following the
-/// ellipse chord at its height inside the box. When `hide_text` is set, the
-/// whole overlay layer is skipped per entry — box background, selection
-/// outline and text (the toolbar's "Hide Text" toggle). The per-entry
-/// [`OverlayEntry::hide_text`] flag (inline editing) hides only the text,
-/// keeping the box background drawn under the floating editor.
+/// shrinking as needed). When the entry's [`TextAlign`] is `Circular`, the
+/// text is wrapped manhwa-style: one centered line per row, each line's width
+/// following the ellipse chord at its height inside the box. When `hide_text`
+/// is set, the whole overlay layer is skipped per entry — box background,
+/// selection outline and text (the toolbar's "Hide Text" toggle). The
+/// per-entry [`OverlayEntry::hide_text`] flag (inline editing) hides only the
+/// text, keeping the box background drawn under the floating editor.
 pub fn draw_entries<'a, I, F>(
     frame: &mut F,
     entries: I,
     font: Font,
     image_width: f32,
-    circular: bool,
     hide_text: bool,
 ) where
     F: geometry::frame::Backend,
@@ -505,13 +733,17 @@ pub fn draw_entries<'a, I, F>(
             continue;
         }
         let styled = styled_font(font, &entry.style);
-        if circular {
+        if entry.style.text_align == TextAlign::Circular {
             let (size, lines) =
                 fit_circle_metrics(entry.text, styled, Size::new(wrap_width, height));
             let line_height = size * LINE_HEIGHT;
             let total_height = lines.last().map_or(0.0, |line| line.y + line_height);
             // Vertically center the whole block inside the ellipse.
             let y_offset = (height - total_height).max(0.0) / 2.0;
+            let block_rect = Rectangle::new(
+                Point::new(position.x, position.y + y_offset),
+                Size::new(wrap_width, total_height),
+            );
             if let Some(transform) = &transform {
                 frame.push_transform();
                 apply_quad_transform(frame, transform, position, width, height);
@@ -533,15 +765,33 @@ pub fn draw_entries<'a, I, F>(
                     align_x: TextAlignment::Center,
                     ..Text::default()
                 };
-                if entry.style.stroke_width > 0.0 {
-                    frame.stroke_text(
-                        text.clone(),
-                        Stroke::default()
-                            .with_color(to_color(entry.style.stroke_color))
-                            .with_width(entry.style.stroke_width * scale),
+                if entry.style.text_gradient {
+                    fill_gradient_text(
+                        frame,
+                        &text,
+                        block_rect,
+                        entry.style.gradient_dir,
+                        entry.style.gradient_a,
+                        entry.style.gradient_b,
+                        (entry.style.stroke_width > 0.0).then(|| {
+                            (to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
+                        }),
+                        transform.as_ref(),
+                        position,
+                        width,
+                        height,
                     );
+                } else {
+                    if entry.style.stroke_width > 0.0 {
+                        frame.stroke_text(
+                            text.clone(),
+                            Stroke::default()
+                                .with_color(to_color(entry.style.stroke_color))
+                                .with_width(entry.style.stroke_width * scale),
+                        );
+                    }
+                    frame.fill_text(text);
                 }
-                frame.fill_text(text);
             }
             if transform.is_some() {
                 frame.pop_transform();
@@ -555,13 +805,24 @@ pub fn draw_entries<'a, I, F>(
         );
         // Vertically center the wrapped text block inside the box.
         let y_offset = (height - fitted_height).max(0.0) / 2.0;
+        let block_rect = Rectangle::new(
+            Point::new(position.x, position.y + y_offset),
+            Size::new(wrap_width, fitted_height),
+        );
+        let (align_x, text_x) = match entry.style.text_align {
+            TextAlign::Circular => (TextAlignment::Default, position.x),
+            TextAlign::Left => (TextAlignment::Left, position.x),
+            TextAlign::Center => (TextAlignment::Center, position.x + wrap_width / 2.0),
+            TextAlign::Right => (TextAlignment::Right, position.x + wrap_width),
+        };
         let text = Text {
             content: entry.text.to_string(),
-            position: Point::new(position.x, position.y + y_offset),
+            position: Point::new(text_x, position.y + y_offset),
             max_width: wrap_width,
             size: Pixels(size),
             color: to_color(entry.style.text_color),
             font: styled,
+            align_x,
             ..Text::default()
         };
         // Only the text lives in the axis-aligned rect space and needs the
@@ -592,15 +853,33 @@ pub fn draw_entries<'a, I, F>(
                 );
             }
         }
-        if entry.style.stroke_width > 0.0 {
-            frame.stroke_text(
-                text.clone(),
-                Stroke::default()
-                    .with_color(to_color(entry.style.stroke_color))
-                    .with_width(entry.style.stroke_width * scale),
+        if entry.style.text_gradient {
+            fill_gradient_text(
+                frame,
+                &text,
+                block_rect,
+                entry.style.gradient_dir,
+                entry.style.gradient_a,
+                entry.style.gradient_b,
+                (entry.style.stroke_width > 0.0).then(|| {
+                    (to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
+                }),
+                transform.as_ref(),
+                position,
+                width,
+                height,
             );
+        } else {
+            if entry.style.stroke_width > 0.0 {
+                frame.stroke_text(
+                    text.clone(),
+                    Stroke::default()
+                        .with_color(to_color(entry.style.stroke_color))
+                        .with_width(entry.style.stroke_width * scale),
+                );
+            }
+            frame.fill_text(text);
         }
-        frame.fill_text(text);
         if transform.is_some() {
             frame.pop_transform();
         }
@@ -1000,5 +1279,44 @@ mod tests {
         // Self-crossing / mirroring quad must not produce a flipped text map.
         let quad = [[0.0, 0.0], [200.0, 0.0], [0.0, 100.0], [200.0, 100.0]];
         assert!(quad_transform(quad, 200.0, 100.0).is_none());
+    }
+
+    #[test]
+    fn lerp_color_endpoints_and_midpoint() {
+        let a = [0, 0, 0, 255];
+        let b = [255, 255, 255, 255];
+        assert_eq!(lerp_color(a, b, 0.0), Color::from_rgba8(0, 0, 0, 1.0));
+        assert_eq!(lerp_color(a, b, 1.0), Color::from_rgba8(255, 255, 255, 1.0));
+        assert_eq!(lerp_color(a, b, 0.5), Color::from_rgba8(128, 128, 128, 1.0));
+        // Out-of-range t clamps.
+        assert_eq!(lerp_color(a, b, -1.0), Color::from_rgba8(0, 0, 0, 1.0));
+        assert_eq!(lerp_color(a, b, 2.0), Color::from_rgba8(255, 255, 255, 1.0));
+    }
+
+    #[test]
+    fn gradient_t_at_box_corners_for_all_directions() {
+        let box_rect = Rectangle::new(Point::new(10.0, 20.0), Size::new(100.0, 50.0));
+        let tl = Point::new(10.0, 20.0);
+        let tr = Point::new(110.0, 20.0);
+        let bl = Point::new(10.0, 70.0);
+        let br = Point::new(110.0, 70.0);
+
+        let t = |dir, p| gradient_t(dir, box_rect, p);
+        assert!((t(TextGradientDir::TopToBottom, tl) - 0.0).abs() < 1e-6);
+        assert!((t(TextGradientDir::TopToBottom, bl) - 1.0).abs() < 1e-6);
+        assert!((t(TextGradientDir::BottomToTop, tl) - 1.0).abs() < 1e-6);
+        assert!((t(TextGradientDir::BottomToTop, bl) - 0.0).abs() < 1e-6);
+        assert!((t(TextGradientDir::LeftToRight, tl) - 0.0).abs() < 1e-6);
+        assert!((t(TextGradientDir::LeftToRight, tr) - 1.0).abs() < 1e-6);
+        assert!((t(TextGradientDir::RightToLeft, tl) - 1.0).abs() < 1e-6);
+        assert!((t(TextGradientDir::RightToLeft, tr) - 0.0).abs() < 1e-6);
+        assert!((t(TextGradientDir::TopLeftToBottomRight, tl) - 0.0).abs() < 1e-6);
+        assert!((t(TextGradientDir::TopLeftToBottomRight, br) - 1.0).abs() < 1e-6);
+        assert!((t(TextGradientDir::BottomRightToTopLeft, br) - 0.0).abs() < 1e-6);
+        assert!((t(TextGradientDir::BottomRightToTopLeft, tl) - 1.0).abs() < 1e-6);
+        assert!((t(TextGradientDir::TopRightToBottomLeft, tr) - 0.0).abs() < 1e-6);
+        assert!((t(TextGradientDir::TopRightToBottomLeft, bl) - 1.0).abs() < 1e-6);
+        assert!((t(TextGradientDir::BottomLeftToTopRight, bl) - 0.0).abs() < 1e-6);
+        assert!((t(TextGradientDir::BottomLeftToTopRight, tr) - 1.0).abs() < 1e-6);
     }
 }

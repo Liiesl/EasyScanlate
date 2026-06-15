@@ -22,3 +22,4 @@ scanlateit-styling = { path = "styling" }
 scanlateit-translation = { path = "translation" }
 scanlateit-ui = { path = "ui" }
 tokio = { version = "1", features = ["rt", "time"] }
+fontdb = "0.24"

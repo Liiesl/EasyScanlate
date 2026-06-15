@@ -1371,7 +1371,6 @@ where
                                 &self.tiles[index].overlays,
                                 self.font,
                                 self.tiles[index].source_width as f32,
-                                overlay::CIRCULAR_OVERLAYS,
                                 !self.show_overlay_text,
                             );
                             // The frame is translated to content coordinates;

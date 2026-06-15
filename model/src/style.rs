@@ -1,10 +1,94 @@
+/// Per-entry text alignment mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextAlign {
+    /// Manhwa-style bubble text: lines follow the ellipse chords of the box.
+    Circular,
+    Left,
+    Center,
+    Right,
+}
+
+impl TextAlign {
+    pub const LABELS: [&'static str; 4] = ["Circular", "Left", "Center", "Right"];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            TextAlign::Circular => "Circular",
+            TextAlign::Left => "Left",
+            TextAlign::Center => "Center",
+            TextAlign::Right => "Right",
+        }
+    }
+
+    pub fn from_label(label: &str) -> Self {
+        match label {
+            "Left" => TextAlign::Left,
+            "Center" => TextAlign::Center,
+            "Right" => TextAlign::Right,
+            _ => TextAlign::Circular,
+        }
+    }
+}
+
+/// Direction of the two-color text gradient.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextGradientDir {
+    TopToBottom,
+    BottomToTop,
+    TopLeftToBottomRight,
+    BottomRightToTopLeft,
+    TopRightToBottomLeft,
+    BottomLeftToTopRight,
+    LeftToRight,
+    RightToLeft,
+}
+
+impl TextGradientDir {
+    pub const LABELS: [&'static str; 8] = [
+        "Top → Bottom",
+        "Bottom → Top",
+        "Top-Left → Bottom-Right",
+        "Bottom-Right → Top-Left",
+        "Top-Right → Bottom-Left",
+        "Bottom-Left → Top-Right",
+        "Left → Right",
+        "Right → Left",
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            TextGradientDir::TopToBottom => "Top → Bottom",
+            TextGradientDir::BottomToTop => "Bottom → Top",
+            TextGradientDir::TopLeftToBottomRight => "Top-Left → Bottom-Right",
+            TextGradientDir::BottomRightToTopLeft => "Bottom-Right → Top-Left",
+            TextGradientDir::TopRightToBottomLeft => "Top-Right → Bottom-Left",
+            TextGradientDir::BottomLeftToTopRight => "Bottom-Left → Top-Right",
+            TextGradientDir::LeftToRight => "Left → Right",
+            TextGradientDir::RightToLeft => "Right → Left",
+        }
+    }
+
+    pub fn from_label(label: &str) -> Self {
+        match label {
+            "Bottom → Top" => TextGradientDir::BottomToTop,
+            "Top-Left → Bottom-Right" => TextGradientDir::TopLeftToBottomRight,
+            "Bottom-Right → Top-Left" => TextGradientDir::BottomRightToTopLeft,
+            "Top-Right → Bottom-Left" => TextGradientDir::TopRightToBottomLeft,
+            "Bottom-Left → Top-Right" => TextGradientDir::BottomLeftToTopRight,
+            "Left → Right" => TextGradientDir::LeftToRight,
+            "Right → Left" => TextGradientDir::RightToLeft,
+            _ => TextGradientDir::TopToBottom,
+        }
+    }
+}
+
 /// Per-entry rendering style for the text overlay and future image export.
 ///
 /// Stored as a delta inside a [`Profile`]; `Default` is the fallback when the
 /// profile has no delta for an entry.
 ///
 /// [`Profile`]: crate::Profile
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EntryStyle {
     pub font_size: f32,
     pub bold: bool,
@@ -19,6 +103,20 @@ pub struct EntryStyle {
     pub bg_color: [u8; 4],
     /// Corner radius of the background in image pixels.
     pub bg_radius: f32,
+    /// Installed font family name for this entry's text; `None` = the app's
+    /// default overlay font.
+    pub font_family: Option<String>,
+    /// How the text is laid out inside its box.
+    pub text_align: TextAlign,
+    /// When true, the text fill is a two-color gradient instead of
+    /// `text_color`.
+    pub text_gradient: bool,
+    /// RGBA; gradient start color, used when `text_gradient`.
+    pub gradient_a: [u8; 4],
+    /// RGBA; gradient end color, used when `text_gradient`.
+    pub gradient_b: [u8; 4],
+    /// Gradient direction, used when `text_gradient`.
+    pub gradient_dir: TextGradientDir,
 }
 
 impl Default for EntryStyle {
@@ -32,6 +130,12 @@ impl Default for EntryStyle {
             stroke_width: 0.0,
             bg_color: [255, 255, 255, 255],
             bg_radius: 0.0,
+            font_family: None,
+            text_align: TextAlign::Circular,
+            text_gradient: false,
+            gradient_a: [0, 0, 0, 255],
+            gradient_b: [0, 0, 0, 255],
+            gradient_dir: TextGradientDir::TopToBottom,
         }
     }
 }
@@ -53,15 +157,15 @@ impl StylePresets {
     pub fn default_presets() -> Self {
         let mut presets = Vec::with_capacity(INITIAL_PRESET_SLOTS);
         let mut preset = EntryStyle::default();
-        presets.push(Some(preset));
+        presets.push(Some(preset.clone()));
         preset.bg_color = [0, 0, 0, 255];
         preset.text_color = [255, 255, 255, 255];
-        presets.push(Some(preset));
+        presets.push(Some(preset.clone()));
         preset.bg_color = [0, 0, 0, 0];
         preset.text_color = [0, 0, 0, 255];
-        presets.push(Some(preset));
+        presets.push(Some(preset.clone()));
         preset.text_color = [255, 255, 255, 255];
-        presets.push(Some(preset));
+        presets.push(Some(preset.clone()));
         preset.bg_color = [255, 0, 0, 255];
         presets.push(Some(preset));
         presets.resize(INITIAL_PRESET_SLOTS, None);
@@ -70,7 +174,7 @@ impl StylePresets {
 
     /// The style of slot `index`, or `None` for an empty slot / out of range.
     pub fn get(&self, index: usize) -> Option<EntryStyle> {
-        self.0.get(index).copied().flatten()
+        self.0.get(index).cloned().flatten()
     }
 
     pub fn len(&self) -> usize {
@@ -140,19 +244,36 @@ mod tests {
         assert_eq!(style.stroke_color, [0, 0, 0, 255]);
         assert_eq!(style.stroke_width, 0.0);
         assert_eq!(style.bg_radius, 0.0);
+        assert_eq!(style.font_family, None);
+        assert_eq!(style.text_align, TextAlign::Circular);
+        assert!(!style.text_gradient);
+    }
+
+    #[test]
+    fn text_align_labels_round_trip() {
+        for label in TextAlign::LABELS {
+            assert_eq!(TextAlign::from_label(label).label(), label);
+        }
+    }
+
+    #[test]
+    fn gradient_dir_labels_round_trip() {
+        for label in TextGradientDir::LABELS {
+            assert_eq!(TextGradientDir::from_label(label).label(), label);
+        }
     }
 
     #[test]
     fn add_fills_the_first_empty_slot() {
         let mut presets = StylePresets::default_presets();
         let style = EntryStyle { bg_color: [9, 9, 9, 255], ..EntryStyle::default() };
-        presets.add(style);
-        presets.add(style);
-        presets.add(style);
+        presets.add(style.clone());
+        presets.add(style.clone());
+        presets.add(style.clone());
 
         assert_eq!(presets.len(), INITIAL_PRESET_SLOTS);
-        assert_eq!(presets.get(5), Some(style));
-        assert_eq!(presets.get(6), Some(style));
+        assert_eq!(presets.get(5), Some(style.clone()));
+        assert_eq!(presets.get(6), Some(style.clone()));
         assert_eq!(presets.get(7), Some(style));
     }
 
@@ -164,7 +285,7 @@ mod tests {
             presets.replace(i, style);
         }
         let style = EntryStyle { bg_color: [1, 2, 3, 255], ..EntryStyle::default() };
-        presets.add(style);
+        presets.add(style.clone());
 
         assert_eq!(presets.len(), INITIAL_PRESET_SLOTS + 1);
         assert_eq!(presets.get(INITIAL_PRESET_SLOTS), Some(style));
@@ -175,7 +296,7 @@ mod tests {
         let mut presets = StylePresets::default_presets();
         presets.remove(2);
         let style = EntryStyle { text_color: [7, 7, 7, 255], ..EntryStyle::default() };
-        presets.add(style);
+        presets.add(style.clone());
 
         assert_eq!(presets.len(), INITIAL_PRESET_SLOTS);
         assert_eq!(presets.get(2), Some(style));
@@ -185,10 +306,10 @@ mod tests {
     fn replace_overwrites_filled_and_empty_slots() {
         let mut presets = StylePresets::default_presets();
         let style = EntryStyle { text_color: [42, 0, 0, 255], ..EntryStyle::default() };
-        presets.replace(1, style);
-        assert_eq!(presets.get(1), Some(style));
-        presets.replace(6, style);
-        assert_eq!(presets.get(6), Some(style));
+        presets.replace(1, style.clone());
+        assert_eq!(presets.get(1), Some(style.clone()));
+        presets.replace(6, style.clone());
+        assert_eq!(presets.get(6), Some(style.clone()));
         presets.replace(999, style);
         assert_eq!(presets.len(), INITIAL_PRESET_SLOTS);
     }

@@ -16,7 +16,7 @@
 use iced::widget::button::Status;
 use iced::widget::image::{self, Handle};
 use iced::widget::{
-    button, checkbox, column, row, scrollable, space::Space, text, text_input,
+    button, checkbox, column, pick_list, row, scrollable, space::Space, text, text_input,
 };
 use iced::{
     Background, Border, Color, Element, Fill as FillLength, Font, Padding, Shadow, Vector,
@@ -26,7 +26,7 @@ use neverliie_iced_widgets::color_picker::ColorPicker;
 use neverliie_iced_widgets::context_menu::{ContextMenu, Menu};
 use neverliie_iced_widgets::overlay::{Anchor, Position};
 
-use scanlateit_model::EntryStyle;
+use scanlateit_model::{EntryStyle, TextAlign, TextGradientDir};
 
 use crate::event::{StyleField, UiEvent};
 use crate::main_area::overlay::styled_font;
@@ -280,7 +280,7 @@ fn presets_grid<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
                     .text_size(12.0)
                     .into();
             };
-            let tile = preset_square(*preset, can_apply.then_some(UiEvent::StylePresetApply(index)));
+            let tile = preset_square(preset.clone(), can_apply.then_some(UiEvent::StylePresetApply(index)));
             ContextMenu::new(tile, preset_menu(index, true))
                 .on_dismiss(UiEvent::StylePresetMenuDismiss)
                 .text_size(12.0)
@@ -315,13 +315,52 @@ fn presets_grid<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let style = state.style_working();
     let Some((image_index, entry_id)) = state.selected() else {
-        return column![
+        return scrollable(column![
             text("Styling").size(14),
             row![
                 checkbox(style.bold).label("Bold").text_size(12),
                 checkbox(style.italic).label("Italic").text_size(12),
             ]
             .spacing(16),
+            field_row(
+                "Font",
+                pick_list(state.installed_fonts(), style.font_family.as_ref(), |f| {
+                    UiEvent::StyleFont(f.clone())
+                })
+                .text_size(12)
+                .width(FillLength)
+                .into(),
+            ),
+            field_row(
+                "Align",
+                pick_list(TextAlign::LABELS, Some(style.text_align.label()), |l| {
+                    UiEvent::StyleTextAlign(TextAlign::from_label(&l))
+                })
+                .text_size(12)
+                .width(FillLength)
+                .into(),
+            ),
+            row![
+                checkbox(style.text_gradient).label("Text gradient").text_size(12),
+            ]
+            .spacing(16),
+            field_row(
+                "Gradient A",
+                color_field(state, StyleField::GradientA, state.style_gradient_a()),
+            ),
+            field_row(
+                "Gradient B",
+                color_field(state, StyleField::GradientB, state.style_gradient_b()),
+            ),
+            field_row(
+                "Direction",
+                pick_list(TextGradientDir::LABELS, Some(style.gradient_dir.label()), |l| {
+                    UiEvent::StyleGradientDir(TextGradientDir::from_label(&l))
+                })
+                .text_size(12)
+                .width(FillLength)
+                .into(),
+            ),
             field_row(
                 "Text color",
                 color_field(state, StyleField::Text, state.style_text_color()),
@@ -339,7 +378,9 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             text(HINT).size(12).color(MUTED_FG),
             presets_grid(state),
         ]
-        .spacing(6)
+        .spacing(6))
+        .width(FillLength)
+        .height(FillLength)
         .into();
     };
 
@@ -356,7 +397,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         })
         .unwrap_or_else(|| "Styling — entry".to_string());
 
-    column![
+    scrollable(column![
         text(heading).size(14),
         button(text("Auto-detect style").size(12))
             .on_press(UiEvent::StyleAutoDetect)
@@ -374,6 +415,24 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         ]
         .spacing(16),
         field_row(
+            "Font",
+            pick_list(state.installed_fonts(), style.font_family.as_ref(), |f| {
+                UiEvent::StyleFont(f.clone())
+            })
+            .text_size(12)
+            .width(FillLength)
+            .into(),
+        ),
+        field_row(
+            "Align",
+            pick_list(TextAlign::LABELS, Some(style.text_align.label()), |l| {
+                UiEvent::StyleTextAlign(TextAlign::from_label(&l))
+            })
+            .text_size(12)
+            .width(FillLength)
+            .into(),
+        ),
+        field_row(
             "Text color",
             color_field(state, StyleField::Text, state.style_text_color()),
         ),
@@ -387,8 +446,34 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             color_field(state, StyleField::Background, state.style_bg_color()),
         ),
         field_row("Corner radius", number_input(state.style_bg_radius(), Some(UiEvent::StyleBgRadius))),
+        row![
+            checkbox(style.text_gradient)
+                .label("Text gradient")
+                .text_size(12)
+                .on_toggle(UiEvent::StyleGradientToggle),
+        ]
+        .spacing(16),
+        field_row(
+            "Gradient A",
+            color_field(state, StyleField::GradientA, state.style_gradient_a()),
+        ),
+        field_row(
+            "Gradient B",
+            color_field(state, StyleField::GradientB, state.style_gradient_b()),
+        ),
+        field_row(
+            "Direction",
+            pick_list(TextGradientDir::LABELS, Some(style.gradient_dir.label()), |l| {
+                UiEvent::StyleGradientDir(TextGradientDir::from_label(&l))
+            })
+            .text_size(12)
+            .width(FillLength)
+            .into(),
+        ),
         presets_grid(state),
     ]
-    .spacing(6)
+    .spacing(6))
+    .width(FillLength)
+    .height(FillLength)
     .into()
 }

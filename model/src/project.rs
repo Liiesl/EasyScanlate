@@ -45,7 +45,7 @@ impl Project {
 
     /// The overlay/export style for an entry, identical across all profiles.
     pub fn entry_style(&self, entry_id: EntryId) -> EntryStyle {
-        self.styles.get(&entry_id).copied().unwrap_or_default()
+        self.styles.get(&entry_id).cloned().unwrap_or_default()
     }
 
     /// Set the overlay/export style for an entry. Setting the default style
@@ -136,7 +136,7 @@ mod tests {
         let mut project = Project::new();
         let style = EntryStyle { font_size: 30.0, ..EntryStyle::default() };
 
-        project.set_entry_style(EntryId(7), style);
+        project.set_entry_style(EntryId(7), style.clone());
         assert_eq!(project.entry_style(EntryId(7)), style);
         assert_eq!(project.entry_style(EntryId(8)), EntryStyle::default());
 
@@ -224,7 +224,7 @@ mod tests {
                 points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
             },
         });
-        project.set_entry_style(id, style);
+        project.set_entry_style(id, style.clone());
         let distorted = Quad {
             points: [[1.0, 2.0], [11.0, 3.0], [10.0, 12.0], [2.0, 11.0]],
         };

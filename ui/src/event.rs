@@ -4,7 +4,7 @@ use iced::widget::pane_grid;
 use iced::widget::text_editor;
 use iced::{Color, Rectangle};
 
-use scanlateit_model::{EntryId, Quad};
+use scanlateit_model::{EntryId, Quad, TextAlign, TextGradientDir};
 
 /// The two actions offered by the selection toolbar drawn under the
 /// selected overlay box in the main area.
@@ -45,6 +45,10 @@ pub enum StyleField {
     Stroke,
     /// The entry's background color.
     Background,
+    /// The gradient start color of the selected entry.
+    GradientA,
+    /// The gradient end color of the selected entry.
+    GradientB,
 }
 
 /// Widget-level events produced by the ui crate. The app maps these into its
@@ -116,6 +120,14 @@ pub enum UiEvent {
     StyleColorSubmit(StyleField, Color),
     StyleStrokeWidth(String),
     StyleBgRadius(String),
+    /// The user picked an installed font family name for the selected entry.
+    StyleFont(String),
+    /// The user picked the text alignment mode for the selected entry.
+    StyleTextAlign(TextAlign),
+    /// The user toggled the two-color text gradient for the selected entry.
+    StyleGradientToggle(bool),
+    /// The user picked the gradient direction for the selected entry.
+    StyleGradientDir(TextGradientDir),
     /// The user clicked preset swatch `usize`: apply that style to the
     /// selected entry.
     StylePresetApply(usize),
