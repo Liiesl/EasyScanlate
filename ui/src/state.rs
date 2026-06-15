@@ -30,6 +30,9 @@ pub trait UiState {
     fn style_picker_open(&self) -> Option<StyleField>;
     fn style_stroke_width(&self) -> &str;
     fn style_bg_radius(&self) -> &str;
+    /// The saved style presets shown in the styling panel, in memory only:
+    /// a fixed set of slots, `None` for an empty slot.
+    fn style_presets(&self) -> &[Option<EntryStyle>];
     /// Whether automatic style detection for new OCR entries is enabled.
     fn auto_style_detect(&self) -> bool;
     /// The configured number of parallel OCR detection workers, as typed in

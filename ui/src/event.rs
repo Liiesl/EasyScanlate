@@ -94,6 +94,20 @@ pub enum UiEvent {
     StyleColorSubmit(StyleField, Color),
     StyleStrokeWidth(String),
     StyleBgRadius(String),
+    /// The user clicked preset swatch `usize`: apply that style to the
+    /// selected entry.
+    StylePresetApply(usize),
+    /// The user clicked the "+" swatch: save the current working style in
+    /// the first empty preset slot.
+    StylePresetAdd,
+    /// The user chose "Replace with current style" in a preset's context
+    /// menu: overwrite that slot (empty or filled) with the working style.
+    StylePresetReplace(usize),
+    /// The user chose "Remove preset" in a preset's context menu: empty
+    /// that slot.
+    StylePresetRemove(usize),
+    /// The user dismissed a preset's context menu; nothing to do.
+    StylePresetMenuDismiss,
     /// Run the ONNX style classifier on the selected entry and apply the
     /// result. Works regardless of the auto-detect setting.
     StyleAutoDetect,

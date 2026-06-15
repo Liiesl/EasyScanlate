@@ -46,6 +46,11 @@ const PANEL_EDIT_INPUT_ID: &'static str = "panel-editor";
 
 const IMAGE_FILTERS: &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "avif"];
 
+/// Number of preset slots seeded in the app: the five built-in styles
+/// plus three empty slots. The "+" tile fills the first empty slot or
+/// appends a new one when all are full, so the list can grow past this.
+const INITIAL_PRESET_SLOTS: usize = 8;
+
 /// The pane the side panel occupies at launch: ~74% of the default window
 /// width (about 1036px of the 1400px window), leaving the main area a third
 /// of its previous ~1120px default.
@@ -228,6 +233,13 @@ pub struct App {
     pub(crate) style_picker: Option<StyleField>,
     pub(crate) style_stroke_width: String,
     pub(crate) style_bg_radius: String,
+    /// The style presets offered in the styling panel, in memory only: a
+    /// list of slots, `None` for an empty slot. The "+" swatch fills the
+    /// first empty slot with a copy of the current working style (or
+    /// appends a new one when all are full), clicking a filled swatch
+    /// applies its style to the selected entry, and the right-click menu
+    /// replaces or empties a slot.
+    pub(crate) style_presets: Vec<Option<EntryStyle>>,
     /// The draggable split between the main area and the side panel.
     pub(crate) panes: pane_grid::State<PaneKind>,
 }
@@ -289,6 +301,23 @@ impl App {
             style_picker: None,
             style_stroke_width: style.stroke_width.to_string(),
             style_bg_radius: style.bg_radius.to_string(),
+            style_presets: {
+                let mut presets = Vec::with_capacity(INITIAL_PRESET_SLOTS);
+                let mut preset = EntryStyle::default();
+                presets.push(Some(preset));
+                preset.bg_color = [0, 0, 0, 255];
+                preset.text_color = [255, 255, 255, 255];
+                presets.push(Some(preset));
+                preset.bg_color = [0, 0, 0, 0];
+                preset.text_color = [0, 0, 0, 255];
+                presets.push(Some(preset));
+                preset.text_color = [255, 255, 255, 255];
+                presets.push(Some(preset));
+                preset.bg_color = [255, 0, 0, 255];
+                presets.push(Some(preset));
+                presets.resize(INITIAL_PRESET_SLOTS, None);
+                presets
+            },
             panes: {
                 let (mut panes, main) = pane_grid::State::new(PaneKind::MainArea);
                 let (_, split) = panes
@@ -488,6 +517,10 @@ impl UiState for App {
 
     fn style_bg_radius(&self) -> &str {
         &self.style_bg_radius
+    }
+
+    fn style_presets(&self) -> &[Option<EntryStyle>] {
+        &self.style_presets
     }
 
     fn auto_style_detect(&self) -> bool {
@@ -804,6 +837,129 @@ for c in text.chars() {
         assert_eq!(app.editing, None);
         assert_eq!(app.selected, None);
         assert_eq!(app.images[0].project.ocr.visible_count(), 1);
+    }
+
+    #[test]
+    fn seeded_presets_cover_the_expected_variants() {
+        let app = App::new();
+        let presets = &app.style_presets;
+        assert_eq!(presets.len(), INITIAL_PRESET_SLOTS);
+        let filled: Vec<&EntryStyle> = presets.iter().flatten().collect();
+        assert_eq!(filled.len(), 5);
+        assert_eq!(filled[0].bg_color, [255, 255, 255, 255], "white bg");
+        assert_eq!(filled[0].text_color, [0, 0, 0, 255], "black text");
+        assert_eq!(filled[1].bg_color, [0, 0, 0, 255], "inverse: black bg");
+        assert_eq!(filled[1].text_color, [255, 255, 255, 255], "inverse: white text");
+        assert_eq!(filled[2].bg_color, [0, 0, 0, 0], "transparent bg");
+        assert_eq!(filled[2].text_color, [0, 0, 0, 255], "black text");
+        assert_eq!(filled[3].bg_color, [0, 0, 0, 0], "transparent bg");
+        assert_eq!(filled[3].text_color, [255, 255, 255, 255], "white text");
+        assert_eq!(filled[4].bg_color, [255, 0, 0, 255], "red bg");
+        assert_eq!(filled[4].text_color, [255, 255, 255, 255], "white text");
+        assert!(presets[5..].iter().all(|slot| slot.is_none()), "last slots empty");
+    }
+
+    #[test]
+    fn applying_a_preset_seeds_working_style_and_entry() {
+        let (mut app, id) = app_with_entry();
+        app.selected = Some((0, id));
+        app.style_working.bg_color = [1, 2, 3, 255];
+        let _ = update(&mut app, Message::Ui(UiEvent::StylePresetApply(1)));
+
+        let preset = app.style_presets[1].expect("preset 1 seeded");
+        assert_eq!(app.style_working, preset);
+        assert_eq!(app.images[0].project.entry_style(id), preset);
+        assert_eq!(app.style_bg_radius, preset.bg_radius.to_string());
+    }
+
+    #[test]
+    fn applying_a_preset_without_selection_or_out_of_range_is_a_noop() {
+        let (mut app, _id) = app_with_entry();
+        app.style_working.bg_color = [1, 2, 3, 255];
+        app.selected = None;
+        let _ = update(&mut app, Message::Ui(UiEvent::StylePresetApply(0)));
+        assert_eq!(app.style_working.bg_color, [1, 2, 3, 255]);
+
+        app.selected = Some((0, app.images[0].project.ocr.visible().next().unwrap().id));
+        let _ = update(&mut app, Message::Ui(UiEvent::StylePresetApply(999)));
+        assert_eq!(app.style_working.bg_color, [1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn applying_an_empty_preset_slot_is_a_noop() {
+        let (mut app, id) = app_with_entry();
+        app.selected = Some((0, id));
+        app.style_working.bg_color = [1, 2, 3, 255];
+        let _ = update(&mut app, Message::Ui(UiEvent::StylePresetApply(5)));
+
+        assert_eq!(app.style_working.bg_color, [1, 2, 3, 255]);
+        assert_eq!(app.images[0].project.entry_style(id).bg_color, [1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn add_preset_fills_the_first_empty_slot() {
+        let (mut app, _id) = app_with_entry();
+        app.style_working.bg_color = [9, 9, 9, 255];
+        let _ = update(&mut app, Message::Ui(UiEvent::StylePresetAdd));
+        let _ = update(&mut app, Message::Ui(UiEvent::StylePresetAdd));
+        let _ = update(&mut app, Message::Ui(UiEvent::StylePresetAdd));
+
+        assert_eq!(app.style_presets.len(), INITIAL_PRESET_SLOTS);
+        assert_eq!(app.style_presets[5], Some(app.style_working));
+        assert_eq!(app.style_presets[6], Some(app.style_working));
+        assert_eq!(app.style_presets[7], Some(app.style_working));
+    }
+
+    #[test]
+    fn add_preset_appends_when_all_slots_are_full() {
+        let (mut app, _id) = app_with_entry();
+        app.style_presets = (0..INITIAL_PRESET_SLOTS)
+            .map(|i| {
+                let mut style = EntryStyle::default();
+                style.text_color = [i as u8, 0, 0, 255];
+                Some(style)
+            })
+            .collect();
+        let _ = update(&mut app, Message::Ui(UiEvent::StylePresetAdd));
+
+        assert_eq!(app.style_presets.len(), INITIAL_PRESET_SLOTS + 1);
+        assert_eq!(app.style_presets.last().unwrap(), &Some(app.style_working));
+    }
+
+    #[test]
+    fn add_preset_refills_an_emptied_slot_before_appending() {
+        let (mut app, _id) = app_with_entry();
+        app.style_working.text_color = [7, 7, 7, 255];
+        let _ = update(&mut app, Message::Ui(UiEvent::StylePresetRemove(2)));
+        let _ = update(&mut app, Message::Ui(UiEvent::StylePresetAdd));
+
+        assert_eq!(app.style_presets.len(), INITIAL_PRESET_SLOTS);
+        assert_eq!(app.style_presets[2], Some(app.style_working));
+    }
+
+    #[test]
+    fn replace_preset_overwrites_filled_and_empty_slots() {
+        let (mut app, _id) = app_with_entry();
+        app.style_working.text_color = [42, 0, 0, 255];
+
+        let _ = update(&mut app, Message::Ui(UiEvent::StylePresetReplace(1)));
+        assert_eq!(app.style_presets[1], Some(app.style_working));
+
+        let _ = update(&mut app, Message::Ui(UiEvent::StylePresetReplace(6)));
+        assert_eq!(app.style_presets[6], Some(app.style_working));
+
+        let _ = update(&mut app, Message::Ui(UiEvent::StylePresetReplace(999)));
+        assert_eq!(app.style_presets.len(), INITIAL_PRESET_SLOTS);
+    }
+
+    #[test]
+    fn remove_preset_empties_the_slot() {
+        let (mut app, _id) = app_with_entry();
+        let _ = update(&mut app, Message::Ui(UiEvent::StylePresetRemove(0)));
+        let _ = update(&mut app, Message::Ui(UiEvent::StylePresetRemove(999)));
+
+        assert!(app.style_presets[0].is_none());
+        assert_eq!(app.style_presets.len(), INITIAL_PRESET_SLOTS);
     }
 }
 
@@ -2106,6 +2262,36 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        Message::Ui(UiEvent::StylePresetApply(preset)) => {
+            let Some((index, id)) = app.selected else { return Task::none() };
+            let Some(Some(preset_style)) = app.style_presets.get(preset).copied() else {
+                return Task::none();
+            };
+            seed_style_inputs(app, preset_style);
+            app.images[index].project.set_entry_style(id, preset_style);
+            Task::none()
+        }
+        Message::Ui(UiEvent::StylePresetAdd) => {
+            if let Some(slot) = app.style_presets.iter_mut().find(|slot| slot.is_none()) {
+                *slot = Some(app.style_working);
+            } else {
+                app.style_presets.push(Some(app.style_working));
+            }
+            Task::none()
+        }
+        Message::Ui(UiEvent::StylePresetReplace(preset)) => {
+            if let Some(slot) = app.style_presets.get_mut(preset) {
+                *slot = Some(app.style_working);
+            }
+            Task::none()
+        }
+        Message::Ui(UiEvent::StylePresetRemove(preset)) => {
+            if let Some(slot) = app.style_presets.get_mut(preset) {
+                *slot = None;
+            }
+            Task::none()
+        }
+        Message::Ui(UiEvent::StylePresetMenuDismiss) => Task::none(),
         Message::Ui(UiEvent::StyleAutoDetect) => {
             let Some((index, id)) = app.selected else { return Task::none() };
             // The entry must leave the done set so it is eligible again, even
