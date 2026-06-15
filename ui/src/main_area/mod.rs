@@ -148,7 +148,8 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .on_toolbar_action(UiEvent::EntryToolbar)
             .on_inpaint_selection(UiEvent::InpaintSelection)
             .inpaint_mode(state.inpaint_mode())
-            .editing(state.editing());
+            .editing(state.editing())
+            .reveal(state.selected());
         iced::widget::stack![viewer, edit_overlay(state)].into()
     }
 }

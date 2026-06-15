@@ -3,10 +3,13 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
+use iced::advanced::widget::operation::{self as widget_op, Operation, Outcome, Scrollable};
+use iced::advanced::widget::{operate, Id as WidgetId};
 use iced::widget::image::Handle;
+use iced::widget::operation::AbsoluteOffset;
 use iced::widget::{pane_grid, text_editor};
 use iced::futures::{SinkExt, StreamExt};
-use iced::{Color, Element, Font, Length, Rectangle, Subscription, Task};
+use iced::{Color, Element, Font, Length, Rectangle, Subscription, Task, Vector};
 
 use scanlateit_inpaint::Engine as InpaintEngine;
 use scanlateit_model::{EntryId, EntryStyle, InpaintPatch, ProfileId, Project, Quad};
@@ -17,6 +20,7 @@ use scanlateit_ui::loaded::InpaintLayer;
 use scanlateit_ui::main_area::decode::{
     decode_page, DecodedPage, PageDecode, Tier, MAX_DECODE_EDGE, THUMB_DECODE_EDGE,
 };
+use scanlateit_ui::panel::results::{PANEL_LIST_ID, panel_row_id};
 use scanlateit_ui::{
     event::{EditOrigin, SettingsTab, StyleField, ToolbarAction, UiEvent},
     main_area, panel, settings as settings_modal, toolbar, KOREAN_FONT_NAME, KOREAN_FONT_PATH,
@@ -316,8 +320,8 @@ fn start_inline_edit(app: &mut App, index: usize, id: EntryId, origin: EditOrigi
         return Task::none();
     };
     let text = image.project.display_text(entry).to_string();
-    app.selected = Some((index, id));
-    seed_style_inputs(app, app.images[index].project.entry_style(id));
+    clear_editing(app);
+    let mut tasks = vec![select_entry(app, index, id)];
     app.editing = Some((index, id));
     app.editing_origin = origin;
     app.editing_dirty = false;
@@ -330,7 +334,12 @@ fn start_inline_edit(app: &mut App, index: usize, id: EntryId, origin: EditOrigi
         EditOrigin::Overlay => EDIT_INPUT_ID,
         EditOrigin::Panel => PANEL_EDIT_INPUT_ID,
     };
-    Task::batch([iced::widget::operation::focus(focus_id)])
+    tasks.push(iced::widget::operation::focus(focus_id));
+    if origin == EditOrigin::Overlay {
+        // Editing started in the main area: make sure the panel shows the row.
+        tasks.push(panel_scroll_task(index, id));
+    }
+    Task::batch(tasks)
 }
 
 /// Clears every piece of inline-editing state in one place.
@@ -349,6 +358,21 @@ fn seed_style_inputs(app: &mut App, style: EntryStyle) {
     app.style_picker = None;
     app.style_stroke_width = style.stroke_width.to_string();
     app.style_bg_radius = style.bg_radius.to_string();
+}
+
+/// Selects `(index, id)`: seeds the style inputs and, when the entry's page
+/// is outside the currently settled decode window (a panel-driven reveal
+/// moved the viewport without a `TilesVisible` event), schedules a full-res
+/// settle for that page.
+fn select_entry(app: &mut App, index: usize, id: EntryId) -> Task<Message> {
+    app.selected = Some((index, id));
+    seed_style_inputs(app, app.images[index].project.entry_style(id));
+    let needs_settle = app.settled.as_ref().is_none_or(|range| !range.contains(&index));
+    if needs_settle {
+        schedule_settle(app, index..index + 1)
+    } else {
+        Task::none()
+    }
 }
 
 /// Points the model picker at the current provider's (already fetched)
@@ -834,15 +858,6 @@ fn start_ocr_stream(app: &mut App) -> Task<Message> {
     let workers = app.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
     let window = workers + 1;
     let total = runs.len();
-    eprintln!(
-        "[ocr-stream] {total} run(s), {workers} det worker(s), window {window}"
-    );
-    for (index, run) in runs.iter().enumerate() {
-        eprintln!(
-            "[ocr-run {index}] pages {}..={} band {:?} above={:?} below={:?} dedup={:?}",
-            run.page_start, run.page_end, run.band, run.above, run.below, run.dedup
-        );
-    }
     Task::stream(
         iced::stream::try_channel(1, move |mut sender| async move {
             let mut dispatched = 0usize;
@@ -875,12 +890,10 @@ fn start_ocr_stream(app: &mut App) -> Task<Message> {
                 dispatched += 1;
             }
             while pending > 0 {
-                eprintln!("[ocr-stream] waiting for recv (in_flight={in_flight}, pending={pending})");
                 let (idx, lines) = match pipeline.recv() {
                     Ok(received) => received,
                     Err(e) => return Err(e),
                 };
-                eprintln!("[ocr-stream] recv got run {idx} ({}) lines", lines.len());
                 pending -= 1;
                 in_flight -= 1;
                 let (width, margin_top) = canvas_meta
@@ -906,7 +919,6 @@ fn start_ocr_stream(app: &mut App) -> Task<Message> {
                     send_t0.elapsed()
                 );
                 if dispatched < total {
-                    eprintln!("[ocr-stream] dispatching run {dispatched}");
                     let outcome = dispatch_run(
                         &mut sender,
                         &pipeline,
@@ -1173,12 +1185,7 @@ fn assemble_run(
     let run_dims: Vec<(usize, u32, u32)> = (run.page_start..=run.page_end)
         .map(|i| (i, app.ocr_dims[i].0, app.ocr_dims[i].1))
         .collect();
-    let page_hs: Vec<u32> = app.images.iter().map(|image| image.height as u32).collect();
     let prev_held = app.held_boundary.take();
-    eprintln!(
-        "[ocr-run {index}] held candidates from prev run: {}",
-        prev_held.as_ref().map_or(0, |s| s.candidates.len())
-    );
     let prev_data = run.dedup.map(|(page, offset)| {
         let quads: Vec<Quad> = app.images[page]
             .project
@@ -1186,18 +1193,9 @@ fn assemble_run(
             .all()
             .map(|entry| entry.quad)
             .collect();
-        eprintln!(
-            "[ocr-run {index}] dedup source page {page}: {} stored quads ({:?} visible of {:?} total, {:?} deleted), offset {offset}",
-            quads.len(),
-            app.images[page].project.ocr.visible_count(),
-            app.images[page].project.ocr.total_count(),
-            app.images[page].project.ocr.total_count() - app.images[page].project.ocr.visible_count(),
-        );
         (quads, app.images[page].width as u32, offset)
     });
-    eprintln!("[ocr-run {index}] raw lines: {}", lines.len());
     let merged = ocr::merge(lines, ocr::MergeConfig::default());
-    eprintln!("[ocr-run {index}] after merge: {}", merged.len());
     let (resolved, kept) = match &prev_held {
         Some(state) => {
             let transformed = ocr::transform_candidates(
@@ -1208,36 +1206,17 @@ fn assemble_run(
                 margin_top,
             );
             let resolution = ocr::resolve_boundary(&state.candidates, &transformed, merged);
-            eprintln!(
-                "[ocr-run {index}] boundary resolve: {} appended (candidate won), {} kept lines",
-                resolution.append.len(),
-                resolution.kept.len()
-            );
             (resolution.append, resolution.kept)
         }
         None => (Vec::new(), merged),
     };
     let deduped = match &prev_data {
         Some((quads, prev_width, offset)) => {
-            let kept_len = kept.len();
-            let out = ocr::dedup_with_previous(kept, quads, *prev_width, *offset, width);
-            eprintln!(
-                "[ocr-run {index}] dedup vs {} stored quads: {} dropped, {} kept",
-                quads.len(),
-                kept_len - out.len(),
-                out.len()
-            );
-            out
+            ocr::dedup_with_previous(kept, quads, *prev_width, *offset, width)
         }
         None => kept,
     };
     let out = ocr::distribute(deduped, &run_dims, run.band, margin_top);
-    eprintln!(
-        "[ocr-run {index}] distribute: {} pages, {} entries, {} held candidates",
-        out.per_page.len(),
-        out.per_page.iter().map(|(_, e)| e.len()).sum::<usize>(),
-        out.held.len()
-    );
     let mut per_page = out.per_page;
     for candidate in resolved {
         match per_page
@@ -1256,17 +1235,6 @@ fn assemble_run(
             .map(|(p, e)| format!("p{p}:{}", e.len()))
             .collect::<Vec<_>>()
     );
-    for (page, entries) in &per_page {
-        for entry in entries {
-            let b = entry.quad.bounds();
-            if b[1] < 0.0 || b[3] > page_hs[*page] as f32 {
-                eprintln!(
-                    "[ocr-run {index}] margin entry on page {page}: text={:?} bounds={:?} page_h={}",
-                    entry.text, b, page_hs[*page]
-                );
-            }
-        }
-    }
     let held = (!out.held.is_empty()).then(|| ocr::BoundaryState {
         candidates: out.held,
         width,
@@ -1283,12 +1251,6 @@ fn commit_run_result(app: &mut App, run_result: ocr::RunResult) {
         let Some(image) = app.images.get_mut(page) else {
             continue;
         };
-        eprintln!(
-            "[ocr-finish {page}] appending {} entry(ies) to page {page} (had {} total, {} visible)",
-            entries.len(),
-            image.project.ocr.total_count(),
-            image.project.ocr.visible_count()
-        );
         app.ocr_total += image.project.append_ocr(entries);
     }
 }
@@ -1298,10 +1260,6 @@ fn commit_run_result(app: &mut App, run_result: ocr::RunResult) {
 /// fails, is cancelled, never starts or took the fallback path.
 fn flush_held_boundary(app: &mut App) {
     if let Some(state) = app.held_boundary.take() {
-        eprintln!(
-            "[ocr-finalize] flushing {} held candidate(s)",
-            state.candidates.len()
-        );
         for candidate in state.candidates {
             if let Some(image) = app.images.get_mut(candidate.page) {
                 app.ocr_total += image.project.append_ocr(vec![candidate.entry]);
@@ -1368,6 +1326,93 @@ async fn decode_async(path: String, max_edge: u32) -> Result<Arc<DecodedPage>, S
     tokio::task::spawn_blocking(move || decode_page(&path, max_edge).map(Arc::new))
         .await
         .map_err(|e| format!("decode task cancelled: {e}"))?
+}
+
+/// Schedules the settle debounce for `range` (bumping the generation so
+/// stale debounces no-op). Shared by visible-range changes and by the
+/// selection-driven reveal (whose viewport change never produces a
+/// `TilesVisible` event).
+fn schedule_settle(app: &mut App, range: Range<usize>) -> Task<Message> {
+    app.settle_seq += 1;
+    let seq = app.settle_seq;
+    app.pending_settle = Some((seq, range));
+    Task::perform(
+        async move { tokio::time::sleep(SETTLE_DEBOUNCE).await },
+        move |_| Message::SettleElapsed(seq),
+    )
+}
+
+/// Widget operation: finds the results panel's scrollable and the row
+/// container of `(index, id)` during one traversal, then — if that row is
+/// not fully visible — chains a `scroll_to` on the panel list (second
+/// traversal pass, see the runtime's `Outcome::Chain` handling) that centers
+/// the row. All bounds are absolute (iced layouts use absolute coordinates).
+struct MeasurePanelRow {
+    panel: WidgetId,
+    row: WidgetId,
+    panel_bounds: Option<Rectangle>,
+    panel_offset: f32,
+    row_y: Option<f32>,
+    row_h: Option<f32>,
+}
+
+impl Operation<Message> for MeasurePanelRow {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<Message>)) {
+        operate(self);
+    }
+
+    fn scrollable(
+        &mut self,
+        id: Option<&WidgetId>,
+        bounds: Rectangle,
+        _content_bounds: Rectangle,
+        translation: Vector,
+        _state: &mut dyn Scrollable,
+    ) {
+        if id == Some(&self.panel) {
+            self.panel_bounds = Some(bounds);
+            self.panel_offset = translation.y;
+        }
+    }
+
+    fn container(&mut self, id: Option<&WidgetId>, bounds: Rectangle) {
+        if id == Some(&self.row) {
+            self.row_y = Some(bounds.y);
+            self.row_h = Some(bounds.height);
+        }
+    }
+
+    fn finish(&self) -> Outcome<Message> {
+        let (Some(panel), Some(row_y), Some(row_h)) =
+            (self.panel_bounds, self.row_y, self.row_h)
+        else {
+            return Outcome::None;
+        };
+        let top = row_y - self.panel_offset; // row's window-space top
+        let bottom = top + row_h; // row's window-space bottom
+        let visible = top >= panel.y && bottom <= panel.y + panel.height;
+        if visible {
+            return Outcome::None; // already visible: no jump
+        }
+        let target = (row_y - panel.y - (panel.height - row_h) / 2.0).max(0.0);
+        Outcome::Chain(Box::new(widget_op::scrollable::scroll_to(
+            self.panel.clone(),
+            AbsoluteOffset { x: Some(0.0), y: Some(target) },
+        )))
+    }
+}
+
+/// Scrolls the results list to the row of `(index, id)` if it is out of
+/// view; no-op otherwise.
+fn panel_scroll_task(index: usize, id: EntryId) -> Task<Message> {
+    operate(MeasurePanelRow {
+        panel: WidgetId::new(PANEL_LIST_ID),
+        row: panel_row_id(index, id),
+        panel_bounds: None,
+        panel_offset: 0.0,
+        row_y: None,
+        row_h: None,
+    })
 }
 
 /// Spawns full-res decodes for the pending settle window (visible pages
@@ -1653,7 +1698,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::OcrStreamRun(index, result) => {
-            eprintln!("[ui-update] OcrStreamRun #{index} entered handler");
             app.pending = app.pending.saturating_sub(1);
             match result {
                 Ok(OcrRunOutcome::Canvas {
@@ -1747,15 +1791,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        Message::Ui(UiEvent::TilesVisible(range)) => {
-            app.settle_seq += 1;
-            let seq = app.settle_seq;
-            app.pending_settle = Some((seq, range));
-            Task::perform(
-                async move { tokio::time::sleep(SETTLE_DEBOUNCE).await },
-                move |_| Message::SettleElapsed(seq),
-            )
-        }
+        Message::Ui(UiEvent::TilesVisible(range)) => schedule_settle(app, range),
         Message::SettleElapsed(seq) => {
             let Some((pending_seq, _)) = app.pending_settle.as_ref() else {
                 return Task::none();
@@ -1889,15 +1925,20 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         }
         Message::Ui(UiEvent::EntryClicked(selection)) => {
             clear_editing(app);
-            app.selected = selection.filter(|(index, id)| {
-                app.images
-                    .get(*index)
-                    .is_some_and(|image| image.project.ocr.get(*id).is_some())
-            });
-            if let Some((index, id)) = app.selected {
-                seed_style_inputs(app, app.images[index].project.entry_style(id));
+            match selection {
+                Some((index, id))
+                    if app
+                        .images
+                        .get(index)
+                        .is_some_and(|image| image.project.ocr.get(id).is_some()) =>
+                {
+                    Task::batch([select_entry(app, index, id), panel_scroll_task(index, id)])
+                }
+                _ => {
+                    app.selected = None;
+                    Task::none()
+                }
             }
-            Task::none()
         }
         Message::Ui(UiEvent::EntryDoubleClicked((index, id))) => {
             start_inline_edit(app, index, id, EditOrigin::Overlay)

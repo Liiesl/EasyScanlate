@@ -9,19 +9,29 @@
 //! modal, not here.
 
 use iced::widget::text_editor;
-use iced::widget::{button, column, container, mouse_area, pick_list, row, scrollable, text, Column};
+use iced::widget::{button, column, container, mouse_area, pick_list, row, scrollable, text, Column, Id};
 use iced::{keyboard, Background, Border, Color, Element, Fill as FillLength, Font, Padding};
 
 use crate::event::{EditOrigin, UiEvent};
 use crate::loaded::LoadedImage;
 use crate::panel::MUTED_FG;
 use crate::state::UiState;
-use scanlateit_model::OcrEntry;
+use scanlateit_model::{EntryId, OcrEntry};
 use scanlateit_translation as translation;
 
 /// Widget id of the multi-line editor shown in a row while the entry is
 /// edited from the panel; must match the app's focus id.
 const PANEL_EDIT_INPUT_ID: &'static str = "panel-editor";
+
+/// Widget id of the scrollable results list; used by the app to scroll a
+/// selected entry's row into view.
+pub const PANEL_LIST_ID: &'static str = "panel-results-list";
+
+/// The widget id of the results row for `(index, id)`; must match the
+/// container id set in `entry_row`.
+pub fn panel_row_id(index: usize, id: EntryId) -> Id {
+    format!("panel-row-{index}-{}", id.0).into()
+}
 
 const ROW_SPACING: f32 = 8.0;
 /// Horizontal gap inside an input box.
@@ -144,6 +154,7 @@ fn entry_row<'a, S: UiState + ?Sized>(
     };
 
     let row = container(row![original, current].spacing(ROW_SPACING))
+        .id(panel_row_id(index, entry_id))
         .width(FillLength)
         .padding(ROW_PADDING)
         .style(move |_theme| container::Style {
@@ -270,6 +281,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
 
     column![
         scrollable(Column::with_children(results_list).spacing(4))
+            .id(PANEL_LIST_ID)
             .height(FillLength)
             .width(FillLength),
         translate,

@@ -126,6 +126,10 @@ pub struct TileView<
     /// The image index whose tile accepts inpainting range drags; `None`
     /// disables the mode. Set by the app from the panel's Inpaint button.
     inpaint_mode: Option<usize>,
+    /// A request (from a selection change elsewhere in the UI) to scroll the
+    /// entry `(index, id)` into view, centered if out of view; `None` when
+    /// there is nothing to reveal. Consumed once in `layout()`.
+    reveal: Option<(usize, EntryId)>,
 }
 
 impl<'a, Message, F, G, H, K, L, M, P, Q> TileView<'a, Message, F, G, H, K, L, M, P, Q>
@@ -153,6 +157,7 @@ where
             on_scroll_ended: None,
             editing: None,
             inpaint_mode: None,
+            reveal: None,
         }
     }
 
@@ -227,6 +232,13 @@ where
     /// and its live viewport rect is reported through `on_edit_rect`.
     pub fn editing(mut self, editing: Option<(usize, EntryId)>) -> Self {
         self.editing = editing;
+        self
+    }
+
+    /// Requests that the entry `(index, id)` be scrolled into view (centered
+    /// if out of view) on the next layout; `None` clears the request.
+    pub fn reveal(mut self, reveal: Option<(usize, EntryId)>) -> Self {
+        self.reveal = reveal;
         self
     }
 }
@@ -385,6 +397,9 @@ struct TileViewState {
     /// The image index whose tile accepts inpainting range drags (`None`
     /// disables the mode). Mirrors the widget field every frame.
     inpaint_mode: Option<usize>,
+    /// The last `reveal` request consumed in `layout()`; requests fire once
+    /// per selection change.
+    last_revealed: Option<(usize, EntryId)>,
 }
 
 impl TileViewState {
@@ -408,6 +423,7 @@ impl Default for TileViewState {
             last_edit_rect: None,
             keyboard_modifiers: keyboard::Modifiers::default(),
             inpaint_mode: None,
+            last_revealed: None,
         }
     }
 }
@@ -659,6 +675,41 @@ fn entry_rect(
         Point::new(min_x * scale, y + min_y * scale - state.offset),
         Size::new((max_x - min_x) * scale, (max_y - min_y) * scale),
     ))
+}
+
+/// The scroll offset that centers the entry `(index, id)` in the viewport,
+/// or `None` when it is already fully visible (or not measurable).
+fn reveal_offset(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    index: usize,
+    id: EntryId,
+) -> Option<f32> {
+    let tile = tiles.get(index)?;
+    let (layout, _) = tile_layout(tiles, state.width);
+    let (y, _) = layout.get(index)?;
+    let scale = if tile.source_width > 0 {
+        state.width / tile.source_width as f32
+    } else {
+        0.0
+    };
+    if scale <= 0.0 {
+        return None;
+    }
+    let entry = tile.overlays.iter().find(|e| e.id == id)?;
+    let [_, min_y, _, max_y] = entry.bounds;
+    let top = y + min_y * scale;
+    let bottom = y + max_y * scale;
+    let viewport = state.viewport_height;
+    if viewport <= 0.0 {
+        return None;
+    }
+    let max_offset = (state.content_height - viewport).max(0.0);
+    if top >= state.offset && bottom <= state.offset + viewport {
+        return None; // already fully visible
+    }
+    let target = (top - (viewport - (bottom - top)) / 2.0).clamp(0.0, max_offset);
+    (target != state.offset).then_some(target)
 }
 
 /// Viewport-relative rect of the overlay entry `editing` (widget
@@ -1152,6 +1203,14 @@ where
         state.inpaint_mode = self.inpaint_mode;
         let (_, content_height) = tile_layout(&self.tiles, state.width);
         state.content_height = content_height;
+        if self.reveal != state.last_revealed {
+            state.last_revealed = self.reveal;
+            if let Some((index, id)) = self.reveal {
+                if let Some(new_offset) = reveal_offset(&self.tiles, state, index, id) {
+                    state.offset = new_offset;
+                }
+            }
+        }
         if state.viewport_height > 0.0 {
             state.offset = state.offset.min((content_height - state.viewport_height).max(0.0));
         }
@@ -1287,6 +1346,7 @@ where
                                 &self.tiles[index].overlays,
                                 self.font,
                                 self.tiles[index].source_width as f32,
+                                overlay::CIRCULAR_OVERLAYS,
                             );
                             // The frame is translated to content coordinates;
                             // bring the cursor into the same tile-local space
