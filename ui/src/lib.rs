@@ -4,6 +4,7 @@
 //! [`UiState`]: crate::state::UiState
 //! [`UiEvent`]: crate::event::UiEvent
 
+pub mod connect;
 pub mod event;
 pub mod loaded;
 pub mod main_area;
@@ -12,6 +13,7 @@ pub mod settings;
 pub mod state;
 pub mod toolbar;
 
+pub use connect::ConnectModal;
 pub use loaded::LoadedImage;
 pub use state::UiState;
 

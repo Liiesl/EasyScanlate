@@ -2,14 +2,22 @@
 //! once at boot, saved whenever the settings modal closes.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+
+use scanlateit_translation::Connection;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
-    /// API key for the translation provider; empty falls back to the
-    /// `OPENCODE_API_KEY` environment variable.
+    /// Stored translation connections, keyed by provider id (`openai`,
+    /// `deepseek`, `custom-openai`, ...). A provider is "connected" when it
+    /// has an entry here; disconnect removes the entry.
     #[serde(default)]
-    pub api_key: String,
+    pub connections: BTreeMap<String, Connection>,
+    /// The connection used by the translation bar; `None` falls back to the
+    /// first connected provider.
+    #[serde(default)]
+    pub last_provider: Option<String>,
     /// When enabled, OCR-detected entries are auto-classified by the ONNX
     /// styling model and their style set from the prediction.
     #[serde(default)]
@@ -30,7 +38,8 @@ fn default_ocr_workers() -> usize {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            api_key: String::new(),
+            connections: BTreeMap::new(),
+            last_provider: None,
             auto_style_detect: false,
             ocr_workers: default_ocr_workers(),
             free_models_only: false,
@@ -75,14 +84,41 @@ mod tests {
     #[test]
     fn settings_round_trips_through_json() {
         let settings = Settings {
-            api_key: "sk-test-123".to_string(),
+            connections: BTreeMap::from([
+                (
+                    "deepseek".to_string(),
+                    Connection {
+                        api_key: "sk-test-123".to_string(),
+                        base_url: None,
+                        model: None,
+                    },
+                ),
+                (
+                    "custom-openai".to_string(),
+                    Connection {
+                        api_key: "sk-custom".to_string(),
+                        base_url: Some("http://localhost:11434/v1".to_string()),
+                        model: Some("llama-3.1-8b".to_string()),
+                    },
+                ),
+            ]),
+            last_provider: Some("deepseek".to_string()),
             auto_style_detect: true,
             ocr_workers: 3,
             free_models_only: true,
         };
         let text = serde_json::to_string(&settings).unwrap();
         let back: Settings = serde_json::from_str(&text).unwrap();
-        assert_eq!(back.api_key, "sk-test-123");
+        assert_eq!(back.connections["deepseek"].api_key, "sk-test-123");
+        assert_eq!(
+            back.connections["custom-openai"].base_url.as_deref(),
+            Some("http://localhost:11434/v1")
+        );
+        assert_eq!(
+            back.connections["custom-openai"].model.as_deref(),
+            Some("llama-3.1-8b")
+        );
+        assert_eq!(back.last_provider.as_deref(), Some("deepseek"));
         assert_eq!(back.auto_style_detect, true);
         assert_eq!(back.ocr_workers, 3);
         assert_eq!(back.free_models_only, true);
@@ -91,9 +127,16 @@ mod tests {
     #[test]
     fn missing_fields_default() {
         let back: Settings = serde_json::from_str("{}").unwrap();
-        assert_eq!(back.api_key, "");
+        assert!(back.connections.is_empty());
+        assert_eq!(back.last_provider, None);
         assert_eq!(back.auto_style_detect, false);
         assert_eq!(back.ocr_workers, 2);
         assert_eq!(back.free_models_only, false);
+    }
+
+    #[test]
+    fn legacy_api_key_field_is_ignored() {
+        let back: Settings = serde_json::from_str(r#"{"api_key": "kilo"}"#).unwrap();
+        assert!(back.connections.is_empty());
     }
 }

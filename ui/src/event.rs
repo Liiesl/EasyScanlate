@@ -64,7 +64,25 @@ pub enum UiEvent {
     TranslateProvider(String),
     TranslateModel(String),
     TranslateLang(String),
-    TranslateApiKey(String),
+    /// The user pressed "Connect" for the translation provider id; the app
+    /// opens the API-key entry modal.
+    TranslateConnect(String),
+    /// The user pressed "Disconnect" for the translation provider id; the
+    /// app drops its stored API key.
+    TranslateDisconnect(String),
+    /// The user typed in the API-key field of the connect modal.
+    ConnectModalKey(String),
+    /// The user typed in the base-URL field of the connect modal (custom
+    /// endpoints only).
+    ConnectModalBaseUrl(String),
+    /// The user typed in the model field of the connect modal (custom
+    /// endpoints only).
+    ConnectModalModel(String),
+    /// The user confirmed the connect modal; the app validates and stores
+    /// the connection.
+    ConnectModalSubmit,
+    /// The user cancelled the connect modal; nothing is stored.
+    ConnectModalCancel,
     /// The user toggled the "only free models" filter in the settings modal.
     FreeModelsOnlyToggle(bool),
     EntryClicked(Option<(usize, EntryId)>),
@@ -120,6 +138,9 @@ pub enum UiEvent {
     PanelResized(pane_grid::ResizeEvent),
     /// Open the settings modal from the toolbar.
     SettingsOpen,
+    /// Open the settings modal directly on the given tab (used by the
+    /// translation bar's configure button).
+    SettingsOpenTab(SettingsTab),
     /// Close the settings modal; the app persists the settings.
     SettingsClose,
     /// Switch the visible settings tab.

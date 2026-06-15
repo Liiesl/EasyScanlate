@@ -1,5 +1,8 @@
-//! Machine translation via rig. Only OpenAI-compatible gateways are wired up
-//! for now; the rest of the app only ever sees the functions in this module.
+//! Machine translation via rig. A fixed catalog of well-known gateways is
+//! offered as "supported" providers, plus two free-form slots for any
+//! OpenAI-compatible or Anthropic-compatible endpoint. A provider only
+//! becomes usable ("connected") when the user stores an API key for it; the
+//! rest of the app only ever sees the functions in this module.
 //!
 //! All OCR lines of all loaded images are translated in a single request.
 //! The prompt embeds the lines in an XML-like file structure (grouped per
@@ -10,6 +13,7 @@
 //! stores into the selected profile named `english(auto)` style.
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::LazyLock;
 
 use rig::completion::{AssistantContent, CompletionResponse};
 use rig::prelude::*;
@@ -20,19 +24,43 @@ use serde::Deserialize;
 /// blow the model's context window on big projects.
 const MAX_LINES: usize = 1000;
 
-/// Model listing mirror. Provider-specific paths (`/opencode`, `/kilo`, ...)
+/// Model listing mirror. Provider-specific paths (`/openai`, `/deepseek`, ...)
 /// keep the payload small instead of the ~6 MB full index.
 const MODELS_MIRROR: &str = "https://models.pileofthings.top";
 
-/// Fallback model choices shown in the UI while the listing is unavailable.
-pub const MODELS: [&str; 3] = ["big-pickle", "mimo-v2.5-free", "deepseek-v4-flash-free"];
+/// How the provider speaks: OpenAI chat-completions style or the Anthropic
+/// Messages API. Custom connections are built around one of these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompatKind {
+    OpenAI,
+    Anthropic,
+}
 
-/// The free models of the [`MODELS`] fallback list.
-pub const MODELS_FREE: [&str; 2] = ["mimo-v2.5-free", "deepseek-v4-flash-free"];
+/// One stored connection: the API key plus (for custom endpoints) the base
+/// URL and the single model id. Persisted in settings.json, one entry per
+/// provider id.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Connection {
+    pub api_key: String,
+    pub base_url: Option<String>,
+    pub model: Option<String>,
+}
 
-/// Translation gateways offered in the UI (models.dev provider ids, which
-/// double as the mirror path segments).
-pub const PROVIDERS: [&str; 2] = ["opencode", "kilo"];
+/// The id of the custom OpenAI-compatible connection.
+pub const CUSTOM_OPENAI: &str = "custom-openai";
+/// The id of the custom Anthropic-compatible connection.
+pub const CUSTOM_ANTHROPIC: &str = "custom-anthropic";
+
+/// Hardcoded model choices for a custom connection when the user did not
+/// enter one; the first entry is the default.
+pub const CUSTOM_OPENAI_MODELS: [&str; 2] = ["gpt-4o-mini", "deepseek-chat"];
+/// See [`CUSTOM_OPENAI_MODELS`].
+pub const CUSTOM_ANTHROPIC_MODELS: [&str; 1] = ["claude-sonnet-4-5"];
+
+/// Maximum output tokens for Anthropic-style requests (rig requires
+/// `max_tokens` to be set; a single request may translate up to
+/// [`MAX_LINES`] lines).
+const ANTHROPIC_MAX_TOKENS: u64 = 16_384;
 
 /// Target languages offered in the UI.
 pub const LANGUAGES: [&str; 13] = [
@@ -64,14 +92,123 @@ pub struct Model {
 /// the fallback list when the mirror is unreachable).
 #[derive(Debug, Clone)]
 pub struct Provider {
-    /// models.dev provider id.
+    /// models.dev provider id (or a custom-* id for free-form endpoints).
     pub id: String,
-    /// OpenAI-compatible chat completions base URL.
+    /// Display name shown in the UI.
+    pub name: String,
+    /// Chat completions base URL (OpenAI style) or the Anthropic API root.
     pub api: String,
+    /// How requests are formed against `api`.
+    pub kind: CompatKind,
     /// API key environment variable.
     pub api_key_env: String,
     /// Selectable models.
     pub models: Vec<Model>,
+}
+
+impl Provider {
+    /// The model picker entries of this provider, respecting the free-only
+    /// filter; the offline fallback list when there are none.
+    pub fn selectable_models(&self, free_only: bool) -> Vec<String> {
+        let mut ids: Vec<String> = self
+            .models
+            .iter()
+            .filter(|model| !free_only || model.free)
+            .map(|model| model.id.clone())
+            .collect();
+        if ids.is_empty() && !self.models.is_empty() {
+            ids = self.models.iter().map(|model| model.id.clone()).collect();
+        }
+        ids
+    }
+}
+
+/// One entry of the built-in gateway catalog, as a ready-to-use [`Provider`]
+/// (its `models` are the offline fallbacks used while the mirror is
+/// unreachable).
+fn entry(
+    id: &str,
+    name: &str,
+    api: &str,
+    kind: CompatKind,
+    api_key_env: &str,
+    fallback: &[&str],
+) -> Provider {
+    Provider {
+        id: id.to_string(),
+        name: name.to_string(),
+        api: api.to_string(),
+        kind,
+        api_key_env: api_key_env.to_string(),
+        models: fallback_models(fallback),
+    }
+}
+
+/// The supported gateways offered in the settings UI ("connect" buttons).
+/// Data verified against the models.dev mirror (`{MODELS_MIRROR}/{id}`):
+/// the `api` and `env` fields come from the API when present, otherwise from
+/// the provider's public defaults. `google` speaks through Gemini's
+/// OpenAI-compatibility endpoint; `minimax` is Anthropic-compatible.
+pub static SUPPORTED_PROVIDERS: LazyLock<Vec<Provider>> = LazyLock::new(|| {
+    vec![
+        entry("openai", "OpenAI", "https://api.openai.com/v1", CompatKind::OpenAI, "OPENAI_API_KEY", &["gpt-4o-mini", "gpt-5-nano"]),
+        entry("anthropic", "Anthropic", "https://api.anthropic.com", CompatKind::Anthropic, "ANTHROPIC_API_KEY", &["claude-sonnet-4-5", "claude-haiku-4-5"]),
+        entry("google", "Google (Gemini)", "https://generativelanguage.googleapis.com/v1beta/openai/", CompatKind::OpenAI, "GOOGLE_API_KEY", &["gemini-flash-lite-latest", "gemini-3.5-flash"]),
+        entry("xai", "xAI (Grok)", "https://api.x.ai/v1", CompatKind::OpenAI, "XAI_API_KEY", &["grok-4.3", "grok-4.5"]),
+        entry("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", CompatKind::OpenAI, "OPENROUTER_API_KEY", &["openai/gpt-4o-mini"]),
+        entry("nvidia", "NVIDIA", "https://integrate.api.nvidia.com/v1", CompatKind::OpenAI, "NVIDIA_API_KEY", &["nvidia/llama-3.1-nemotron-nano-8b-v1"]),
+        entry("deepseek", "DeepSeek", "https://api.deepseek.com", CompatKind::OpenAI, "DEEPSEEK_API_KEY", &["deepseek-chat", "deepseek-reasoner"]),
+        entry("kilo", "Kilo", "https://api.kilo.ai/api/gateway", CompatKind::OpenAI, "KILO_API_KEY", &["deepseek-v4-flash", "mimo-v2.5"]),
+        entry("moonshotai", "Moonshot AI", "https://api.moonshot.ai/v1", CompatKind::OpenAI, "MOONSHOT_API_KEY", &["kimi-k2.5", "kimi-k3"]),
+        entry("zai", "Z.AI", "https://api.z.ai/api/paas/v4", CompatKind::OpenAI, "ZHIPU_API_KEY", &["glm-4.5-flash", "glm-4.6"]),
+        entry("minimax", "MiniMax", "https://api.minimax.io/anthropic/v1", CompatKind::Anthropic, "MINIMAX_API_KEY", &["MiniMax-M2.1", "MiniMax-M2.5"]),
+        entry("opencode", "OpenCode Zen", "https://opencode.ai/zen/v1", CompatKind::OpenAI, "OPENCODE_API_KEY", &["deepseek-v4-flash", "mimo-v2.5-free"]),
+        entry("opencode-go", "OpenCode Go", "https://opencode.ai/zen/go/v1", CompatKind::OpenAI, "OPENCODE_API_KEY", &["deepseek-v4-flash", "mimo-v2.5"]),
+        entry("mistral", "Mistral", "https://api.mistral.ai/v1", CompatKind::OpenAI, "MISTRAL_API_KEY", &["mistral-small-latest", "mistral-medium-2508"]),
+        entry("ollama-cloud", "Ollama Cloud", "https://ollama.com/v1", CompatKind::OpenAI, "OLLAMA_API_KEY", &["deepseek-v4-flash", "kimi-k3"]),
+    ]
+});
+
+fn fallback_models(ids: &[&str]) -> Vec<Model> {
+    ids.iter()
+        .map(|id| Model {
+            id: (*id).to_string(),
+            free: false,
+        })
+        .collect()
+}
+
+/// Looks up a supported gateway by its provider id.
+pub fn catalog_provider(id: &str) -> Option<&'static Provider> {
+    SUPPORTED_PROVIDERS.iter().find(|p| p.id == id)
+}
+
+/// The connection id of a custom endpoint matching `kind`, or `None` when
+/// `id` is a built-in gateway.
+pub fn custom_id(kind: CompatKind) -> &'static str {
+    match kind {
+        CompatKind::OpenAI => CUSTOM_OPENAI,
+        CompatKind::Anthropic => CUSTOM_ANTHROPIC,
+    }
+}
+
+/// Whether `id` is one of the two custom connection slots.
+pub fn is_custom(id: &str) -> bool {
+    id == CUSTOM_OPENAI || id == CUSTOM_ANTHROPIC
+}
+
+/// Display name for a connection id: the catalog name, the custom labels,
+/// or the id itself as a last resort.
+pub fn provider_name(id: &str) -> String {
+    if id == CUSTOM_OPENAI {
+        return "Custom (OpenAI-compatible)".to_string();
+    }
+    if id == CUSTOM_ANTHROPIC {
+        return "Custom (Anthropic-compatible)".to_string();
+    }
+    catalog_provider(id)
+        .map(|p| p.name.to_string())
+        .unwrap_or_else(|| id.to_string())
 }
 
 /// Profile name convention for machine translations: `english(auto)`.
@@ -128,73 +265,112 @@ struct ModelCost {
     output: Option<f64>,
 }
 
-/// Fetches and filters the model list of every [`PROVIDERS`] gateway, keyed
-/// by provider id. Each entry falls back to hardcoded defaults when its
-/// listing is unreachable.
-pub async fn fetch_all_providers() -> HashMap<String, Provider> {
+/// Fetches and filters the model list of every requested gateway (by
+/// provider id), keyed by id. Each entry falls back to the catalog's
+/// offline defaults when its listing is unreachable.
+pub async fn fetch_providers(ids: Vec<String>) -> HashMap<String, Provider> {
     let mut providers = HashMap::new();
-    for id in PROVIDERS {
-        providers.insert(id.to_string(), fetch_provider(id).await);
+    for id in &ids {
+        providers.insert(id.clone(), fetch_provider(id).await);
     }
     providers
 }
 
 /// Fetches one gateway's listing from the models mirror and returns the
-/// usable [`Provider`]: the API base URL and key environment variable are
-/// taken from the listing itself. On any failure the hardcoded fallbacks are
-/// used, so the app always has something to show.
+/// usable [`Provider`]: the API base URL and key environment variable come
+/// from the catalog. On any failure the catalog's fallback models are used,
+/// so the app always has something to show.
 pub async fn fetch_provider(id: &str) -> Provider {
-    let fallback = fallback_provider(id);
+    let Some(catalog) = catalog_provider(id) else {
+        return custom_fallback_provider(id);
+    };
     let url = format!("{MODELS_MIRROR}/{id}");
     let response = match reqwest::get(&url).await {
         Ok(response) => response,
         Err(e) => {
             eprintln!("[translation] {id} models fetch failed: {e}; using fallback list");
-            return fallback;
+            return catalog.clone();
         }
     };
     let listing: ProviderListing = match response.json().await {
         Ok(listing) => listing,
         Err(e) => {
             eprintln!("[translation] {id} models listing parse failed: {e}; using fallback list");
-            return fallback;
+            return catalog.clone();
         }
     };
     let models = select_models(&listing);
     eprintln!("[translation] {} model(s) loaded from {url}", models.len());
     Provider {
-        id: id.to_string(),
+        id: catalog.id.to_string(),
+        name: catalog.name.to_string(),
         api: listing
             .api
             .filter(|api| !api.is_empty())
-            .unwrap_or_else(|| fallback.api.clone()),
+            .unwrap_or_else(|| catalog.api.to_string()),
+        kind: catalog.kind,
         api_key_env: listing
             .env
             .first()
             .cloned()
-            .unwrap_or_else(|| fallback.api_key_env.clone()),
+            .unwrap_or_else(|| catalog.api_key_env.to_string()),
         models,
     }
 }
 
-/// The offline fallback for one gateway.
-fn fallback_provider(id: &str) -> Provider {
-    let (api, api_key_env) = match id {
-        "kilo" => ("https://api.kilo.ai/api/gateway", "KILO_API_KEY"),
-        _ => ("https://opencode.ai/zen/v1", "OPENCODE_API_KEY"),
+/// The offline fallback for a custom connection id: its catalog entry when
+/// known, otherwise the plain custom-* defaults.
+fn custom_fallback_provider(id: &str) -> Provider {
+    let (kind, name, models) = match id {
+        CUSTOM_OPENAI => (
+            CompatKind::OpenAI,
+            "Custom (OpenAI-compatible)",
+            &CUSTOM_OPENAI_MODELS[..],
+        ),
+        CUSTOM_ANTHROPIC => (
+            CompatKind::Anthropic,
+            "Custom (Anthropic-compatible)",
+            &CUSTOM_ANTHROPIC_MODELS[..],
+        ),
+        _ => (CompatKind::OpenAI, id, &[][..]),
     };
     Provider {
         id: id.to_string(),
-        api: api.to_string(),
-        api_key_env: api_key_env.to_string(),
-        models: MODELS
+        name: name.to_string(),
+        api: String::new(),
+        kind,
+        api_key_env: String::new(),
+        models: models
             .iter()
             .map(|m| Model {
                 id: (*m).to_string(),
-                free: MODELS_FREE.contains(m),
+                free: false,
             })
             .collect(),
     }
+}
+
+/// The `Provider` to send requests to for a connection: the fetched/catalog
+/// gateway for built-ins, or one built from the connection's own base URL
+/// and model for custom endpoints. The model list is a single entry per
+/// connection, replaced by the connection's model or the kind's defaults.
+pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
+    let mut provider = match catalog_provider(id) {
+        Some(catalog) => catalog.clone(),
+        None => custom_fallback_provider(id),
+    };
+    if is_custom(id) {
+        provider.api = connection.base_url.clone().unwrap_or_default();
+        let model = connection
+            .model
+            .clone()
+            .unwrap_or_else(|| provider.models.first().map(|m| m.id.clone()).unwrap_or_default());
+        provider.models = vec![Model {
+            id: model,
+            free: false,
+        }];
+    }
+    provider
 }
 
 /// Applies the listing filters: drops deprecated models, keeps only the
@@ -257,9 +433,10 @@ fn is_newer(info: &ModelInfo, current: &ModelInfo) -> bool {
 }
 
 /// Translates every line in `items` into `target` using `model` on the given
-/// gateway. `api_key` overrides the provider's environment variable when set
-/// (in-memory only; never persisted). On success returns one translation per
-/// input line, in the same order.
+/// gateway (dispatched by its [`CompatKind`]). `api_key` overrides the
+/// provider's environment variable when set (in-memory only; never
+/// persisted). On success returns one translation per input line, in the
+/// same order.
 pub async fn translate_all(
     items: &[TranslateItem],
     target: &str,
@@ -283,32 +460,56 @@ pub async fn translate_all(
         .unwrap_or_default();
     if key.is_empty() {
         return Err(format!(
-            "Translation init failed: no API key for {} (set {} or enter an API key)",
-            provider.id, provider.api_key_env
+            "Translation init failed: no API key for {} (set {} or connect it in Settings)",
+            provider.name, provider.api_key_env
+        ));
+    }
+    if provider.api.is_empty() {
+        return Err(format!(
+            "Translation init failed: no base URL for {}; enter one in Settings.",
+            provider.name
         ));
     }
 
-    let client = openai::CompletionsClient::builder()
-        .api_key(&key)
-        .base_url(&provider.api)
-        .build()
-        .map_err(|e| format!("Translation init failed: {e}"))?;
-    let completion = client.completion_model(model);
-
     let prompt = build_prompt(items, target);
+    let output = match provider.kind {
+        CompatKind::OpenAI => {
+            let client = openai::CompletionsClient::builder()
+                .api_key(&key)
+                .base_url(&provider.api)
+                .build()
+                .map_err(|e| format!("Translation init failed: {e}"))?;
+            let completion = client.completion_model(model);
+            let response = completion
+                .completion_request(&prompt)
+                .preamble(SYSTEM.to_string())
+                .temperature(1.0)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            choice_text(&response)
+        }
+        CompatKind::Anthropic => {
+            let client = rig::providers::anthropic::Client::builder()
+                .api_key(&key)
+                .base_url(&provider.api)
+                .build()
+                .map_err(|e| format!("Translation init failed: {e}"))?;
+            let completion = client.completion_model(model);
+            let response = completion
+                .completion_request(&prompt)
+                .preamble(SYSTEM.to_string())
+                .max_tokens(ANTHROPIC_MAX_TOKENS)
+                .temperature(1.0)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            choice_text(&response)
+        }
+    };
     eprintln!(
-        "[translation] request: provider={} model={model} target={target} lines={}\nprompt:\n{prompt}\n---",
-        provider.id,
-        items.len()
+        "[translation] response:\n{output}\n---"
     );
-
-    let request = completion
-        .completion_request(&prompt)
-        .preamble(SYSTEM.to_string())
-        .temperature(1.0);
-    let response = request.send().await.map_err(|e| e.to_string())?;
-    let output = choice_text(&response);
-    eprintln!("[translation] response:\n{output}\n---");
 
     let parsed = parse_translation_file(&output);
     let translations = align(items, parsed)?;
@@ -462,9 +663,7 @@ fn align(items: &[TranslateItem], parsed: HashMap<(String, u64), String>) -> Res
 }
 
 /// Extracts the assistant's text from a completion response.
-fn choice_text(
-    response: &CompletionResponse<openai::completion::CompletionResponse>,
-) -> String {
+fn choice_text<R>(response: &CompletionResponse<R>) -> String {
     match response.choice.first_ref() {
         AssistantContent::Text(text) => text.text.clone(),
         _ => String::new(),
@@ -729,6 +928,108 @@ mod tests {
                 id: "deepseek-v4-flash-free".to_string(),
                 free: true
             }]
+        );
+    }
+
+    #[test]
+    fn catalog_covers_the_supported_providers() {
+        for id in [
+            "openai",
+            "anthropic",
+            "google",
+            "xai",
+            "openrouter",
+            "nvidia",
+            "deepseek",
+            "kilo",
+            "moonshotai",
+            "zai",
+            "minimax",
+            "opencode",
+            "opencode-go",
+            "mistral",
+            "ollama-cloud",
+        ] {
+            let provider = catalog_provider(id).expect("supported provider in catalog");
+            assert!(!provider.name.is_empty());
+            assert!(!provider.api.is_empty());
+            assert!(!provider.api_key_env.is_empty());
+            assert!(!provider.models.is_empty(), "{id} needs fallback models");
+        }
+    }
+
+    #[test]
+    fn catalog_metadata_matches_the_models_dev_mirror() {
+        assert_eq!(catalog_provider("minimax").unwrap().kind, CompatKind::Anthropic);
+        assert_eq!(catalog_provider("anthropic").unwrap().kind, CompatKind::Anthropic);
+        assert_eq!(
+            catalog_provider("minimax").unwrap().api,
+            "https://api.minimax.io/anthropic/v1"
+        );
+        assert_eq!(
+            catalog_provider("google").unwrap().api,
+            "https://generativelanguage.googleapis.com/v1beta/openai/"
+        );
+        assert_eq!(catalog_provider("ollama-cloud").unwrap().api_key_env, "OLLAMA_API_KEY");
+        assert_eq!(catalog_provider("moonshotai").unwrap().api_key_env, "MOONSHOT_API_KEY");
+    }
+
+    #[test]
+    fn custom_ids_resolve_kinds_and_names() {
+        assert_eq!(custom_id(CompatKind::OpenAI), CUSTOM_OPENAI);
+        assert_eq!(custom_id(CompatKind::Anthropic), CUSTOM_ANTHROPIC);
+        assert!(is_custom(CUSTOM_OPENAI));
+        assert!(is_custom(CUSTOM_ANTHROPIC));
+        assert!(!is_custom("openai"));
+        assert_eq!(provider_name(CUSTOM_OPENAI), "Custom (OpenAI-compatible)");
+        assert_eq!(provider_name(CUSTOM_ANTHROPIC), "Custom (Anthropic-compatible)");
+        assert_eq!(provider_name("openai"), "OpenAI");
+    }
+
+    #[test]
+    fn provider_for_connection_overrides_custom_api_and_models() {
+        let connection = Connection {
+            api_key: "sk-test".to_string(),
+            base_url: Some("http://localhost:11434/v1".to_string()),
+            model: Some("llama-3.1-8b".to_string()),
+        };
+        let provider = provider_for_connection(CUSTOM_OPENAI, &connection);
+        assert_eq!(provider.api, "http://localhost:11434/v1");
+        assert_eq!(provider.kind, CompatKind::OpenAI);
+        assert_eq!(provider.models.len(), 1);
+        assert_eq!(provider.models[0].id, "llama-3.1-8b");
+
+        let empty = Connection {
+            api_key: String::new(),
+            base_url: None,
+            model: None,
+        };
+        let provider = provider_for_connection(CUSTOM_OPENAI, &empty);
+        assert_eq!(provider.models[0].id, CUSTOM_OPENAI_MODELS[0]);
+
+        // A built-in connection keeps the catalog api/kind.
+        let provider = provider_for_connection("deepseek", &empty);
+        assert_eq!(provider.api, "https://api.deepseek.com");
+        assert_eq!(provider.kind, CompatKind::OpenAI);
+    }
+
+    #[test]
+    fn selectable_models_honors_the_free_only_filter() {
+        let provider = Provider {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            api: "https://example.test/v1".to_string(),
+            kind: CompatKind::OpenAI,
+            api_key_env: "TEST_API_KEY".to_string(),
+            models: vec![
+                Model { id: "free-1".to_string(), free: true },
+                Model { id: "paid-1".to_string(), free: false },
+            ],
+        };
+        assert_eq!(provider.selectable_models(true), vec!["free-1"]);
+        assert_eq!(
+            provider.selectable_models(false),
+            vec!["free-1", "paid-1"]
         );
     }
 }

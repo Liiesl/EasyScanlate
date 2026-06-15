@@ -1,8 +1,12 @@
+use std::collections::BTreeMap;
+
 use iced::widget::text_editor;
 use iced::{Color, Font, Rectangle};
 
 use scanlateit_model::{EntryId, EntryStyle};
+use scanlateit_translation::Connection;
 
+use crate::connect::ConnectModal;
 use crate::event::{EditOrigin, SettingsTab, StyleField};
 use crate::loaded::LoadedImage;
 
@@ -13,12 +17,19 @@ pub trait UiState {
     fn running(&self) -> bool;
     fn translating(&self) -> bool;
     fn status(&self) -> &str;
-    fn translate_provider(&self) -> &String;
-    fn translate_providers(&self) -> &[String];
+    /// Display name of the currently selected translation provider.
+    fn translate_provider(&self) -> String;
+    /// Display names of every connected translation provider, in catalog
+    /// order (the picker options of the translation bar).
+    fn translate_providers(&self) -> Vec<String>;
     fn translate_model(&self) -> &String;
     fn translate_models(&self) -> &[String];
     fn translate_lang(&self) -> &str;
-    fn translate_api_key(&self) -> &str;
+    /// The stored translation connections, keyed by provider id; a provider
+    /// is connected exactly when it has an entry here.
+    fn connections(&self) -> &BTreeMap<String, Connection>;
+    /// The connect modal open over the settings modal, if any.
+    fn connect_modal(&self) -> Option<&ConnectModal>;
     /// Whether the translation model picker only lists free models.
     fn free_models_only(&self) -> bool;
     fn selected(&self) -> Option<(usize, EntryId)>;

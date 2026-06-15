@@ -9,10 +9,12 @@
 //! modal, not here.
 
 use iced::widget::text_editor;
-use iced::widget::{button, column, container, mouse_area, pick_list, row, scrollable, text, Column, Id};
+use iced::widget::{
+    button, column, container, mouse_area, pick_list, row, scrollable, space, text, Column, Id,
+};
 use iced::{keyboard, Background, Border, Color, Element, Fill as FillLength, Font, Padding};
 
-use crate::event::{EditOrigin, UiEvent};
+use crate::event::{EditOrigin, SettingsTab, UiEvent};
 use crate::loaded::LoadedImage;
 use crate::panel::MUTED_FG;
 use crate::state::UiState;
@@ -205,6 +207,95 @@ fn image_results<'a, S: UiState + ?Sized>(
     elements
 }
 
+/// The bottom translation bar: the connection status and (when connected)
+/// the provider/model/language pickers and the translate button. When no
+/// provider is connected the bar collapses to a status row with a
+/// "Configure…" button that opens the settings modal on the Translation
+/// tab.
+fn translate_bar<'a, S: UiState + ?Sized>(
+    state: &'a S,
+    has_entries: bool,
+    total_results: usize,
+) -> Element<'a, UiEvent> {
+    let connected = !state.connections().is_empty();
+    let body: Element<'_, UiEvent> = if connected {
+        column![
+            row![
+                text("Service:").size(12),
+                pick_list(
+                    state.translate_providers(),
+                    Some(state.translate_provider()),
+                    |p| UiEvent::TranslateProvider(p),
+                )
+                .text_size(12)
+                .width(FillLength),
+                button(text("Configure…").size(11))
+                    .padding([2, 6])
+                    .on_press(UiEvent::SettingsOpenTab(SettingsTab::Translation)),
+            ]
+            .spacing(6),
+            row![
+                text("Model:").size(12),
+                pick_list(
+                    state.translate_models(),
+                    Some(state.translate_model()),
+                    |m| UiEvent::TranslateModel(m.to_string()),
+                )
+                .text_size(12)
+                .width(FillLength),
+                text("To:").size(12),
+                pick_list(
+                    translation::LANGUAGES,
+                    Some(state.translate_lang()),
+                    |l| UiEvent::TranslateLang(l.to_string()),
+                )
+                .text_size(12)
+                .width(FillLength),
+            ]
+            .spacing(6),
+            row![
+                button("Translate").on_press_maybe(
+                    (has_entries && !state.translating() && !state.running())
+                        .then_some(UiEvent::Translate)
+                ),
+                space::horizontal(),
+                text(format!(
+                    "{} image(s), {} result(s)",
+                    state.images().len(),
+                    total_results
+                ))
+                .size(12)
+                .color(MUTED_FG),
+            ]
+            .spacing(6)
+            .align_y(iced::Alignment::Center),
+        ]
+        .spacing(6)
+        .into()
+    } else {
+        row![
+            text("Translation service: Not connected").size(12),
+            space::horizontal(),
+            button(text("Configure…").size(11))
+                .padding([2, 6])
+                .on_press(UiEvent::SettingsOpenTab(SettingsTab::Translation)),
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center)
+        .into()
+    };
+
+    container(body)
+        .width(FillLength)
+        .padding(6)
+        .style(|_theme| container::Style {
+            background: Some(BOX_BG.into()),
+            border: Border::default().rounded(4.0),
+            ..container::Style::default()
+        })
+        .into()
+}
+
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let total_results: usize = state.images().iter().map(|i| i.project.ocr.visible_count()).sum();
     let has_entries = total_results > 0;
@@ -225,66 +316,12 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         );
     }
 
-    let translate = container(
-        column![
-            row![
-                text("Provider:").size(12),
-                pick_list(
-                    state.translate_providers(),
-                    Some(state.translate_provider()),
-                    |p| UiEvent::TranslateProvider(p.to_string()),
-                )
-                .text_size(12)
-                .width(FillLength),
-                text("Model:").size(12),
-                pick_list(
-                    state.translate_models(),
-                    Some(state.translate_model()),
-                    |m| UiEvent::TranslateModel(m.to_string()),
-                )
-                .text_size(12)
-                .width(FillLength),
-            ]
-            .spacing(6),
-            row![
-                text("To:").size(12),
-                pick_list(
-                    translation::LANGUAGES,
-                    Some(state.translate_lang()),
-                    |l| UiEvent::TranslateLang(l.to_string()),
-                )
-                .text_size(12)
-                .width(FillLength),
-                button("Translate").on_press_maybe(
-                    (has_entries && !state.translating() && !state.running())
-                        .then_some(UiEvent::Translate)
-                ),
-            ]
-            .spacing(6),
-            text(format!(
-                "{} image(s), {} result(s)",
-                state.images().len(),
-                total_results
-            ))
-            .size(12)
-            .color(MUTED_FG),
-        ]
-        .spacing(6),
-    )
-    .width(FillLength)
-    .padding(6)
-    .style(|_theme| container::Style {
-        background: Some(BOX_BG.into()),
-        border: Border::default().rounded(4.0),
-        ..container::Style::default()
-    });
-
     column![
         scrollable(Column::with_children(results_list).spacing(4))
             .id(PANEL_LIST_ID)
             .height(FillLength)
             .width(FillLength),
-        translate,
+        translate_bar(state, has_entries, total_results),
     ]
     .spacing(8)
     .height(FillLength)

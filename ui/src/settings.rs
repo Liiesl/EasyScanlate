@@ -4,10 +4,12 @@
 //! `settings.json` next to the executable when the modal closes.
 
 use iced::widget::{
-    button, center, checkbox, column, container, mouse_area, opaque, row, space, stack, text,
-    text_input,
+    button, center, checkbox, column, container, mouse_area, opaque, row, scrollable, space,
+    stack, text, text_input,
 };
 use iced::{Color, Element, Fill as FillLength, Length};
+
+use scanlateit_translation::{self as translation, CUSTOM_ANTHROPIC, CUSTOM_OPENAI};
 
 use crate::event::{SettingsTab, UiEvent};
 use crate::panel::PANEL_BG;
@@ -55,6 +57,79 @@ fn tab_button<'a, S: UiState + ?Sized>(
     .into()
 }
 
+/// The last four characters of a key, for the "connected" status display.
+fn mask_key(key: &str) -> String {
+    if key.len() > 8 {
+        format!("{}…{}", &key[..6], &key[key.len() - 4..])
+    } else {
+        "••••".to_string()
+    }
+}
+
+/// One row of the supported-provider list: name, connection status and the
+/// Connect/Disconnect button.
+fn provider_row<'a, S: UiState + ?Sized>(
+    state: &'a S,
+    provider: &'a translation::Provider,
+) -> Element<'a, UiEvent> {
+    let connected = state.connections().get(&provider.id);
+    let status = connected
+        .map(|connection| format!("Connected · {}", mask_key(&connection.api_key)))
+        .unwrap_or_else(|| "Not connected".to_string());
+    let button = match connected {
+        Some(_) => button(text("Disconnect").size(11))
+            .padding([3, 8])
+            .on_press(UiEvent::TranslateDisconnect(provider.id.clone())),
+        None => button(text("Connect").size(11))
+            .padding([3, 8])
+            .on_press(UiEvent::TranslateConnect(provider.id.clone())),
+    };
+    row![
+        column![
+            text(&provider.name).size(12),
+            text(status).size(11).color(MUTED_FG),
+        ]
+        .spacing(1)
+        .width(FillLength),
+        button,
+    ]
+    .spacing(6)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+/// One row of the custom-endpoint section.
+fn custom_row<'a, S: UiState + ?Sized>(
+    state: &'a S,
+    id: &'static str,
+    label: &'static str,
+) -> Element<'a, UiEvent> {
+    let connected = state.connections().get(id);
+    let status = connected
+        .map(|connection| format!("Connected · {}", mask_key(&connection.api_key)))
+        .unwrap_or_else(|| "Not connected".to_string());
+    let button = match connected {
+        Some(_) => button(text("Disconnect").size(11))
+            .padding([3, 8])
+            .on_press(UiEvent::TranslateDisconnect(id.to_string())),
+        None => button(text("Connect…").size(11))
+            .padding([3, 8])
+            .on_press(UiEvent::TranslateConnect(id.to_string())),
+    };
+    row![
+        column![
+            text(label).size(12),
+            text(status).size(11).color(MUTED_FG),
+        ]
+        .spacing(1)
+        .width(FillLength),
+        button,
+    ]
+    .spacing(6)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
 /// The field area of the currently selected tab.
 fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     match state.settings_tab() {
@@ -84,34 +159,48 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         ]
         .spacing(6)
         .into(),
-        SettingsTab::Translation => column![
-            text("Translation").size(14),
-            text("API key used by the machine translator; empty falls back to the \
-                  OPENCODE_API_KEY environment variable.")
-                .size(12)
-                .color(MUTED_FG),
-            row![
-                container(text("API key").size(12).color(MUTED_FG))
-                    .width(Length::Fixed(84.0)),
-                text_input("sk-…", state.translate_api_key())
-                    .on_input(UiEvent::TranslateApiKey)
-                    .secure(true)
-                    .padding(4)
+        SettingsTab::Translation => {
+            let mut rows: Vec<Element<'_, UiEvent>> = Vec::new();
+            rows.push(text("Translation Service").size(14).into());
+            rows.push(
+                text("Connect the gateway used by the machine translator. \
+                      Disconnect removes its API key.")
                     .size(12)
-                    .width(FillLength),
-            ]
-            .spacing(6),
-            checkbox(state.free_models_only())
+                    .color(MUTED_FG)
+                    .into(),
+            );
+            for provider in translation::SUPPORTED_PROVIDERS.iter() {
+                rows.push(provider_row(state, provider));
+            }
+            rows.push(text("Custom service").size(14).into());
+            rows.push(
+                text("Any other endpoint speaking the OpenAI or Anthropic \
+                      API, e.g. a local Ollama server.")
+                    .size(12)
+                    .color(MUTED_FG)
+                    .into(),
+            );
+            rows.push(custom_row(state, CUSTOM_OPENAI, "OpenAI-compatible"));
+            rows.push(custom_row(state, CUSTOM_ANTHROPIC, "Anthropic-compatible"));
+            rows.push(checkbox(state.free_models_only())
                 .label("Only show free models")
                 .text_size(12)
-                .on_toggle(UiEvent::FreeModelsOnlyToggle),
-            text("Hide paid models from the translation picker.")
-                .size(11)
-                .color(MUTED_FG),
-            text("Saved to settings.json beside the executable.").size(11).color(MUTED_FG),
-        ]
-        .spacing(8)
-        .into(),
+                .on_toggle(UiEvent::FreeModelsOnlyToggle)
+                .into());
+            rows.push(
+                text("Hide paid models from the translation picker.")
+                    .size(11)
+                    .color(MUTED_FG)
+                    .into(),
+            );
+            rows.push(
+                text("Connections are saved to settings.json beside the executable.")
+                    .size(11)
+                    .color(MUTED_FG)
+                    .into(),
+            );
+            scrollable(column(rows).spacing(4)).into()
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,8 +23,8 @@ use scanlateit_ui::main_area::decode::{
 use scanlateit_ui::panel::results::{PANEL_LIST_ID, panel_row_id};
 use scanlateit_ui::{
     event::{EditOrigin, SettingsTab, StyleField, ToolbarAction, UiEvent},
-    main_area, panel, settings as settings_modal, toolbar, KOREAN_FONT_NAME, KOREAN_FONT_PATH,
-    LoadedImage, UiState,
+    main_area, panel, settings as settings_modal, toolbar, ConnectModal, KOREAN_FONT_NAME,
+    KOREAN_FONT_PATH, LoadedImage, UiState,
 };
 
 const DECODE_PRELOAD: usize = 2;
@@ -153,6 +153,10 @@ pub struct App {
     pub(crate) inpainting: bool,
     /// The image whose tile is in inpainting selection mode.
     pub(crate) inpaint_mode: Option<usize>,
+    /// Whether the overlay text is drawn over the pages in the main area.
+    pub(crate) show_overlay_text: bool,
+    /// Whether applied inpainting patches are drawn over the pages.
+    pub(crate) show_inpaint: bool,
     /// The shared ONNX text-styling classifier, built lazily on first use.
     styling_engine: Option<StylingEngine>,
     /// True when a styling classification is queued but the engine is still
@@ -180,18 +184,25 @@ pub struct App {
     /// captured bubble is lost.
     held_boundary: Option<ocr::BoundaryState>,
     pub(crate) translating: bool,
+    /// The selected connection id (`openai`, `deepseek`, `custom-openai`,
+    /// ...); always one of the connected providers.
     pub(crate) translate_provider: String,
-    /// All translation gateways offered in the UI (provider ids).
+    /// The connected provider ids offered in the translation bar, in
+    /// catalog order followed by the custom slots.
     pub(crate) translate_providers: Vec<String>,
     /// Fetched gateway configs (api base, key env var, model ids), keyed by
-    /// provider id; every [`translation::PROVIDERS`] id is always present.
+    /// provider id; only entries for connected providers are fetched.
     pub(crate) translate_providers_map: std::collections::HashMap<String, translation::Provider>,
     pub(crate) translate_model: String,
     pub(crate) translate_lang: String,
-    pub(crate) translate_api_key: String,
+    /// Stored translation connections, keyed by provider id; a provider is
+    /// connected exactly when it has an entry here.
+    pub(crate) connections: BTreeMap<String, translation::Connection>,
+    /// The API-key entry modal open over the settings modal, if any.
+    pub(crate) connect_modal: Option<ConnectModal>,
     /// Selectable translation models of the current provider (fetched from
-    /// the models mirror, with [`translation::MODELS`] as the offline
-    /// fallback).
+    /// the models mirror, with the catalog's fallbacks as the offline
+    /// defaults).
     pub(crate) translate_models: Vec<String>,
     /// When enabled, only free models are offered in the picker.
     pub(crate) free_models_only: bool,
@@ -258,6 +269,8 @@ impl App {
             pending_inpaint: None,
             inpainting: false,
             inpaint_mode: None,
+            show_overlay_text: true,
+            show_inpaint: true,
             styling_engine: None,
             styling_pending: false,
             auto_style_detect: false,
@@ -272,19 +285,14 @@ impl App {
             ocr_runs: 0,
             held_boundary: None,
             translating: false,
-            translate_provider: translation::PROVIDERS[0].to_string(),
-            translate_providers: translation::PROVIDERS
-                .iter()
-                .map(|p| (*p).to_string())
-                .collect(),
+            translate_provider: String::new(),
+            translate_providers: Vec::new(),
             translate_providers_map: std::collections::HashMap::new(),
-            translate_model: translation::MODELS[0].to_string(),
+            translate_model: String::new(),
             translate_lang: translation::LANGUAGES[0].to_string(),
-            translate_api_key: String::new(),
-            translate_models: translation::MODELS
-                .iter()
-                .map(|m| (*m).to_string())
-                .collect(),
+            connections: BTreeMap::new(),
+            connect_modal: None,
+            translate_models: Vec::new(),
             free_models_only: false,
             settings_open: false,
             settings_tab: SettingsTab::General,
@@ -404,30 +412,55 @@ fn select_entry(app: &mut App, index: usize, id: EntryId) -> Task<Message> {
     }
 }
 
-/// Points the model picker at the current provider's (already fetched)
-/// model list, falling back to the offline list if the provider is missing.
-/// The selected model is reset when it is no longer on the list. When
-/// `free_models_only` is enabled, only free models are offered.
+/// Rebuilds the connected-provider list from the stored connections: every
+/// connected provider in catalog order, then the custom slots. The selected
+/// provider is kept when still connected, otherwise it falls back to the
+/// first connected provider (or empty).
+fn sync_translate_providers(app: &mut App) {
+    let mut ids: Vec<String> = Vec::new();
+    for provider in translation::SUPPORTED_PROVIDERS.iter() {
+        if app.connections.contains_key(&provider.id) {
+            ids.push(provider.id.clone());
+        }
+    }
+    for custom in [translation::CUSTOM_OPENAI, translation::CUSTOM_ANTHROPIC] {
+        if app.connections.contains_key(custom) {
+            ids.push(custom.to_string());
+        }
+    }
+    app.translate_providers = ids;
+    if !app.translate_providers.contains(&app.translate_provider) {
+        app.translate_provider = app.translate_providers.first().cloned().unwrap_or_default();
+        sync_translate_models(app);
+    }
+}
+
+/// Points the model picker at the current provider's model list: the
+/// fetched listing when present, otherwise the connection's own model (for
+/// custom endpoints) or the catalog's offline fallbacks. The selected model
+/// is reset when it is no longer on the list. When `free_models_only` is
+/// enabled, only free models are offered.
 fn sync_translate_models(app: &mut App) {
+    if app.translate_provider.is_empty() {
+        app.translate_models = Vec::new();
+        app.translate_model = String::new();
+        return;
+    }
     let free_only = app.free_models_only;
-    let models: Vec<String> = app
+    let provider = app
         .translate_providers_map
         .get(&app.translate_provider)
-        .map(|provider| {
-            provider
-                .models
-                .iter()
-                .filter(|model| !free_only || model.free)
-                .map(|model| model.id.clone())
-                .collect()
-        })
-        .unwrap_or_else(|| {
-            translation::MODELS
-                .iter()
-                .filter(|m| !free_only || translation::MODELS_FREE.contains(m))
-                .map(|m| (*m).to_string())
-                .collect()
+        .cloned()
+        .or_else(|| {
+            app.connections
+                .get(&app.translate_provider)
+                .map(|connection| {
+                    translation::provider_for_connection(&app.translate_provider, connection)
+                })
         });
+    let models = provider
+        .map(|provider| provider.selectable_models(free_only))
+        .unwrap_or_default();
     if models.is_empty() {
         return;
     }
@@ -459,12 +492,15 @@ impl UiState for App {
         &self.status
     }
 
-    fn translate_provider(&self) -> &String {
-        &self.translate_provider
+    fn translate_provider(&self) -> String {
+        translation::provider_name(&self.translate_provider)
     }
 
-    fn translate_providers(&self) -> &[String] {
-        &self.translate_providers
+    fn translate_providers(&self) -> Vec<String> {
+        self.translate_providers
+            .iter()
+            .map(|id| translation::provider_name(id))
+            .collect()
     }
 
     fn translate_model(&self) -> &String {
@@ -479,8 +515,12 @@ impl UiState for App {
         &self.translate_lang
     }
 
-    fn translate_api_key(&self) -> &str {
-        &self.translate_api_key
+    fn connections(&self) -> &BTreeMap<String, translation::Connection> {
+        &self.connections
+    }
+
+    fn connect_modal(&self) -> Option<&ConnectModal> {
+        self.connect_modal.as_ref()
     }
 
     fn free_models_only(&self) -> bool {
@@ -970,11 +1010,30 @@ pub fn boot() -> (App, Task<Message>) {
     };
     let mut app = App::new();
     let settings = crate::settings::Settings::load();
-    app.translate_api_key = settings.api_key;
+    app.connections = settings.connections;
     app.auto_style_detect = settings.auto_style_detect;
     app.ocr_workers = settings.ocr_workers.to_string();
     app.free_models_only = settings.free_models_only;
-    let models_task = Task::perform(translation::fetch_all_providers(), Message::ModelsFetched);
+    sync_translate_providers(&mut app);
+    if settings
+        .last_provider
+        .as_deref()
+        .is_some_and(|id| app.connections.contains_key(id))
+    {
+        app.translate_provider = settings.last_provider.unwrap();
+        sync_translate_models(&mut app);
+    }
+    let fetch_ids: Vec<String> = app
+        .translate_providers
+        .iter()
+        .filter(|id| !translation::is_custom(id))
+        .cloned()
+        .collect();
+    let models_task = if fetch_ids.is_empty() {
+        Task::none()
+    } else {
+        Task::perform(translation::fetch_providers(fetch_ids), Message::ModelsFetched)
+    };
     (app, Task::batch([font_task, models_task]))
 }
 
@@ -1622,10 +1681,20 @@ fn settle_full(app: &mut App) -> Task<Message> {
 pub fn update(app: &mut App, message: Message) -> Task<Message> {
     match message {
         Message::FetchModels => {
-            Task::perform(translation::fetch_all_providers(), Message::ModelsFetched)
+            let ids: Vec<String> = app
+                .translate_providers
+                .iter()
+                .filter(|id| !translation::is_custom(id))
+                .cloned()
+                .collect();
+            if ids.is_empty() {
+                Task::none()
+            } else {
+                Task::perform(translation::fetch_providers(ids), Message::ModelsFetched)
+            }
         }
         Message::ModelsFetched(providers) => {
-            app.translate_providers_map = providers;
+            app.translate_providers_map.extend(providers);
             sync_translate_models(app);
             Task::none()
         }
@@ -1987,6 +2056,10 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             if app.translating || app.running {
                 return Task::none();
             }
+            if app.translate_provider.is_empty() {
+                app.status = "Connect a translation service in Settings first.".to_string();
+                return Task::none();
+            }
             let jobs: Vec<(usize, EntryId, String, String)> = app
                 .images
                 .iter()
@@ -2021,27 +2094,23 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 })
                 .collect();
             let target = app.translate_lang.clone();
-            let provider = app
-                .translate_providers_map
-                .get(&app.translate_provider)
-                .cloned()
-                .unwrap_or_else(|| {
-                    // Cannot happen after boot, but keeps the task well-typed.
-                    translation::Provider {
-                        id: app.translate_provider.clone(),
-                        api: "https://opencode.ai/zen/v1".to_string(),
-                        api_key_env: "OPENCODE_API_KEY".to_string(),
-                        models: Vec::new(),
-                    }
-                });
+            let (provider, api_key) = match app.connections.get(&app.translate_provider) {
+                Some(connection) => (
+                    translation::provider_for_connection(&app.translate_provider, connection),
+                    Some(connection.api_key.clone()),
+                ),
+                None => {
+                    app.translating = false;
+                    app.status = "Translation service is not connected.".to_string();
+                    return Task::none();
+                }
+            };
             let model = app.translate_model.clone();
-            let api_key = (!app.translate_api_key.is_empty())
-                .then(|| app.translate_api_key.clone());
             app.status = format!(
                 "Translating {} line(s) to {} via {model} ({})...",
                 jobs.len(),
                 app.translate_lang,
-                provider.id
+                provider.name
             );
             Task::perform(
                 async move {
@@ -2053,9 +2122,16 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 |(jobs, result)| Message::TranslateFinished(jobs, result),
             )
         }
-        Message::Ui(UiEvent::TranslateProvider(provider)) => {
-            if app.translate_provider != provider {
-                app.translate_provider = provider;
+        Message::Ui(UiEvent::TranslateProvider(name)) => {
+            // The picker option is the display name; map it back to the id.
+            let id = app
+                .translate_providers
+                .iter()
+                .find(|id| translation::provider_name(id) == name)
+                .cloned()
+                .unwrap_or_default();
+            if !id.is_empty() && app.translate_provider != id {
+                app.translate_provider = id;
                 sync_translate_models(app);
             }
             Task::none()
@@ -2068,8 +2144,103 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.translate_lang = lang;
             Task::none()
         }
-        Message::Ui(UiEvent::TranslateApiKey(key)) => {
-            app.translate_api_key = key;
+        Message::Ui(UiEvent::TranslateConnect(provider_id)) => {
+            let is_custom = translation::is_custom(&provider_id);
+            let existing = app.connections.get(&provider_id);
+            app.connect_modal = Some(ConnectModal {
+                provider_id,
+                is_custom,
+                api_key: existing.map(|c| c.api_key.clone()).unwrap_or_default(),
+                base_url: existing
+                    .and_then(|c| c.base_url.clone())
+                    .unwrap_or_default(),
+                model: existing.and_then(|c| c.model.clone()).unwrap_or_default(),
+                error: None,
+            });
+            Task::none()
+        }
+        Message::Ui(UiEvent::TranslateDisconnect(provider_id)) => {
+            app.connections.remove(&provider_id);
+            app.translate_providers_map.remove(&provider_id);
+            sync_translate_providers(app);
+            app.status = format!(
+                "Disconnected {}. Its API key was removed.",
+                translation::provider_name(&provider_id)
+            );
+            Task::none()
+        }
+        Message::Ui(UiEvent::ConnectModalKey(key)) => {
+            if let Some(modal) = &mut app.connect_modal {
+                modal.api_key = key;
+                modal.error = None;
+            }
+            Task::none()
+        }
+        Message::Ui(UiEvent::ConnectModalBaseUrl(url)) => {
+            if let Some(modal) = &mut app.connect_modal {
+                modal.base_url = url;
+                modal.error = None;
+            }
+            Task::none()
+        }
+        Message::Ui(UiEvent::ConnectModalModel(model)) => {
+            if let Some(modal) = &mut app.connect_modal {
+                modal.model = model;
+                modal.error = None;
+            }
+            Task::none()
+        }
+        Message::Ui(UiEvent::ConnectModalSubmit) => {
+            let Some(modal) = app.connect_modal.take() else {
+                return Task::none();
+            };
+            if modal.api_key.trim().is_empty() {
+                app.connect_modal = Some(ConnectModal {
+                    error: Some("Enter an API key.".to_string()),
+                    ..modal
+                });
+                return Task::none();
+            }
+            if modal.is_custom {
+                if modal.base_url.trim().is_empty() {
+                    app.connect_modal = Some(ConnectModal {
+                        error: Some("Enter a base URL.".to_string()),
+                        ..modal
+                    });
+                    return Task::none();
+                }
+                if modal.model.trim().is_empty() {
+                    app.connect_modal = Some(ConnectModal {
+                        error: Some("Enter a model id.".to_string()),
+                        ..modal
+                    });
+                    return Task::none();
+                }
+            }
+            let id = modal.provider_id.clone();
+            app.connections.insert(
+                id.clone(),
+                translation::Connection {
+                    api_key: modal.api_key.trim().to_string(),
+                    base_url: modal.is_custom.then(|| modal.base_url.trim().to_string()),
+                    model: modal.is_custom.then(|| modal.model.trim().to_string()),
+                },
+            );
+            sync_translate_providers(app);
+            app.translate_provider = id.clone();
+            sync_translate_models(app);
+            app.status = format!("Connected {}.", translation::provider_name(&id));
+            if translation::is_custom(&id) {
+                Task::none()
+            } else {
+                Task::perform(
+                    translation::fetch_providers(vec![id]),
+                    Message::ModelsFetched,
+                )
+            }
+        }
+        Message::Ui(UiEvent::ConnectModalCancel) => {
+            app.connect_modal = None;
             Task::none()
         }
         Message::Ui(UiEvent::FreeModelsOnlyToggle(enabled)) => {
@@ -2320,10 +2491,18 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.settings_open = true;
             Task::none()
         }
+        Message::Ui(UiEvent::SettingsOpenTab(tab)) => {
+            app.settings_open = true;
+            app.settings_tab = tab;
+            Task::none()
+        }
         Message::Ui(UiEvent::SettingsClose) => {
             app.settings_open = false;
+            app.connect_modal = None;
             let settings = crate::settings::Settings {
-                api_key: app.translate_api_key.clone(),
+                connections: app.connections.clone(),
+                last_provider: (!app.translate_provider.is_empty())
+                    .then(|| app.translate_provider.clone()),
                 auto_style_detect: app.auto_style_detect,
                 ocr_workers: app.ocr_workers.parse().unwrap_or(2),
                 free_models_only: app.free_models_only,
@@ -2411,6 +2590,11 @@ pub fn view(app: &App) -> Element<'_, Message> {
         settings_modal::view(app, content)
     } else {
         content
+    };
+    let view: Element<'_, UiEvent> = if app.connect_modal.is_some() {
+        scanlateit_ui::connect::view(app, view)
+    } else {
+        view
     };
     Element::map(view, Message::from)
 }
