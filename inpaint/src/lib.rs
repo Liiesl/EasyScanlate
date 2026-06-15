@@ -147,12 +147,13 @@ fn mask_center(crop_w: u32, crop_h: u32, quads: &[Quad], origin: [f32; 2]) -> [f
 /// The model canvas window over the area crop, as `(src_x, src_y, w, h,
 /// dst_x, dst_y)`: the crop pixels `src_x..src_x+w, src_y..src_y+h` are
 /// copied to the canvas at `(dst_x, dst_y)`; everything else on the canvas
-/// stays white (image) / black (mask, i.e. "keep").
+/// reflects the window's edge pixels (symmetric padding, the padding the
+/// LaMa model was trained with).
 ///
 /// The window is centered on the combined mask boxes so a big area is fed
 /// to the model at full resolution with only the sides around the text
-/// boxes cut off; a small area is centered with white padding. Either way
-/// the model input is exactly `MODEL_EDGE` x `MODEL_EDGE`.
+/// boxes cut off; a small area is centered with symmetric padding. Either
+/// way the model input is exactly `MODEL_EDGE` x `MODEL_EDGE`.
 fn view_window(
     crop_w: u32,
     crop_h: u32,
@@ -163,6 +164,50 @@ fn view_window(
     let (sx, sw, dx) = window_dim(crop_w as i64, center[0], MODEL_EDGE as i64);
     let (sy, sh, dy) = window_dim(crop_h as i64, center[1], MODEL_EDGE as i64);
     (sx, sy, sw, sh, dx, dy)
+}
+
+/// Maps any index into the mirrored range `[0, len)`: indices inside the
+/// range pass through, indices beyond it are reflected back (symmetric
+/// padding, edge pixels repeated at the seam), including negative offsets.
+fn reflect_index(x: i64, len: i64) -> i64 {
+    let period = len * 2;
+    let mut x = x % period;
+    if x < 0 {
+        x += period;
+    }
+    if x >= len {
+        period - x - 1
+    } else {
+        x
+    }
+}
+
+/// Fills `canvas` by placing `region` at `(dst_x, dst_y)` and reflecting
+/// the region's edge pixels into the surrounding canvas area.
+fn reflect_place_rgb(canvas: &mut RgbImage, region: &RgbImage, dst_x: i64, dst_y: i64) {
+    let (canvas_w, canvas_h) = canvas.dimensions();
+    let (region_w, region_h) = (region.width() as i64, region.height() as i64);
+    for cy in 0..canvas_h as i64 {
+        let sy = reflect_index(cy - dst_y, region_h);
+        for cx in 0..canvas_w as i64 {
+            let sx = reflect_index(cx - dst_x, region_w);
+            canvas[(cx as u32, cy as u32)] = region[(sx as u32, sy as u32)];
+        }
+    }
+}
+
+/// Fills `canvas` by placing `region` at `(dst_x, dst_y)` and reflecting
+/// the region's edge pixels into the surrounding canvas area.
+fn reflect_place_gray(canvas: &mut GrayImage, region: &GrayImage, dst_x: i64, dst_y: i64) {
+    let (canvas_w, canvas_h) = canvas.dimensions();
+    let (region_w, region_h) = (region.width() as i64, region.height() as i64);
+    for cy in 0..canvas_h as i64 {
+        let sy = reflect_index(cy - dst_y, region_h);
+        for cx in 0..canvas_w as i64 {
+            let sx = reflect_index(cx - dst_x, region_w);
+            canvas[(cx as u32, cy as u32)] = region[(sx as u32, sy as u32)];
+        }
+    }
 }
 
 /// The white/black mask of a crop: white where any quad overlaps it, black
@@ -309,24 +354,16 @@ pub fn inpaint_crop(
     let crop = image::imageops::crop_imm(image, x, y, crop_w, crop_h).to_image();
 
     let (sx, sy, sw, sh, dx, dy) = view_window(crop_w, crop_h, quads, origin);
-    let mut canvas = RgbImage::from_pixel(MODEL_EDGE, MODEL_EDGE, Rgb([255, 255, 255]));
-    image::imageops::overlay(
-        &mut canvas,
-        &image::DynamicImage::from(
-            image::imageops::crop_imm(&crop, sx as u32, sy as u32, sw as u32, sh as u32)
-                .to_image(),
-        )
-        .into_rgb8(),
-        dx,
-        dy,
-    );
-    let mut canvas_mask = GrayImage::from_pixel(MODEL_EDGE, MODEL_EDGE, image::Luma([0]));
-    image::imageops::overlay(
-        &mut canvas_mask,
-        &image::imageops::crop_imm(&mask, sx as u32, sy as u32, sw as u32, sh as u32).to_image(),
-        dx,
-        dy,
-    );
+    let region = image::DynamicImage::from(
+        image::imageops::crop_imm(&crop, sx as u32, sy as u32, sw as u32, sh as u32).to_image(),
+    )
+    .into_rgb8();
+    let mut canvas = RgbImage::new(MODEL_EDGE, MODEL_EDGE);
+    reflect_place_rgb(&mut canvas, &region, dx, dy);
+    let region_mask =
+        image::imageops::crop_imm(&mask, sx as u32, sy as u32, sw as u32, sh as u32).to_image();
+    let mut canvas_mask = GrayImage::new(MODEL_EDGE, MODEL_EDGE);
+    reflect_place_gray(&mut canvas_mask, &region_mask, dx, dy);
 
     let (image, mask) = compose_inputs(&canvas, &canvas_mask);
     let output = run_session(session, image, mask)?;
@@ -532,5 +569,51 @@ mod tests {
         assert_eq!(crops.len(), 1, "the outside box must be dropped");
         assert_eq!(crops[0].1, [95.0, 30.0, 5.0, 20.0]);
         assert_eq!(crops[0].0.dimensions(), (5, 20));
+    }
+
+    #[test]
+    fn reflect_index_mirrors_beyond_both_edges_with_edge_repetition() {
+        assert_eq!(reflect_index(0, 5), 0);
+        assert_eq!(reflect_index(4, 5), 4);
+        assert_eq!(reflect_index(5, 5), 4, "the edge repeats at the seam");
+        assert_eq!(reflect_index(8, 5), 1);
+        assert_eq!(reflect_index(9, 5), 0);
+        assert_eq!(reflect_index(10, 5), 0, "full periods wrap");
+        assert_eq!(reflect_index(-1, 5), 0, "negative offsets reflect too");
+        assert_eq!(reflect_index(-5, 5), 4);
+        assert_eq!(reflect_index(-9, 5), 1);
+    }
+
+    #[test]
+    fn reflect_place_rgb_pads_the_canvas_with_mirrored_edges() {
+        let mut region = RgbImage::new(2, 2);
+        region[(0, 0)] = Rgb([1, 2, 3]);
+        region[(1, 0)] = Rgb([4, 5, 6]);
+        region[(0, 1)] = Rgb([7, 8, 9]);
+        region[(1, 1)] = Rgb([10, 11, 12]);
+        let mut canvas = RgbImage::new(4, 4);
+        reflect_place_rgb(&mut canvas, &region, 1, 1);
+        assert_eq!(canvas[(1, 1)], Rgb([1, 2, 3]), "region pixels copy through");
+        assert_eq!(canvas[(2, 1)], Rgb([4, 5, 6]));
+        assert_eq!(canvas[(1, 0)], Rgb([1, 2, 3]), "top padding mirrors the edge row");
+        assert_eq!(canvas[(0, 0)], Rgb([1, 2, 3]), "corners reflect both edges");
+        assert_eq!(canvas[(0, 3)], Rgb([7, 8, 9]), "bottom padding mirrors the bottom row");
+        assert_eq!(canvas[(3, 3)], Rgb([10, 11, 12]));
+    }
+
+    #[test]
+    fn reflect_place_gray_reflects_the_mask_border() {
+        let mut region = GrayImage::new(2, 2);
+        region[(0, 0)] = image::Luma([255]);
+        region[(1, 0)] = image::Luma([0]);
+        region[(0, 1)] = image::Luma([0]);
+        region[(1, 1)] = image::Luma([255]);
+        let mut canvas = GrayImage::new(3, 3);
+        reflect_place_gray(&mut canvas, &region, 0, 0);
+        assert_eq!(canvas[(0, 0)][0], 255);
+        assert_eq!(canvas[(1, 0)][0], 0);
+        assert_eq!(canvas[(2, 0)][0], 0, "the edge column repeats at the seam");
+        assert_eq!(canvas[(0, 2)][0], 0);
+        assert_eq!(canvas[(2, 2)][0], 255);
     }
 }
