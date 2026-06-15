@@ -126,6 +126,11 @@ pub struct TileView<
     /// The image index whose tile accepts inpainting range drags; `None`
     /// disables the mode. Set by the app from the panel's Inpaint button.
     inpaint_mode: Option<usize>,
+    /// Whether applied inpainting patches are drawn over the page rasters.
+    show_inpaint: bool,
+    /// Whether the overlay text is drawn over the pages; `false` hides only
+    /// the text, keeping the boxes and selection decorations interactive.
+    show_overlay_text: bool,
     /// A request (from a selection change elsewhere in the UI) to scroll the
     /// entry `(index, id)` into view, centered if out of view; `None` when
     /// there is nothing to reveal. Consumed once in `layout()`.
@@ -157,6 +162,8 @@ where
             on_scroll_ended: None,
             editing: None,
             inpaint_mode: None,
+            show_inpaint: true,
+            show_overlay_text: true,
             reveal: None,
         }
     }
@@ -225,6 +232,20 @@ where
     /// the mode.
     pub fn inpaint_mode(mut self, inpaint_mode: Option<usize>) -> Self {
         self.inpaint_mode = inpaint_mode;
+        self
+    }
+
+    /// Controls whether applied inpainting patches are drawn over the page
+    /// rasters; `false` hides them.
+    pub fn show_inpaint(mut self, show_inpaint: bool) -> Self {
+        self.show_inpaint = show_inpaint;
+        self
+    }
+
+    /// Controls whether the overlay text is drawn; `false` hides only the
+    /// text, keeping the boxes and selection decorations interactive.
+    pub fn show_overlay_text(mut self, show_overlay_text: bool) -> Self {
+        self.show_overlay_text = show_overlay_text;
         self
     }
 
@@ -1102,8 +1123,9 @@ where
 /// Draws the resize handles and the Rename/Delete toolbar around the
 /// selected entry, in the tile-local coordinates of its overlay frame.
 ///
-/// The decorations are skipped while the entry is being edited inline or
-/// while the user is already moving/resizing it. `cursor_local` is the
+/// The decorations are skipped while the entry is being edited inline, while
+/// the user is already moving/resizing it, or while the overlay layer is
+/// hidden entirely (`show_overlay_text` is `false`). `cursor_local` is the
 /// cursor in the frame's coordinates (`None` outside the widget), used for
 /// the toolbar's hover highlight. `flip_at` is the viewer viewport's bottom
 /// in the frame's coordinates: the toolbar hangs below the box and flips
@@ -1115,13 +1137,14 @@ fn draw_selection_decorations<'a, F>(
     tile_index: usize,
     cursor_local: Option<Point>,
     flip_at: f32,
+    show_overlay_text: bool,
 ) where
     F: geometry::frame::Backend,
 {
     let Some(entry) = tiles[tile_index].overlays.iter().find(|e| e.selected) else {
         return;
     };
-    if entry.hide_text {
+    if entry.hide_text || !show_overlay_text {
         return;
     }
     // Hide the decorations while this entry is actually being moved,
@@ -1261,17 +1284,19 @@ where
                             );
                             // Inpaint layers sit right above the page raster
                             // and below the entry overlays.
-                            let scale =
-                                frame.width() / tile.source_width.max(1) as f32;
-                            for layer in tile.inpaint {
-                                let bounds = layer.bounds;
-                                frame.draw_image(
-                                    Rectangle::new(
-                                        Point::new(bounds[0] * scale, bounds[1] * scale),
-                                        Size::new(bounds[2] * scale, bounds[3] * scale),
-                                    ),
-                                    geometry::Image::new(layer.handle.clone()),
-                                );
+                            if self.show_inpaint {
+                                let scale =
+                                    frame.width() / tile.source_width.max(1) as f32;
+                                for layer in tile.inpaint {
+                                    let bounds = layer.bounds;
+                                    frame.draw_image(
+                                        Rectangle::new(
+                                            Point::new(bounds[0] * scale, bounds[1] * scale),
+                                            Size::new(bounds[2] * scale, bounds[3] * scale),
+                                        ),
+                                        geometry::Image::new(layer.handle.clone()),
+                                    );
+                                }
                             }
                         }
                         None => draw_placeholder(&mut frame, tile.decode.thumb_failed(), self.font),
@@ -1347,6 +1372,7 @@ where
                                 self.font,
                                 self.tiles[index].source_width as f32,
                                 overlay::CIRCULAR_OVERLAYS,
+                                !self.show_overlay_text,
                             );
                             // The frame is translated to content coordinates;
                             // bring the cursor into the same tile-local space
@@ -1373,6 +1399,7 @@ where
                                 index,
                                 cursor_local,
                                 flip_at,
+                                self.show_overlay_text,
                             );
                             // The inpainting range marquee, drawn last so it
                             // sits on top of the tile's content.

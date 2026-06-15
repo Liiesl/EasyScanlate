@@ -57,6 +57,10 @@ pub trait UiState {
     /// The image whose tile is accepting inpainting range drags; `None`
     /// disables the mode.
     fn inpaint_mode(&self) -> Option<usize>;
+    /// Whether the overlay text is drawn over the pages in the main area.
+    fn show_overlay_text(&self) -> bool;
+    /// Whether applied inpainting patches are drawn over the pages.
+    fn show_inpaint(&self) -> bool;
     /// True while the settings modal is open.
     fn settings_open(&self) -> bool;
     /// The settings tab currently shown in the modal.

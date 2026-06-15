@@ -96,6 +96,10 @@ pub enum UiEvent {
     /// Toggle inpainting mode from the panel: the next drag on the page
     /// selects the range to clean.
     Inpaint,
+    /// Toggle hiding the overlay text drawn over the pages in the main area.
+    ToggleOverlayText,
+    /// Toggle showing the applied inpainting patches over the pages.
+    ToggleInpaintLayer,
     /// The user finished dragging an inpainting range on `index`'s tile;
     /// `Rectangle` is `(x, y, w, h)` in image pixels.
     InpaintSelection((usize, Rectangle)),

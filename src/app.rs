@@ -595,6 +595,14 @@ impl UiState for App {
         self.inpaint_mode
     }
 
+    fn show_overlay_text(&self) -> bool {
+        self.show_overlay_text
+    }
+
+    fn show_inpaint(&self) -> bool {
+        self.show_inpaint
+    }
+
     fn settings_open(&self) -> bool {
         self.settings_open
     }
@@ -1906,6 +1914,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                             .push(InpaintPatch { bounds });
                     }
                     app.inpaint_mode = None;
+                    app.show_inpaint = true;
                     app.status = format!("Inpainted {count} region(s).");
                 }
                 Err(e) => {
@@ -2289,6 +2298,26 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     .to_string(),
                 None => "Inpaint mode cancelled.".to_string(),
             };
+            Task::none()
+        }
+        Message::Ui(UiEvent::ToggleOverlayText) => {
+            app.show_overlay_text = !app.show_overlay_text;
+            app.status = if app.show_overlay_text {
+                "Overlay text shown."
+            } else {
+                "Overlay text hidden."
+            }
+            .to_string();
+            Task::none()
+        }
+        Message::Ui(UiEvent::ToggleInpaintLayer) => {
+            app.show_inpaint = !app.show_inpaint;
+            app.status = if app.show_inpaint {
+                "Inpaint layer shown."
+            } else {
+                "Inpaint layer hidden."
+            }
+            .to_string();
             Task::none()
         }
         Message::Ui(UiEvent::EntryToolbar((index, id, action))) => match action {

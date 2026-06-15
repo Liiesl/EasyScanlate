@@ -14,6 +14,34 @@ use crate::panel::PANEL_BG;
 pub const TOOLBAR_WIDTH: f32 = 76.0;
 
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
+    let can_toggle = !state.images().is_empty();
+
+    let toggle_text = button(
+        text(if state.show_overlay_text() {
+            "Hide Text"
+        } else {
+            "Show Text"
+        })
+        .size(13)
+        .wrapping(Wrapping::Word),
+    )
+    .width(Length::Fill)
+    .padding(4)
+    .on_press_maybe(can_toggle.then_some(UiEvent::ToggleOverlayText));
+
+    let toggle_inpaint = button(
+        text(if state.show_inpaint() {
+            "Hide Inpaint"
+        } else {
+            "Show Inpaint"
+        })
+        .size(13)
+        .wrapping(Wrapping::Word),
+    )
+    .width(Length::Fill)
+    .padding(4)
+    .on_press_maybe(can_toggle.then_some(UiEvent::ToggleInpaintLayer));
+
     let inpaint_active = state.inpaint_mode().is_some();
     let inpaint = button(
         text(if inpaint_active {
@@ -36,7 +64,9 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         .padding(4)
         .on_press(UiEvent::SettingsOpen);
 
-    container(column![inpaint, settings].spacing(6).padding(8))
+    container(column![toggle_text, toggle_inpaint, inpaint, settings]
+        .spacing(6)
+        .padding(8))
         .width(Length::Fixed(TOOLBAR_WIDTH))
         .height(Length::Fill)
         .style(|_theme| container::Style {

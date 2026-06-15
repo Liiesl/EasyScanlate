@@ -447,19 +447,29 @@ pub(crate) fn fit_circle_metrics(text: &str, font: Font, bounds: Size) -> (f32, 
 /// label's font size is auto-sized to fill its bounding box (growing or
 /// shrinking as needed). When `circular` is set, the text is wrapped
 /// manhwa-style: one centered line per row, each line's width following the
-/// ellipse chord at its height inside the box.
+/// ellipse chord at its height inside the box. When `hide_text` is set, the
+/// whole overlay layer is skipped per entry — box background, selection
+/// outline and text (the toolbar's "Hide Text" toggle). The per-entry
+/// [`OverlayEntry::hide_text`] flag (inline editing) hides only the text,
+/// keeping the box background drawn under the floating editor.
 pub fn draw_entries<'a, I, F>(
     frame: &mut F,
     entries: I,
     font: Font,
     image_width: f32,
     circular: bool,
+    hide_text: bool,
 ) where
     F: geometry::frame::Backend,
     I: IntoIterator<Item = &'a OverlayEntry<'a>>,
 {
     let scale = frame.width() / image_width.max(1.0);
     for entry in entries {
+        // The toolbar's "Hide Text" toggle hides the whole overlay layer:
+        // no box background, no selection outline, no text.
+        if hide_text {
+            continue;
+        }
         let [min_x, min_y, max_x, max_y] = entry.bounds;
         let width = (max_x - min_x).max(0.0) * scale;
         let height = (max_y - min_y).max(0.0) * scale;
