@@ -172,6 +172,20 @@ impl Profiles {
         self.profiles.iter()
     }
 
+    /// Forks a fresh profile off the original ("Default") profile and selects
+    /// it, for inline edits that must not touch the OCR source of truth.
+    /// Returns the new profile's name, or `None` when the original profile is
+    /// not selected (edits then apply in place).
+    pub fn fork_for_edit(&mut self) -> Option<String> {
+        if self.selected_id() == self.original_id() {
+            let name = self.next_available_name();
+            let forked = self.add(name.clone());
+            self.select(forked);
+            return Some(name);
+        }
+        None
+    }
+
     pub fn len(&self) -> usize {
         self.profiles.len()
     }
@@ -243,5 +257,39 @@ mod tests {
         profiles.add("Profile alpha");
         profiles.add("Profile 12abc");
         assert_eq!(profiles.next_available_name(), "Profile 1");
+    }
+
+    #[test]
+    fn fork_for_edit_forks_and_selects_when_original_is_selected() {
+        let mut profiles = Profiles::default();
+        let name = profiles.fork_for_edit().expect("fork must happen");
+        assert_eq!(name, "Profile 1");
+        assert_eq!(profiles.len(), 2);
+        let forked = profiles.find_by_name(&name).unwrap();
+        assert_ne!(forked, profiles.original_id());
+        assert_eq!(profiles.selected_id(), forked);
+
+        let entry = EntryId(1);
+        profiles.selected_mut().set_translation(entry, Some("edited".into()));
+        let original = profiles
+            .iter()
+            .find(|p| p.id == profiles.original_id())
+            .expect("original profile always exists");
+        assert_eq!(
+            original.translation_of(entry),
+            None,
+            "the original profile must keep no delta"
+        );
+    }
+
+    #[test]
+    fn fork_for_edit_is_a_noop_on_non_original_profiles() {
+        let mut profiles = Profiles::default();
+        let jp = profiles.add("JP");
+        profiles.select(jp);
+
+        assert_eq!(profiles.fork_for_edit(), None);
+        assert_eq!(profiles.len(), 2, "no new profile");
+        assert_eq!(profiles.selected_id(), jp, "selection unchanged");
     }
 }

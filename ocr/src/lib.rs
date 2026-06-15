@@ -16,7 +16,10 @@ use rapidocr_core::{is_cancelled_error, RapidOcr};
 
 pub use rapidocr_core::OcrCancellationToken;
 
-use scanlateit_model::{EntrySource, NewEntry, Quad};
+pub mod session;
+pub use session::{RunEvent, RunSession};
+
+use scanlateit_model::{EntrySource, NewEntry, Project, Quad};
 
 const MODEL_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../models");
 
@@ -506,6 +509,109 @@ pub struct BoundaryState {
 pub struct RunResult {
     pub per_page: Vec<(usize, Vec<NewEntry>)>,
     pub held: Option<BoundaryState>,
+}
+
+impl RunResult {
+    /// Appends this run's per-page entries to the projects (indexed by page)
+    /// and returns the appended count.
+    pub fn commit_entries(&self, projects: &mut [Project]) -> usize {
+        self.per_page
+            .iter()
+            .map(|(page, entries)| {
+                projects
+                    .get_mut(*page)
+                    .map_or(0, |project| project.append_ocr(entries.clone()))
+            })
+            .sum()
+    }
+}
+
+impl BoundaryState {
+    /// Appends every held candidate to its page's project and returns the
+    /// appended count. Used when a run fails, is cancelled or never starts:
+    /// the captured bubbles must not be lost.
+    pub fn commit(&self, projects: &mut [Project]) -> usize {
+        self.candidates
+            .iter()
+            .map(|candidate| {
+                projects
+                    .get_mut(candidate.page)
+                    .map_or(0, |project| project.append_ocr(vec![candidate.entry.clone()]))
+            })
+            .sum()
+    }
+}
+
+/// Assembles one run's raw lines into a commit-ready [`RunResult`], strictly
+/// in run order on the UI thread: merges nearby boxes, resolves the previous
+/// run's held boundary candidates against this run's re-detections in its top
+/// margin, dedups against the committed quads of the page above, distributes
+/// the survivors to their pages and holds this run's own boundary candidates
+/// for the next run.
+///
+/// `prev` is the dedup target: the committed quads of the page above, its
+/// width and the offset of this run's canvas top edge in that page's pixel
+/// space (`(quads, prev_width, prev_offset)`).
+pub fn assemble(
+    index: usize,
+    width: u32,
+    margin_top: u32,
+    lines: Vec<OcrLine>,
+    plans: &[RunPlan],
+    dims: &[(u32, u32)],
+    held: Option<BoundaryState>,
+    prev: Option<(Vec<Quad>, u32, u32)>,
+) -> RunResult {
+    let run = plans[index];
+    let run_dims: Vec<(usize, u32, u32)> = (run.page_start..=run.page_end)
+        .map(|i| (i, dims[i].0, dims[i].1))
+        .collect();
+    let merged = merge(lines, MergeConfig::default());
+    let (resolved, kept) = match &held {
+        Some(state) => {
+            let transformed = transform_candidates(
+                &state.candidates,
+                state.width,
+                state.boundary,
+                width,
+                margin_top,
+            );
+            let resolution = resolve_boundary(&state.candidates, &transformed, merged);
+            (resolution.append, resolution.kept)
+        }
+        None => (Vec::new(), merged),
+    };
+    let deduped = match &prev {
+        Some((quads, prev_width, offset)) => {
+            dedup_with_previous(kept, quads, *prev_width, *offset, width)
+        }
+        None => kept,
+    };
+    let out = distribute(deduped, &run_dims, run.band, margin_top);
+    let mut per_page = out.per_page;
+    for candidate in resolved {
+        match per_page
+            .iter_mut()
+            .find(|(page, _)| *page == candidate.page)
+        {
+            Some((_, entries)) => entries.push(candidate.entry),
+            None => per_page.push((candidate.page, vec![candidate.entry])),
+        }
+    }
+    per_page.sort_by_key(|(page, _)| *page);
+    eprintln!(
+        "[ocr-run {index}] final per-page: {:?}",
+        per_page
+            .iter()
+            .map(|(p, e)| format!("p{p}:{}", e.len()))
+            .collect::<Vec<_>>()
+    );
+    let held = (!out.held.is_empty()).then(|| BoundaryState {
+        candidates: out.held,
+        width,
+        boundary: out.boundary,
+    });
+    RunResult { per_page, held }
 }
 
 /// One OCR run's distributed output: per-page entries plus the boundary
@@ -1573,5 +1679,180 @@ mod tests {
         ]);
         assert!(append.is_empty());
         assert_eq!(kept, vec!["..전하를 지켜주게 숙빈".to_string()]);
+    }
+
+    fn entry(text: &str) -> NewEntry {
+        NewEntry {
+            source: EntrySource::AutoOcr,
+            text: text.to_string(),
+            score: 0.9,
+            quad: quad_xyxy(0.0, 0.0, 10.0, 10.0),
+        }
+    }
+
+    fn plan(page_start: usize, page_end: usize, band: (f32, f32), dedup: Option<(usize, u32)>) -> RunPlan {
+        RunPlan {
+            page_start,
+            page_end,
+            band,
+            above: None,
+            below: None,
+            dedup,
+        }
+    }
+
+    #[test]
+    fn assemble_maps_a_whole_page_run_to_per_page_entries() {
+        let plans = vec![plan(0, 1, (0.0, 1.0), None)];
+        let dims = [(100, 200), (100, 300)];
+        let lines = vec![
+            line("p0", 10.0, 210.0, 90.0, 240.0, 0.9),
+            line("p1", 10.0, 450.0, 90.0, 480.0, 0.9),
+        ];
+        let result = assemble(0, 100, 200, lines, &plans, &dims, None, None);
+        assert_eq!(result.per_page.len(), 2);
+        assert_eq!(result.per_page[0].0, 0);
+        assert_eq!(result.per_page[0].1[0].text, "p0");
+        assert_eq!(result.per_page[0].1[0].quad.bounds(), [10.0, 10.0, 90.0, 40.0]);
+        assert_eq!(result.per_page[1].0, 1);
+        assert_eq!(result.per_page[1].1[0].text, "p1");
+        assert_eq!(result.per_page[1].1[0].quad.bounds(), [10.0, 50.0, 90.0, 80.0]);
+        assert!(result.held.is_none());
+    }
+
+    #[test]
+    fn assemble_resolves_held_boundary_candidates_against_the_next_run() {
+        // Run 0 covers page 0 (100x400) and holds a bubble captured in its
+        // bottom margin (the capture is held, not stored); run 1 re-detects
+        // the same bubble in its top margin.
+        let plans = vec![
+            plan(0, 0, (0.0, 1.0), None),
+            plan(1, 1, (0.0, 1.0), Some((0, 400))),
+        ];
+        let dims = [(100, 400), (100, 400)];
+        let first = assemble(
+            0,
+            100,
+            200,
+            vec![line("held", 10.0, 590.0, 90.0, 640.0, 0.9)],
+            &plans,
+            &dims,
+            None,
+            None,
+        );
+        assert!(first.per_page.is_empty(), "bottom-margin bubbles are held, not stored");
+        let held = first.held.expect("run 0 holds its bottom-margin capture");
+        assert_eq!(held.candidates.len(), 1);
+        assert_eq!(held.width, 100);
+        assert_eq!(held.boundary, 600);
+
+        // Run 1's canvas starts with a 40px top strip: the seam sits at y 40
+        // and page 0 committed nothing (the capture was held, not stored).
+        let second = assemble(
+            1,
+            100,
+            40,
+            vec![line("redo", 10.0, 30.0, 90.0, 80.0, 0.9)],
+            &plans,
+            &dims,
+            Some(held),
+            Some((Vec::new(), 100, 400)),
+        );
+        assert_eq!(second.per_page.len(), 1);
+        assert_eq!(second.per_page[0].0, 1);
+        assert_eq!(second.per_page[0].1[0].text, "redo", "re-detection wins the tie");
+        assert_eq!(second.per_page[0].1[0].quad.bounds(), [10.0, -10.0, 90.0, 40.0]);
+        assert!(second.held.is_none());
+    }
+
+    #[test]
+    fn assemble_dedups_against_the_previous_page_quads() {
+        // Page 0's committed store has an entry whose quad sticks 50px past
+        // the page's bottom edge; run 1's top strip re-detects it as a
+        // duplicate and must drop the copy.
+        let plans = vec![plan(1, 1, (0.0, 1.0), Some((0, 500)))];
+        let dims = [(100, 500), (100, 500)];
+        let prev_quads = vec![quad_xyxy(20.0, 450.0, 80.0, 550.0)];
+        let result = assemble(
+            0,
+            100,
+            50,
+            vec![
+                line("span", 20.0, -50.0, 80.0, 50.0, 0.9),
+                line("own", 20.0, 120.0, 80.0, 150.0, 0.9),
+            ],
+            &plans,
+            &dims,
+            None,
+            Some((prev_quads, 100, 500)),
+        );
+        assert_eq!(result.per_page.len(), 1);
+        assert_eq!(result.per_page[0].0, 1);
+        assert_eq!(result.per_page[0].1.len(), 1);
+        assert_eq!(result.per_page[0].1[0].text, "own");
+        assert_eq!(result.per_page[0].1[0].quad.bounds(), [20.0, 70.0, 80.0, 100.0]);
+        assert!(result.held.is_none());
+    }
+
+    #[test]
+    fn assemble_maps_chunk_bands_into_the_page() {
+        // A too-tall page split in half: the run covers band 0.5..1.0 of page
+        // 0 with a 200px top strip.
+        let plans = vec![plan(0, 0, (0.5, 1.0), Some((0, 300)))];
+        let dims = [(100, 600)];
+        let result = assemble(
+            0,
+            100,
+            200,
+            vec![
+                line("chunk", 10.0, 250.0, 90.0, 280.0, 0.9),
+                line("edge", 10.0, 190.0, 90.0, 210.0, 0.9),
+            ],
+            &plans,
+            &dims,
+            None,
+            None,
+        );
+        assert_eq!(result.per_page.len(), 1);
+        let entries = &result.per_page[0].1;
+        assert_eq!(entries[0].text, "edge");
+        assert_eq!(entries[0].quad.bounds(), [10.0, 290.0, 90.0, 310.0]);
+        assert_eq!(entries[1].text, "chunk");
+        assert_eq!(entries[1].quad.bounds(), [10.0, 350.0, 90.0, 380.0]);
+        assert!(result.held.is_none());
+    }
+
+    #[test]
+    fn commit_entries_appends_per_page_entries_and_counts() {
+        let mut projects = [Project::new(), Project::new()];
+        let result = RunResult {
+            per_page: vec![
+                (0, vec![entry("a")]),
+                (1, vec![entry("b"), entry("c")]),
+                (9, vec![entry("x")]),
+            ],
+            held: None,
+        };
+        assert_eq!(result.commit_entries(&mut projects), 3, "out-of-range page skipped");
+        assert_eq!(projects[0].ocr.visible_count(), 1);
+        assert_eq!(projects[1].ocr.visible_count(), 2);
+    }
+
+    #[test]
+    fn boundary_state_commit_appends_held_candidates() {
+        let mut projects = [Project::new()];
+        let state = BoundaryState {
+            candidates: vec![
+                BoundaryCandidate { canvas_quad: [0.0, 0.0, 1.0, 1.0], entry: entry("a"), page: 0 },
+                BoundaryCandidate { canvas_quad: [0.0, 0.0, 1.0, 1.0], entry: entry("b"), page: 0 },
+                BoundaryCandidate { canvas_quad: [0.0, 0.0, 1.0, 1.0], entry: entry("c"), page: 5 },
+            ],
+            width: 100,
+            boundary: 600,
+        };
+        assert_eq!(state.commit(&mut projects), 2, "out-of-range page skipped");
+        assert_eq!(projects[0].ocr.visible_count(), 2);
+        let texts: Vec<String> = projects[0].ocr.all().map(|e| e.text.clone()).collect();
+        assert_eq!(texts, vec!["a".to_string(), "b".to_string()]);
     }
 }

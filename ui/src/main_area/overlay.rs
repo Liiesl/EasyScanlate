@@ -941,16 +941,29 @@ mod tests {
         let (got_s1, got_s2, got_beta, got_alpha) = svd2(m00, m01, m10, m11);
         assert!((got_s1 - s1).abs() < 1e-3, "s1: {got_s1} != {s1}");
         assert!((got_s2 - s2).abs() < 1e-3, "s2: {got_s2} != {s2}");
-        assert!((got_alpha - alpha).abs() < 1e-3, "alpha: {got_alpha} != {alpha}");
-        assert!((got_beta - beta).abs() < 1e-3, "beta: {got_beta} != {beta}");
+        // The eigenvector sign is free, so only the round trip
+        // A = R(got_beta) . S . R(-got_alpha) is asserted.
+        let (cga, sga) = (got_alpha.cos(), got_alpha.sin());
+        let (cgb, sgb) = (got_beta.cos(), got_beta.sin());
+        let got00 = cgb * got_s1 * cga + sgb * got_s2 * sga;
+        let got01 = cgb * got_s1 * sga - sgb * got_s2 * cga;
+        let got10 = sgb * got_s1 * cga - cgb * got_s2 * sga;
+        let got11 = sgb * got_s1 * sga + cgb * got_s2 * cga;
+        assert!((got00 - m00).abs() < 1e-3, "m00: {got00} != {m00}");
+        assert!((got01 - m01).abs() < 1e-3, "m01: {got01} != {m01}");
+        assert!((got10 - m10).abs() < 1e-3, "m10: {got10} != {m10}");
+        assert!((got11 - m11).abs() < 1e-3, "m11: {got11} != {m11}");
     }
 
     #[test]
     fn transform_maps_box_corners_onto_the_skewed_quad() {
-        // A skewed quad: top edge tilted, bottom edge straight.
+        // A skewed quad: top edge tilted, bottom edge straight. The app
+        // fits the quad's AABB (the text box spans the AABB), so the rect
+        // mirrors the box: width/height come from the bounds.
         let quad = [[0.0, 0.0], [200.0, 30.0], [180.0, 100.0], [-20.0, 70.0]];
-        let width = 200.0;
-        let height = 100.0;
+        let [min_x, min_y, max_x, max_y] = quad_bounds(quad);
+        let width = max_x - min_x;
+        let height = max_y - min_y;
         let transform = quad_transform(quad, width, height).expect("skewed quad transforms");
 
         // Apply T(c) . R(angle2) . S . R(angle1) . T(-c) to the rect corners
@@ -972,7 +985,7 @@ mod tests {
             [lx + center[0], ly + center[1]]
         };
 
-        let corners = [[0.0, 0.0], [width, 0.0], [width, height], [0.0, height]];
+        let corners = [[min_x, min_y], [max_x, min_y], [max_x, max_y], [min_x, max_y]];
         for (mapped, expected) in corners.iter().zip(quad.iter()) {
             let got = apply(mapped[0], mapped[1]);
             assert!(

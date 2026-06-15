@@ -51,6 +51,49 @@ impl Quad {
         }
         self
     }
+
+    /// Whether this quad's AABB overlaps `rect` (`[x, y, w, h]` in the same
+    /// coordinate space).
+    pub fn intersects_rect(&self, rect: [f32; 4]) -> bool {
+        let [x0, y0, x1, y1] = self.bounds();
+        !(x1 <= rect[0] || x0 >= rect[0] + rect[2] || y1 <= rect[1] || y0 >= rect[1] + rect[3])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn quad(x0: f32, y0: f32, x1: f32, y1: f32) -> Quad {
+        Quad {
+            points: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+        }
+    }
+
+    #[test]
+    fn intersects_rect_overlaps() {
+        let q = quad(0.0, 0.0, 100.0, 100.0);
+        assert!(q.intersects_rect([50.0, 50.0, 100.0, 100.0]));
+    }
+
+    #[test]
+    fn intersects_rect_disjoint() {
+        let q = quad(0.0, 0.0, 100.0, 100.0);
+        assert!(!q.intersects_rect([200.0, 200.0, 10.0, 10.0]));
+    }
+
+    #[test]
+    fn intersects_rect_edge_touching_is_not_overlap() {
+        let q = quad(0.0, 0.0, 100.0, 100.0);
+        assert!(!q.intersects_rect([100.0, 0.0, 10.0, 100.0]), "x1 <= rect[0]");
+        assert!(!q.intersects_rect([0.0, 100.0, 100.0, 10.0]), "y1 <= rect[1]");
+    }
+
+    #[test]
+    fn intersects_rect_fully_contained() {
+        let q = quad(10.0, 10.0, 90.0, 90.0);
+        assert!(q.intersects_rect([0.0, 0.0, 100.0, 100.0]));
+    }
 }
 
 /// A single OCR result line. Entries are immutable once appended; edits are

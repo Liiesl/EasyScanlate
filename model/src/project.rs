@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::{EntryId, EntryStyle, Extras, NewEntry, OcrEntry, OcrResult, Profiles, Quad};
+use super::{EntryId, EntryStyle, Extras, NewEntry, OcrEntry, OcrResult, ProfileId, Profiles, Quad};
 
 /// The whole document model for one image: immutable OCR results, freely
 /// editable profiles, cross-profile entry styles, view bounds, and extras.
@@ -82,6 +82,23 @@ impl Project {
     /// is dropped, so a future restore keeps every adjustment.
     pub fn delete_entry(&mut self, entry_id: EntryId) -> bool {
         self.ocr.soft_delete(entry_id)
+    }
+
+    /// Ensures a profile named `profile_name` exists, selects it and sets the
+    /// entry's translated text in it. Returns the profile id.
+    pub fn store_translation(
+        &mut self,
+        profile_name: &str,
+        entry_id: EntryId,
+        text: Option<String>,
+    ) -> ProfileId {
+        let id = self
+            .profiles
+            .find_by_name(profile_name)
+            .unwrap_or_else(|| self.profiles.add(profile_name));
+        self.profiles.select(id);
+        self.profiles.selected_mut().set_translation(entry_id, text);
+        id
     }
 }
 
@@ -227,5 +244,38 @@ mod tests {
             "view quad override must survive delete"
         );
         assert!(!project.delete_entry(EntryId(999)));
+    }
+
+    #[test]
+    fn store_translation_creates_and_selects_a_profile_by_name() {
+        let mut project = Project::new();
+        let id = project.ocr.append(NewEntry {
+            source: crate::EntrySource::AutoOcr,
+            text: "raw".to_string(),
+            score: 0.9,
+            quad: Quad {
+                points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            },
+        });
+
+        let profile_id = project.store_translation("english(auto)", id, Some("Hello".into()));
+
+        assert_eq!(project.profiles.len(), 2, "one new profile");
+        assert_eq!(project.profiles.find_by_name("english(auto)"), Some(profile_id));
+        assert_eq!(project.profiles.selected_id(), profile_id, "new profile selected");
+        assert_eq!(project.profiles.selected().translation_of(id), Some("Hello"));
+        assert_eq!(project.ocr.get(id).unwrap().text, "raw", "OCR text untouched");
+    }
+
+    #[test]
+    fn store_translation_reuses_an_existing_profile() {
+        let mut project = Project::new();
+        let first = project.store_translation("english(auto)", EntryId(1), Some("Hello".into()));
+        let again = project.store_translation("english(auto)", EntryId(2), Some("Hi".into()));
+
+        assert_eq!(again, first, "existing profile reused");
+        assert_eq!(project.profiles.len(), 2, "no duplicate profile");
+        assert_eq!(project.profiles.selected().translation_of(EntryId(1)), Some("Hello"));
+        assert_eq!(project.profiles.selected().translation_of(EntryId(2)), Some("Hi"));
     }
 }

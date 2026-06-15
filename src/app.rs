@@ -1,41 +1,28 @@
-use std::collections::{BTreeMap, VecDeque};
-use std::ops::Range;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use iced::advanced::widget::operation::{self as widget_op, Operation, Outcome, Scrollable};
-use iced::advanced::widget::{operate, Id as WidgetId};
 use iced::widget::image::Handle;
-use iced::widget::operation::AbsoluteOffset;
 use iced::widget::{pane_grid, text_editor};
 use iced::futures::{SinkExt, StreamExt};
-use iced::{Color, Element, Font, Length, Rectangle, Subscription, Task, Vector};
+use iced::{Color, Element, Font, Length, Rectangle, Subscription, Task};
 
 use scanlateit_inpaint::Engine as InpaintEngine;
-use scanlateit_model::{EntryId, EntryStyle, InpaintPatch, ProfileId, Project, Quad};
-use scanlateit_ocr::{self as ocr, Engine, OcrCancellationToken, ParallelEngine};
-use scanlateit_styling::Engine as StylingEngine;
-use scanlateit_translation as translation;
-use scanlateit_ui::loaded::InpaintLayer;
-use scanlateit_ui::main_area::decode::{
-    decode_page, DecodedPage, PageDecode, Tier, MAX_DECODE_EDGE, THUMB_DECODE_EDGE,
+use scanlateit_model::{
+    EntryId, EntryStyle, InpaintPatch, NewEntry, ProfileId, Project, Quad, StylePresets,
 };
-use scanlateit_ui::panel::results::{PANEL_LIST_ID, panel_row_id};
+use scanlateit_ocr::{self as ocr, Engine, OcrCancellationToken, ParallelEngine};
+use scanlateit_styling::{Engine as StylingEngine, JobTracker};
+use scanlateit_translation as translation;
+use scanlateit_ui::color::rgba_to_color;
+use scanlateit_ui::loaded::InpaintLayer;
+use scanlateit_ui::main_area::decode::{DecodedPage, PageDecode, Scheduler, Tier};
+use scanlateit_ui::panel::results::scroll_to_row;
 use scanlateit_ui::{
     event::{EditOrigin, SettingsTab, StyleField, ToolbarAction, UiEvent},
     main_area, panel, settings as settings_modal, toolbar, ConnectModal, KOREAN_FONT_NAME,
     KOREAN_FONT_PATH, LoadedImage, UiState,
 };
-
-const DECODE_PRELOAD: usize = 2;
-
-/// How long the viewport must stop scrolling before the full-resolution
-/// decode of its neighborhood kicks in.
-const SETTLE_DEBOUNCE: Duration = Duration::from_millis(150);
-
-/// How many pages beyond the full-backed window a full decode survives a
-/// settle before it is evicted.
-const FULL_KEEP_MARGIN: usize = 4;
 
 /// Widget id of the floating inline editor shown over a double-clicked entry.
 const EDIT_INPUT_ID: &'static str = "overlay-editor";
@@ -45,11 +32,6 @@ const EDIT_INPUT_ID: &'static str = "overlay-editor";
 const PANEL_EDIT_INPUT_ID: &'static str = "panel-editor";
 
 const IMAGE_FILTERS: &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "avif"];
-
-/// Number of preset slots seeded in the app: the five built-in styles
-/// plus three empty slots. The "+" tile fills the first empty slot or
-/// appends a new one when all are full, so the list can grow past this.
-const INITIAL_PRESET_SLOTS: usize = 8;
 
 /// The pane the side panel occupies at launch: ~74% of the default window
 /// width (about 1036px of the 1400px window), leaving the main area a third
@@ -70,10 +52,10 @@ pub enum Message {
     ImagesPicked(Result<Vec<(String, u32, u32)>, String>),
     EngineReady(Result<Engine, String>),
     ParallelEngineReady(Result<ParallelEngine, String>),
-    /// One parallel-pipeline OCR run's inference output: raw lines assembled
-    /// in the handler, or an already-assembled result from the fallback path
-    /// (see [`OcrRunOutcome`]).
-    OcrStreamRun(usize, Result<OcrRunOutcome, String>),
+    /// One parallel-pipeline OCR run's inference outcome: raw lines for
+    /// assembly, or an already-assembled result from the fallback path (see
+    /// [`ocr::RunEvent`]).
+    OcrStreamRun(Result<ocr::RunEvent, String>),
     /// The OCR stream ended without delivering every run (pipeline error or
     /// cancellation); the handler finalizes the run.
     OcrStreamFailed(String),
@@ -108,25 +90,6 @@ impl From<UiEvent> for Message {
     }
 }
 
-/// One OCR run's inference outcome from the parallel pipeline.
-#[derive(Debug, Clone)]
-pub enum OcrRunOutcome {
-    /// Raw lines plus the canvas metrics the handler needs for assembly.
-    /// The handler resolves the previous run's boundary candidates, dedups
-    /// against committed quads, distributes to pages and commits — strictly
-    /// in run order, on the UI thread where the committed state is
-    /// authoritative.
-    Canvas {
-        width: u32,
-        margin_top: u32,
-        lines: Vec<ocr::OcrLine>,
-    },
-    /// Fallback of the undecodable-page path: per-page entries ready to
-    /// commit directly, with no boundary candidates (the previous run's held
-    /// candidates are flushed instead of resolved).
-    Fallback(ocr::RunResult),
-}
-
 /// Session state: one loaded image plus everything iced/OCR related that the
 /// model doesn't know about (engine handle, per-image canvas cache).
 pub struct App {
@@ -157,17 +120,13 @@ pub struct App {
     pub(crate) show_overlay_text: bool,
     /// Whether applied inpainting patches are drawn over the pages.
     pub(crate) show_inpaint: bool,
-    /// The shared ONNX text-styling classifier, built lazily on first use.
-    styling_engine: Option<StylingEngine>,
-    /// True when a styling classification is queued but the engine is still
-    /// loading; jobs start once `StylingEngineReady` arrives.
-    styling_pending: bool,
+    /// Auto style-detection bookkeeping: the lazily-built classifier engine,
+    /// the in-flight build flag and the `(image index, entry id)` pairs
+    /// already classified (see [`JobTracker`]).
+    styling: JobTracker,
     /// When enabled, newly OCR-detected entries are auto-classified and their
     /// style set from the prediction.
     pub(crate) auto_style_detect: bool,
-    /// `(image index, entry id)` pairs whose style has already been set by
-    /// the classifier, so auto-run never overrides a manual tweak.
-    styled: std::collections::HashSet<(usize, EntryId)>,
     pub(crate) running: bool,
     pub(crate) font: Option<Font>,
     pub(crate) status: String,
@@ -184,28 +143,12 @@ pub struct App {
     /// captured bubble is lost.
     held_boundary: Option<ocr::BoundaryState>,
     pub(crate) translating: bool,
-    /// The selected connection id (`openai`, `deepseek`, `custom-openai`,
-    /// ...); always one of the connected providers.
-    pub(crate) translate_provider: String,
-    /// The connected provider ids offered in the translation bar, in
-    /// catalog order followed by the custom slots.
-    pub(crate) translate_providers: Vec<String>,
-    /// Fetched gateway configs (api base, key env var, model ids), keyed by
-    /// provider id; only entries for connected providers are fetched.
-    pub(crate) translate_providers_map: std::collections::HashMap<String, translation::Provider>,
-    pub(crate) translate_model: String,
+    /// The connected-provider session: stored connections, selection, model
+    /// picker lists and the free-only filter (see [`translation::Session`]).
+    pub(crate) tx: translation::Session,
     pub(crate) translate_lang: String,
-    /// Stored translation connections, keyed by provider id; a provider is
-    /// connected exactly when it has an entry here.
-    pub(crate) connections: BTreeMap<String, translation::Connection>,
     /// The API-key entry modal open over the settings modal, if any.
     pub(crate) connect_modal: Option<ConnectModal>,
-    /// Selectable translation models of the current provider (fetched from
-    /// the models mirror, with the catalog's fallbacks as the offline
-    /// defaults).
-    pub(crate) translate_models: Vec<String>,
-    /// When enabled, only free models are offered in the picker.
-    pub(crate) free_models_only: bool,
     /// True while the settings modal is open.
     pub(crate) settings_open: bool,
     /// The settings tab shown inside the modal.
@@ -228,14 +171,10 @@ pub struct App {
     pub(crate) editing_dirty: bool,
     /// Latest viewport rect of the edited entry, in tile viewer coordinates.
     pub(crate) editing_rect: Option<Rectangle>,
-    /// Monotonic generation of the settle debounce: bumped on every visible
-    /// range change, so stale debounce timers no-op.
-    settle_seq: u64,
-    /// The visible range whose settle debounce is still pending.
-    pending_settle: Option<(u64, Range<usize>)>,
-    /// The visible range the last settle backed with full decodes; results
-    /// for pages outside its preload window are dropped on arrival.
-    settled: Option<Range<usize>>,
+    /// The settled-viewport decode scheduler: debounces visible-range
+    /// changes, backs the settled window with full-res decodes and evicts
+    /// far-away full caches (see [`Scheduler`]).
+    scheduler: Scheduler,
     /// Staged style of the selected entry. Mirrors the entry's stored style
     /// on selection; mutations are written back to that entry only.
     pub(crate) style_working: EntryStyle,
@@ -250,7 +189,7 @@ pub struct App {
     /// appends a new one when all are full), clicking a filled swatch
     /// applies its style to the selected entry, and the right-click menu
     /// replaces or empties a slot.
-    pub(crate) style_presets: Vec<Option<EntryStyle>>,
+    pub(crate) presets: StylePresets,
     /// The draggable split between the main area and the side panel.
     pub(crate) panes: pane_grid::State<PaneKind>,
 }
@@ -271,10 +210,8 @@ impl App {
             inpaint_mode: None,
             show_overlay_text: true,
             show_inpaint: true,
-            styling_engine: None,
-            styling_pending: false,
+            styling: JobTracker::new(),
             auto_style_detect: false,
-            styled: std::collections::HashSet::new(),
             running: false,
             font: None,
             status: "Idle - open images to begin.".to_string(),
@@ -285,15 +222,9 @@ impl App {
             ocr_runs: 0,
             held_boundary: None,
             translating: false,
-            translate_provider: String::new(),
-            translate_providers: Vec::new(),
-            translate_providers_map: std::collections::HashMap::new(),
-            translate_model: String::new(),
+            tx: translation::Session::default(),
             translate_lang: translation::LANGUAGES[0].to_string(),
-            connections: BTreeMap::new(),
             connect_modal: None,
-            translate_models: Vec::new(),
-            free_models_only: false,
             settings_open: false,
             settings_tab: SettingsTab::General,
             selected: None,
@@ -302,30 +233,12 @@ impl App {
             edit_content: None,
             editing_dirty: false,
             editing_rect: None,
-            settle_seq: 0,
-            pending_settle: None,
-            settled: None,
+            scheduler: Scheduler::new(),
             style_working: style,
             style_picker: None,
             style_stroke_width: style.stroke_width.to_string(),
             style_bg_radius: style.bg_radius.to_string(),
-            style_presets: {
-                let mut presets = Vec::with_capacity(INITIAL_PRESET_SLOTS);
-                let mut preset = EntryStyle::default();
-                presets.push(Some(preset));
-                preset.bg_color = [0, 0, 0, 255];
-                preset.text_color = [255, 255, 255, 255];
-                presets.push(Some(preset));
-                preset.bg_color = [0, 0, 0, 0];
-                preset.text_color = [0, 0, 0, 255];
-                presets.push(Some(preset));
-                preset.text_color = [255, 255, 255, 255];
-                presets.push(Some(preset));
-                preset.bg_color = [255, 0, 0, 255];
-                presets.push(Some(preset));
-                presets.resize(INITIAL_PRESET_SLOTS, None);
-                presets
-            },
+            presets: StylePresets::default_presets(),
             panes: {
                 let (mut panes, main) = pane_grid::State::new(PaneKind::MainArea);
                 let (_, split) = panes
@@ -336,12 +249,6 @@ impl App {
             },
         }
     }
-}
-
-/// The file name (last path component) of an image path, stripped of both
-/// separator styles; used as the file tag in translation requests.
-fn file_name(path: &str) -> String {
-    path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
 }
 
 /// Starts an inline edit of `(index, id)`: selects the entry, seeds the
@@ -374,7 +281,7 @@ fn start_inline_edit(app: &mut App, index: usize, id: EntryId, origin: EditOrigi
     tasks.push(iced::widget::operation::focus(focus_id));
     if origin == EditOrigin::Overlay {
         // Editing started in the main area: make sure the panel shows the row.
-        tasks.push(panel_scroll_task(index, id));
+        tasks.push(scroll_to_row::<Message>(index, id));
     }
     Task::batch(tasks)
 }
@@ -404,75 +311,12 @@ fn seed_style_inputs(app: &mut App, style: EntryStyle) {
 fn select_entry(app: &mut App, index: usize, id: EntryId) -> Task<Message> {
     app.selected = Some((index, id));
     seed_style_inputs(app, app.images[index].project.entry_style(id));
-    let needs_settle = app.settled.as_ref().is_none_or(|range| !range.contains(&index));
-    if needs_settle {
-        schedule_settle(app, index..index + 1)
+    if app.scheduler.needs_settle(index, app.images.len()) {
+        app.scheduler
+            .schedule(index..index + 1, Message::SettleElapsed)
     } else {
         Task::none()
     }
-}
-
-/// Rebuilds the connected-provider list from the stored connections: every
-/// connected provider in catalog order, then the custom slots. The selected
-/// provider is kept when still connected, otherwise it falls back to the
-/// first connected provider (or empty).
-fn sync_translate_providers(app: &mut App) {
-    let mut ids: Vec<String> = Vec::new();
-    for provider in translation::SUPPORTED_PROVIDERS.iter() {
-        if app.connections.contains_key(&provider.id) {
-            ids.push(provider.id.clone());
-        }
-    }
-    for custom in [translation::CUSTOM_OPENAI, translation::CUSTOM_ANTHROPIC] {
-        if app.connections.contains_key(custom) {
-            ids.push(custom.to_string());
-        }
-    }
-    app.translate_providers = ids;
-    if !app.translate_providers.contains(&app.translate_provider) {
-        app.translate_provider = app.translate_providers.first().cloned().unwrap_or_default();
-        sync_translate_models(app);
-    }
-}
-
-/// Points the model picker at the current provider's model list: the
-/// fetched listing when present, otherwise the connection's own model (for
-/// custom endpoints) or the catalog's offline fallbacks. The selected model
-/// is reset when it is no longer on the list. When `free_models_only` is
-/// enabled, only free models are offered.
-fn sync_translate_models(app: &mut App) {
-    if app.translate_provider.is_empty() {
-        app.translate_models = Vec::new();
-        app.translate_model = String::new();
-        return;
-    }
-    let free_only = app.free_models_only;
-    let provider = app
-        .translate_providers_map
-        .get(&app.translate_provider)
-        .cloned()
-        .or_else(|| {
-            app.connections
-                .get(&app.translate_provider)
-                .map(|connection| {
-                    translation::provider_for_connection(&app.translate_provider, connection)
-                })
-        });
-    let models = provider
-        .map(|provider| provider.selectable_models(free_only))
-        .unwrap_or_default();
-    if models.is_empty() {
-        return;
-    }
-    app.translate_models = models;
-    if !app.translate_models.contains(&app.translate_model) {
-        app.translate_model = app.translate_models[0].clone();
-    }
-}
-
-/// Converts an RGBA color value to an iced [`Color`].
-fn rgba_to_color(rgba: [u8; 4]) -> Color {
-    Color::from_rgba8(rgba[0], rgba[1], rgba[2], rgba[3] as f32 / 255.0)
 }
 
 impl UiState for App {
@@ -493,22 +337,23 @@ impl UiState for App {
     }
 
     fn translate_provider(&self) -> String {
-        translation::provider_name(&self.translate_provider)
+        translation::provider_name(&self.tx.selected_id)
     }
 
     fn translate_providers(&self) -> Vec<String> {
-        self.translate_providers
+        self.tx
+            .connected_ids
             .iter()
             .map(|id| translation::provider_name(id))
             .collect()
     }
 
     fn translate_model(&self) -> &String {
-        &self.translate_model
+        &self.tx.selected_model
     }
 
     fn translate_models(&self) -> &[String] {
-        &self.translate_models
+        &self.tx.models
     }
 
     fn translate_lang(&self) -> &str {
@@ -516,7 +361,7 @@ impl UiState for App {
     }
 
     fn connections(&self) -> &BTreeMap<String, translation::Connection> {
-        &self.connections
+        &self.tx.connections
     }
 
     fn connect_modal(&self) -> Option<&ConnectModal> {
@@ -524,7 +369,7 @@ impl UiState for App {
     }
 
     fn free_models_only(&self) -> bool {
-        self.free_models_only
+        self.tx.free_only
     }
 
     fn selected(&self) -> Option<(usize, EntryId)> {
@@ -560,7 +405,7 @@ impl UiState for App {
     }
 
     fn style_presets(&self) -> &[Option<EntryStyle>] {
-        &self.style_presets
+        self.presets.as_slice()
     }
 
     fn auto_style_detect(&self) -> bool {
@@ -615,16 +460,7 @@ impl UiState for App {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn default_style_round_trips_all_fields() {
-        let style = EntryStyle::default();
-        assert_eq!(style.bold, false);
-        assert_eq!(style.italic, false);
-        assert_eq!(style.stroke_color, [0, 0, 0, 255]);
-        assert_eq!(style.stroke_width, 0.0);
-        assert_eq!(style.bg_radius, 0.0);
-    }
+    use scanlateit_model::INITIAL_PRESET_SLOTS;
 
     fn app_with_entry() -> (App, EntryId) {
         use scanlateit_model::{EntrySource, NewEntry, Quad};
@@ -888,33 +724,13 @@ for c in text.chars() {
     }
 
     #[test]
-    fn seeded_presets_cover_the_expected_variants() {
-        let app = App::new();
-        let presets = &app.style_presets;
-        assert_eq!(presets.len(), INITIAL_PRESET_SLOTS);
-        let filled: Vec<&EntryStyle> = presets.iter().flatten().collect();
-        assert_eq!(filled.len(), 5);
-        assert_eq!(filled[0].bg_color, [255, 255, 255, 255], "white bg");
-        assert_eq!(filled[0].text_color, [0, 0, 0, 255], "black text");
-        assert_eq!(filled[1].bg_color, [0, 0, 0, 255], "inverse: black bg");
-        assert_eq!(filled[1].text_color, [255, 255, 255, 255], "inverse: white text");
-        assert_eq!(filled[2].bg_color, [0, 0, 0, 0], "transparent bg");
-        assert_eq!(filled[2].text_color, [0, 0, 0, 255], "black text");
-        assert_eq!(filled[3].bg_color, [0, 0, 0, 0], "transparent bg");
-        assert_eq!(filled[3].text_color, [255, 255, 255, 255], "white text");
-        assert_eq!(filled[4].bg_color, [255, 0, 0, 255], "red bg");
-        assert_eq!(filled[4].text_color, [255, 255, 255, 255], "white text");
-        assert!(presets[5..].iter().all(|slot| slot.is_none()), "last slots empty");
-    }
-
-    #[test]
     fn applying_a_preset_seeds_working_style_and_entry() {
         let (mut app, id) = app_with_entry();
         app.selected = Some((0, id));
         app.style_working.bg_color = [1, 2, 3, 255];
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetApply(1)));
 
-        let preset = app.style_presets[1].expect("preset 1 seeded");
+        let preset = app.presets.get(1).expect("preset 1 seeded");
         assert_eq!(app.style_working, preset);
         assert_eq!(app.images[0].project.entry_style(id), preset);
         assert_eq!(app.style_bg_radius, preset.bg_radius.to_string());
@@ -938,6 +754,7 @@ for c in text.chars() {
         let (mut app, id) = app_with_entry();
         app.selected = Some((0, id));
         app.style_working.bg_color = [1, 2, 3, 255];
+        app.images[0].project.set_entry_style(id, app.style_working);
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetApply(5)));
 
         assert_eq!(app.style_working.bg_color, [1, 2, 3, 255]);
@@ -952,26 +769,24 @@ for c in text.chars() {
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetAdd));
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetAdd));
 
-        assert_eq!(app.style_presets.len(), INITIAL_PRESET_SLOTS);
-        assert_eq!(app.style_presets[5], Some(app.style_working));
-        assert_eq!(app.style_presets[6], Some(app.style_working));
-        assert_eq!(app.style_presets[7], Some(app.style_working));
+        assert_eq!(app.presets.len(), INITIAL_PRESET_SLOTS);
+        assert_eq!(app.presets.get(5), Some(app.style_working));
+        assert_eq!(app.presets.get(6), Some(app.style_working));
+        assert_eq!(app.presets.get(7), Some(app.style_working));
     }
 
     #[test]
     fn add_preset_appends_when_all_slots_are_full() {
         let (mut app, _id) = app_with_entry();
-        app.style_presets = (0..INITIAL_PRESET_SLOTS)
-            .map(|i| {
-                let mut style = EntryStyle::default();
-                style.text_color = [i as u8, 0, 0, 255];
-                Some(style)
-            })
-            .collect();
+        for i in 0..INITIAL_PRESET_SLOTS {
+            let mut style = EntryStyle::default();
+            style.text_color = [i as u8, 0, 0, 255];
+            app.presets.replace(i, style);
+        }
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetAdd));
 
-        assert_eq!(app.style_presets.len(), INITIAL_PRESET_SLOTS + 1);
-        assert_eq!(app.style_presets.last().unwrap(), &Some(app.style_working));
+        assert_eq!(app.presets.len(), INITIAL_PRESET_SLOTS + 1);
+        assert_eq!(app.presets.get(INITIAL_PRESET_SLOTS), Some(app.style_working));
     }
 
     #[test]
@@ -981,8 +796,8 @@ for c in text.chars() {
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetRemove(2)));
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetAdd));
 
-        assert_eq!(app.style_presets.len(), INITIAL_PRESET_SLOTS);
-        assert_eq!(app.style_presets[2], Some(app.style_working));
+        assert_eq!(app.presets.len(), INITIAL_PRESET_SLOTS);
+        assert_eq!(app.presets.get(2), Some(app.style_working));
     }
 
     #[test]
@@ -991,13 +806,13 @@ for c in text.chars() {
         app.style_working.text_color = [42, 0, 0, 255];
 
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetReplace(1)));
-        assert_eq!(app.style_presets[1], Some(app.style_working));
+        assert_eq!(app.presets.get(1), Some(app.style_working));
 
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetReplace(6)));
-        assert_eq!(app.style_presets[6], Some(app.style_working));
+        assert_eq!(app.presets.get(6), Some(app.style_working));
 
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetReplace(999)));
-        assert_eq!(app.style_presets.len(), INITIAL_PRESET_SLOTS);
+        assert_eq!(app.presets.len(), INITIAL_PRESET_SLOTS);
     }
 
     #[test]
@@ -1006,8 +821,8 @@ for c in text.chars() {
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetRemove(0)));
         let _ = update(&mut app, Message::Ui(UiEvent::StylePresetRemove(999)));
 
-        assert!(app.style_presets[0].is_none());
-        assert_eq!(app.style_presets.len(), INITIAL_PRESET_SLOTS);
+        assert!(app.presets.get(0).is_none());
+        assert_eq!(app.presets.len(), INITIAL_PRESET_SLOTS);
     }
 }
 
@@ -1018,25 +833,12 @@ pub fn boot() -> (App, Task<Message>) {
     };
     let mut app = App::new();
     let settings = crate::settings::Settings::load();
-    app.connections = settings.connections;
+    app.tx = translation::Session::new(settings.connections, settings.last_provider);
     app.auto_style_detect = settings.auto_style_detect;
     app.ocr_workers = settings.ocr_workers.to_string();
-    app.free_models_only = settings.free_models_only;
-    sync_translate_providers(&mut app);
-    if settings
-        .last_provider
-        .as_deref()
-        .is_some_and(|id| app.connections.contains_key(id))
-    {
-        app.translate_provider = settings.last_provider.unwrap();
-        sync_translate_models(&mut app);
-    }
-    let fetch_ids: Vec<String> = app
-        .translate_providers
-        .iter()
-        .filter(|id| !translation::is_custom(id))
-        .cloned()
-        .collect();
+    app.tx.free_only = settings.free_models_only;
+    app.tx.sync();
+    let fetch_ids = app.tx.fetch_ids();
     let models_task = if fetch_ids.is_empty() {
         Task::none()
     } else {
@@ -1045,11 +847,10 @@ pub fn boot() -> (App, Task<Message>) {
     (app, Task::batch([font_task, models_task]))
 }
 
-/// Spawns the parallel OCR stream for the whole planned run set. The stream
-/// keeps a window of canvases in flight (one ahead per detection worker):
-/// canvases are built and submitted as results arrive, and per-run results
-/// are yielded in run order to the UI. Only the inference (detect + recognize
-/// on a stitched canvas) runs on the pipeline's worker threads; assembly —
+/// Spawns the parallel OCR stream: the [`ocr::RunSession`] does the
+/// windowing/ordering on the pipeline, this task only forwards its events
+/// into the iced channel. Only the inference (detect + recognize on a
+/// stitched canvas) runs on the pipeline's worker threads; assembly —
 /// boundary resolution, dedup, distribution and commit — happens in the
 /// `OcrStreamRun` handler, on the UI thread, where the committed state is
 /// authoritative. The old [`Engine`] is kept for the undecodable-page
@@ -1079,90 +880,16 @@ fn start_ocr_stream(app: &mut App) -> Task<Message> {
         .map(|run| run.below.map(|(page, _)| app.images[page].path.clone()))
         .collect();
     let workers = app.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
-    let window = workers + 1;
-    let total = runs.len();
+    let mut session = ocr::RunSession::new(runs, dims, paths, above_paths, below_paths, workers);
     Task::stream(
-        iced::stream::try_channel(1, move |mut sender| async move {
-            let mut dispatched = 0usize;
-            let mut pending = total;
-            let mut in_flight = 0usize;
-            let mut canvas_meta: VecDeque<(u32, u32)> = VecDeque::new();
-            // Fill the submission window before the first receive.
-            while dispatched < total && in_flight < window {
-                let outcome = dispatch_run(
-                    &mut sender,
-                    &pipeline,
-                    &fallback,
-                    &token,
-                    dispatched,
-                    &runs,
-                    &paths,
-                    &above_paths,
-                    &below_paths,
-                    &dims,
-                    &mut canvas_meta,
-                    &mut in_flight,
-                )
-                .await;
-                match outcome {
-                    Ok(true) => {}
-                    // The UI channel closed; the app is gone or restarting.
-                    Ok(false) => return Ok(()),
-                    Err(e) => return Err(e),
-                }
-                dispatched += 1;
-            }
-            while pending > 0 {
-                let (idx, lines) = match pipeline.recv() {
-                    Ok(received) => received,
-                    Err(e) => return Err(e),
-                };
-                pending -= 1;
-                in_flight -= 1;
-                let (width, margin_top) = canvas_meta
-                    .pop_front()
-                    .expect("canvas metadata arrives in submission order");
-                let send_t0 = std::time::Instant::now();
+        iced::stream::try_channel(1, move |mut sender: iced::futures::channel::mpsc::Sender<Message>| async move {
+            while let Some(event) = session.step(&pipeline, &fallback, &token)? {
                 if sender
-                    .send(Message::OcrStreamRun(
-                        idx,
-                        Ok(OcrRunOutcome::Canvas {
-                            width,
-                            margin_top,
-                            lines,
-                        }),
-                    ))
+                    .send(Message::OcrStreamRun(Ok::<ocr::RunEvent, String>(event)))
                     .await
                     .is_err()
                 {
                     return Ok(());
-                }
-                eprintln!(
-                    "[ocr-stream] sent run {idx} to UI channel, send took {:?}",
-                    send_t0.elapsed()
-                );
-                if dispatched < total {
-                    let outcome = dispatch_run(
-                        &mut sender,
-                        &pipeline,
-                        &fallback,
-                        &token,
-                        dispatched,
-                        &runs,
-                        &paths,
-                        &above_paths,
-                        &below_paths,
-                        &dims,
-                        &mut canvas_meta,
-                        &mut in_flight,
-                    )
-                    .await;
-                    match outcome {
-                        Ok(true) => {}
-                        Ok(false) => return Ok(()),
-                        Err(e) => return Err(e),
-                    }
-                    dispatched += 1;
                 }
             }
             Ok(())
@@ -1172,126 +899,6 @@ fn start_ocr_stream(app: &mut App) -> Task<Message> {
             Err(e) => Message::OcrStreamFailed(e),
         }),
     )
-}
-
-/// What [`build_canvas`] produced for one run.
-enum CanvasBuild {
-    /// The stitched canvas plus its `(width, margin_top)` for submission.
-    Ready(image::RgbImage, u32, u32),
-    /// The undecodable-page fallback result, ready to commit directly.
-    Fallback(ocr::RunResult),
-}
-
-/// Builds the stitched canvas of one run: its pages stacked at the first
-/// page's width with the margin strips of the neighboring content above and
-/// below (see [`ocr::stack_run`]). When a page fails to decode, falls back
-/// to raw per-page OCR through the old engine and returns the ready-to-commit
-/// result instead (no canvas, no boundary candidates).
-fn build_canvas(
-    fallback: &Engine,
-    token: &OcrCancellationToken,
-    index: usize,
-    run: &ocr::RunPlan,
-    paths: &[String],
-    above_path: Option<&str>,
-    below_path: Option<&str>,
-    dims: &[(u32, u32)],
-) -> Result<CanvasBuild, String> {
-    let mut loaded = Vec::with_capacity(paths.len());
-    for path in paths {
-        match ocr::load_rgb(path) {
-            Some(image) => loaded.push(image),
-            None => {
-                eprintln!(
-                    "[ocr-run {index}] undecodable page {path}: falling back to per-page OCR"
-                );
-                let mut out = Vec::with_capacity(paths.len());
-                for (offset, path) in paths.iter().enumerate() {
-                    match fallback.run_path_cancellable(path, token) {
-                        Ok(lines) => out.push((run.page_start + offset, ocr::to_entries(lines))),
-                        Err(e) => return Err(e),
-                    }
-                }
-                return Ok(CanvasBuild::Fallback(ocr::RunResult {
-                    per_page: out,
-                    held: None,
-                }));
-            }
-        }
-    }
-    let width = loaded[0].width();
-    let body_h = ocr::body_height(&dims[run.page_start..=run.page_end], width, run.band);
-    let margin = (ocr::STITCH_MARGIN_RATIO * body_h as f32).round().max(1.0) as u32;
-    let above = match (above_path, run.above) {
-        (Some(path), Some((_, band))) => ocr::load_rgb(path)
-            .and_then(|image| ocr::top_margin_strip(&image, band, width, margin)),
-        _ => None,
-    };
-    let below = match (below_path, run.below) {
-        (Some(path), Some((_, band))) => ocr::load_rgb(path)
-            .and_then(|image| ocr::bottom_margin_strip(&image, band, width, margin)),
-        _ => None,
-    };
-    let margin_top = above.as_ref().map_or(0, |strip| strip.height());
-    let canvas = ocr::stack_run(above, &loaded, below, width, run.band);
-    Ok(CanvasBuild::Ready(canvas, width, margin_top))
-}
-
-/// Builds and dispatches one run: submits its canvas to the pipeline, or —
-/// when the run took the fallback path — emits its ready result to the UI
-/// directly. Returns `false` when the UI channel closed (the stream should
-/// end quietly), `true` otherwise.
-async fn dispatch_run(
-    sender: &mut iced::futures::channel::mpsc::Sender<Message>,
-    pipeline: &ParallelEngine,
-    fallback: &Engine,
-    token: &OcrCancellationToken,
-    index: usize,
-    runs: &[ocr::RunPlan],
-    paths: &[Vec<String>],
-    above_paths: &[Option<String>],
-    below_paths: &[Option<String>],
-    dims: &[(u32, u32)],
-    canvas_meta: &mut VecDeque<(u32, u32)>,
-    in_flight: &mut usize,
-) -> Result<bool, String> {
-    let run = &runs[index];
-    match build_canvas(
-        fallback,
-        token,
-        index,
-        run,
-        &paths[index],
-        above_paths[index].as_deref(),
-        below_paths[index].as_deref(),
-        dims,
-    ) {
-        Ok(CanvasBuild::Ready(canvas, width, margin_top)) => {
-            canvas_meta.push_back((width, margin_top));
-            pipeline
-                .submit(index, canvas)
-                .map_err(|e| format!("OCR pipeline submit failed: {e}"))?;
-            *in_flight += 1;
-            Ok(true)
-        }
-        Ok(CanvasBuild::Fallback(result)) => {
-            let sent = sender
-                .send(Message::OcrStreamRun(
-                    index,
-                    Ok(OcrRunOutcome::Fallback(result)),
-                ))
-                .await;
-            Ok(sent.is_ok())
-        }
-        Err(e) => Err(e),
-    }
-}
-
-/// True when the quad's bounding box overlaps `rect` (image pixels). Used
-/// to pick the text boxes an inpainting range should mask out.
-fn quad_intersects_rect(quad: &Quad, rect: [f32; 4]) -> bool {
-    let [x0, y0, x1, y1] = quad.bounds();
-    !(x1 <= rect[0] || x0 >= rect[0] + rect[2] || y1 <= rect[1] || y0 >= rect[1] + rect[3])
 }
 
 /// Spawns one inpainting run: the full-res decode, mask build and LaMa
@@ -1324,10 +931,10 @@ fn start_inpaint(
 /// style has not already been set by the classifier. Builds the engine lazily
 /// on first use; queued jobs start when the engine finishes loading.
 fn classify_entries(app: &mut App) -> Task<Message> {
-    match app.styling_engine.clone() {
-        Some(engine) => start_style_jobs(app, engine),
+    match app.styling.engine() {
+        Some(engine) => start_style_jobs(app, engine.clone()),
         None => {
-            app.styling_pending = true;
+            app.styling.mark_building();
             app.status = "Loading the styling model...".to_string();
             Task::perform(async move { StylingEngine::build() }, Message::StylingEngineReady)
         }
@@ -1339,9 +946,9 @@ fn classify_entries(app: &mut App) -> Task<Message> {
 /// auto-run never schedules the same entry twice.
 fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
     // Immutable reference captured by the inner closures so a `move` does not
-    // move `app` itself; disjoint-field borrows of the images and the set
+    // move `app` itself; disjoint-field borrows of the images and the tracker
     // coexist until `collect` finishes.
-    let styled = &app.styled;
+    let styling = &app.styling;
     let jobs: Vec<(usize, EntryId, String, Quad)> = app
         .images
         .iter()
@@ -1351,7 +958,7 @@ fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
                 .project
                 .ocr
                 .visible()
-                .filter(move |entry| !styled.contains(&(index, entry.id)))
+                .filter(move |entry| !styling.is_done(index, entry.id))
                 .map(move |entry| {
                     (
                         index,
@@ -1366,7 +973,7 @@ fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
         return Task::none();
     }
     for (index, id, _, _) in &jobs {
-        app.styled.insert((*index, *id));
+        app.styling.mark_done(*index, *id);
     }
     let tasks: Vec<Task<Message>> = jobs
         .into_iter()
@@ -1375,9 +982,7 @@ fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
             Task::perform(
                 async move {
                     let classified = tokio::task::spawn_blocking(move || {
-                        engine.predict_entry(&path, &quad).map(|pred| {
-                            pred.to_entry_style(scanlateit_model::EntryStyle::default())
-                        })
+                        engine.classify_entry(&path, &quad)
                     })
                     .await
                     .unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
@@ -1390,87 +995,10 @@ fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
     Task::batch(tasks)
 }
 
-/// Assembles one run's raw lines into a commit-ready [`ocr::RunResult`],
-/// strictly in run order on the UI thread: merges nearby boxes, resolves the
-/// previous run's held boundary candidates against this run's re-detections
-/// in its top margin, dedups against the committed quads of the page above,
-/// distributes the survivors to their pages and holds this run's own
-/// boundary candidates for the next run. Reads the authoritative committed
-/// state (`app.held_boundary`, `app.images[..].project.ocr`).
-fn assemble_run(
-    app: &mut App,
-    index: usize,
-    width: u32,
-    margin_top: u32,
-    lines: Vec<ocr::OcrLine>,
-) -> ocr::RunResult {
-    let run = app.ocr_plans[index];
-    let run_dims: Vec<(usize, u32, u32)> = (run.page_start..=run.page_end)
-        .map(|i| (i, app.ocr_dims[i].0, app.ocr_dims[i].1))
-        .collect();
-    let prev_held = app.held_boundary.take();
-    let prev_data = run.dedup.map(|(page, offset)| {
-        let quads: Vec<Quad> = app.images[page]
-            .project
-            .ocr
-            .all()
-            .map(|entry| entry.quad)
-            .collect();
-        (quads, app.images[page].width as u32, offset)
-    });
-    let merged = ocr::merge(lines, ocr::MergeConfig::default());
-    let (resolved, kept) = match &prev_held {
-        Some(state) => {
-            let transformed = ocr::transform_candidates(
-                &state.candidates,
-                state.width,
-                state.boundary,
-                width,
-                margin_top,
-            );
-            let resolution = ocr::resolve_boundary(&state.candidates, &transformed, merged);
-            (resolution.append, resolution.kept)
-        }
-        None => (Vec::new(), merged),
-    };
-    let deduped = match &prev_data {
-        Some((quads, prev_width, offset)) => {
-            ocr::dedup_with_previous(kept, quads, *prev_width, *offset, width)
-        }
-        None => kept,
-    };
-    let out = ocr::distribute(deduped, &run_dims, run.band, margin_top);
-    let mut per_page = out.per_page;
-    for candidate in resolved {
-        match per_page
-            .iter_mut()
-            .find(|(page, _)| *page == candidate.page)
-        {
-            Some((_, entries)) => entries.push(candidate.entry),
-            None => per_page.push((candidate.page, vec![candidate.entry])),
-        }
-    }
-    per_page.sort_by_key(|(page, _)| *page);
-    eprintln!(
-        "[ocr-run {index}] final per-page: {:?}",
-        per_page
-            .iter()
-            .map(|(p, e)| format!("p{p}:{}", e.len()))
-            .collect::<Vec<_>>()
-    );
-    let held = (!out.held.is_empty()).then(|| ocr::BoundaryState {
-        candidates: out.held,
-        width,
-        boundary: out.boundary,
-    });
-    ocr::RunResult { per_page, held }
-}
-
-/// Commits one run's result: stores the boundary candidates for the next run
-/// and appends the per-page entries to their projects, updating `ocr_total`.
-fn commit_run_result(app: &mut App, run_result: ocr::RunResult) {
-    app.held_boundary = run_result.held;
-    for (page, entries) in run_result.per_page {
+/// Appends per-page entries to their projects, updating `ocr_total`. The
+/// assembly itself (resolve, dedup, distribute) lives in [`ocr::assemble`].
+fn commit_per_page(app: &mut App, per_page: Vec<(usize, Vec<NewEntry>)>) {
+    for (page, entries) in per_page {
         let Some(image) = app.images.get_mut(page) else {
             continue;
         };
@@ -1536,165 +1064,10 @@ fn finalize_run(app: &mut App) {
     };
 }
 
-/// The pages a settled visible range gets backed with full decodes: the
-/// range itself plus [`DECODE_PRELOAD`] pages on each side.
-fn full_window(len: usize, range: &Range<usize>) -> Range<usize> {
-    range.start.saturating_sub(DECODE_PRELOAD)
-        ..range.end.saturating_add(DECODE_PRELOAD).min(len)
-}
-
-/// Decodes `path` through the tokio blocking pool; the CPU-bound decode
-/// never starves the runtime's worker threads (timers, message dispatch).
-async fn decode_async(path: String, max_edge: u32) -> Result<Arc<DecodedPage>, String> {
-    tokio::task::spawn_blocking(move || decode_page(&path, max_edge).map(Arc::new))
-        .await
-        .map_err(|e| format!("decode task cancelled: {e}"))?
-}
-
-/// Schedules the settle debounce for `range` (bumping the generation so
-/// stale debounces no-op). Shared by visible-range changes and by the
-/// selection-driven reveal (whose viewport change never produces a
-/// `TilesVisible` event).
-fn schedule_settle(app: &mut App, range: Range<usize>) -> Task<Message> {
-    app.settle_seq += 1;
-    let seq = app.settle_seq;
-    app.pending_settle = Some((seq, range));
-    Task::perform(
-        async move { tokio::time::sleep(SETTLE_DEBOUNCE).await },
-        move |_| Message::SettleElapsed(seq),
-    )
-}
-
-/// Widget operation: finds the results panel's scrollable and the row
-/// container of `(index, id)` during one traversal, then — if that row is
-/// not fully visible — chains a `scroll_to` on the panel list (second
-/// traversal pass, see the runtime's `Outcome::Chain` handling) that centers
-/// the row. All bounds are absolute (iced layouts use absolute coordinates).
-struct MeasurePanelRow {
-    panel: WidgetId,
-    row: WidgetId,
-    panel_bounds: Option<Rectangle>,
-    panel_offset: f32,
-    row_y: Option<f32>,
-    row_h: Option<f32>,
-}
-
-impl Operation<Message> for MeasurePanelRow {
-    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<Message>)) {
-        operate(self);
-    }
-
-    fn scrollable(
-        &mut self,
-        id: Option<&WidgetId>,
-        bounds: Rectangle,
-        _content_bounds: Rectangle,
-        translation: Vector,
-        _state: &mut dyn Scrollable,
-    ) {
-        if id == Some(&self.panel) {
-            self.panel_bounds = Some(bounds);
-            self.panel_offset = translation.y;
-        }
-    }
-
-    fn container(&mut self, id: Option<&WidgetId>, bounds: Rectangle) {
-        if id == Some(&self.row) {
-            self.row_y = Some(bounds.y);
-            self.row_h = Some(bounds.height);
-        }
-    }
-
-    fn finish(&self) -> Outcome<Message> {
-        let (Some(panel), Some(row_y), Some(row_h)) =
-            (self.panel_bounds, self.row_y, self.row_h)
-        else {
-            return Outcome::None;
-        };
-        let top = row_y - self.panel_offset; // row's window-space top
-        let bottom = top + row_h; // row's window-space bottom
-        let visible = top >= panel.y && bottom <= panel.y + panel.height;
-        if visible {
-            return Outcome::None; // already visible: no jump
-        }
-        let target = (row_y - panel.y - (panel.height - row_h) / 2.0).max(0.0);
-        Outcome::Chain(Box::new(widget_op::scrollable::scroll_to(
-            self.panel.clone(),
-            AbsoluteOffset { x: Some(0.0), y: Some(target) },
-        )))
-    }
-}
-
-/// Scrolls the results list to the row of `(index, id)` if it is out of
-/// view; no-op otherwise.
-fn panel_scroll_task(index: usize, id: EntryId) -> Task<Message> {
-    operate(MeasurePanelRow {
-        panel: WidgetId::new(PANEL_LIST_ID),
-        row: panel_row_id(index, id),
-        panel_bounds: None,
-        panel_offset: 0.0,
-        row_y: None,
-        row_h: None,
-    })
-}
-
-/// Spawns full-res decodes for the pending settle window (visible pages
-/// first, then preload pages outward) and evicts far-away full caches.
-fn settle_full(app: &mut App) -> Task<Message> {
-    let Some((_, range)) = app.pending_settle.take() else {
-        return Task::none();
-    };
-    app.settled = Some(range.clone());
-    let window = full_window(app.images.len(), &range);
-    let mut indices: Vec<usize> = window.clone().collect();
-    // Spawn closest-to-visible pages first so the pages under the viewport
-    // swap to full-res before the preload padding.
-    let center = (range.start + range.end) as f64 / 2.0;
-    indices.sort_by_key(|index| {
-        let distance = (*index as f64 - center).abs();
-        (distance * 1000.0) as u64
-    });
-    let mut tasks = Vec::new();
-    for index in indices {
-        let image = &mut app.images[index];
-        if matches!(image.decode.thumb, Tier::Failed)
-            || !matches!(image.decode.full, Tier::Absent)
-        {
-            continue;
-        }
-        image.decode.full = Tier::Decoding;
-        let path = image.path.clone();
-        tasks.push(Task::perform(
-            decode_async(path, MAX_DECODE_EDGE),
-            move |result| Message::FullDecoded(index, result),
-        ));
-    }
-    let keep = range.start.saturating_sub(DECODE_PRELOAD + FULL_KEEP_MARGIN)
-        ..range
-            .end
-            .saturating_add(DECODE_PRELOAD + FULL_KEEP_MARGIN)
-            .min(app.images.len());
-    for (index, image) in app.images.iter_mut().enumerate() {
-        if index < keep.start || index >= keep.end {
-            image.decode.full = Tier::Absent;
-        }
-    }
-    if tasks.is_empty() {
-        Task::none()
-    } else {
-        Task::batch(tasks)
-    }
-}
-
 pub fn update(app: &mut App, message: Message) -> Task<Message> {
     match message {
         Message::FetchModels => {
-            let ids: Vec<String> = app
-                .translate_providers
-                .iter()
-                .filter(|id| !translation::is_custom(id))
-                .cloned()
-                .collect();
+            let ids = app.tx.fetch_ids();
             if ids.is_empty() {
                 Task::none()
             } else {
@@ -1702,8 +1075,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
         }
         Message::ModelsFetched(providers) => {
-            app.translate_providers_map.extend(providers);
-            sync_translate_models(app);
+            app.tx.on_fetched(providers);
             Task::none()
         }
         Message::Ui(UiEvent::OpenImages) => Task::perform(
@@ -1750,20 +1122,8 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     });
                 }
                 app.status = format!("Decoding {} image(s)...", app.images.len());
-                let tasks: Vec<Task<Message>> = app
-                    .images
-                    .iter_mut()
-                    .enumerate()
-                    .map(|(index, image)| {
-                        image.decode.thumb = Tier::Decoding;
-                        let path = image.path.clone();
-                        Task::perform(
-                            decode_async(path, THUMB_DECODE_EDGE),
-                            move |result| Message::ThumbDecoded(index, result),
-                        )
-                    })
-                    .collect();
-                Task::batch(tasks)
+                app.scheduler
+                    .decode_thumbs(&mut app.images, Message::ThumbDecoded)
             }
             Err(e) => {
                 app.status = e;
@@ -1864,16 +1224,14 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         },
         Message::StylingEngineReady(result) => match result {
             Ok(engine) => {
-                app.styling_engine = Some(engine.clone());
-                if app.styling_pending {
-                    app.styling_pending = false;
+                if app.styling.set_engine(engine.clone()) {
                     start_style_jobs(app, engine)
                 } else {
                     Task::none()
                 }
             }
             Err(e) => {
-                app.styling_pending = false;
+                app.styling.fail_build();
                 app.status = e;
                 Task::none()
             }
@@ -1881,7 +1239,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::StyleDetected(index, id, result) => {
             if let (Some(image), Ok(style)) = (app.images.get_mut(index), result) {
                 image.project.set_entry_style(id, style);
-                app.styled.insert((index, id));
+                app.styling.mark_done(index, id);
                 app.status = "Applied auto-detected text style.".to_string();
             }
             Task::none()
@@ -1931,23 +1289,44 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.status = "Cancelling OCR...".to_string();
             Task::none()
         }
-        Message::OcrStreamRun(index, result) => {
+        Message::OcrStreamRun(result) => {
             app.pending = app.pending.saturating_sub(1);
             match result {
-                Ok(OcrRunOutcome::Canvas {
+                Ok(ocr::RunEvent::Canvas {
+                    index,
                     width,
                     margin_top,
                     lines,
                 }) => {
-                    let run_result = assemble_run(app, index, width, margin_top, lines);
-                    commit_run_result(app, run_result);
+                    let run = app.ocr_plans[index];
+                    let prev = run.dedup.map(|(page, offset)| {
+                        let quads: Vec<Quad> = app.images[page]
+                            .project
+                            .ocr
+                            .all()
+                            .map(|entry| entry.quad)
+                            .collect();
+                        (quads, app.images[page].width as u32, offset)
+                    });
+                    let run_result = ocr::assemble(
+                        index,
+                        width,
+                        margin_top,
+                        lines,
+                        &app.ocr_plans,
+                        &app.ocr_dims,
+                        app.held_boundary.take(),
+                        prev,
+                    );
+                    app.held_boundary = run_result.held;
+                    commit_per_page(app, run_result.per_page);
                 }
-                Ok(OcrRunOutcome::Fallback(run_result)) => {
+                Ok(ocr::RunEvent::Fallback { result, .. }) => {
                     // The fallback produced no re-detections; the previous
                     // run's held candidates cannot be resolved against them
                     // and are flushed so no captured bubble is lost.
                     flush_held_boundary(app);
-                    commit_run_result(app, run_result);
+                    commit_per_page(app, result.per_page);
                 }
                 Err(e) => {
                     app.ocr_failed += 1;
@@ -2025,22 +1404,23 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        Message::Ui(UiEvent::TilesVisible(range)) => schedule_settle(app, range),
+        Message::Ui(UiEvent::TilesVisible(range)) => app
+            .scheduler
+            .schedule(range, Message::SettleElapsed),
         Message::SettleElapsed(seq) => {
-            let Some((pending_seq, _)) = app.pending_settle.as_ref() else {
-                return Task::none();
-            };
-            if *pending_seq != seq {
-                return Task::none();
+            if app.scheduler.accept_elapsed(seq) {
+                app.scheduler
+                    .settle(&mut app.images, Message::FullDecoded)
+            } else {
+                Task::none()
             }
-            settle_full(app)
         }
-        Message::Ui(UiEvent::TileScrollEnded) => settle_full(app),
+        Message::Ui(UiEvent::TileScrollEnded) => app
+            .scheduler
+            .settle(&mut app.images, Message::FullDecoded),
         Message::FullDecoded(index, result) => {
             if index < app.images.len() {
-                let keep = app.settled.as_ref().is_some_and(|range| {
-                    full_window(app.images.len(), range).contains(&index)
-                });
+                let keep = app.scheduler.keep_full(app.images.len(), index);
                 app.images[index].decode.full = if keep {
                     match result {
                         Ok(decoded) => Tier::Ready(decoded),
@@ -2065,7 +1445,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             if app.translating || app.running {
                 return Task::none();
             }
-            if app.translate_provider.is_empty() {
+            if !app.tx.is_connected() {
                 app.status = "Connect a translation service in Settings first.".to_string();
                 return Task::none();
             }
@@ -2074,7 +1454,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 .iter()
                 .enumerate()
                 .flat_map(|(index, image)| {
-                    let filename = file_name(&image.path);
+                    let filename = translation::file_tag(&image.path);
                     image
                         .project
                         .ocr
@@ -2103,18 +1483,15 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 })
                 .collect();
             let target = app.translate_lang.clone();
-            let (provider, api_key) = match app.connections.get(&app.translate_provider) {
-                Some(connection) => (
-                    translation::provider_for_connection(&app.translate_provider, connection),
-                    Some(connection.api_key.clone()),
-                ),
+            let (provider, api_key) = match app.tx.selected_provider() {
+                Some(provider) => (provider, app.tx.selected_api_key()),
                 None => {
                     app.translating = false;
                     app.status = "Translation service is not connected.".to_string();
                     return Task::none();
                 }
             };
-            let model = app.translate_model.clone();
+            let model = app.tx.selected_model.clone();
             app.status = format!(
                 "Translating {} line(s) to {} via {model} ({})...",
                 jobs.len(),
@@ -2134,19 +1511,19 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::TranslateProvider(name)) => {
             // The picker option is the display name; map it back to the id.
             let id = app
-                .translate_providers
+                .tx
+                .connected_ids
                 .iter()
                 .find(|id| translation::provider_name(id) == name)
                 .cloned()
                 .unwrap_or_default();
-            if !id.is_empty() && app.translate_provider != id {
-                app.translate_provider = id;
-                sync_translate_models(app);
+            if !id.is_empty() {
+                app.tx.select(id);
             }
             Task::none()
         }
         Message::Ui(UiEvent::TranslateModel(model)) => {
-            app.translate_model = model;
+            app.tx.selected_model = model;
             Task::none()
         }
         Message::Ui(UiEvent::TranslateLang(lang)) => {
@@ -2155,7 +1532,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         }
         Message::Ui(UiEvent::TranslateConnect(provider_id)) => {
             let is_custom = translation::is_custom(&provider_id);
-            let existing = app.connections.get(&provider_id);
+            let existing = app.tx.connections.get(&provider_id);
             app.connect_modal = Some(ConnectModal {
                 provider_id,
                 is_custom,
@@ -2169,9 +1546,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::Ui(UiEvent::TranslateDisconnect(provider_id)) => {
-            app.connections.remove(&provider_id);
-            app.translate_providers_map.remove(&provider_id);
-            sync_translate_providers(app);
+            app.tx.disconnect(&provider_id);
             app.status = format!(
                 "Disconnected {}. Its API key was removed.",
                 translation::provider_name(&provider_id)
@@ -2203,31 +1578,20 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             let Some(modal) = app.connect_modal.take() else {
                 return Task::none();
             };
-            if modal.api_key.trim().is_empty() {
+            if let Some(error) = translation::validate_connection(
+                modal.is_custom,
+                &modal.api_key,
+                &modal.base_url,
+                &modal.model,
+            ) {
                 app.connect_modal = Some(ConnectModal {
-                    error: Some("Enter an API key.".to_string()),
+                    error: Some(error),
                     ..modal
                 });
                 return Task::none();
             }
-            if modal.is_custom {
-                if modal.base_url.trim().is_empty() {
-                    app.connect_modal = Some(ConnectModal {
-                        error: Some("Enter a base URL.".to_string()),
-                        ..modal
-                    });
-                    return Task::none();
-                }
-                if modal.model.trim().is_empty() {
-                    app.connect_modal = Some(ConnectModal {
-                        error: Some("Enter a model id.".to_string()),
-                        ..modal
-                    });
-                    return Task::none();
-                }
-            }
             let id = modal.provider_id.clone();
-            app.connections.insert(
+            app.tx.connect(
                 id.clone(),
                 translation::Connection {
                     api_key: modal.api_key.trim().to_string(),
@@ -2235,9 +1599,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     model: modal.is_custom.then(|| modal.model.trim().to_string()),
                 },
             );
-            sync_translate_providers(app);
-            app.translate_provider = id.clone();
-            sync_translate_models(app);
             app.status = format!("Connected {}.", translation::provider_name(&id));
             if translation::is_custom(&id) {
                 Task::none()
@@ -2253,10 +1614,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::Ui(UiEvent::FreeModelsOnlyToggle(enabled)) => {
-            if app.free_models_only != enabled {
-                app.free_models_only = enabled;
-                sync_translate_models(app);
-            }
+            app.tx.set_free_only(enabled);
             Task::none()
         }
         Message::Ui(UiEvent::EntryClicked(selection)) => {
@@ -2268,7 +1626,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                         .get(index)
                         .is_some_and(|image| image.project.ocr.get(id).is_some()) =>
                 {
-                    Task::batch([select_entry(app, index, id), panel_scroll_task(index, id)])
+                    Task::batch([select_entry(app, index, id), scroll_to_row::<Message>(index, id)])
                 }
                 _ => {
                     app.selected = None;
@@ -2354,7 +1712,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 .ocr
                 .all()
                 .map(|entry| image.project.view_quad(entry))
-                .filter(|quad| quad_intersects_rect(quad, rect))
+                .filter(|quad| quad.intersects_rect(rect))
                 .collect();
             if quads.is_empty() {
                 app.status = "Inpaint: no OCR boxes in the range; the whole selection \
@@ -2386,10 +1744,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             if !app.editing_dirty {
                 app.editing_dirty = true;
                 let project = &mut app.images[index].project;
-                if project.profiles.selected_id() == project.profiles.original_id() {
-                    let name = project.profiles.next_available_name();
-                    let forked = project.profiles.add(name.clone());
-                    project.profiles.select(forked);
+                if let Some(name) = project.profiles.fork_for_edit() {
                     app.status = format!(
                         "Edit forked into '{name}': the OCR text stays untouched."
                     );
@@ -2464,7 +1819,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         }
         Message::Ui(UiEvent::StylePresetApply(preset)) => {
             let Some((index, id)) = app.selected else { return Task::none() };
-            let Some(Some(preset_style)) = app.style_presets.get(preset).copied() else {
+            let Some(preset_style) = app.presets.get(preset) else {
                 return Task::none();
             };
             seed_style_inputs(app, preset_style);
@@ -2472,23 +1827,15 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::Ui(UiEvent::StylePresetAdd) => {
-            if let Some(slot) = app.style_presets.iter_mut().find(|slot| slot.is_none()) {
-                *slot = Some(app.style_working);
-            } else {
-                app.style_presets.push(Some(app.style_working));
-            }
+            app.presets.add(app.style_working);
             Task::none()
         }
         Message::Ui(UiEvent::StylePresetReplace(preset)) => {
-            if let Some(slot) = app.style_presets.get_mut(preset) {
-                *slot = Some(app.style_working);
-            }
+            app.presets.replace(preset, app.style_working);
             Task::none()
         }
         Message::Ui(UiEvent::StylePresetRemove(preset)) => {
-            if let Some(slot) = app.style_presets.get_mut(preset) {
-                *slot = None;
-            }
+            app.presets.remove(preset);
             Task::none()
         }
         Message::Ui(UiEvent::StylePresetMenuDismiss) => Task::none(),
@@ -2496,7 +1843,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             let Some((index, id)) = app.selected else { return Task::none() };
             // The entry must leave the done set so it is eligible again, even
             // if auto-detect already classified it.
-            app.styled.remove(&(index, id));
+            app.styling.reopen(index, id);
             classify_entries(app)
         }
         Message::Ui(UiEvent::StyleAutoDetectToggle(enabled)) => {
@@ -2529,12 +1876,12 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.settings_open = false;
             app.connect_modal = None;
             let settings = crate::settings::Settings {
-                connections: app.connections.clone(),
-                last_provider: (!app.translate_provider.is_empty())
-                    .then(|| app.translate_provider.clone()),
+                connections: app.tx.connections.clone(),
+                last_provider: (!app.tx.selected_id.is_empty())
+                    .then(|| app.tx.selected_id.clone()),
                 auto_style_detect: app.auto_style_detect,
                 ocr_workers: app.ocr_workers.parse().unwrap_or(2),
-                free_models_only: app.free_models_only,
+                free_models_only: app.tx.free_only,
             };
             if let Err(e) = settings.save() {
                 app.status = e;
@@ -2554,24 +1901,13 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                         return Task::none();
                     }
                     let profile_name = translation::profile_name(&app.translate_lang);
-                    let mut current_image: Option<usize> = None;
                     for ((image_index, entry_id, _path, _text), translation) in
                         jobs.iter().zip(translations.iter())
                     {
-                        if current_image != Some(*image_index) {
-                            let image = &mut app.images[*image_index];
-                            let id = image.project.profiles.find_by_name(&profile_name).unwrap_or_else(
-                                || image.project.profiles.add(profile_name.clone()),
-                            );
-                            image.project.profiles.select(id);
-                            current_image = Some(*image_index);
-                        }
                         let image = &mut app.images[*image_index];
                         image
                             .project
-                            .profiles
-                            .selected_mut()
-                            .set_translation(*entry_id, Some(translation.clone()));
+                            .store_translation(&profile_name, *entry_id, Some(translation.clone()));
                     }
                     app.status = format!(
                         "Translated {} line(s) into '{profile_name}'.",

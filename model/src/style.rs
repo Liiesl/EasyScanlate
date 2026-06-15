@@ -35,3 +35,178 @@ impl Default for EntryStyle {
         }
     }
 }
+
+/// How many preset slots the app starts with: five built-in styles plus
+/// three empty slots.
+pub const INITIAL_PRESET_SLOTS: usize = 8;
+
+/// The style-preset slot list shown in the styling panel, in memory only:
+/// `None` = empty slot. "+" fills the first empty slot or appends; clicking
+/// a filled swatch applies its style; right-click replaces or empties.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StylePresets(Vec<Option<EntryStyle>>);
+
+impl StylePresets {
+    /// The five seeded variants (white bg/black text, inverse, transparent
+    /// bg/black text, transparent bg/white text, red bg/white text) followed
+    /// by three empty slots.
+    pub fn default_presets() -> Self {
+        let mut presets = Vec::with_capacity(INITIAL_PRESET_SLOTS);
+        let mut preset = EntryStyle::default();
+        presets.push(Some(preset));
+        preset.bg_color = [0, 0, 0, 255];
+        preset.text_color = [255, 255, 255, 255];
+        presets.push(Some(preset));
+        preset.bg_color = [0, 0, 0, 0];
+        preset.text_color = [0, 0, 0, 255];
+        presets.push(Some(preset));
+        preset.text_color = [255, 255, 255, 255];
+        presets.push(Some(preset));
+        preset.bg_color = [255, 0, 0, 255];
+        presets.push(Some(preset));
+        presets.resize(INITIAL_PRESET_SLOTS, None);
+        Self(presets)
+    }
+
+    /// The style of slot `index`, or `None` for an empty slot / out of range.
+    pub fn get(&self, index: usize) -> Option<EntryStyle> {
+        self.0.get(index).copied().flatten()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn as_slice(&self) -> &[Option<EntryStyle>] {
+        &self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Fills the first empty slot, or appends when all are full.
+    pub fn add(&mut self, style: EntryStyle) {
+        if let Some(slot) = self.0.iter_mut().find(|slot| slot.is_none()) {
+            *slot = Some(style);
+        } else {
+            self.0.push(Some(style));
+        }
+    }
+
+    /// Overwrites slot `index` (no-op when out of range).
+    pub fn replace(&mut self, index: usize, style: EntryStyle) {
+        if let Some(slot) = self.0.get_mut(index) {
+            *slot = Some(style);
+        }
+    }
+
+    /// Empties slot `index` (no-op when out of range).
+    pub fn remove(&mut self, index: usize) {
+        if let Some(slot) = self.0.get_mut(index) {
+            *slot = None;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seeded_presets_cover_the_expected_variants() {
+        let presets = StylePresets::default_presets();
+        assert_eq!(presets.len(), INITIAL_PRESET_SLOTS);
+        let filled: Vec<&EntryStyle> = presets.as_slice().iter().flatten().collect();
+        assert_eq!(filled.len(), 5);
+        assert_eq!(filled[0].bg_color, [255, 255, 255, 255], "white bg");
+        assert_eq!(filled[0].text_color, [0, 0, 0, 255], "black text");
+        assert_eq!(filled[1].bg_color, [0, 0, 0, 255], "inverse: black bg");
+        assert_eq!(filled[1].text_color, [255, 255, 255, 255], "inverse: white text");
+        assert_eq!(filled[2].bg_color, [0, 0, 0, 0], "transparent bg");
+        assert_eq!(filled[2].text_color, [0, 0, 0, 255], "black text");
+        assert_eq!(filled[3].bg_color, [0, 0, 0, 0], "transparent bg");
+        assert_eq!(filled[3].text_color, [255, 255, 255, 255], "white text");
+        assert_eq!(filled[4].bg_color, [255, 0, 0, 255], "red bg");
+        assert_eq!(filled[4].text_color, [255, 255, 255, 255], "white text");
+        assert!(presets.as_slice()[5..].iter().all(|slot| slot.is_none()), "last slots empty");
+    }
+
+    #[test]
+    fn default_style_round_trips_all_fields() {
+        let style = EntryStyle::default();
+        assert_eq!(style.bold, false);
+        assert_eq!(style.italic, false);
+        assert_eq!(style.stroke_color, [0, 0, 0, 255]);
+        assert_eq!(style.stroke_width, 0.0);
+        assert_eq!(style.bg_radius, 0.0);
+    }
+
+    #[test]
+    fn add_fills_the_first_empty_slot() {
+        let mut presets = StylePresets::default_presets();
+        let style = EntryStyle { bg_color: [9, 9, 9, 255], ..EntryStyle::default() };
+        presets.add(style);
+        presets.add(style);
+        presets.add(style);
+
+        assert_eq!(presets.len(), INITIAL_PRESET_SLOTS);
+        assert_eq!(presets.get(5), Some(style));
+        assert_eq!(presets.get(6), Some(style));
+        assert_eq!(presets.get(7), Some(style));
+    }
+
+    #[test]
+    fn add_appends_when_all_slots_are_full() {
+        let mut presets = StylePresets::default_presets();
+        for i in 0..INITIAL_PRESET_SLOTS {
+            let style = EntryStyle { text_color: [i as u8, 0, 0, 255], ..EntryStyle::default() };
+            presets.replace(i, style);
+        }
+        let style = EntryStyle { bg_color: [1, 2, 3, 255], ..EntryStyle::default() };
+        presets.add(style);
+
+        assert_eq!(presets.len(), INITIAL_PRESET_SLOTS + 1);
+        assert_eq!(presets.get(INITIAL_PRESET_SLOTS), Some(style));
+    }
+
+    #[test]
+    fn add_refills_an_emptied_slot_before_appending() {
+        let mut presets = StylePresets::default_presets();
+        presets.remove(2);
+        let style = EntryStyle { text_color: [7, 7, 7, 255], ..EntryStyle::default() };
+        presets.add(style);
+
+        assert_eq!(presets.len(), INITIAL_PRESET_SLOTS);
+        assert_eq!(presets.get(2), Some(style));
+    }
+
+    #[test]
+    fn replace_overwrites_filled_and_empty_slots() {
+        let mut presets = StylePresets::default_presets();
+        let style = EntryStyle { text_color: [42, 0, 0, 255], ..EntryStyle::default() };
+        presets.replace(1, style);
+        assert_eq!(presets.get(1), Some(style));
+        presets.replace(6, style);
+        assert_eq!(presets.get(6), Some(style));
+        presets.replace(999, style);
+        assert_eq!(presets.len(), INITIAL_PRESET_SLOTS);
+    }
+
+    #[test]
+    fn remove_empties_the_slot() {
+        let mut presets = StylePresets::default_presets();
+        presets.remove(0);
+        presets.remove(999);
+
+        assert!(presets.get(0).is_none());
+        assert_eq!(presets.len(), INITIAL_PRESET_SLOTS);
+    }
+
+    #[test]
+    fn get_returns_none_for_empty_slots_and_out_of_range() {
+        let presets = StylePresets::default_presets();
+        assert!(presets.get(5).is_none());
+        assert!(presets.get(999).is_none());
+    }
+}

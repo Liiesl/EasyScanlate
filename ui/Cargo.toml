@@ -10,3 +10,4 @@ image = "0.25"
 neverliie-iced-widgets = { path = "../NeverLiieIcedWidgets" }
 scanlateit-model = { path = "../model" }
 scanlateit-translation = { path = "../translation" }
+tokio = { version = "1", features = ["rt", "time"] }

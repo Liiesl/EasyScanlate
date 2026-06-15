@@ -20,6 +20,9 @@ use rig::prelude::*;
 use rig::providers::openai;
 use serde::Deserialize;
 
+pub mod session;
+pub use session::Session;
+
 /// Hard cap on lines per request; a single unbounded prompt is guaranteed to
 /// blow the model's context window on big projects.
 const MAX_LINES: usize = 1000;
@@ -214,6 +217,34 @@ pub fn provider_name(id: &str) -> String {
 /// Profile name convention for machine translations: `english(auto)`.
 pub fn profile_name(lang: &str) -> String {
     format!("{}(auto)", lang.to_lowercase())
+}
+
+/// The last path component of an image path; the file tag of the wire format.
+pub fn file_tag(path: &str) -> String {
+    path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
+}
+
+/// First validation error of the connect modal form, if any:
+/// - api_key must be non-blank;
+/// - custom connections also need a base URL and a model id.
+pub fn validate_connection(
+    is_custom: bool,
+    api_key: &str,
+    base_url: &str,
+    model: &str,
+) -> Option<String> {
+    if api_key.trim().is_empty() {
+        return Some("Enter an API key.".to_string());
+    }
+    if is_custom {
+        if base_url.trim().is_empty() {
+            return Some("Enter a base URL.".to_string());
+        }
+        if model.trim().is_empty() {
+            return Some("Enter a model id.".to_string());
+        }
+    }
+    None
 }
 
 const SYSTEM: &str = "You are a professional scanlation translator for comics, manga and manhwa. \
@@ -678,6 +709,35 @@ mod tests {
     fn profile_name_is_lowercase_with_auto_suffix() {
         assert_eq!(profile_name("English"), "english(auto)");
         assert_eq!(profile_name("Chinese (Simplified)"), "chinese (simplified)(auto)");
+    }
+
+    #[test]
+    fn file_tag_strips_directory_components() {
+        assert_eq!(file_tag(r"C:\a\b\c.png"), "c.png");
+        assert_eq!(file_tag("/a/b/d.png"), "d.png");
+    }
+
+    #[test]
+    fn validate_connection_returns_the_first_error() {
+        assert_eq!(validate_connection(false, "sk", "", ""), None);
+        assert_eq!(
+            validate_connection(false, "  ", "", ""),
+            Some("Enter an API key.".to_string())
+        );
+        assert_eq!(
+            validate_connection(true, "sk", "", ""),
+            Some("Enter a base URL.".to_string())
+        );
+        assert_eq!(
+            validate_connection(true, "sk", "https://x", ""),
+            Some("Enter a model id.".to_string())
+        );
+        assert_eq!(validate_connection(true, "sk", "https://x", "m"), None);
+        // First error wins: a blank key beats the missing custom fields.
+        assert_eq!(
+            validate_connection(true, "", "", ""),
+            Some("Enter an API key.".to_string())
+        );
     }
 
     fn item(filename: &str, id: u64, text: &str) -> TranslateItem {

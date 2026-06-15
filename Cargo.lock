@@ -4519,6 +4519,7 @@ dependencies = [
  "neverliie-iced-widgets",
  "scanlateit-model",
  "scanlateit-translation",
+ "tokio",
 ]
 
 [[package]]

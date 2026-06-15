@@ -8,11 +8,15 @@
 //! highlighted with a border. The API key is configured in the settings
 //! modal, not here.
 
+use iced::advanced::widget::operation::{self as widget_op, Operation, Outcome, Scrollable};
+use iced::advanced::widget::{operate, Id as WidgetId};
+use iced::widget::operation::AbsoluteOffset;
 use iced::widget::text_editor;
 use iced::widget::{
     button, column, container, mouse_area, pick_list, row, scrollable, space, text, Column, Id,
 };
-use iced::{keyboard, Background, Border, Color, Element, Fill as FillLength, Font, Padding};
+use iced::{keyboard, Background, Border, Color, Element, Fill as FillLength, Font, Padding,
+    Rectangle, Vector};
 
 use crate::event::{EditOrigin, SettingsTab, UiEvent};
 use crate::loaded::LoadedImage;
@@ -326,4 +330,81 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     .spacing(8)
     .height(FillLength)
     .into()
+}
+
+/// Widget operation: finds the results panel's scrollable and the row
+/// container of `(index, id)` during one traversal, then — if that row is
+/// not fully visible — chains a `scroll_to` on the panel list (second
+/// traversal pass, see the runtime's `Outcome::Chain` handling) that centers
+/// the row. All bounds are absolute (iced layouts use absolute coordinates).
+struct MeasurePanelRow {
+    panel: WidgetId,
+    row: WidgetId,
+    panel_bounds: Option<Rectangle>,
+    panel_offset: f32,
+    row_y: Option<f32>,
+    row_h: Option<f32>,
+}
+
+impl<T: 'static> Operation<T> for MeasurePanelRow {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<T>)) {
+        operate(self);
+    }
+
+    fn scrollable(
+        &mut self,
+        id: Option<&WidgetId>,
+        bounds: Rectangle,
+        _content_bounds: Rectangle,
+        translation: Vector,
+        _state: &mut dyn Scrollable,
+    ) {
+        if id == Some(&self.panel) {
+            self.panel_bounds = Some(bounds);
+            self.panel_offset = translation.y;
+        }
+    }
+
+    fn container(&mut self, id: Option<&WidgetId>, bounds: Rectangle) {
+        if id == Some(&self.row) {
+            self.row_y = Some(bounds.y);
+            self.row_h = Some(bounds.height);
+        }
+    }
+
+    fn finish(&self) -> Outcome<T> {
+        let (Some(panel), Some(row_y), Some(row_h)) =
+            (self.panel_bounds, self.row_y, self.row_h)
+        else {
+            return Outcome::None;
+        };
+        let top = row_y - self.panel_offset; // row's window-space top
+        let bottom = top + row_h; // row's window-space bottom
+        let visible = top >= panel.y && bottom <= panel.y + panel.height;
+        if visible {
+            return Outcome::None; // already visible: no jump
+        }
+        let target = (row_y - panel.y - (panel.height - row_h) / 2.0).max(0.0);
+        Outcome::Chain(Box::new(widget_op::scrollable::scroll_to(
+            self.panel.clone(),
+            AbsoluteOffset { x: Some(0.0), y: Some(target) },
+        )))
+    }
+}
+
+/// Scrolls the results list so the row of `(index, id)` is fully visible
+/// (centered when out of view); no-op when already visible. Generic over the
+/// message type so the app can return it directly.
+pub fn scroll_to_row<T>(index: usize, id: EntryId) -> iced::Task<T>
+where
+    T: Send + 'static,
+{
+    operate(MeasurePanelRow {
+        panel: WidgetId::new(PANEL_LIST_ID),
+        row: panel_row_id(index, id),
+        panel_bounds: None,
+        panel_offset: 0.0,
+        row_y: None,
+        row_h: None,
+    })
 }

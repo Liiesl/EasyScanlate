@@ -4,6 +4,7 @@
 //! [`UiState`]: crate::state::UiState
 //! [`UiEvent`]: crate::event::UiEvent
 
+pub mod color;
 pub mod connect;
 pub mod event;
 pub mod loaded;

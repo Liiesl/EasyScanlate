@@ -21,6 +21,10 @@ use ort::session::Session;
 use ort::value::TensorRef;
 use scanlateit_model::{EntryStyle, Quad};
 
+pub mod tracker;
+
+pub use tracker::JobTracker;
+
 /// The fixed input size of the styling model: width x height.
 pub const MODEL_WIDTH: u32 = 160;
 pub const MODEL_HEIGHT: u32 = 64;
@@ -126,6 +130,13 @@ impl Engine {
         let input = compose_input(&resized);
         let outputs = run_session(&mut session, input)?;
         Ok(parse_outputs(&outputs))
+    }
+
+    /// Decodes `path`, classifies the `quad` crop and maps the prediction
+    /// onto an [`EntryStyle`] in one call (the app's auto-detect job).
+    pub fn classify_entry(&self, path: &str, quad: &Quad) -> Result<EntryStyle, String> {
+        self.predict_entry(path, quad)
+            .map(|pred| pred.to_entry_style(EntryStyle::default()))
     }
 }
 
