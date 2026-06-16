@@ -71,6 +71,26 @@ impl Project {
         self.view_quads.insert(entry_id, quad);
     }
 
+    /// Whether the entry has a user-adjusted view quad (vs. falling back to
+    /// its OCR quad). The UI shows the revert-transform action only then.
+    pub fn has_view_quad(&self, entry_id: EntryId) -> bool {
+        self.view_quads.contains_key(&entry_id)
+    }
+
+    /// Revert the box's transform (rotation, skew and size) back to the OCR
+    /// quad while keeping its current position: the override is rebuilt as
+    /// the OCR shape placed at the view quad's TL corner.
+    pub fn revert_transform(&mut self, entry_id: EntryId) {
+        let Some(entry) = self.ocr.get(entry_id) else {
+            return;
+        };
+        let ocr = entry.quad;
+        let view = self.view_quads.get(&entry_id).copied().unwrap_or(ocr);
+        let dx = view.points[0][0] - ocr.points[0][0];
+        let dy = view.points[0][1] - ocr.points[0][1];
+        self.view_quads.insert(entry_id, ocr.translate(dx, dy));
+    }
+
     /// Drop the view-quad override, falling back to the OCR quad.
     #[allow(dead_code)]
     pub fn reset_view_quad(&mut self, entry_id: EntryId) {
@@ -277,5 +297,49 @@ mod tests {
         assert_eq!(project.profiles.len(), 2, "no duplicate profile");
         assert_eq!(project.profiles.selected().translation_of(EntryId(1)), Some("Hello"));
         assert_eq!(project.profiles.selected().translation_of(EntryId(2)), Some("Hi"));
+    }
+
+    #[test]
+    fn revert_transform_keeps_position_and_restores_ocr_shape() {
+        let mut project = Project::new();
+        let id = project.ocr.append(NewEntry {
+            source: crate::EntrySource::AutoOcr,
+            text: "hi".to_string(),
+            score: 0.9,
+            quad: Quad {
+                points: [[0.0, 0.0], [100.0, 0.0], [100.0, 30.0], [0.0, 30.0]],
+            },
+        });
+        let ocr = project.ocr.get(id).unwrap().quad;
+        let view = ocr.translate(20.0, 10.0).rotate([50.0, 15.0], 0.6);
+        project.set_view_quad(id, view);
+        assert_ne!(project.view_quad(project.ocr.get(id).unwrap()), ocr);
+
+        project.revert_transform(id);
+
+        let reverted = project.view_quad(project.ocr.get(id).unwrap());
+        let reverted_tl = reverted.ordered()[0];
+        assert_eq!(reverted_tl, view.ordered()[0], "position must be kept");
+        let shifted = reverted.translate(-reverted_tl[0], -reverted_tl[1]);
+        for (point, expected) in shifted.points.iter().zip(ocr.points) {
+            assert!((point[0] - expected[0]).abs() < 1e-3, "x: {point:?}");
+            assert!((point[1] - expected[1]).abs() < 1e-3, "y: {point:?}");
+        }
+    }
+
+    #[test]
+    fn revert_transform_without_override_is_a_noop() {
+        let mut project = Project::new();
+        let id = project.ocr.append(NewEntry {
+            source: crate::EntrySource::AutoOcr,
+            text: "hi".to_string(),
+            score: 0.9,
+            quad: Quad {
+                points: [[0.0, 0.0], [10.0, 0.0], [10.0, 5.0], [0.0, 5.0]],
+            },
+        });
+        project.revert_transform(id);
+        let entry = project.ocr.get(id).unwrap();
+        assert_eq!(project.view_quad(entry), entry.quad);
     }
 }

@@ -40,6 +40,51 @@ impl Quad {
         self
     }
 
+    /// Reorder the points so index `0..4` matches the bounding-box corners
+    /// TL, TR, BR, BL, by assigning each AABB corner its nearest unused point
+    /// (correct for any convex quad).
+    pub fn ordered(self) -> [[f32; 2]; 4] {
+        let [min_x, min_y, max_x, max_y] = self.bounds();
+        let corners = [
+            [min_x, min_y],
+            [max_x, min_y],
+            [max_x, max_y],
+            [min_x, max_y],
+        ];
+        let mut used = [false; 4];
+        let mut ordered = [[0.0; 2]; 4];
+        for (corner_index, corner) in corners.iter().enumerate() {
+            let mut best = None;
+            for (index, point) in self.points.iter().enumerate() {
+                if used[index] {
+                    continue;
+                }
+                let dx = point[0] - corner[0];
+                let dy = point[1] - corner[1];
+                if best.is_none_or(|(_, best_d2)| dx * dx + dy * dy < best_d2) {
+                    best = Some((index, dx * dx + dy * dy));
+                }
+            }
+            let (index, _) = best.expect("quad has four points");
+            used[index] = true;
+            ordered[corner_index] = self.points[index];
+        }
+        ordered
+    }
+
+    /// Rotate every point around `center` by `angle` (radians, counter-
+    /// clockwise in the image coordinate space).
+    pub fn rotate(mut self, center: [f32; 2], angle: f32) -> Self {
+        let (sin, cos) = angle.sin_cos();
+        for point in &mut self.points {
+            let dx = point[0] - center[0];
+            let dy = point[1] - center[1];
+            point[0] = center[0] + dx * cos - dy * sin;
+            point[1] = center[1] + dx * sin + dy * cos;
+        }
+        self
+    }
+
     /// Refit the quad inside `new_bounds` by scaling each point's offset from
     /// `old_bounds`' top-left, so the shape's proportions are preserved.
     pub fn refit(mut self, old: [f32; 4], new: [f32; 4]) -> Self {
@@ -67,6 +112,69 @@ mod tests {
     fn quad(x0: f32, y0: f32, x1: f32, y1: f32) -> Quad {
         Quad {
             points: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+        }
+    }
+
+    #[test]
+    fn ordered_matches_aabb_corners() {
+        let q = quad(10.0, 20.0, 90.0, 80.0);
+        let ordered = q.ordered();
+        assert_eq!(ordered[0], [10.0, 20.0]);
+        assert_eq!(ordered[1], [90.0, 20.0]);
+        assert_eq!(ordered[2], [90.0, 80.0]);
+        assert_eq!(ordered[3], [10.0, 80.0]);
+    }
+
+    #[test]
+    fn ordered_survives_rotation() {
+        let q = quad(0.0, 0.0, 100.0, 100.0).rotate([50.0, 50.0], 0.7);
+        let ordered = q.ordered();
+        let [min_x, min_y, max_x, max_y] = q.bounds();
+        let corners = [
+            [min_x, min_y],
+            [max_x, min_y],
+            [max_x, max_y],
+            [min_x, max_y],
+        ];
+        for (point, corner) in ordered.iter().zip(corners) {
+            assert!((point[0] - corner[0]).abs() < 1.0 || (point[1] - corner[1]).abs() < 1.0);
+        }
+        assert!((ordered[1][0] - ordered[0][0]).abs() > 0.0 || (ordered[1][1] - ordered[0][1]).abs() > 0.0);
+    }
+
+    #[test]
+    fn rotate_spins_points_around_the_center() {
+        let q = quad(0.0, 0.0, 100.0, 100.0);
+        let rotated = q.rotate([50.0, 50.0], std::f32::consts::PI / 2.0);
+        for (point, expected) in rotated.points.iter().zip([
+            [100.0, 0.0],
+            [100.0, 100.0],
+            [0.0, 100.0],
+            [0.0, 0.0],
+        ]) {
+            assert!((point[0] - expected[0]).abs() < 1e-3, "x: {point:?}");
+            assert!((point[1] - expected[1]).abs() < 1e-3, "y: {point:?}");
+        }
+    }
+
+    #[test]
+    fn rotate_keeps_the_center_stationary() {
+        let q = quad(10.0, 20.0, 90.0, 80.0);
+        let center = [50.0, 50.0];
+        let rotated = q.rotate(center, 0.37);
+        let centroid = |points: [[f32; 2]; 4]| {
+            [
+                points.iter().map(|p| p[0]).sum::<f32>() / 4.0,
+                points.iter().map(|p| p[1]).sum::<f32>() / 4.0,
+            ]
+        };
+        let c = centroid(rotated.points);
+        assert!((c[0] - center[0]).abs() < 1e-3);
+        assert!((c[1] - center[1]).abs() < 1e-3);
+        let restored = rotated.rotate(center, -0.37);
+        for (point, original) in restored.points.iter().zip(q.points) {
+            assert!((point[0] - original[0]).abs() < 1e-3);
+            assert!((point[1] - original[1]).abs() < 1e-3);
         }
     }
 

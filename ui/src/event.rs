@@ -6,14 +6,17 @@ use iced::{Color, Rectangle};
 
 use scanlateit_model::{EntryId, Quad, TextAlign, TextGradientDir};
 
-/// The two actions offered by the selection toolbar drawn under the
-/// selected overlay box in the main area.
+/// The actions offered by the selection decorations around the selected
+/// overlay box in the main area.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolbarAction {
     /// Start the inline text edit for the entry (same as double-click).
     Rename,
     /// Soft-delete the entry and clear the selection.
     Delete,
+    /// Reset the box's transform (move, resize, rotation, free-transform
+    /// distortion) back to the OCR quad.
+    RevertTransform,
 }
 
 /// The tabs shown inside the settings modal.

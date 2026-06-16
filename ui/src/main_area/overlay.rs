@@ -28,6 +28,10 @@ pub struct OverlayEntry<'a> {
     pub style: EntryStyle,
     /// True when this entry is the one picked in the style panel.
     pub selected: bool,
+    /// True when the box is a user-adjusted view quad (move, resize, rotation
+    /// or free-transform distortion) instead of the plain OCR quad: the
+    /// revert-transform action is offered only then.
+    pub quad_overridden: bool,
     /// True while the entry is being edited inline: only the box is drawn,
     /// the text is left to the floating text input on top.
     pub hide_text: bool,
@@ -911,29 +915,26 @@ fn affine_error(quad: [[f32; 2]; 4], width: f32, height: f32) -> f32 {
     let Some((m00, m01, m10, m11)) = fit_affine(quad, width, height) else {
         return f32::INFINITY;
     };
-    let [min_x, min_y, max_x, max_y] = quad_bounds(quad);
-    let center = [(min_x + max_x) / 2.0, (min_y + max_y) / 2.0];
+    let center_x = (quad[0][0] + quad[1][0] + quad[2][0] + quad[3][0]) / 4.0;
+    let center_y = (quad[0][1] + quad[1][1] + quad[2][1] + quad[3][1]) / 4.0;
     let half_w = width / 2.0;
     let half_h = height / 2.0;
     let rect_corners = [
-        [center[0] - half_w, center[1] - half_h],
-        [center[0] + half_w, center[1] - half_h],
-        [center[0] + half_w, center[1] + half_h],
-        [center[0] - half_w, center[1] + half_h],
+        [-half_w, -half_h],
+        [half_w, -half_h],
+        [half_w, half_h],
+        [-half_w, half_h],
     ];
     let mut error: f32 = 0.0;
     for index in 0..4 {
-        let (dx, dy) = (
-            rect_corners[index][0] - center[0],
-            rect_corners[index][1] - center[1],
-        );
+        let (dx, dy) = (rect_corners[index][0], rect_corners[index][1]);
         let mapped = [
-            center[0] + m00 * dx + m01 * dy,
-            center[1] + m10 * dx + m11 * dy,
+            center_x + m00 * dx + m01 * dy,
+            center_y + m10 * dx + m11 * dy,
         ];
-        let dx = mapped[0] - quad[index][0];
-        let dy = mapped[1] - quad[index][1];
-        error = error.max((dx * dx + dy * dy).sqrt());
+        let diff_x = mapped[0] - quad[index][0];
+        let diff_y = mapped[1] - quad[index][1];
+        error = error.max((diff_x * diff_x + diff_y * diff_y).sqrt());
     }
     error
 }
@@ -1036,29 +1037,52 @@ pub fn draw_entries<'a, I, F>(
 {
     let scale = frame.width() / image_width.max(1.0);
     for entry in entries {
-        // The toolbar's "Hide Text" toggle hides the whole overlay layer:
-        // no box background, no selection outline, no text.
         if hide_text {
             continue;
         }
-        let [min_x, min_y, max_x, max_y] = entry.bounds;
-        let width = (max_x - min_x).max(0.0) * scale;
-        let height = (max_y - min_y).max(0.0) * scale;
-        let position = Point::new(min_x * scale, min_y * scale);
-        // The entry's quad scaled to viewport pixels. When it is not an
-        // axis-aligned box (free transform), the box is the quad itself and
-        // the text is mapped onto it by an affine transform, so the text
-        // skews and rotates with the box.
         let quad = entry.quad.points.map(|p| [p[0] * scale, p[1] * scale]);
-        let transform = quad_transform(quad, width, height);
-        // The quad path is already in screen space at the box's real
-        // corners: it must be drawn without the text transform, or the
-        // polygon gets pushed through the rect->quad map a second time.
-        let path = match transform {
+        let rotated = rotated_rect_geometry(quad).and_then(|(tl, w, h, angle)| {
+            let upright = angle.rem_euclid(2.0 * std::f32::consts::PI);
+            let is_upright = upright.abs() < 0.01 || (upright - 2.0 * std::f32::consts::PI).abs() < 0.01;
+            if is_upright {
+                None
+            } else {
+                Some((
+                    tl,
+                    w,
+                    h,
+                    QuadTransform {
+                        angle1: 0.0,
+                        scale_x: 1.0005,
+                        scale_y: 1.0 / 1.0005,
+                        angle2: angle,
+                    },
+                ))
+            }
+        });
+
+        let (layout_position, layout_width, layout_height, layout_transform) = match rotated {
+            Some((tl, w, h, t)) => (tl, w, h, Some(t)),
+            None => {
+                let w_top = ((quad[1][0] - quad[0][0]).powi(2) + (quad[1][1] - quad[0][1]).powi(2)).sqrt();
+                let w_bot = ((quad[2][0] - quad[3][0]).powi(2) + (quad[2][1] - quad[3][1]).powi(2)).sqrt();
+                let h_left = ((quad[3][0] - quad[0][0]).powi(2) + (quad[3][1] - quad[0][1]).powi(2)).sqrt();
+                let h_right = ((quad[2][0] - quad[1][0]).powi(2) + (quad[2][1] - quad[1][1]).powi(2)).sqrt();
+                let w = ((w_top + w_bot) / 2.0).max(1.0);
+                let h = ((h_left + h_right) / 2.0).max(1.0);
+                let center_x = (quad[0][0] + quad[1][0] + quad[2][0] + quad[3][0]) / 4.0;
+                let center_y = (quad[0][1] + quad[1][1] + quad[2][1] + quad[3][1]) / 4.0;
+                let pos = Point::new(center_x - w / 2.0, center_y - h / 2.0);
+                let transform = quad_transform(quad, w, h);
+                (pos, w, h, transform)
+            }
+        };
+
+        let path = match layout_transform {
             Some(_) => quad_path(quad),
             None => Path::rounded_rectangle(
-                position,
-                Size::new(width, height),
+                layout_position,
+                Size::new(layout_width, layout_height),
                 Radius::from(entry.style.bg_radius * scale),
             ),
         };
@@ -1071,44 +1095,39 @@ pub fn draw_entries<'a, I, F>(
                     .with_width(SELECTED_WIDTH),
             );
         }
-        let wrap_width = width.max(8.0);
+        let wrap_width = layout_width.max(8.0);
         if entry.hide_text {
             continue;
         }
         let styled = styled_font(font, &entry.style);
-        // The box the text is laid out against and the warp decision: a
-        // quad the single affine cannot match (affine error above the
-        // threshold) draws per-glyph through the projective field instead.
-        let box_rect = Rectangle::new(position, Size::new(width, height));
-        let ordered = order_quad(quad);
-        let warp = transform.is_some() && affine_error(ordered, width, height) > WARP_THRESHOLD_PX;
+        let box_rect = Rectangle::new(layout_position, Size::new(layout_width, layout_height));
+        let warp = rotated.is_none()
+            && layout_transform.is_some()
+            && affine_error(quad, layout_width, layout_height) > WARP_THRESHOLD_PX;
         let stroke = (entry.style.stroke_width > 0.0).then(|| {
             (to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
         });
         let gradient = entry.style.text_gradient.then(|| {
             (entry.style.gradient_dir, entry.style.gradient_a, entry.style.gradient_b)
         });
+
         if entry.style.text_align == TextAlign::Circular {
             let (size, lines) =
-                fit_circle_metrics(entry.text, styled, Size::new(wrap_width, height));
+                fit_circle_metrics(entry.text, styled, Size::new(wrap_width, layout_height));
             let line_height = size * LINE_HEIGHT;
             let total_height = lines.last().map_or(0.0, |line| line.y + line_height);
-            // Vertically center the whole block inside the ellipse.
-            let y_offset = (height - total_height).max(0.0) / 2.0;
+            let y_offset = (layout_height - total_height).max(0.0) / 2.0;
             let block_rect = Rectangle::new(
-                Point::new(position.x, position.y + y_offset),
+                Point::new(layout_position.x, layout_position.y + y_offset),
                 Size::new(wrap_width, total_height),
             );
             if warp {
                 for line in &lines {
-                    // `align_x: Center` treats the position's x as the line's
-                    // center (not its left edge), so it must be the bubble's
-                    // horizontal center, not the box's left corner.
                     let text = Text {
                         content: line.content.clone(),
                         position: Point::new(
-                            position.x + wrap_width / 2.0,
-                            position.y + y_offset + line.y,
+                            layout_position.x + wrap_width / 2.0,
+                            layout_position.y + y_offset + line.y,
                         ),
                         max_width: line.chord,
                         size: Pixels(size),
@@ -1117,22 +1136,25 @@ pub fn draw_entries<'a, I, F>(
                         align_x: TextAlignment::Center,
                         ..Text::default()
                     };
-                    draw_warped_text(frame, &text, box_rect, ordered, stroke, gradient);
+                    draw_warped_text(frame, &text, box_rect, quad, stroke, gradient);
                 }
             } else {
-                if let Some(transform) = &transform {
+                if let Some(transform) = &layout_transform {
                     frame.push_transform();
-                    apply_quad_transform(frame, transform, position, width, height);
+                    apply_quad_transform(
+                        frame,
+                        transform,
+                        layout_position,
+                        layout_width,
+                        layout_height,
+                    );
                 }
                 for line in &lines {
-                    // `align_x: Center` treats the position's x as the line's
-                    // center (not its left edge), so it must be the bubble's
-                    // horizontal center, not the box's left corner.
                     let text = Text {
                         content: line.content.clone(),
                         position: Point::new(
-                            position.x + wrap_width / 2.0,
-                            position.y + y_offset + line.y,
+                            layout_position.x + wrap_width / 2.0,
+                            layout_position.y + y_offset + line.y,
                         ),
                         max_width: line.chord,
                         size: Pixels(size),
@@ -1152,10 +1174,10 @@ pub fn draw_entries<'a, I, F>(
                             (entry.style.stroke_width > 0.0).then(|| {
                                 (to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
                             }),
-                            transform.as_ref(),
-                            position,
-                            width,
-                            height,
+                            layout_transform.as_ref(),
+                            layout_position,
+                            layout_width,
+                            layout_height,
                         );
                     } else {
                         if entry.style.stroke_width > 0.0 {
@@ -1169,32 +1191,32 @@ pub fn draw_entries<'a, I, F>(
                         frame.fill_text(text);
                     }
                 }
-                if transform.is_some() {
+                if layout_transform.is_some() {
                     frame.pop_transform();
                 }
             }
             continue;
         }
+
         let (size, fitted_height) = fit_font_metrics(
             entry.text,
             styled,
-            Size::new(wrap_width, height),
+            Size::new(wrap_width, layout_height),
         );
-        // Vertically center the wrapped text block inside the box.
-        let y_offset = (height - fitted_height).max(0.0) / 2.0;
+        let y_offset = (layout_height - fitted_height).max(0.0) / 2.0;
         let block_rect = Rectangle::new(
-            Point::new(position.x, position.y + y_offset),
+            Point::new(layout_position.x, layout_position.y + y_offset),
             Size::new(wrap_width, fitted_height),
         );
         let (align_x, text_x) = match entry.style.text_align {
-            TextAlign::Circular => (TextAlignment::Default, position.x),
-            TextAlign::Left => (TextAlignment::Left, position.x),
-            TextAlign::Center => (TextAlignment::Center, position.x + wrap_width / 2.0),
-            TextAlign::Right => (TextAlignment::Right, position.x + wrap_width),
+            TextAlign::Circular => (TextAlignment::Default, layout_position.x),
+            TextAlign::Left => (TextAlignment::Left, layout_position.x),
+            TextAlign::Center => (TextAlignment::Center, layout_position.x + wrap_width / 2.0),
+            TextAlign::Right => (TextAlignment::Right, layout_position.x + wrap_width),
         };
         let text = Text {
             content: entry.text.to_string(),
-            position: Point::new(text_x, position.y + y_offset),
+            position: Point::new(text_x, layout_position.y + y_offset),
             max_width: wrap_width,
             size: Pixels(size),
             color: to_color(entry.style.text_color),
@@ -1202,70 +1224,19 @@ pub fn draw_entries<'a, I, F>(
             align_x,
             ..Text::default()
         };
+
         if warp {
-            // DEBUG markers: green square = raw AABB text position; red
-            // squares = the block's TL and BR corners mapped through the
-            // projective field (must land on the quad).
-            if entry.selected {
-                frame.fill_rectangle(
-                    Point::new(text.position.x - 4.0, text.position.y - 4.0),
-                    Size::new(8.0, 8.0),
-                    Fill::from(Color::from_rgba8(0, 255, 0, 1.0)),
-                );
-                let tl = perspective_map(
-                    ordered,
-                    box_rect,
-                    Point::new(position.x, position.y + y_offset),
-                );
-                let br = perspective_map(
-                    ordered,
-                    box_rect,
-                    Point::new(
-                        position.x + wrap_width,
-                        position.y + y_offset + fitted_height,
-                    ),
-                );
-                frame.fill_rectangle(
-                    Point::new(tl.x - 4.0, tl.y - 4.0),
-                    Size::new(8.0, 8.0),
-                    Fill::from(Color::from_rgba8(255, 0, 0, 1.0)),
-                );
-                frame.fill_rectangle(
-                    Point::new(br.x - 4.0, br.y - 4.0),
-                    Size::new(8.0, 8.0),
-                    Fill::from(Color::from_rgba8(255, 0, 0, 1.0)),
-                );
-            }
-            draw_warped_text(frame, &text, box_rect, ordered, stroke, gradient);
+            draw_warped_text(frame, &text, box_rect, quad, stroke, gradient);
         } else {
-            // Only the text lives in the axis-aligned rect space and needs
-            // the map onto the skewed quad.
-            if let Some(transform) = &transform {
+            if let Some(transform) = &layout_transform {
                 frame.push_transform();
-                apply_quad_transform(frame, transform, position, width, height);
-            }
-            // DEBUG markers: green square = text position drawn WITHOUT the
-            // transform (raw AABB coords); red squares = same local rect
-            // under the transform (must land exactly on the quad's
-            // envelope).
-            if entry.selected {
-                frame.fill_rectangle(
-                    Point::new(text.position.x - 4.0, text.position.y - 4.0),
-                    Size::new(8.0, 8.0),
-                    Fill::from(Color::from_rgba8(0, 255, 0, 1.0)),
+                apply_quad_transform(
+                    frame,
+                    transform,
+                    layout_position,
+                    layout_width,
+                    layout_height,
                 );
-                if transform.is_some() {
-                    frame.fill_rectangle(
-                        Point::new(text.position.x - 4.0, text.position.y - 4.0),
-                        Size::new(8.0, 8.0),
-                        Fill::from(Color::from_rgba8(255, 0, 0, 1.0)),
-                    );
-                    frame.fill_rectangle(
-                        Point::new(text.position.x + wrap_width - 4.0, text.position.y + fitted_height - 4.0),
-                        Size::new(8.0, 8.0),
-                        Fill::from(Color::from_rgba8(255, 0, 0, 1.0)),
-                    );
-                }
             }
             if entry.style.text_gradient {
                 fill_gradient_text(
@@ -1278,10 +1249,10 @@ pub fn draw_entries<'a, I, F>(
                     (entry.style.stroke_width > 0.0).then(|| {
                         (to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
                     }),
-                    transform.as_ref(),
-                    position,
-                    width,
-                    height,
+                    layout_transform.as_ref(),
+                    layout_position,
+                    layout_width,
+                    layout_height,
                 );
             } else {
                 if entry.style.stroke_width > 0.0 {
@@ -1294,7 +1265,7 @@ pub fn draw_entries<'a, I, F>(
                 }
                 frame.fill_text(text);
             }
-            if transform.is_some() {
+            if layout_transform.is_some() {
                 frame.pop_transform();
             }
         }
@@ -1315,6 +1286,7 @@ fn quad_path(quad: [[f32; 2]; 4]) -> Path {
 
 /// An affine map `M = R(angle2) * S(scale_x, scale_y) * R(angle1)` that maps
 /// an axis-aligned rect onto a free-transformed quad.
+#[derive(Debug, Clone, Copy)]
 struct QuadTransform {
     angle1: f32,
     scale_x: f32,
@@ -1359,32 +1331,39 @@ fn quad_bounds(quad: [[f32; 2]; 4]) -> [f32; 4] {
 /// corners TL, TR, BR, BL, by assigning each AABB corner its nearest unused
 /// quad point (correct for any convex quad).
 pub(crate) fn order_quad(quad: [[f32; 2]; 4]) -> [[f32; 2]; 4] {
-    let [min_x, min_y, max_x, max_y] = quad_bounds(quad);
-    let corners = [
-        [min_x, min_y],
-        [max_x, min_y],
-        [max_x, max_y],
-        [min_x, max_y],
-    ];
-    let mut used = [false; 4];
-    let mut ordered = [[0.0; 2]; 4];
-    for (corner_index, corner) in corners.iter().enumerate() {
-        let mut best = None;
-        for (index, point) in quad.iter().enumerate() {
-            if used[index] {
-                continue;
-            }
-            let dx = point[0] - corner[0];
-            let dy = point[1] - corner[1];
-            if best.is_none_or(|(_, best_d2)| dx * dx + dy * dy < best_d2) {
-                best = Some((index, dx * dx + dy * dy));
-            }
-        }
-        let (index, _) = best.expect("quad has four points");
-        used[index] = true;
-        ordered[corner_index] = quad[index];
+    Quad { points: quad }.ordered()
+}
+
+/// The quad's local rect when it is a rotated rectangle: `(tl, w, h, angle)`
+/// with `w`/`h` the true edge lengths and `angle` the top-edge direction.
+/// `None` for sheared/perspective quads (adjacent edges not perpendicular)
+/// and degenerate boxes. Used to lay out and fit text against the box's own
+/// axes instead of its axis-aligned bounding box, so rotated text keeps its
+/// size and wrap width.
+fn rotated_rect_geometry(quad: [[f32; 2]; 4]) -> Option<(Point, f32, f32, f32)> {
+    let top = [quad[1][0] - quad[0][0], quad[1][1] - quad[0][1]];
+    let bottom = [quad[2][0] - quad[3][0], quad[2][1] - quad[3][1]];
+    let left = [quad[3][0] - quad[0][0], quad[3][1] - quad[0][1]];
+    let right = [quad[2][0] - quad[1][0], quad[2][1] - quad[1][1]];
+    let w = (top[0] * top[0] + top[1] * top[1]).sqrt();
+    let h = (left[0] * left[0] + left[1] * left[1]).sqrt();
+    if w <= f32::EPSILON || h <= f32::EPSILON {
+        return None;
     }
-    ordered
+    let w_bot = (bottom[0] * bottom[0] + bottom[1] * bottom[1]).sqrt();
+    let h_right = (right[0] * right[0] + right[1] * right[1]).sqrt();
+    if (w - w_bot).abs() / w.max(w_bot) > 0.05 || (h - h_right).abs() / h.max(h_right) > 0.05 {
+        return None;
+    }
+    let dot = top[0] * left[0] + top[1] * left[1];
+    if dot.abs() / (w * h) > 0.05 {
+        return None;
+    }
+    let angle = top[1].atan2(top[0]);
+    let center_x = (quad[0][0] + quad[1][0] + quad[2][0] + quad[3][0]) / 4.0;
+    let center_y = (quad[0][1] + quad[1][1] + quad[2][1] + quad[3][1]) / 4.0;
+    let unrotated_pos = Point::new(center_x - w / 2.0, center_y - h / 2.0);
+    Some((unrotated_pos, w, h, angle))
 }
 
 /// The affine 2x2 matrix (least squares) mapping the corners of the
@@ -1401,12 +1380,8 @@ fn fit_affine(quad: [[f32; 2]; 4], width: f32, height: f32) -> Option<(f32, f32,
     }
     let half_w = width / 2.0;
     let half_h = height / 2.0;
-    let [min_x, min_y, max_x, max_y] = quad_bounds(quad);
-    let center = ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0);
-    // Rect corners relative to the rect center: (-hw,-hh), (hw,-hh), (hw,hh),
-    // (-hw,hh). Because they are symmetric, the normal matrix is diagonal:
-    // sum(lx*lx) = width^2 and sum(ly*ly) = height^2, so the least-squares
-    // solution is the average of the corner ratios along each axis.
+    let center_x = (quad[0][0] + quad[1][0] + quad[2][0] + quad[3][0]) / 4.0;
+    let center_y = (quad[0][1] + quad[1][1] + quad[2][1] + quad[3][1]) / 4.0;
     let lx = [-half_w, half_w, half_w, -half_w];
     let ly = [-half_h, -half_h, half_h, half_h];
     let mut m00 = 0.0;
@@ -1414,7 +1389,7 @@ fn fit_affine(quad: [[f32; 2]; 4], width: f32, height: f32) -> Option<(f32, f32,
     let mut m01 = 0.0;
     let mut m11 = 0.0;
     for index in 0..4 {
-        let (qx, qy) = (quad[index][0] - center.0, quad[index][1] - center.1);
+        let (qx, qy) = (quad[index][0] - center_x, quad[index][1] - center_y);
         m00 += lx[index] * qx;
         m10 += lx[index] * qy;
         m01 += ly[index] * qx;
@@ -1466,29 +1441,16 @@ fn svd2(m00: f32, m01: f32, m10: f32, m11: f32) -> (f32, f32, f32, f32) {
 /// `None` when the quad is axis-aligned (keep the exact rounded-rect draw
 /// path), degenerate, or mirrored.
 fn quad_transform(quad: [[f32; 2]; 4], width: f32, height: f32) -> Option<QuadTransform> {
-    let ordered = order_quad(quad);
-    let [min_x, min_y, max_x, max_y] = quad_bounds(quad);
-    let corners = [[min_x, min_y], [max_x, min_y], [max_x, max_y], [min_x, max_y]];
-    let axis_aligned = ordered
-        .iter()
-        .zip(corners.iter())
-        .all(|(point, corner)| (point[0] - corner[0]).abs() < 0.5 && (point[1] - corner[1]).abs() < 0.5);
-    if axis_aligned {
+    let (m00, m01, m10, m11) = fit_affine(quad, width, height)?;
+    if m00 * m11 - m01 * m10 <= 0.0 {
         return None;
     }
-    let (m00, m01, m10, m11) = fit_affine(ordered, width, height)?;
-    // Mirroring maps (det <= 0) would flip the text; the rounded-rect path
-    // with axis-aligned text is the safer fallback.
-    if m00 * m11 - m01 * m10 <= 0.0 {
+    if (m00 - 1.0).abs() < 1e-3 && (m11 - 1.0).abs() < 1e-3 && m01.abs() < 1e-3 && m10.abs() < 1e-3 {
         return None;
     }
     let (mut s1, mut s2, beta, alpha) = svd2(m00, m01, m10, m11);
     s1 = s1.max(0.01);
     s2 = s2.max(0.01);
-    // Text backends only rasterize glyphs through the transform when it is
-    // not a pure scale+translation: a pure rotation (s1 == s2) would render
-    // glyphs axis-aligned at a rotated position. The 0.05% anisotropy is
-    // invisible and forces the transform-aware glyph path.
     let stretch = 1.0005;
     Some(QuadTransform {
         angle1: -alpha,
@@ -1782,6 +1744,26 @@ mod tests {
                 "line image at v={v} misses the vanishing point (area {area})"
             );
         }
+    }
+
+    #[test]
+    fn rotated_rect_geometry_detects_rotated_boxes_and_rejects_shear() {
+        // A 100x30 box spun 0.5 rad: true edge lengths, exact angle.
+        let rotated = [[0.0, 0.0], [87.758256, 47.942554], [73.37549, 74.27003], [-14.382766, 26.327477]];
+        let (tl, w, h, angle) = rotated_rect_geometry(rotated).unwrap();
+        assert_eq!((tl.x, tl.y), (0.0, 0.0));
+        assert!((w - 100.0).abs() < 1e-3 && (h - 30.0).abs() < 1e-3);
+        assert!((angle - 0.5).abs() < 1e-3);
+
+        // An axis-aligned box: geometry reported, upright angle.
+        let upright = [[0.0, 0.0], [100.0, 0.0], [100.0, 30.0], [0.0, 30.0]];
+        let (_, w, h, angle) = rotated_rect_geometry(upright).unwrap();
+        assert!((w - 100.0).abs() < 1e-3 && (h - 30.0).abs() < 1e-3);
+        assert!(angle.abs() < 1e-3);
+
+        // A sheared parallelogram: not a rectangle, must be rejected.
+        let sheared = [[0.0, 0.0], [100.0, 0.0], [90.0, 30.0], [10.0, 30.0]];
+        assert!(rotated_rect_geometry(sheared).is_none());
     }
 
     #[test]

@@ -758,10 +758,44 @@ for c in text.chars() {
             &mut app,
             Message::Ui(UiEvent::EntryToolbar((999, missing, ToolbarAction::Delete))),
         );
+        let _ = update(
+            &mut app,
+            Message::Ui(UiEvent::EntryToolbar((0, missing, ToolbarAction::RevertTransform))),
+        );
 
         assert_eq!(app.editing, None);
         assert_eq!(app.selected, None);
         assert_eq!(app.images[0].project.ocr.visible_count(), 1);
+    }
+
+    #[test]
+    fn toolbar_revert_drops_the_view_quad_back_to_the_ocr_quad() {
+        let (mut app, id) = app_with_entry();
+        let ocr_quad = app.images[0].project.ocr.get(id).unwrap().quad;
+        let ocr_tl = ocr_quad.ordered()[0];
+        let moved = ocr_quad.translate(15.0, 8.0).rotate([50.0, 50.0], 0.4);
+        let _ = update(&mut app, Message::Ui(UiEvent::EntryMoved((0, id, moved))));
+        assert_ne!(app.images[0].project.view_quad(app.images[0].project.ocr.get(id).unwrap()), ocr_quad);
+        app.selected = Some((0, id));
+
+        let _ = update(
+            &mut app,
+            Message::Ui(UiEvent::EntryToolbar((0, id, ToolbarAction::RevertTransform))),
+        );
+
+        let view = app.images[0].project.view_quad(app.images[0].project.ocr.get(id).unwrap());
+        let tl = view.ordered()[0];
+        assert!(
+            (tl[0] - (ocr_tl[0] + 15.0)).abs() < 1e-3 && (tl[1] - (ocr_tl[1] + 8.0)).abs() < 1e-3,
+            "revert must keep the box's position, got {tl:?}"
+        );
+        assert_eq!(view.translate(-(tl[0] - ocr_tl[0]), -(tl[1] - ocr_tl[1])), ocr_quad,
+            "revert must restore the OCR shape/rotation/size");
+        assert_eq!(app.selected, Some((0, id)), "revert must keep the selection");
+        assert!(
+            !app.images[0].project.ocr.get(id).unwrap().deleted,
+            "revert must not touch the entry"
+        );
     }
 
     #[test]
@@ -1819,6 +1853,17 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 app.selected = None;
                 clear_editing(app);
                 app.status = "Deleted entry.".to_string();
+                Task::none()
+            }
+            ToolbarAction::RevertTransform => {
+                let Some(image) = app.images.get_mut(index) else {
+                    return Task::none();
+                };
+                if !image.project.has_view_quad(id) {
+                    return Task::none();
+                }
+                image.project.revert_transform(id);
+                app.status = "Reverted transform.".to_string();
                 Task::none()
             }
         },

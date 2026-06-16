@@ -129,6 +129,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                         bounds: image.project.view_quad(entry).bounds(),
                         style: image.project.entry_style(entry.id),
                         selected: state.selected() == Some((index, entry.id)),
+                        quad_overridden: image.project.has_view_quad(entry.id),
                         // During an overlay-origin edit the floating editor
                         // replaces the drawn text; panel edits leave the page
                         // text visible and updating live.

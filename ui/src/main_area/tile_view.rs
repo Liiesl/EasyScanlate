@@ -59,6 +59,10 @@ const TOOLBAR_FG: Color = Color::from_rgba8(215, 220, 235, 1.0);
 const HANDLE_FILL: Color = Color::WHITE;
 const HANDLE_BORDER: Color = Color::from_rgba8(92, 190, 255, 1.0);
 
+/// Length of the stem connecting the rotation knob to the box, in viewport
+/// pixels.
+const ROTATE_STEM: f32 = 16.0;
+
 const PLACEHOLDER_BG: Color = Color::from_rgba8(45, 47, 60, 1.0);
 const PLACEHOLDER_FG: Color = Color::from_rgba8(140, 145, 160, 1.0);
 const FAILED_BG: Color = Color::from_rgba8(70, 40, 45, 1.0);
@@ -110,8 +114,8 @@ pub struct TileView<
     on_entry_double_clicked: Option<H>,
     on_edit_rect: Option<K>,
     on_entry_moved: Option<L>,
-    /// Called when a button of the selection toolbar under the selected entry
-    /// is clicked.
+    /// Called when a button of the selection decorations (the toolbar under
+    /// the selected entry's box or the revert button above it) is clicked.
     on_toolbar_action: Option<M>,
     /// Called when the user finishes dragging an inpainting range on the
     /// tile whose index matches [`TileView::inpaint_mode`]; the rectangle is
@@ -205,8 +209,9 @@ where
         self
     }
 
-    /// Called when a button of the selection toolbar (drawn under the
-    /// selected entry's box) is clicked.
+    /// Called when a button of the selection decorations (the toolbar drawn
+    /// under the selected entry's box, or the revert button beside the
+    /// rotation knob above it) is clicked.
     pub fn on_toolbar_action(mut self, f: M) -> Self {
         self.on_toolbar_action = Some(f);
         self
@@ -328,6 +333,32 @@ enum Interaction {
         id: EntryId,
         corner: usize,
         quad: Quad,
+    },
+    /// A press on the rotation knob above the selected entry that could
+    /// still resolve into a click of nothing; turns into
+    /// [`Interaction::Rotating`] past the drag threshold. `quad` is the
+    /// entry's view quad at press (image pixels), `center_img` its centroid
+    /// in image pixels and `center_view` the centroid in viewport pixels;
+    /// dragging spins the quad around that center by the cursor's angle
+    /// delta around `center_view`.
+    RotatePending {
+        index: usize,
+        id: EntryId,
+        quad: Quad,
+        center_img: [f32; 2],
+        center_view: Point,
+        press: Point,
+    },
+    /// A press past the drag threshold on the rotation knob: publishes the
+    /// entry's new view quad (rotated around its center) on every cursor
+    /// move.
+    Rotating {
+        index: usize,
+        id: EntryId,
+        quad: Quad,
+        center_img: [f32; 2],
+        center_view: Point,
+        press: Point,
     },
     /// A press on a button of the selection toolbar; resolves (publishes the
     /// action) on release iff the cursor is still over the same button.
@@ -807,6 +838,166 @@ fn hit_handle(
     None
 }
 
+/// The quad's centroid (average of its four points).
+fn quad_centroid(quad: [[f32; 2]; 4]) -> Point {
+    Point::new(
+        (quad[0][0] + quad[1][0] + quad[2][0] + quad[3][0]) / 4.0,
+        (quad[0][1] + quad[1][1] + quad[2][1] + quad[3][1]) / 4.0,
+    )
+}
+
+/// The geometry of the top selection decorations (rotation knob + revert
+/// button), in the caller's coordinate space: `rect` is the box's AABB,
+/// `quad` its polygon, `width` the content width and `viewport_top` /
+/// `viewport_bottom` the visible band the decorations must stay inside. The
+/// decorations hang off the box's top edge by a stem, and flip below the box
+/// when they would cross the viewport's top edge (mirroring the bottom
+/// toolbar's flip).
+struct TopDecor {
+    /// The rotation knob's center, connected to the box by a stem.
+    anchor: Point,
+    /// The box-edge midpoint the stem is drawn from.
+    stem_from: Point,
+    /// The revert button's rect.
+    revert: Rectangle,
+}
+
+fn top_decor_geometry(
+    rect: Rectangle,
+    quad: [[f32; 2]; 4],
+    width: f32,
+    viewport_top: f32,
+    viewport_bottom: f32,
+) -> TopDecor {
+    let center = quad_centroid(quad);
+    // The point `ROTATE_STEM` outward from the midpoint of the edge `a`-`b`,
+    // on the side pointing away from the box's centroid.
+    let outward = |a: [f32; 2], b: [f32; 2]| -> Point {
+        let mid = Point::new((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0);
+        let edge = [b[0] - a[0], b[1] - a[1]];
+        let mut normal = [-edge[1], edge[0]];
+        let toward = [mid.x - center.x, mid.y - center.y];
+        if normal[0] * toward[0] + normal[1] * toward[1] < 0.0 {
+            normal = [edge[1], -edge[0]];
+        }
+        let len = (normal[0] * normal[0] + normal[1] * normal[1]).sqrt().max(f32::EPSILON);
+        Point::new(
+            mid.x + normal[0] / len * ROTATE_STEM,
+            mid.y + normal[1] / len * ROTATE_STEM,
+        )
+    };
+    let ordered = overlay::order_quad(quad);
+    let top_mid = Point::new(
+        (ordered[0][0] + ordered[1][0]) / 2.0,
+        (ordered[0][1] + ordered[1][1]) / 2.0,
+    );
+    let bottom_mid = Point::new(
+        (ordered[2][0] + ordered[3][0]) / 2.0,
+        (ordered[2][1] + ordered[3][1]) / 2.0,
+    );
+    let stem_up = outward(ordered[0], ordered[1]);
+    let stem_down = outward(ordered[3], ordered[2]);
+    // Flip below the box only when the knob would cross the viewport's top
+    // while the box itself still sits inside it; with the box fully above
+    // the viewport the clamp below pins the knob to the visible band.
+    let flip = stem_up.y - HANDLE_SIZE / 2.0 < viewport_top && rect.y > viewport_top;
+    let (stem_from, mut anchor) = if flip {
+        (bottom_mid, stem_down)
+    } else {
+        (top_mid, stem_up)
+    };
+    // Keep the knob inside the visible band; with the box itself above the
+    // viewport the flipped-down knob would otherwise sit off-screen.
+    anchor.y = anchor
+        .y
+        .clamp(viewport_top + HANDLE_SIZE / 2.0, viewport_bottom - HANDLE_SIZE / 2.0);
+    let revert_width = button_width("Revert");
+    let revert = Rectangle::new(
+        Point::new(
+            (anchor.x + HANDLE_SIZE / 2.0 + TOOLBAR_GAP).clamp(0.0, (width - revert_width).max(0.0)),
+            anchor.y - TOOLBAR_HEIGHT / 2.0,
+        ),
+        Size::new(revert_width, TOOLBAR_HEIGHT),
+    );
+    TopDecor { anchor, stem_from, revert }
+}
+
+/// What part of the top selection decorations is under `local`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TopDecorHit {
+    /// The rotation knob: press-drag rotates the box.
+    Rotate,
+    /// The revert button: resets the box's transform.
+    Revert,
+}
+
+/// The top selection decorations of the selected entry under `local`
+/// (viewport-relative), if any: its tile index, entry id and which part was
+/// hit. The revert button is only offered when the box is actually a
+/// user-adjusted override.
+fn hit_top_decor(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    local: Point,
+) -> Option<(usize, EntryId, TopDecorHit)> {
+    let (index, entry) = tiles.iter().enumerate().find_map(|(index, tile)| {
+        tile.overlays.iter().find(|e| e.selected).map(|e| (index, e))
+    })?;
+    let id = entry.id;
+    if state.inpaint_mode() == Some(index) {
+        return None;
+    }
+    let (_, rect) = selected_rect(tiles, state)?;
+    let quad = selected_quad_view(tiles, state, index)?;
+    let decor = top_decor_geometry(
+        rect,
+        quad,
+        state.width,
+        state.offset,
+        state.offset + state.viewport_height,
+    );
+    if handle_rect(decor.anchor).contains(local) {
+        return Some((index, id, TopDecorHit::Rotate));
+    }
+    if entry.quad_overridden && decor.revert.contains(local) {
+        return Some((index, id, TopDecorHit::Revert));
+    }
+    None
+}
+
+/// The angle the cursor swept around `center` between `from` and `to`, in
+/// radians; snapped to [`ROTATE_SNAP_DEGREES`] steps when `snap` is true.
+fn delta_angle(center: Point, from: Point, to: Point, snap: bool) -> f32 {
+    let from_angle = f32::atan2(from.y - center.y, from.x - center.x);
+    let to_angle = f32::atan2(to.y - center.y, to.x - center.x);
+    let mut delta = to_angle - from_angle;
+    while delta > std::f32::consts::PI {
+        delta -= std::f32::consts::TAU;
+    }
+    while delta < -std::f32::consts::PI {
+        delta += std::f32::consts::TAU;
+    }
+    if snap {
+        const ROTATE_SNAP_DEGREES: f32 = 15.0;
+        let step = ROTATE_SNAP_DEGREES.to_radians();
+        delta = (delta / step).round() * step;
+    }
+    delta
+}
+
+/// The image-pixel view quad when the rotation knob captured at press spins
+/// the entry by the cursor's angle delta around the box center.
+fn rotate_quad(
+    quad: Quad,
+    center_img: [f32; 2],
+    center_view: Point,
+    press: Point,
+    local: Point,
+    snap: bool,
+) -> Quad {
+    quad.rotate(center_img, delta_angle(center_view, press, local, snap))
+}
+
 /// The toolbar's buttons in drawing order, with their labels.
 fn toolbar_buttons() -> [(ToolbarAction, &'static str); 2] {
     [
@@ -815,11 +1006,13 @@ fn toolbar_buttons() -> [(ToolbarAction, &'static str); 2] {
     ]
 }
 
+/// Width of one labeled toolbar button, in viewport pixels.
+fn button_width(label: &str) -> f32 {
+    label.chars().count() as f32 * 6.5 + TOOLBAR_BTN_PAD * 2.0
+}
+
 /// Width of the toolbar: two side-by-side buttons ("Rename", "Delete").
 fn toolbar_width() -> f32 {
-    fn button_width(label: &str) -> f32 {
-        label.chars().count() as f32 * 6.5 + TOOLBAR_BTN_PAD * 2.0
-    }
     toolbar_buttons()
         .into_iter()
         .map(|(_, label)| button_width(label))
@@ -848,7 +1041,7 @@ fn hit_toolbar_button(toolbar: Rectangle, local: Point) -> Option<ToolbarAction>
     }
     let mut x = toolbar.x;
     for (action, label) in toolbar_buttons() {
-        let width = label.chars().count() as f32 * 6.5 + TOOLBAR_BTN_PAD * 2.0;
+        let width = button_width(label);
         if local.x < x + width {
             return Some(action);
         }
@@ -1080,7 +1273,7 @@ where
 fn toolbar_button_rect(toolbar: Rectangle, action: ToolbarAction) -> Rectangle {
     let mut x = toolbar.x;
     for (candidate, label) in toolbar_buttons() {
-        let width = label.chars().count() as f32 * 6.5 + TOOLBAR_BTN_PAD * 2.0;
+        let width = button_width(label);
         if candidate == action {
             return Rectangle::new(Point::new(x, toolbar.y), Size::new(width, toolbar.height));
         }
@@ -1099,6 +1292,15 @@ where
         .find(|(candidate, _)| *candidate == action)
         .map(|(_, label)| label)
         .unwrap_or("");
+    draw_action_button(frame, rect, label, hovered);
+}
+
+/// Fills one action button (the bottom toolbar's buttons and the top revert
+/// button).
+fn draw_action_button<F>(frame: &mut F, rect: Rectangle, label: &str, hovered: bool)
+where
+    F: geometry::frame::Backend,
+{
     if hovered {
         frame.fill(
             &Path::rounded_rectangle(rect.position(), rect.size(), Radius::from(4.0)),
@@ -1120,22 +1322,44 @@ where
     });
 }
 
-/// Draws the resize handles and the Rename/Delete toolbar around the
-/// selected entry, in the tile-local coordinates of its overlay frame.
+/// Draws the rotation knob with its stem, and the revert button beside it
+/// when the box is a user-adjusted override.
+fn draw_top_decor<F>(frame: &mut F, decor: TopDecor, show_revert: bool, hover: bool)
+where
+    F: geometry::frame::Backend,
+{
+    frame.stroke(
+        &Path::line(decor.stem_from, decor.anchor),
+        Stroke::default().with_color(HANDLE_BORDER).with_width(1.5),
+    );
+    let knob = Path::circle(decor.anchor, HANDLE_SIZE / 2.0);
+    frame.fill(&knob, Fill::from(HANDLE_FILL));
+    frame.stroke(&knob, Stroke::default().with_color(HANDLE_BORDER).with_width(1.5));
+    if show_revert {
+        draw_action_button(frame, decor.revert, "Revert", hover);
+    }
+}
+
+/// Draws the resize handles, the rotation knob with the revert button, and
+/// the Rename/Delete toolbar around the selected entry, in the tile-local
+/// coordinates of its overlay frame.
 ///
 /// The decorations are skipped while the entry is being edited inline, while
-/// the user is already moving/resizing it, or while the overlay layer is
-/// hidden entirely (`show_overlay_text` is `false`). `cursor_local` is the
-/// cursor in the frame's coordinates (`None` outside the widget), used for
-/// the toolbar's hover highlight. `flip_at` is the viewer viewport's bottom
-/// in the frame's coordinates: the toolbar hangs below the box and flips
-/// above only when it would cross the viewport's bottom edge.
+/// the user is already moving/resizing/rotating it, or while the overlay
+/// layer is hidden entirely (`show_overlay_text` is `false`). `cursor_local`
+/// is the cursor in the frame's coordinates (`None` outside the widget),
+/// used for the buttons' hover highlight. `flip_from`/`flip_at` are the
+/// viewer viewport's top/bottom in the frame's coordinates: the toolbar
+/// hangs below the box and flips above when it would cross the viewport's
+/// bottom edge, and the rotation knob hangs above the box and flips below
+/// when it would cross the viewport's top edge.
 fn draw_selection_decorations<'a, F>(
     frame: &mut F,
     state: &TileViewState,
     tiles: &[TileSpec<'a>],
     tile_index: usize,
     cursor_local: Option<Point>,
+    flip_from: f32,
     flip_at: f32,
     show_overlay_text: bool,
 ) where
@@ -1148,12 +1372,14 @@ fn draw_selection_decorations<'a, F>(
         return;
     }
     // Hide the decorations while this entry is actually being moved,
-    // resized or free-transformed; pending presses (not yet past the drag
-    // threshold) and interactions on other entries keep them visible.
+    // resized, rotated or free-transformed; pending presses (not yet past
+    // the drag threshold) and interactions on other entries keep them
+    // visible.
     let interacting_with_selected = match state.interaction {
         Interaction::Dragging { index, id, .. }
         | Interaction::Resizing { index, id, .. }
-        | Interaction::Distorting { index, id, .. } => index == tile_index && id == entry.id,
+        | Interaction::Distorting { index, id, .. }
+        | Interaction::Rotating { index, id, .. } => index == tile_index && id == entry.id,
         _ => false,
     };
     if interacting_with_selected {
@@ -1161,9 +1387,16 @@ fn draw_selection_decorations<'a, F>(
     }
     let scale = frame.width() / tiles[tile_index].source_width.max(1) as f32;
     let quad = overlay::order_quad(entry.quad.points.map(|p| [p[0] * scale, p[1] * scale]));
-    // While inpainting mode is on for this tile, the transform handles are
-    // hidden so the range drag has an uncluttered canvas; the panel's
-    // Inpaint button toggles the mode back off.
+    let rect = Rectangle::new(
+        Point::new(entry.bounds[0] * scale, entry.bounds[1] * scale),
+        Size::new(
+            (entry.bounds[2] - entry.bounds[0]) * scale,
+            (entry.bounds[3] - entry.bounds[1]) * scale,
+        ),
+    );
+    // While inpainting mode is on for this tile, the transform handles and
+    // the rotation knob are hidden so the range drag has an uncluttered
+    // canvas; the panel's Inpaint button toggles the mode back off.
     if state.inpaint_mode() != Some(tile_index) {
         let anchors = handle_anchors(quad);
         for (_, anchor) in anchors {
@@ -1174,14 +1407,12 @@ fn draw_selection_decorations<'a, F>(
                 Stroke::default().with_color(HANDLE_BORDER).with_width(1.0),
             );
         }
+        // The rotation knob is always offered; the revert button beside it
+        // only when the box is a user-adjusted override.
+        let decor = top_decor_geometry(rect, quad, frame.width(), flip_from, flip_at);
+        let hover = cursor_local.is_some_and(|local| decor.revert.contains(local));
+        draw_top_decor(frame, decor, entry.quad_overridden, hover);
     }
-    let rect = Rectangle::new(
-        Point::new(entry.bounds[0] * scale, entry.bounds[1] * scale),
-        Size::new(
-            (entry.bounds[2] - entry.bounds[0]) * scale,
-            (entry.bounds[3] - entry.bounds[1]) * scale,
-        ),
-    );
     let toolbar = toolbar_rect(rect, frame.width(), flip_at);
     let hover = cursor_local.and_then(|local| hit_toolbar_button(toolbar, local));
     for (action, _) in toolbar_buttons() {
@@ -1391,12 +1622,16 @@ where
                             // below the box.
                             let flip_at =
                                 state.offset + visible_bounds.height - tile_bounds.y;
+                            // The rotation knob flips below the box only when
+                            // it would cross the viewer viewport's top.
+                            let flip_from = state.offset - tile_bounds.y;
                             draw_selection_decorations(
                                 &mut overlay_frame,
                                 state,
                                 &self.tiles,
                                 index,
                                 cursor_local,
+                                flip_from,
                                 flip_at,
                                 self.show_overlay_text,
                             );
@@ -1518,6 +1753,40 @@ where
                                 return;
                             }
                         }
+                        if let Some((index, id, hit)) = hit_top_decor(&self.tiles, state, local) {
+                            match hit {
+                                TopDecorHit::Revert => {
+                                    state.interaction = Interaction::ToolbarPressed {
+                                        index,
+                                        id,
+                                        action: ToolbarAction::RevertTransform,
+                                    };
+                                    shell.capture_event();
+                                    return;
+                                }
+                                TopDecorHit::Rotate => {
+                                    if let (Some(quad), Some(view)) = (
+                                        entry_quad(&self.tiles, index, id),
+                                        selected_quad_view(&self.tiles, state, index),
+                                    ) {
+                                        let center_img = [
+                                            quad.points.iter().map(|p| p[0]).sum::<f32>() / 4.0,
+                                            quad.points.iter().map(|p| p[1]).sum::<f32>() / 4.0,
+                                        ];
+                                        state.interaction = Interaction::RotatePending {
+                                            index,
+                                            id,
+                                            quad,
+                                            center_img,
+                                            center_view: quad_centroid(view),
+                                            press: local,
+                                        };
+                                        shell.capture_event();
+                                        return;
+                                    }
+                                }
+                            }
+                        }
                         if let Some((index, id, handle)) = hit_handle(&self.tiles, state, local) {
                             if let Some(quad) = entry_quad(&self.tiles, index, id) {
                                 // Ctrl turns a corner handle into a free
@@ -1602,7 +1871,14 @@ where
                 if let Interaction::ToolbarPressed { index, id, action } = state.interaction {
                     if let Some(position) = cursor.position_over(bounds) {
                         let local = local_point(position, bounds);
-                        if hit_toolbar(&self.tiles, state, local) == Some((index, id, action)) {
+                        let still_hovered = match action {
+                            ToolbarAction::RevertTransform => {
+                                hit_top_decor(&self.tiles, state, local)
+                                    == Some((index, id, TopDecorHit::Revert))
+                            }
+                            _ => hit_toolbar(&self.tiles, state, local) == Some((index, id, action)),
+                        };
+                        if still_hovered {
                             if let Some(callback) = self.on_toolbar_action.as_ref() {
                                 shell.publish(callback((index, id, action)));
                                 shell.request_redraw();
@@ -1648,6 +1924,8 @@ where
                         | Interaction::Resizing { .. }
                         | Interaction::DistortPending { .. }
                         | Interaction::Distorting { .. }
+                        | Interaction::RotatePending { .. }
+                        | Interaction::Rotating { .. }
                         | Interaction::ToolbarPressed { .. }
                         | Interaction::InpaintSelecting { .. }
                 ) {
@@ -1784,6 +2062,55 @@ where
                         }
                         shell.capture_event();
                     }
+                    Interaction::RotatePending {
+                        index,
+                        id,
+                        quad,
+                        center_img,
+                        center_view,
+                        press,
+                    } => {
+                        let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        let dx = local.x - press.x;
+                        let dy = local.y - press.y;
+                        if dx * dx + dy * dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
+                            state.interaction = Interaction::Rotating {
+                                index,
+                                id,
+                                quad,
+                                center_img,
+                                center_view,
+                                press,
+                            };
+                            if let Some(callback) = self.on_entry_moved.as_ref() {
+                                let snap = state.keyboard_modifiers.shift();
+                                let rotated = rotate_quad(
+                                    quad, center_img, center_view, press, local, snap,
+                                );
+                                shell.publish(callback((index, id, rotated)));
+                                shell.request_redraw();
+                            }
+                        }
+                        shell.capture_event();
+                    }
+                    Interaction::Rotating {
+                        index,
+                        id,
+                        quad,
+                        center_img,
+                        center_view,
+                        press,
+                    } => {
+                        let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        if let Some(callback) = self.on_entry_moved.as_ref() {
+                            let snap = state.keyboard_modifiers.shift();
+                            let rotated =
+                                rotate_quad(quad, center_img, center_view, press, local, snap);
+                            shell.publish(callback((index, id, rotated)));
+                            shell.request_redraw();
+                        }
+                        shell.capture_event();
+                    }
                     Interaction::InpaintSelecting { index, start, .. } => {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         let (layout, _) = tile_layout(&self.tiles, state.width);
@@ -1836,6 +2163,8 @@ where
             | Interaction::Resizing { .. }
             | Interaction::DistortPending { .. }
             | Interaction::Distorting { .. }
+            | Interaction::RotatePending { .. }
+            | Interaction::Rotating { .. }
             | Interaction::ToolbarPressed { .. }
             | Interaction::InpaintSelecting { .. } => {
                 mouse::Interaction::Grabbing
@@ -1847,6 +2176,12 @@ where
                     if self.editing.is_none() {
                         if hit_toolbar(&self.tiles, state, local).is_some() {
                             return mouse::Interaction::Pointer;
+                        }
+                        if let Some((_, _, hit)) = hit_top_decor(&self.tiles, state, local) {
+                            return match hit {
+                                TopDecorHit::Rotate => mouse::Interaction::Grabbing,
+                                TopDecorHit::Revert => mouse::Interaction::Pointer,
+                            };
                         }
                         if let Some((_, _, handle)) = hit_handle(&self.tiles, state, local) {
                             return handle.cursor();
