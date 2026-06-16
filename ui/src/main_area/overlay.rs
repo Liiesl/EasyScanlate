@@ -671,6 +671,349 @@ fn fill_gradient_glyphs<F>(
     }
 }
 
+/// How far (frame pixels) a quad may deviate from a parallelogram before the
+/// text switches from the single-affine draw to the per-glyph warp path.
+const WARP_THRESHOLD_PX: f32 = 0.5;
+
+/// One warped glyph: its rect in paragraph-local space (x, y, w, h) plus its
+/// outline path positioned at that rect (y-flipped, same convention as
+/// [`fill_gradient_glyphs`]).
+#[derive(Clone)]
+struct WarpGlyph {
+    rect: [f32; 4],
+    path: Path,
+}
+
+/// The flat layout the warp path draws from: per-glyph rects and outline
+/// paths in paragraph-local space plus the paragraph's min width (mirrors
+/// the geometry backend's alignment translation).
+#[derive(Clone)]
+struct WarpLayout {
+    glyphs: Vec<WarpGlyph>,
+    min_width: f32,
+}
+
+struct WarpCacheEntry {
+    content: String,
+    layout: WarpLayout,
+}
+
+struct WarpCache {
+    entries: HashMap<FitKey, WarpCacheEntry>,
+    order: VecDeque<FitKey>,
+}
+
+/// Runs `f` with the shared warp layout cache.
+fn with_warp_cache<R>(f: impl FnOnce(&mut WarpCache) -> R) -> R {
+    thread_local! {
+        static CACHE: RefCell<Option<Box<dyn std::any::Any>>> = RefCell::new(None);
+    }
+
+    CACHE.with(|cell| {
+        let mut borrowed = cell.borrow_mut();
+        let cache: &mut WarpCache = borrowed
+            .get_or_insert_with(|| {
+                Box::new(WarpCache {
+                    entries: HashMap::new(),
+                    order: VecDeque::new(),
+                })
+            })
+            .downcast_mut()
+            .expect("warp cache holds an incompatible type");
+
+        f(cache)
+    })
+}
+
+/// Shapes `text` flat (word-wrapped at `wrap_width`) into per-glyph rects and
+/// outline paths in paragraph-local space, memoized like [`FitCache`]. Mirrors
+/// [`measure_text`]'s paragraph settings so the flat layout matches what
+/// `fill_text` would draw.
+fn shape_warp_layout(text: &str, font: Font, size: f32, wrap_width: f32) -> WarpLayout {
+    if text.is_empty() || wrap_width <= 0.0 {
+        return WarpLayout {
+            glyphs: Vec::new(),
+            min_width: 0.0,
+        };
+    }
+    let key = (
+        fnv1a(text),
+        size.to_bits(),
+        wrap_width.to_bits(),
+        font_hash(font),
+    );
+    with_warp_cache(|cache| {
+        if let Some(entry) = cache.entries.get(&key).filter(|entry| entry.content == text) {
+            return entry.layout.clone();
+        }
+        let layout = build_warp_layout(text, font, size, wrap_width);
+        if !cache.entries.contains_key(&key) {
+            if cache.entries.len() >= FIT_CACHE_CAP {
+                if let Some(evicted) = cache.order.pop_front() {
+                    cache.entries.remove(&evicted);
+                }
+            }
+            cache.order.push_back(key);
+        }
+        cache.entries.insert(
+            key,
+            WarpCacheEntry {
+                content: text.to_owned(),
+                layout: layout.clone(),
+            },
+        );
+        layout
+    })
+}
+
+fn build_warp_layout(text: &str, font: Font, size: f32, wrap_width: f32) -> WarpLayout {
+    use iced::advanced::graphics::text::{self as gfx_text, cosmic_text, Paragraph as GfxParagraph};
+
+    let paragraph = GfxParagraph::with_text(ParagraphText {
+        content: text,
+        bounds: Size::new(wrap_width, f32::INFINITY),
+        size: Pixels(size),
+        line_height: LineHeight::Relative(1.2),
+        font,
+        align_x: TextAlignment::Default,
+        align_y: alignment::Vertical::Top,
+        shaping: Shaping::Auto,
+        wrapping: Wrapping::Word,
+    });
+    let min_width = paragraph.min_width();
+    let buffer = paragraph.buffer();
+    let mut swash_cache = cosmic_text::SwashCache::new();
+    let mut font_system = gfx_text::font_system().write().expect("Write font system");
+    let mut glyphs = Vec::new();
+    for run in buffer.layout_runs() {
+        for glyph in run.glyphs.iter() {
+            let physical_glyph = glyph.physical((0.0, 0.0), 1.0);
+            let gx = glyph.x + glyph.x_offset;
+            let gy = glyph.y_offset + run.line_y;
+            let gw = glyph.w;
+            if gw <= 0.0 {
+                continue;
+            }
+            let offset = Vector::new(gx, gy);
+            let Some(commands) =
+                swash_cache.get_outline_commands(font_system.raw(), physical_glyph.cache_key)
+            else {
+                continue;
+            };
+            // The outline is y-up from the glyph's baseline; the rect the
+            // warp maps must be the glyph's actual ink box, or the affine is
+            // fitted to a band shifted below the ink (and, for the last line,
+            // clamped past the box's bottom edge). Track the flipped,
+            // offset command extents.
+            let mut min_x = f32::INFINITY;
+            let mut min_y = f32::INFINITY;
+            let mut max_x = f32::NEG_INFINITY;
+            let mut max_y = f32::NEG_INFINITY;
+            let mut track = |p: Point| {
+                min_x = min_x.min(p.x);
+                min_y = min_y.min(p.y);
+                max_x = max_x.max(p.x);
+                max_y = max_y.max(p.y);
+            };
+            let path = Path::new(|path| {
+                use cosmic_text::Command;
+                for command in commands {
+                    match command {
+                        Command::MoveTo(p) => {
+                            let point = Point::new(p.x, -p.y) + offset;
+                            track(point);
+                            path.move_to(point);
+                        }
+                        Command::LineTo(p) => {
+                            let point = Point::new(p.x, -p.y) + offset;
+                            track(point);
+                            path.line_to(point);
+                        }
+                        Command::CurveTo(control_a, control_b, to) => {
+                            let point_a = Point::new(control_a.x, -control_a.y) + offset;
+                            let point_b = Point::new(control_b.x, -control_b.y) + offset;
+                            let point_to = Point::new(to.x, -to.y) + offset;
+                            track(point_a);
+                            track(point_b);
+                            track(point_to);
+                            path.bezier_curve_to(point_a, point_b, point_to);
+                        }
+                        Command::QuadTo(control, to) => {
+                            let point_c = Point::new(control.x, -control.y) + offset;
+                            let point_to = Point::new(to.x, -to.y) + offset;
+                            track(point_c);
+                            track(point_to);
+                            path.quadratic_curve_to(point_c, point_to);
+                        }
+                        Command::Close => path.close(),
+                    }
+                }
+            });
+            if min_x.is_infinite() || min_y.is_infinite() {
+                continue;
+            }
+            glyphs.push(WarpGlyph {
+                rect: [min_x, min_y, max_x - min_x, max_y - min_y],
+                path,
+            });
+        }
+    }
+    WarpLayout { glyphs, min_width }
+}
+
+/// The projective (homography) map of `box_rect` onto the quad corners
+/// ordered TL/TR/BR/BL: the quad is the perspective image of the box's
+/// rectangle, so `P(u, v)` with `u, v` the point's relative position inside
+/// `box_rect` follows a planar projection. All horizontal lines therefore
+/// share one vanishing point instead of fanning between the edge angles
+/// (bilinear blending). Degenerate (parallelogram) quads fall back to the
+/// affine form; the warp path only runs for quads with a real affine error,
+/// so the fallback is never taken there.
+fn perspective_map(quad: [[f32; 2]; 4], box_rect: Rectangle, p: Point) -> Point {
+    let u = ((p.x - box_rect.x) / box_rect.width.max(1.0)).clamp(0.0, 1.0);
+    let v = ((p.y - box_rect.y) / box_rect.height.max(1.0)).clamp(0.0, 1.0);
+    let [x0, y0] = quad[0];
+    let [x1, y1] = quad[1];
+    let [x2, y2] = quad[2];
+    let [x3, y3] = quad[3];
+    let dx1 = x1 - x2;
+    let dx2 = x3 - x2;
+    let dy1 = y1 - y2;
+    let dy2 = y3 - y2;
+    let denom = dx1 * dy2 - dy1 * dx2;
+    let (a, b, c, d, e, f, g, h) = if denom.abs() < 1e-7 {
+        (x1 - x0, x3 - x0, x0, y1 - y0, y3 - y0, y0, 0.0, 0.0)
+    } else {
+        let sx = x0 - x1 + x2 - x3;
+        let sy = y0 - y1 + y2 - y3;
+        let g = (sx * dy2 - sy * dx2) / denom;
+        let h = (dx1 * sy - dy1 * sx) / denom;
+        (
+            x1 - x0 + g * x1,
+            x3 - x0 + h * x3,
+            x0,
+            y1 - y0 + g * y1,
+            y3 - y0 + h * y3,
+            y0,
+            g,
+            h,
+        )
+    };
+    let w = g * u + h * v + 1.0;
+    Point::new((a * u + b * v + c) / w, (d * u + e * v + f) / w)
+}
+
+/// How badly the single-affine fit ([`fit_affine`]) misses `quad`'s corners:
+/// the largest distance between a quad corner and the rect corner the fitted
+/// affine maps it to. Zero for parallelograms; tens of pixels for stretched
+/// trapezoids. Drives the warp-vs-affine decision in [`draw_entries`].
+fn affine_error(quad: [[f32; 2]; 4], width: f32, height: f32) -> f32 {
+    let Some((m00, m01, m10, m11)) = fit_affine(quad, width, height) else {
+        return f32::INFINITY;
+    };
+    let [min_x, min_y, max_x, max_y] = quad_bounds(quad);
+    let center = [(min_x + max_x) / 2.0, (min_y + max_y) / 2.0];
+    let half_w = width / 2.0;
+    let half_h = height / 2.0;
+    let rect_corners = [
+        [center[0] - half_w, center[1] - half_h],
+        [center[0] + half_w, center[1] - half_h],
+        [center[0] + half_w, center[1] + half_h],
+        [center[0] - half_w, center[1] + half_h],
+    ];
+    let mut error: f32 = 0.0;
+    for index in 0..4 {
+        let (dx, dy) = (
+            rect_corners[index][0] - center[0],
+            rect_corners[index][1] - center[1],
+        );
+        let mapped = [
+            center[0] + m00 * dx + m01 * dy,
+            center[1] + m10 * dx + m11 * dy,
+        ];
+        let dx = mapped[0] - quad[index][0];
+        let dy = mapped[1] - quad[index][1];
+        error = error.max((dx * dx + dy * dy).sqrt());
+    }
+    error
+}
+
+/// Draws `text` warped through the free quad: each glyph is mapped through
+/// the quad's projective field (a planar surface, so every text line shares
+/// the quad's vanishing point) and drawn with its own small affine, so the
+/// text tracks trapezoids and perspective shapes that no single affine can
+/// follow. `quad` must be ordered TL/TR/BR/BL and `box_rect` is the box the
+/// text was laid out against (its AABB). `stroke` is `(color, width)` when
+/// the entry has a stroke; `gradient` colors each glyph by the gradient at
+/// its center.
+fn draw_warped_text<F>(
+    frame: &mut F,
+    text: &Text,
+    box_rect: Rectangle,
+    quad: [[f32; 2]; 4],
+    stroke: Option<(Color, f32)>,
+    gradient: Option<(TextGradientDir, [u8; 4], [u8; 4])>,
+) where
+    F: geometry::frame::Backend,
+{
+    let layout = shape_warp_layout(&text.content, text.font, text.size.0, text.max_width);
+    if layout.glyphs.is_empty() {
+        return;
+    }
+    let translation_x = match text.align_x {
+        TextAlignment::Default | TextAlignment::Left | TextAlignment::Justified => text.position.x,
+        TextAlignment::Center => text.position.x - layout.min_width / 2.0,
+        TextAlignment::Right => text.position.x - layout.min_width,
+    };
+    let translation_y = text.position.y;
+    for glyph in &layout.glyphs {
+        let [gx, gy, gw, gh] = glyph.rect;
+        let ax = translation_x + gx;
+        let ay = translation_y + gy;
+        let corners: [[f32; 2]; 4] = [
+            perspective_map(quad, box_rect, Point::new(ax, ay)),
+            perspective_map(quad, box_rect, Point::new(ax + gw, ay)),
+            perspective_map(quad, box_rect, Point::new(ax + gw, ay + gh)),
+            perspective_map(quad, box_rect, Point::new(ax, ay + gh)),
+        ]
+        .map(|p| [p.x, p.y]);
+        let Some((m00, m01, m10, m11)) = fit_affine(corners, gw, gh) else {
+            continue;
+        };
+        if m00 * m11 - m01 * m10 <= 0.0 {
+            continue;
+        }
+        let (mut s1, mut s2, beta, alpha) = svd2(m00, m01, m10, m11);
+        s1 = s1.max(0.01);
+        s2 = s2.max(0.01);
+        let [min_x, min_y, max_x, max_y] = quad_bounds(corners);
+        let quad_center = Point::new((min_x + max_x) / 2.0, (min_y + max_y) / 2.0);
+        let rect_center = Point::new(gx + gw / 2.0, gy + gh / 2.0);
+        let color = match gradient {
+            Some((dir, a, b)) => lerp_color(
+                a,
+                b,
+                gradient_t(dir, box_rect, Point::new(ax + gw / 2.0, ay + gh / 2.0)),
+            ),
+            None => text.color,
+        };
+        frame.push_transform();
+        frame.translate(Vector::new(quad_center.x, quad_center.y));
+        frame.rotate(beta);
+        frame.scale_nonuniform(Vector::new(s1, s2));
+        frame.rotate(-alpha);
+        frame.translate(Vector::new(-rect_center.x, -rect_center.y));
+        if let Some((stroke_color, stroke_width)) = stroke {
+            frame.stroke(
+                &glyph.path,
+                Stroke::default().with_color(stroke_color).with_width(stroke_width),
+            );
+        }
+        frame.fill(&glyph.path, Fill::from(color));
+        frame.pop_transform();
+    }
+}
+
 /// Draws one translucent box + label per entry on top of the image inside
 /// `frame`. Coordinates are image pixels, scaled to the frame's width. Each
 /// label's font size is auto-sized to fill its bounding box (growing or
@@ -733,6 +1076,18 @@ pub fn draw_entries<'a, I, F>(
             continue;
         }
         let styled = styled_font(font, &entry.style);
+        // The box the text is laid out against and the warp decision: a
+        // quad the single affine cannot match (affine error above the
+        // threshold) draws per-glyph through the projective field instead.
+        let box_rect = Rectangle::new(position, Size::new(width, height));
+        let ordered = order_quad(quad);
+        let warp = transform.is_some() && affine_error(ordered, width, height) > WARP_THRESHOLD_PX;
+        let stroke = (entry.style.stroke_width > 0.0).then(|| {
+            (to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
+        });
+        let gradient = entry.style.text_gradient.then(|| {
+            (entry.style.gradient_dir, entry.style.gradient_a, entry.style.gradient_b)
+        });
         if entry.style.text_align == TextAlign::Circular {
             let (size, lines) =
                 fit_circle_metrics(entry.text, styled, Size::new(wrap_width, height));
@@ -744,57 +1099,79 @@ pub fn draw_entries<'a, I, F>(
                 Point::new(position.x, position.y + y_offset),
                 Size::new(wrap_width, total_height),
             );
-            if let Some(transform) = &transform {
-                frame.push_transform();
-                apply_quad_transform(frame, transform, position, width, height);
-            }
-            for line in &lines {
-                // `align_x: Center` treats the position's x as the line's
-                // center (not its left edge), so it must be the bubble's
-                // horizontal center, not the box's left corner.
-                let text = Text {
-                    content: line.content.clone(),
-                    position: Point::new(
-                        position.x + wrap_width / 2.0,
-                        position.y + y_offset + line.y,
-                    ),
-                    max_width: line.chord,
-                    size: Pixels(size),
-                    color: to_color(entry.style.text_color),
-                    font: styled,
-                    align_x: TextAlignment::Center,
-                    ..Text::default()
-                };
-                if entry.style.text_gradient {
-                    fill_gradient_text(
-                        frame,
-                        &text,
-                        block_rect,
-                        entry.style.gradient_dir,
-                        entry.style.gradient_a,
-                        entry.style.gradient_b,
-                        (entry.style.stroke_width > 0.0).then(|| {
-                            (to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
-                        }),
-                        transform.as_ref(),
-                        position,
-                        width,
-                        height,
-                    );
-                } else {
-                    if entry.style.stroke_width > 0.0 {
-                        frame.stroke_text(
-                            text.clone(),
-                            Stroke::default()
-                                .with_color(to_color(entry.style.stroke_color))
-                                .with_width(entry.style.stroke_width * scale),
-                        );
-                    }
-                    frame.fill_text(text);
+            if warp {
+                for line in &lines {
+                    // `align_x: Center` treats the position's x as the line's
+                    // center (not its left edge), so it must be the bubble's
+                    // horizontal center, not the box's left corner.
+                    let text = Text {
+                        content: line.content.clone(),
+                        position: Point::new(
+                            position.x + wrap_width / 2.0,
+                            position.y + y_offset + line.y,
+                        ),
+                        max_width: line.chord,
+                        size: Pixels(size),
+                        color: to_color(entry.style.text_color),
+                        font: styled,
+                        align_x: TextAlignment::Center,
+                        ..Text::default()
+                    };
+                    draw_warped_text(frame, &text, box_rect, ordered, stroke, gradient);
                 }
-            }
-            if transform.is_some() {
-                frame.pop_transform();
+            } else {
+                if let Some(transform) = &transform {
+                    frame.push_transform();
+                    apply_quad_transform(frame, transform, position, width, height);
+                }
+                for line in &lines {
+                    // `align_x: Center` treats the position's x as the line's
+                    // center (not its left edge), so it must be the bubble's
+                    // horizontal center, not the box's left corner.
+                    let text = Text {
+                        content: line.content.clone(),
+                        position: Point::new(
+                            position.x + wrap_width / 2.0,
+                            position.y + y_offset + line.y,
+                        ),
+                        max_width: line.chord,
+                        size: Pixels(size),
+                        color: to_color(entry.style.text_color),
+                        font: styled,
+                        align_x: TextAlignment::Center,
+                        ..Text::default()
+                    };
+                    if entry.style.text_gradient {
+                        fill_gradient_text(
+                            frame,
+                            &text,
+                            block_rect,
+                            entry.style.gradient_dir,
+                            entry.style.gradient_a,
+                            entry.style.gradient_b,
+                            (entry.style.stroke_width > 0.0).then(|| {
+                                (to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
+                            }),
+                            transform.as_ref(),
+                            position,
+                            width,
+                            height,
+                        );
+                    } else {
+                        if entry.style.stroke_width > 0.0 {
+                            frame.stroke_text(
+                                text.clone(),
+                                Stroke::default()
+                                    .with_color(to_color(entry.style.stroke_color))
+                                    .with_width(entry.style.stroke_width * scale),
+                            );
+                        }
+                        frame.fill_text(text);
+                    }
+                }
+                if transform.is_some() {
+                    frame.pop_transform();
+                }
             }
             continue;
         }
@@ -825,63 +1202,101 @@ pub fn draw_entries<'a, I, F>(
             align_x,
             ..Text::default()
         };
-        // Only the text lives in the axis-aligned rect space and needs the
-        // map onto the skewed quad.
-        if let Some(transform) = &transform {
-            frame.push_transform();
-            apply_quad_transform(frame, transform, position, width, height);
-        }
-        // DEBUG markers: green square = text position drawn WITHOUT the
-        // transform (raw AABB coords); red squares = same local rect under
-        // the transform (must land exactly on the quad's envelope).
-        if entry.selected {
-            frame.fill_rectangle(
-                Point::new(text.position.x - 4.0, text.position.y - 4.0),
-                Size::new(8.0, 8.0),
-                Fill::from(Color::from_rgba8(0, 255, 0, 1.0)),
-            );
-            if transform.is_some() {
+        if warp {
+            // DEBUG markers: green square = raw AABB text position; red
+            // squares = the block's TL and BR corners mapped through the
+            // projective field (must land on the quad).
+            if entry.selected {
                 frame.fill_rectangle(
                     Point::new(text.position.x - 4.0, text.position.y - 4.0),
                     Size::new(8.0, 8.0),
+                    Fill::from(Color::from_rgba8(0, 255, 0, 1.0)),
+                );
+                let tl = perspective_map(
+                    ordered,
+                    box_rect,
+                    Point::new(position.x, position.y + y_offset),
+                );
+                let br = perspective_map(
+                    ordered,
+                    box_rect,
+                    Point::new(
+                        position.x + wrap_width,
+                        position.y + y_offset + fitted_height,
+                    ),
+                );
+                frame.fill_rectangle(
+                    Point::new(tl.x - 4.0, tl.y - 4.0),
+                    Size::new(8.0, 8.0),
                     Fill::from(Color::from_rgba8(255, 0, 0, 1.0)),
                 );
                 frame.fill_rectangle(
-                    Point::new(text.position.x + wrap_width - 4.0, text.position.y + fitted_height - 4.0),
+                    Point::new(br.x - 4.0, br.y - 4.0),
                     Size::new(8.0, 8.0),
                     Fill::from(Color::from_rgba8(255, 0, 0, 1.0)),
                 );
             }
-        }
-        if entry.style.text_gradient {
-            fill_gradient_text(
-                frame,
-                &text,
-                block_rect,
-                entry.style.gradient_dir,
-                entry.style.gradient_a,
-                entry.style.gradient_b,
-                (entry.style.stroke_width > 0.0).then(|| {
-                    (to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
-                }),
-                transform.as_ref(),
-                position,
-                width,
-                height,
-            );
+            draw_warped_text(frame, &text, box_rect, ordered, stroke, gradient);
         } else {
-            if entry.style.stroke_width > 0.0 {
-                frame.stroke_text(
-                    text.clone(),
-                    Stroke::default()
-                        .with_color(to_color(entry.style.stroke_color))
-                        .with_width(entry.style.stroke_width * scale),
-                );
+            // Only the text lives in the axis-aligned rect space and needs
+            // the map onto the skewed quad.
+            if let Some(transform) = &transform {
+                frame.push_transform();
+                apply_quad_transform(frame, transform, position, width, height);
             }
-            frame.fill_text(text);
-        }
-        if transform.is_some() {
-            frame.pop_transform();
+            // DEBUG markers: green square = text position drawn WITHOUT the
+            // transform (raw AABB coords); red squares = same local rect
+            // under the transform (must land exactly on the quad's
+            // envelope).
+            if entry.selected {
+                frame.fill_rectangle(
+                    Point::new(text.position.x - 4.0, text.position.y - 4.0),
+                    Size::new(8.0, 8.0),
+                    Fill::from(Color::from_rgba8(0, 255, 0, 1.0)),
+                );
+                if transform.is_some() {
+                    frame.fill_rectangle(
+                        Point::new(text.position.x - 4.0, text.position.y - 4.0),
+                        Size::new(8.0, 8.0),
+                        Fill::from(Color::from_rgba8(255, 0, 0, 1.0)),
+                    );
+                    frame.fill_rectangle(
+                        Point::new(text.position.x + wrap_width - 4.0, text.position.y + fitted_height - 4.0),
+                        Size::new(8.0, 8.0),
+                        Fill::from(Color::from_rgba8(255, 0, 0, 1.0)),
+                    );
+                }
+            }
+            if entry.style.text_gradient {
+                fill_gradient_text(
+                    frame,
+                    &text,
+                    block_rect,
+                    entry.style.gradient_dir,
+                    entry.style.gradient_a,
+                    entry.style.gradient_b,
+                    (entry.style.stroke_width > 0.0).then(|| {
+                        (to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
+                    }),
+                    transform.as_ref(),
+                    position,
+                    width,
+                    height,
+                );
+            } else {
+                if entry.style.stroke_width > 0.0 {
+                    frame.stroke_text(
+                        text.clone(),
+                        Stroke::default()
+                            .with_color(to_color(entry.style.stroke_color))
+                            .with_width(entry.style.stroke_width * scale),
+                    );
+                }
+                frame.fill_text(text);
+            }
+            if transform.is_some() {
+                frame.pop_transform();
+            }
         }
     }
 }
@@ -1318,5 +1733,161 @@ mod tests {
         assert!((t(TextGradientDir::TopRightToBottomLeft, bl) - 1.0).abs() < 1e-6);
         assert!((t(TextGradientDir::BottomLeftToTopRight, bl) - 0.0).abs() < 1e-6);
         assert!((t(TextGradientDir::BottomLeftToTopRight, tr) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn perspective_map_maps_box_corners_onto_quad_corners() {
+        // A stretched trapezoid: top edge wider than the bottom and shifted
+        // right. The homography must map the box's four corners onto the
+        // quad's ordered TL/TR/BR/BL corners.
+        let quad = [[100.0, 50.0], [500.0, 50.0], [420.0, 200.0], [180.0, 200.0]];
+        let box_rect = Rectangle::new(Point::new(100.0, 50.0), Size::new(400.0, 150.0));
+        let tl = perspective_map(quad, box_rect, Point::new(100.0, 50.0));
+        let tr = perspective_map(quad, box_rect, Point::new(500.0, 50.0));
+        let br = perspective_map(quad, box_rect, Point::new(500.0, 200.0));
+        let bl = perspective_map(quad, box_rect, Point::new(100.0, 200.0));
+        assert!((tl.x - 100.0).abs() < 1e-3 && (tl.y - 50.0).abs() < 1e-3);
+        assert!((tr.x - 500.0).abs() < 1e-3 && (tr.y - 50.0).abs() < 1e-3);
+        assert!((br.x - 420.0).abs() < 1e-3 && (br.y - 200.0).abs() < 1e-3);
+        assert!((bl.x - 180.0).abs() < 1e-3 && (bl.y - 200.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn perspective_map_shares_one_vanishing_point_between_lines() {
+        // A keystone quad: its top and bottom edges are not parallel, so a
+        // bilinear field would fan the lines between the two edge angles
+        // (top line slants like the top edge, last line like the bottom
+        // edge). The projective map must make every horizontal line's image
+        // pass through the vanishing point of the top and bottom edges.
+        let quad = [[100.0, 50.0], [500.0, 50.0], [460.0, 230.0], [140.0, 210.0]];
+        let box_rect = Rectangle::new(Point::new(100.0, 50.0), Size::new(400.0, 180.0));
+        // The top edge is y = 50; the bottom edge goes through (140, 210)
+        // with direction (320, 20), so it meets y = 50 at x = -2420.
+        let vp = Point::new(-2420.0, 50.0);
+        for v in [0.25, 0.5, 0.75] {
+            let y = box_rect.y + v * box_rect.height;
+            let a = perspective_map(
+                quad,
+                box_rect,
+                Point::new(box_rect.x + 0.2 * box_rect.width, y),
+            );
+            let b = perspective_map(
+                quad,
+                box_rect,
+                Point::new(box_rect.x + 0.8 * box_rect.width, y),
+            );
+            let area = (b.x - a.x) * (vp.y - a.y) - (b.y - a.y) * (vp.x - a.x);
+            assert!(
+                area.abs() < 1.0,
+                "line image at v={v} misses the vanishing point (area {area})"
+            );
+        }
+    }
+
+    #[test]
+    fn affine_error_is_zero_for_parallelogram_and_large_for_trapezoid() {
+        // A parallelogram: the affine fit is exact.
+        let parallelogram = [[100.0, 50.0], [500.0, 50.0], [440.0, 200.0], [40.0, 200.0]];
+        let [min_x, min_y, max_x, max_y] = quad_bounds(parallelogram);
+        let width = max_x - min_x;
+        let height = max_y - min_y;
+        assert!(
+            affine_error(parallelogram, width, height) < 0.01,
+            "parallelogram must fit exactly"
+        );
+        // The design doc's stretched trapezoid: tens of pixels of deviation.
+        let trapezoid = [[302.75, 257.02], [785.25, 257.02], [815.2, 376.0], [302.75, 313.79]];
+        let [min_x, min_y, max_x, max_y] = quad_bounds(trapezoid);
+        let width = max_x - min_x;
+        let height = max_y - min_y;
+        let error = affine_error(trapezoid, width, height);
+        assert!(error > 5.0, "trapezoid must deviate, got {error}");
+    }
+
+    #[test]
+    fn warp_transform_round_trips_glyph_rect() {
+        // Map a small glyph rect through a trapezoid's projective field, fit
+        // a per-glyph affine and check that applying it lands the rect
+        // corners back on the mapped corners (the "close enough" guarantee).
+        let quad = [[100.0, 50.0], [500.0, 50.0], [420.0, 200.0], [180.0, 200.0]];
+        let box_rect = Rectangle::new(Point::new(100.0, 50.0), Size::new(400.0, 150.0));
+        // A small glyph: the affine error scales with glyph size, so a
+        // realistic glyph stays well under a pixel even in a strongly
+        // tapered quad.
+        let rect = [224.0, 92.0, 8.0, 9.0];
+        let corners: [[f32; 2]; 4] = [
+            perspective_map(quad, box_rect, Point::new(rect[0], rect[1])),
+            perspective_map(quad, box_rect, Point::new(rect[0] + rect[2], rect[1])),
+            perspective_map(quad, box_rect, Point::new(rect[0] + rect[2], rect[1] + rect[3])),
+            perspective_map(quad, box_rect, Point::new(rect[0], rect[1] + rect[3])),
+        ]
+        .map(|p| [p.x, p.y]);
+        let (m00, m01, m10, m11) = fit_affine(corners, rect[2], rect[3]).expect("fit");
+        let [min_x, min_y, max_x, max_y] = quad_bounds(corners);
+        let quad_center = [(min_x + max_x) / 2.0, (min_y + max_y) / 2.0];
+        let rect_center = [rect[0] + rect[2] / 2.0, rect[1] + rect[3] / 2.0];
+        let apply = |x: f32, y: f32| -> [f32; 2] {
+            let (lx, ly) = (x - rect_center[0], y - rect_center[1]);
+            [
+                quad_center[0] + m00 * lx + m01 * ly,
+                quad_center[1] + m10 * lx + m11 * ly,
+            ]
+        };
+        let local = [
+            [rect[0], rect[1]],
+            [rect[0] + rect[2], rect[1]],
+            [rect[0] + rect[2], rect[1] + rect[3]],
+            [rect[0], rect[1] + rect[3]],
+        ];
+        for (mapped, expected) in corners.iter().zip(local.iter()) {
+            let got = apply(expected[0], expected[1]);
+            assert!(
+                (got[0] - mapped[0]).abs() < 0.5 && (got[1] - mapped[1]).abs() < 0.5,
+                "glyph corner {expected:?} -> {got:?}, expected {mapped:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn warp_layout_shapes_glyphs() {
+        let layout = shape_warp_layout("hello world", Font::DEFAULT, 20.0, 200.0);
+        assert!(
+            layout.glyphs.len() >= 6,
+            "expected glyphs, got {}",
+            layout.glyphs.len()
+        );
+        assert!(layout.min_width > 50.0, "min_width {}", layout.min_width);
+        let empty = shape_warp_layout("", Font::DEFAULT, 20.0, 200.0);
+        assert!(empty.glyphs.is_empty());
+    }
+
+    #[test]
+    fn warp_layout_glyph_rects_stay_inside_the_paragraph() {
+        // The per-glyph rect must be the glyph's ink box. A rect anchored at
+        // the baseline and sized by the font size hangs below the paragraph
+        // for the last line (and clamps the projective map to the box's
+        // bottom edge), so every rect must fit inside the measured paragraph
+        // height.
+        let text = "hello world this wraps into several lines";
+        let size = 20.0;
+        let wrap_width = 120.0;
+        let fitted = measure_text(text, Font::DEFAULT, size, wrap_width);
+        let layout = shape_warp_layout(text, Font::DEFAULT, size, wrap_width);
+        assert!(
+            layout.glyphs.len() >= 2,
+            "expected several lines of glyphs, got {}",
+            layout.glyphs.len()
+        );
+        for glyph in &layout.glyphs {
+            let [gx, gy, gw, gh] = glyph.rect;
+            assert!(gx >= -1.0, "glyph rect left {gx} out of bounds");
+            assert!(gy >= -1.0, "glyph rect top {gy} out of bounds");
+            assert!(
+                gy + gh <= fitted.height + 1.0,
+                "glyph rect bottom {} exceeds paragraph height {}",
+                gy + gh,
+                fitted.height
+            );
+        }
     }
 }
