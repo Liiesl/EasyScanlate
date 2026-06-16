@@ -18,7 +18,7 @@ use iced::widget::{
 use iced::{keyboard, Background, Border, Color, Element, Fill as FillLength, Font, Padding,
     Rectangle, Vector};
 
-use crate::event::{EditOrigin, SettingsTab, UiEvent};
+use crate::event::{EditOrigin, SettingsTab, ToolbarAction, UiEvent};
 use crate::loaded::LoadedImage;
 use crate::panel::MUTED_FG;
 use crate::state::UiState;
@@ -42,13 +42,13 @@ pub fn panel_row_id(index: usize, id: EntryId) -> Id {
 const ROW_SPACING: f32 = 8.0;
 /// Horizontal gap inside an input box.
 const BOX_PADDING: f32 = 6.0;
-/// Padding between the row's border/background and its input boxes; the
-/// clickable band that selects the row.
+/// Large padding between the row's border/background and its content; the
+/// whitespace around each item in the list.
 const ROW_PADDING: Padding = Padding {
-    top: 2.0,
-    right: 8.0,
-    bottom: 2.0,
-    left: 8.0,
+    top: 14.0,
+    right: 16.0,
+    bottom: 14.0,
+    left: 16.0,
 };
 /// Shaded background of the two input boxes inside a row.
 const BOX_BG: Color = Color::from_rgb8(28, 30, 38);
@@ -119,11 +119,13 @@ fn current_box(value: String, font: Font) -> Element<'static, UiEvent> {
 }
 
 /// One results row: the original OCR text on the left, the selected
-/// profile's text on the right. Clicking the left box selects the row;
-/// clicking the right box starts the inline edit for it. The row being
-/// edited from the panel swaps its right box for the live editor (and is
-/// not a click target, so the editor keeps the clicks). The selected row
-/// is outlined with a highlight border.
+/// profile's text on the right, and the delete/retranslate buttons on the
+/// far right. Each box carries a small label above it: "kor" for the OCR
+/// source language, the selected profile's name for the right side.
+/// Clicking the left box selects the row; clicking the right box starts the
+/// inline edit for it. The row being edited from the panel swaps its right
+/// box for the live editor (and is not a click target, so the editor keeps
+/// the clicks). The selected row is outlined with a highlight border.
 fn entry_row<'a, S: UiState + ?Sized>(
     state: &'a S,
     index: usize,
@@ -134,6 +136,7 @@ fn entry_row<'a, S: UiState + ?Sized>(
     let editing_here = state.editing() == Some((index, entry_id));
     let editing_from_panel = editing_here && state.editing_origin() == EditOrigin::Panel;
     let font = state.font().unwrap_or(Font::DEFAULT);
+    let profile_name = state.images()[index].project.profiles.selected().name.clone();
 
     let original = mouse_area(original_box(&entry.text, font)).on_press(UiEvent::EntryClicked(Some((
         index,
@@ -159,18 +162,40 @@ fn entry_row<'a, S: UiState + ?Sized>(
             .into()
     };
 
-    let row = container(row![original, current].spacing(ROW_SPACING))
-        .id(panel_row_id(index, entry_id))
-        .width(FillLength)
-        .padding(ROW_PADDING)
-        .style(move |_theme| container::Style {
-            background: selected.then_some(SELECTED_BG.into()),
-            border: Border::default()
-                .width(1.0)
-                .color(if selected { SELECTED_BORDER } else { ROW_BORDER })
-                .rounded(4.0),
-            ..container::Style::default()
-        });
+    let buttons = column![
+        button(text("Delete").size(10))
+            .padding([2, 6])
+            .on_press(UiEvent::EntryToolbar((index, entry_id, ToolbarAction::Delete))),
+        button(text("Retranslate").size(10))
+            .padding([2, 6])
+            .on_press(UiEvent::RetranslateEntry((index, entry_id))),
+    ]
+    .spacing(4);
+
+    let row = container(
+        row![
+            column![text("kor").size(10).color(MUTED_FG), original]
+                .spacing(2)
+                .width(FillLength),
+            column![text(profile_name).size(10).color(MUTED_FG), current]
+                .spacing(2)
+                .width(FillLength),
+            buttons,
+        ]
+        .spacing(ROW_SPACING)
+        .align_y(iced::Alignment::Center),
+    )
+    .id(panel_row_id(index, entry_id))
+    .width(FillLength)
+    .padding(ROW_PADDING)
+    .style(move |_theme| container::Style {
+        background: selected.then_some(SELECTED_BG.into()),
+        border: Border::default()
+            .width(1.0)
+            .color(if selected { SELECTED_BORDER } else { ROW_BORDER })
+            .rounded(4.0),
+        ..container::Style::default()
+    });
 
     // While the row itself is the active panel editor, clicks must reach the
     // editor, not the row.
@@ -181,29 +206,15 @@ fn entry_row<'a, S: UiState + ?Sized>(
     }
 }
 
-/// The column labels ("Original" / "Current Profile"), aligned with the two
-/// inputs of every row.
-fn label_row() -> Element<'static, UiEvent> {
-    row![
-        text("Original").size(12).color(MUTED_FG).width(FillLength),
-        text("Current Profile").size(12).color(MUTED_FG).width(FillLength),
-    ]
-    .spacing(ROW_SPACING)
-    .padding(Padding::from([8.0, 0.0]))
-    .into()
-}
-
 /// All OCR entry rows of one image in the results list. Images without
-/// entries show a placeholder line instead.
+/// entries contribute nothing: the list is simply empty for them.
 fn image_results<'a, S: UiState + ?Sized>(
     state: &'a S,
     image: &'a LoadedImage,
     index: usize,
 ) -> Vec<Element<'a, UiEvent>> {
     let mut elements = Vec::new();
-    if image.project.ocr.visible_count() == 0 {
-        elements.push(text("  No results yet.").size(12).color(MUTED_FG).into());
-    } else {
+    if image.project.ocr.visible_count() > 0 {
         for entry in image.project.ocr.visible() {
             elements.push(entry_row(state, index, entry));
         }
@@ -305,13 +316,10 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let has_entries = total_results > 0;
 
     let mut results_list: Vec<Element<'_, UiEvent>> = Vec::new();
-    if has_entries {
-        results_list.push(label_row());
-    }
     for (index, image) in state.images().iter().enumerate() {
         results_list.extend(image_results(state, image, index));
     }
-    if results_list.is_empty() {
+    if state.images().is_empty() {
         results_list.push(
             text("No images loaded. Open images to begin.")
                 .size(12)

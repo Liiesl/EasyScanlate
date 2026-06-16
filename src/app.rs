@@ -1765,6 +1765,10 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::PanelEntryEdit((index, id))) => {
             start_inline_edit(app, index, id, EditOrigin::Panel)
         }
+        Message::Ui(UiEvent::RetranslateEntry(_)) => {
+            app.status = "Retranslate is not implemented yet.".to_string();
+            Task::none()
+        }
         Message::Ui(UiEvent::Inpaint) => {
             if app.inpainting || app.running || app.translating || app.images.is_empty() {
                 return Task::none();

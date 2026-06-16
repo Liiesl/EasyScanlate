@@ -94,6 +94,10 @@ pub enum UiEvent {
     /// Start the inline text edit from the panel's results list instead of
     /// the overlay: the row's current-profile side becomes the live editor.
     PanelEntryEdit((usize, EntryId)),
+    /// The user pressed "Retranslate" on a results row: re-run machine
+    /// translation for that entry. Not implemented yet; the app only
+    /// acknowledges it.
+    RetranslateEntry((usize, EntryId)),
     EntryMoved((usize, EntryId, Quad)),
     /// A button of the selection toolbar under the selected entry.
     EntryToolbar((usize, EntryId, ToolbarAction)),
