@@ -1,9 +1,11 @@
+#[cfg(feature = "translation")]
 use std::collections::BTreeMap;
 
 use iced::widget::text_editor;
 use iced::{Color, Font, Rectangle};
 
 use scanlateit_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
+#[cfg(feature = "translation")]
 use scanlateit_translation::Connection;
 
 use crate::connect::ConnectModal;
@@ -18,19 +20,26 @@ pub trait UiState {
     fn translating(&self) -> bool;
     fn status(&self) -> &str;
     /// Display name of the currently selected translation provider.
+    #[cfg(feature = "translation")]
     fn translate_provider(&self) -> String;
     /// Display names of every connected translation provider, in catalog
     /// order (the picker options of the translation bar).
+    #[cfg(feature = "translation")]
     fn translate_providers(&self) -> Vec<String>;
+    #[cfg(feature = "translation")]
     fn translate_model(&self) -> &String;
+    #[cfg(feature = "translation")]
     fn translate_models(&self) -> &[String];
+    #[cfg(feature = "translation")]
     fn translate_lang(&self) -> &str;
     /// The stored translation connections, keyed by provider id; a provider
     /// is connected exactly when it has an entry here.
+    #[cfg(feature = "translation")]
     fn connections(&self) -> &BTreeMap<String, Connection>;
     /// The connect modal open over the settings modal, if any.
     fn connect_modal(&self) -> Option<&ConnectModal>;
     /// Whether the translation model picker only lists free models.
+    #[cfg(feature = "translation")]
     fn free_models_only(&self) -> bool;
     fn selected(&self) -> Option<(usize, EntryId)>;
     fn style_working(&self) -> &EntryStyle;
@@ -58,9 +67,11 @@ pub trait UiState {
     /// The working style's gradient direction.
     fn style_gradient_dir(&self) -> TextGradientDir;
     /// Whether automatic style detection for new OCR entries is enabled.
+    #[cfg(feature = "styling")]
     fn auto_style_detect(&self) -> bool;
     /// The configured number of parallel OCR detection workers, as typed in
     /// the settings modal (parsed when OCR starts).
+    #[cfg(feature = "ocr")]
     fn ocr_workers(&self) -> &str;
     fn editing(&self) -> Option<(usize, EntryId)>;
     fn editing_origin(&self) -> EditOrigin;

@@ -13,16 +13,21 @@ use iced::advanced::widget::{operate, Id as WidgetId};
 use iced::widget::operation::AbsoluteOffset;
 use iced::widget::text_editor;
 use iced::widget::{
-    button, column, container, mouse_area, pick_list, row, scrollable, space, text, Column, Id,
+    button, column, container, mouse_area, row, scrollable, text, Column, Id,
 };
+#[cfg(feature = "translation")]
+use iced::widget::{pick_list, space};
 use iced::{keyboard, Background, Border, Color, Element, Fill as FillLength, Font, Padding,
     Rectangle, Vector};
 
-use crate::event::{EditOrigin, SettingsTab, ToolbarAction, UiEvent};
+use crate::event::{EditOrigin, ToolbarAction, UiEvent};
+#[cfg(feature = "translation")]
+use crate::event::SettingsTab;
 use crate::loaded::LoadedImage;
 use crate::panel::MUTED_FG;
 use crate::state::UiState;
 use scanlateit_model::{EntryId, OcrEntry};
+#[cfg(feature = "translation")]
 use scanlateit_translation as translation;
 
 /// Widget id of the multi-line editor shown in a row while the entry is
@@ -162,10 +167,15 @@ fn entry_row<'a, S: UiState + ?Sized>(
             .into()
     };
 
-    let buttons = column![
+    #[cfg_attr(not(feature = "translation"), allow(unused_mut))]
+    let mut buttons: Vec<Element<'_, UiEvent>> = vec![
         button(text("Delete").size(10))
             .padding([2, 6])
-            .on_press(UiEvent::EntryToolbar((index, entry_id, ToolbarAction::Delete))),
+            .on_press(UiEvent::EntryToolbar((index, entry_id, ToolbarAction::Delete)))
+            .into(),
+    ];
+    #[cfg(feature = "translation")]
+    buttons.push(
         button(text("Retranslate").size(10))
             .padding([2, 6])
             .on_press_maybe(
@@ -173,9 +183,9 @@ fn entry_row<'a, S: UiState + ?Sized>(
                     && !state.running()
                     && !state.connections().is_empty())
                 .then_some(UiEvent::RetranslateEntry((index, entry_id))),
-            ),
-    ]
-    .spacing(4);
+            )
+            .into(),
+    );
 
     let row = container(
         row![
@@ -185,7 +195,7 @@ fn entry_row<'a, S: UiState + ?Sized>(
             column![text(profile_name).size(10).color(MUTED_FG), current]
                 .spacing(2)
                 .width(FillLength),
-            buttons,
+            column(buttons).spacing(4),
         ]
         .spacing(ROW_SPACING)
         .align_y(iced::Alignment::Center),
@@ -232,6 +242,7 @@ fn image_results<'a, S: UiState + ?Sized>(
 /// provider is connected the bar collapses to a status row with a
 /// "Configure…" button that opens the settings modal on the Translation
 /// tab.
+#[cfg(feature = "translation")]
 fn translate_bar<'a, S: UiState + ?Sized>(
     state: &'a S,
     has_entries: bool,
@@ -318,6 +329,7 @@ fn translate_bar<'a, S: UiState + ?Sized>(
 
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let total_results: usize = state.images().iter().map(|i| i.project.ocr.visible_count()).sum();
+    #[cfg_attr(not(feature = "translation"), allow(unused_variables))]
     let has_entries = total_results > 0;
 
     let mut results_list: Vec<Element<'_, UiEvent>> = Vec::new();
@@ -333,12 +345,29 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         );
     }
 
+    #[cfg(feature = "translation")]
+    let bar = translate_bar(state, has_entries, total_results);
+    #[cfg(not(feature = "translation"))]
+    let bar: Element<'_, UiEvent> = container(
+        text("Translation is not available in this build.")
+            .size(12)
+            .color(MUTED_FG),
+    )
+    .width(FillLength)
+    .padding(6)
+    .style(|_theme| container::Style {
+        background: Some(BOX_BG.into()),
+        border: Border::default().rounded(4.0),
+        ..container::Style::default()
+    })
+    .into();
+
     column![
         scrollable(Column::with_children(results_list).spacing(4))
             .id(PANEL_LIST_ID)
             .height(FillLength)
             .width(FillLength),
-        translate_bar(state, has_entries, total_results),
+        bar,
     ]
     .spacing(8)
     .height(FillLength)

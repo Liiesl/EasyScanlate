@@ -8,6 +8,24 @@ members = ["model", "inpaint", "ocr", "styling", "translation", "ui", "NeverLiie
 resolver = "3"
 exclude = ["iced", "rapidocr-core", "NeverLiieIcedWidgets/examples"]
 
+[features]
+# Subsystem switches. Building without one (e.g. `--no-default-features
+# --features test-ui`) skips that crate entirely: no ort (ocr/inpaint/styling)
+# and no rig (translation) are compiled or linked. Disabled subsystems show a
+# "unavailable in this build" status instead of running.
+default = ["ocr", "inpaint", "styling", "translation"]
+ocr = ["dep:scanlateit-ocr", "scanlateit-ui/ocr"]
+inpaint = ["dep:scanlateit-inpaint", "scanlateit-ui/inpaint"]
+styling = ["dep:scanlateit-styling", "scanlateit-ui/styling"]
+translation = ["dep:scanlateit-translation", "scanlateit-ui/translation"]
+# Convenience aliases: UI-only iteration (fake white image + fake OCR entries
+# at boot, no ML backends), or exactly one real subsystem at a time.
+test-ui = []
+test-ocr = ["ocr"]
+test-inpaint = ["inpaint"]
+test-styling = ["styling"]
+test-translation = ["translation"]
+
 [dependencies]
 iced = { version = "0.14.0", path = "iced", features = ["image", "canvas", "advanced", "tokio"] }
 image = "0.25"
@@ -16,11 +34,11 @@ rfd = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 scanlateit-model = { path = "model" }
-scanlateit-inpaint = { path = "inpaint" }
-scanlateit-ocr = { path = "ocr" }
-scanlateit-styling = { path = "styling" }
-scanlateit-translation = { path = "translation" }
-scanlateit-ui = { path = "ui" }
+scanlateit-inpaint = { path = "inpaint", optional = true }
+scanlateit-ocr = { path = "ocr", optional = true }
+scanlateit-styling = { path = "styling", optional = true }
+scanlateit-translation = { path = "translation", optional = true }
+scanlateit-ui = { path = "ui", default-features = false }
 tokio = { version = "1", features = ["rt", "time"] }
 fontdb = "0.24"
 

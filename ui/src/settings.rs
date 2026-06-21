@@ -4,11 +4,17 @@
 //! `settings.json` next to the executable when the modal closes.
 
 use iced::widget::{
-    button, center, checkbox, column, container, mouse_area, opaque, row, scrollable, space,
-    stack, text, text_input,
+    button, center, column, container, mouse_area, opaque, row, space, stack, text,
 };
+#[cfg(any(feature = "styling", feature = "translation"))]
+use iced::widget::checkbox;
+#[cfg(feature = "ocr")]
+use iced::widget::text_input;
+#[cfg(feature = "translation")]
+use iced::widget::scrollable;
 use iced::{Color, Element, Fill as FillLength, Length};
 
+#[cfg(feature = "translation")]
 use scanlateit_translation::{self as translation, CUSTOM_ANTHROPIC, CUSTOM_OPENAI};
 
 use crate::event::{SettingsTab, UiEvent};
@@ -58,6 +64,7 @@ fn tab_button<'a, S: UiState + ?Sized>(
 }
 
 /// The last four characters of a key, for the "connected" status display.
+#[cfg(feature = "translation")]
 fn mask_key(key: &str) -> String {
     if key.len() > 8 {
         format!("{}…{}", &key[..6], &key[key.len() - 4..])
@@ -68,6 +75,7 @@ fn mask_key(key: &str) -> String {
 
 /// One row of the supported-provider list: name, connection status and the
 /// Connect/Disconnect button.
+#[cfg(feature = "translation")]
 fn provider_row<'a, S: UiState + ?Sized>(
     state: &'a S,
     provider: &'a translation::Provider,
@@ -99,6 +107,7 @@ fn provider_row<'a, S: UiState + ?Sized>(
 }
 
 /// One row of the custom-endpoint section.
+#[cfg(feature = "translation")]
 fn custom_row<'a, S: UiState + ?Sized>(
     state: &'a S,
     id: &'static str,
@@ -133,73 +142,108 @@ fn custom_row<'a, S: UiState + ?Sized>(
 /// The field area of the currently selected tab.
 fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     match state.settings_tab() {
-        SettingsTab::General => column![
-            text("General").size(14),
-            text("Classify newly OCR-detected entries with the ONNX styling \
-                  model and set their text style from the prediction.")
-                .size(12)
-                .color(MUTED_FG),
-            checkbox(state.auto_style_detect())
-                .label("Auto-detect entry styles")
-                .text_size(12)
-                .on_toggle(UiEvent::StyleAutoDetectToggle),
-            row![
-                container(text("OCR detection workers").size(12).color(MUTED_FG))
-                    .width(Length::Fixed(150.0)),
-                text_input("2", state.ocr_workers())
-                    .on_input(UiEvent::OcrWorkers)
-                    .padding(4)
-                    .size(12)
-                    .width(Length::Fixed(64.0)),
-            ]
-            .spacing(6),
-            text("Parallel OCR detection sessions; 2 fits a potato-laptop CPU.")
-                .size(11)
-                .color(MUTED_FG),
-        ]
-        .spacing(6)
-        .into(),
-        SettingsTab::Translation => {
-            let mut rows: Vec<Element<'_, UiEvent>> = Vec::new();
-            rows.push(text("Translation Service").size(14).into());
-            rows.push(
-                text("Connect the gateway used by the machine translator. \
-                      Disconnect removes its API key.")
-                    .size(12)
-                    .color(MUTED_FG)
-                    .into(),
-            );
-            for provider in translation::SUPPORTED_PROVIDERS.iter() {
-                rows.push(provider_row(state, provider));
+        SettingsTab::General => {
+            #[cfg_attr(not(any(feature = "styling", feature = "ocr")), allow(unused_mut))]
+            let mut items: Vec<Element<'_, UiEvent>> = vec![text("General").size(14).into()];
+            #[cfg(feature = "styling")]
+            {
+                items.push(
+                    text("Classify newly OCR-detected entries with the ONNX styling \
+                          model and set their text style from the prediction.")
+                        .size(12)
+                        .color(MUTED_FG)
+                        .into(),
+                );
+                items.push(
+                    checkbox(state.auto_style_detect())
+                        .label("Auto-detect entry styles")
+                        .text_size(12)
+                        .on_toggle(UiEvent::StyleAutoDetectToggle)
+                        .into(),
+                );
             }
-            rows.push(text("Custom service").size(14).into());
-            rows.push(
-                text("Any other endpoint speaking the OpenAI or Anthropic \
-                      API, e.g. a local Ollama server.")
-                    .size(12)
-                    .color(MUTED_FG)
+            #[cfg(feature = "ocr")]
+            {
+                items.push(
+                    row![
+                        container(text("OCR detection workers").size(12).color(MUTED_FG))
+                            .width(Length::Fixed(150.0)),
+                        text_input("2", state.ocr_workers())
+                            .on_input(UiEvent::OcrWorkers)
+                            .padding(4)
+                            .size(12)
+                            .width(Length::Fixed(64.0)),
+                    ]
+                    .spacing(6)
                     .into(),
-            );
-            rows.push(custom_row(state, CUSTOM_OPENAI, "OpenAI-compatible"));
-            rows.push(custom_row(state, CUSTOM_ANTHROPIC, "Anthropic-compatible"));
-            rows.push(checkbox(state.free_models_only())
-                .label("Only show free models")
-                .text_size(12)
-                .on_toggle(UiEvent::FreeModelsOnlyToggle)
-                .into());
-            rows.push(
-                text("Hide paid models from the translation picker.")
-                    .size(11)
-                    .color(MUTED_FG)
-                    .into(),
-            );
-            rows.push(
-                text("Connections are saved to settings.json beside the executable.")
-                    .size(11)
-                    .color(MUTED_FG)
-                    .into(),
-            );
-            scrollable(column(rows).spacing(4)).into()
+                );
+                items.push(
+                    text("Parallel OCR detection sessions; 2 fits a potato-laptop CPU.")
+                        .size(11)
+                        .color(MUTED_FG)
+                        .into(),
+                );
+            }
+            column(items).spacing(6).into()
+        }
+        SettingsTab::Translation => {
+            #[cfg(feature = "translation")]
+            {
+                let mut rows: Vec<Element<'_, UiEvent>> = Vec::new();
+                rows.push(text("Translation Service").size(14).into());
+                rows.push(
+                    text("Connect the gateway used by the machine translator. \
+                          Disconnect removes its API key.")
+                        .size(12)
+                        .color(MUTED_FG)
+                        .into(),
+                );
+                for provider in translation::SUPPORTED_PROVIDERS.iter() {
+                    rows.push(provider_row(state, provider));
+                }
+                rows.push(text("Custom service").size(14).into());
+                rows.push(
+                    text("Any other endpoint speaking the OpenAI or Anthropic \
+                          API, e.g. a local Ollama server.")
+                        .size(12)
+                        .color(MUTED_FG)
+                        .into(),
+                );
+                rows.push(custom_row(state, CUSTOM_OPENAI, "OpenAI-compatible"));
+                rows.push(custom_row(state, CUSTOM_ANTHROPIC, "Anthropic-compatible"));
+                rows.push(
+                    checkbox(state.free_models_only())
+                        .label("Only show free models")
+                        .text_size(12)
+                        .on_toggle(UiEvent::FreeModelsOnlyToggle)
+                        .into(),
+                );
+                rows.push(
+                    text("Hide paid models from the translation picker.")
+                        .size(11)
+                        .color(MUTED_FG)
+                        .into(),
+                );
+                rows.push(
+                    text("Connections are saved to settings.json beside the executable.")
+                        .size(11)
+                        .color(MUTED_FG)
+                        .into(),
+                );
+                scrollable(column(rows).spacing(4)).into()
+            }
+            #[cfg(not(feature = "translation"))]
+            {
+                column![
+                    text("Translation Service").size(14),
+                    text("Translation is not available in this build (the \
+                          translation subsystem is compiled out).")
+                        .size(12)
+                        .color(MUTED_FG),
+                ]
+                .spacing(6)
+                .into()
+            }
         }
     }
 }

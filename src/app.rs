@@ -1,22 +1,34 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
+#[cfg(feature = "translation")]
+use std::collections::BTreeMap;
 use std::sync::Arc;
+#[cfg(feature = "ocr")]
 use std::time::Duration;
 
+#[cfg(any(feature = "inpaint", feature = "test-ui"))]
 use iced::widget::image::Handle;
 use iced::widget::{pane_grid, text_editor};
+#[cfg(feature = "ocr")]
 use iced::futures::{SinkExt, StreamExt};
 use iced::{Color, Element, Font, Length, Rectangle, Subscription, Task};
 
 use fontdb;
+#[cfg(feature = "inpaint")]
 use scanlateit_inpaint::Engine as InpaintEngine;
 use scanlateit_model::{
-    EntryId, EntryStyle, InpaintPatch, NewEntry, ProfileId, Project, Quad, StylePresets,
-    TextAlign, TextGradientDir,
+    EntryId, EntryStyle, NewEntry, ProfileId, Project, Quad, StylePresets, TextAlign,
+    TextGradientDir,
 };
+#[cfg(feature = "inpaint")]
+use scanlateit_model::InpaintPatch;
+#[cfg(feature = "ocr")]
 use scanlateit_ocr::{self as ocr, Engine, OcrCancellationToken, ParallelEngine};
+#[cfg(feature = "styling")]
 use scanlateit_styling::{Engine as StylingEngine, JobTracker};
+#[cfg(feature = "translation")]
 use scanlateit_translation as translation;
 use scanlateit_ui::color::rgba_to_color;
+#[cfg(feature = "inpaint")]
 use scanlateit_ui::loaded::InpaintLayer;
 use scanlateit_ui::main_area::decode::{DecodedPage, PageDecode, Scheduler, Tier};
 use scanlateit_ui::panel::results::scroll_to_row;
@@ -52,21 +64,30 @@ pub enum Message {
     /// A widget-level event from the ui crate.
     Ui(UiEvent),
     ImagesPicked(Result<Vec<(String, u32, u32)>, String>),
+    #[cfg(feature = "ocr")]
     EngineReady(Result<Engine, String>),
+    #[cfg(feature = "ocr")]
     ParallelEngineReady(Result<ParallelEngine, String>),
     /// One parallel-pipeline OCR run's inference outcome: raw lines for
     /// assembly, or an already-assembled result from the fallback path (see
     /// [`ocr::RunEvent`]).
+    #[cfg(feature = "ocr")]
     OcrStreamRun(Result<ocr::RunEvent, String>),
     /// The OCR stream ended without delivering every run (pipeline error or
     /// cancellation); the handler finalizes the run.
+    #[cfg(feature = "ocr")]
     OcrStreamFailed(String),
     /// Frame tick while the OCR stream is running: keeps the iced frame loop
     /// alive so queued `OcrStreamRun` messages are drained per run.
+    #[cfg(feature = "ocr")]
     OcrTick,
+    #[cfg(feature = "inpaint")]
     InpaintEngineReady(Result<InpaintEngine, String>),
+    #[cfg(feature = "inpaint")]
     InpaintFinished(usize, Result<Vec<(image::RgbaImage, [f32; 4])>, String>),
+    #[cfg(feature = "styling")]
     StylingEngineReady(Result<StylingEngine, String>),
+    #[cfg(feature = "styling")]
     StyleDetected(usize, EntryId, Result<EntryStyle, String>),
     FontLoaded,
     /// The boot-time enumeration of installed system fonts as
@@ -81,10 +102,13 @@ pub enum Message {
     SettleElapsed(u64),
     /// A request to (re)fetch the translation model lists from the models
     /// mirror; handled the same way as the boot fetch.
+    #[cfg(feature = "translation")]
     FetchModels,
     /// The fetched translation gateway configs, keyed by provider id (each
     /// already filtered and sorted, or the fallback on failure).
+    #[cfg(feature = "translation")]
     ModelsFetched(std::collections::HashMap<String, translation::Provider>),
+    #[cfg(feature = "translation")]
     TranslateFinished(
         Vec<(usize, EntryId, String, String)>,
         Result<Vec<String>, String>,
@@ -92,6 +116,7 @@ pub enum Message {
     /// The per-row retranslate finished: the new text for `(image index,
     /// entry id)`, or the error message. The result is stored in the selected
     /// profile (forking a new one when the Default profile is selected).
+    #[cfg(feature = "translation")]
     RetranslateFinished((usize, EntryId), Result<String, String>),
 }
 
@@ -105,23 +130,30 @@ impl From<UiEvent> for Message {
 /// model doesn't know about (engine handle, per-image canvas cache).
 pub struct App {
     pub(crate) images: Vec<LoadedImage>,
+    #[cfg(feature = "ocr")]
     engine: Option<Engine>,
     /// The parallel OCR pipeline (K detection workers + one recognition
     /// worker). Built lazily on first OCR run; dropped (workers exit) when a
     /// run finishes, so the next run rebuilds it fresh.
+    #[cfg(feature = "ocr")]
     pipeline: Option<ParallelEngine>,
+    #[cfg(feature = "ocr")]
     cancel: Option<OcrCancellationToken>,
     /// Number of parallel OCR detection workers, as typed in the settings
     /// modal; parsed (fallback 2) when OCR starts.
     ocr_workers: String,
     /// The current run plan, indexed by run number; the stream closure
     /// captures a clone, the handler reads it back for assembly.
+    #[cfg(feature = "ocr")]
     ocr_plans: Vec<ocr::RunPlan>,
     /// All images' `(width, height)` of the current run, in image order.
+    #[cfg(feature = "ocr")]
     ocr_dims: Vec<(u32, u32)>,
+    #[cfg(feature = "inpaint")]
     inpaint_engine: Option<InpaintEngine>,
     /// Buffered inpainting job waiting for the engine to finish loading,
     /// as `(image index, path, rect, mask quads)`.
+    #[cfg(feature = "inpaint")]
     pending_inpaint: Option<(usize, String, [f32; 4], Vec<Quad>)>,
     /// True while an inpainting inference is in flight.
     pub(crate) inpainting: bool,
@@ -134,6 +166,7 @@ pub struct App {
     /// Auto style-detection bookkeeping: the lazily-built classifier engine,
     /// the in-flight build flag and the `(image index, entry id)` pairs
     /// already classified (see [`JobTracker`]).
+    #[cfg(feature = "styling")]
     styling: JobTracker,
     /// When enabled, newly OCR-detected entries are auto-classified and their
     /// style set from the prediction.
@@ -141,22 +174,30 @@ pub struct App {
     pub(crate) running: bool,
     pub(crate) font: Option<Font>,
     pub(crate) status: String,
+    #[cfg(feature = "ocr")]
     pending: usize,
+    #[cfg(feature = "ocr")]
     ocr_total: usize,
+    #[cfg(feature = "ocr")]
     ocr_failed: usize,
+    #[cfg(feature = "ocr")]
     ocr_cancelled: bool,
     /// Total OCR runs in the current run's plan; `pending` counts down from
     /// this (one run may cover several images).
+    #[cfg(feature = "ocr")]
     ocr_runs: usize,
     /// Boundary candidates of the last completed run, awaiting the next run's
     /// re-detections in its top margin (see [`ocr::resolve_boundary`]). Taken
     /// by the next run's task; flushed if the run fails or is cancelled so no
     /// captured bubble is lost.
+    #[cfg(feature = "ocr")]
     held_boundary: Option<ocr::BoundaryState>,
     pub(crate) translating: bool,
     /// The connected-provider session: stored connections, selection, model
     /// picker lists and the free-only filter (see [`translation::Session`]).
+    #[cfg(feature = "translation")]
     pub(crate) tx: translation::Session,
+    #[cfg(feature = "translation")]
     pub(crate) translate_lang: String,
     /// The API-key entry modal open over the settings modal, if any.
     pub(crate) connect_modal: Option<ConnectModal>,
@@ -216,31 +257,47 @@ impl App {
         let style = EntryStyle::default();
         Self {
             images: Vec::new(),
+            #[cfg(feature = "ocr")]
             engine: None,
+            #[cfg(feature = "ocr")]
             pipeline: None,
+            #[cfg(feature = "ocr")]
             cancel: None,
             ocr_workers: "2".to_string(),
+            #[cfg(feature = "ocr")]
             ocr_plans: Vec::new(),
+            #[cfg(feature = "ocr")]
             ocr_dims: Vec::new(),
+            #[cfg(feature = "inpaint")]
             inpaint_engine: None,
+            #[cfg(feature = "inpaint")]
             pending_inpaint: None,
             inpainting: false,
             inpaint_mode: None,
             show_overlay_text: true,
             show_inpaint: true,
+            #[cfg(feature = "styling")]
             styling: JobTracker::new(),
             auto_style_detect: false,
             running: false,
             font: None,
             status: "Idle - open images to begin.".to_string(),
+            #[cfg(feature = "ocr")]
             pending: 0,
+            #[cfg(feature = "ocr")]
             ocr_total: 0,
+            #[cfg(feature = "ocr")]
             ocr_failed: 0,
+            #[cfg(feature = "ocr")]
             ocr_cancelled: false,
+            #[cfg(feature = "ocr")]
             ocr_runs: 0,
+            #[cfg(feature = "ocr")]
             held_boundary: None,
             translating: false,
+            #[cfg(feature = "translation")]
             tx: translation::Session::default(),
+            #[cfg(feature = "translation")]
             translate_lang: translation::LANGUAGES[0].to_string(),
             connect_modal: None,
             settings_open: false,
@@ -357,10 +414,12 @@ impl UiState for App {
         &self.status
     }
 
+    #[cfg(feature = "translation")]
     fn translate_provider(&self) -> String {
         translation::provider_name(&self.tx.selected_id)
     }
 
+    #[cfg(feature = "translation")]
     fn translate_providers(&self) -> Vec<String> {
         self.tx
             .connected_ids
@@ -369,18 +428,22 @@ impl UiState for App {
             .collect()
     }
 
+    #[cfg(feature = "translation")]
     fn translate_model(&self) -> &String {
         &self.tx.selected_model
     }
 
+    #[cfg(feature = "translation")]
     fn translate_models(&self) -> &[String] {
         &self.tx.models
     }
 
+    #[cfg(feature = "translation")]
     fn translate_lang(&self) -> &str {
         &self.translate_lang
     }
 
+    #[cfg(feature = "translation")]
     fn connections(&self) -> &BTreeMap<String, translation::Connection> {
         &self.tx.connections
     }
@@ -389,6 +452,7 @@ impl UiState for App {
         self.connect_modal.as_ref()
     }
 
+    #[cfg(feature = "translation")]
     fn free_models_only(&self) -> bool {
         self.tx.free_only
     }
@@ -453,10 +517,12 @@ impl UiState for App {
         self.style_working.gradient_dir
     }
 
+    #[cfg(feature = "styling")]
     fn auto_style_detect(&self) -> bool {
         self.auto_style_detect
     }
 
+    #[cfg(feature = "ocr")]
     fn ocr_workers(&self) -> &str {
         &self.ocr_workers
     }
@@ -954,6 +1020,7 @@ for c in text.chars() {
         );
     }
 
+    #[cfg(feature = "translation")]
     #[test]
     fn retranslate_without_connection_is_rejected() {
         let (mut app, id) = app_with_entry();
@@ -962,6 +1029,7 @@ for c in text.chars() {
         assert!(app.status.contains("Connect a translation service"));
     }
 
+    #[cfg(feature = "translation")]
     #[test]
     fn retranslate_missing_entry_is_rejected() {
         let (mut app, _) = app_with_entry();
@@ -973,6 +1041,7 @@ for c in text.chars() {
         assert!(app.status.contains("no longer exists"));
     }
 
+    #[cfg(feature = "translation")]
     #[test]
     fn retranslate_starts_translation_when_connected() {
         let (mut app, id) = app_with_entry();
@@ -992,6 +1061,7 @@ for c in text.chars() {
         assert!(app.status.starts_with("Retranslating"));
     }
 
+    #[cfg(feature = "translation")]
     #[test]
     fn retranslate_finished_forks_a_profile_off_the_default() {
         let (mut app, id) = app_with_entry();
@@ -1011,6 +1081,7 @@ for c in text.chars() {
         assert_eq!(original.translation_of(id), None, "Default keeps no delta");
     }
 
+    #[cfg(feature = "translation")]
     #[test]
     fn retranslate_finished_writes_into_the_selected_profile_in_place() {
         let (mut app, id) = app_with_entry();
@@ -1031,6 +1102,7 @@ for c in text.chars() {
         assert_eq!(project.profiles.selected().translation_of(id), Some("Hola"));
     }
 
+    #[cfg(feature = "translation")]
     #[test]
     fn retranslate_finished_error_leaves_the_profile_untouched() {
         let (mut app, id) = app_with_entry();
@@ -1050,6 +1122,7 @@ for c in text.chars() {
         assert_eq!(project.profiles.selected().translation_of(id), Some("Hello"));
     }
 
+    #[cfg(feature = "translation")]
     #[test]
     fn retranslate_finished_strips_quotes_and_clears_when_identical_to_ocr() {
         let (mut app, id) = app_with_entry();
@@ -1073,22 +1146,113 @@ pub fn boot() -> (App, Task<Message>) {
         Ok(bytes) => iced::font::load(bytes).map(|_| Message::FontLoaded),
         Err(_) => Task::none(),
     };
+    #[cfg_attr(
+        not(any(
+            feature = "translation",
+            feature = "styling",
+            feature = "ocr",
+            feature = "test-ui"
+        )),
+        allow(unused_mut)
+    )]
     let mut app = App::new();
+    #[cfg_attr(
+        not(any(feature = "translation", feature = "styling", feature = "ocr")),
+        allow(unused_variables)
+    )]
     let settings = crate::settings::Settings::load();
-    app.tx = translation::Session::new(settings.connections, settings.last_provider);
-    app.auto_style_detect = settings.auto_style_detect;
-    app.ocr_workers = settings.ocr_workers.to_string();
-    app.tx.free_only = settings.free_models_only;
-    app.tx.sync();
-    let fetch_ids = app.tx.fetch_ids();
-    let models_task = if fetch_ids.is_empty() {
-        Task::none()
-    } else {
-        Task::perform(translation::fetch_providers(fetch_ids), Message::ModelsFetched)
+    #[cfg(feature = "translation")]
+    {
+        app.tx = translation::Session::new(settings.connections, settings.last_provider);
+        app.tx.free_only = settings.free_models_only;
+        app.tx.sync();
+    }
+    #[cfg(feature = "styling")]
+    {
+        app.auto_style_detect = settings.auto_style_detect;
+    }
+    #[cfg(feature = "ocr")]
+    {
+        app.ocr_workers = settings.ocr_workers.to_string();
+    }
+    #[cfg(feature = "translation")]
+    let models_task = {
+        let fetch_ids = app.tx.fetch_ids();
+        if fetch_ids.is_empty() {
+            Task::none()
+        } else {
+            Task::perform(translation::fetch_providers(fetch_ids), Message::ModelsFetched)
+        }
     };
+    #[cfg(not(feature = "translation"))]
+    let models_task = Task::none();
+    #[cfg(feature = "test-ui")]
+    {
+        // TEST-UI build: preload a fake white page with fake OCR entries so
+        // the overlay, panel, editing and styling UI are usable without any
+        // ML backend (no ort, no rig compiled).
+        let width = 900u32;
+        let height = 1200u32;
+        let white = image::RgbaImage::from_pixel(width, height, image::Rgba([245, 245, 245, 255]));
+        let pixels = bytes::Bytes::from(white.into_raw());
+        let page = std::sync::Arc::new(DecodedPage {
+            handle: Handle::from_rgba(width, height, pixels),
+            width,
+            height,
+        });
+        let mut project = Project::new();
+        project.append_ocr(fake_ocr_entries());
+        app.images.push(LoadedImage {
+            width: width as f32,
+            height: height as f32,
+            path: "fake-white-page.png".to_string(),
+            project,
+            decode: PageDecode {
+                thumb: Tier::Ready(page.clone()),
+                full: Tier::Ready(page),
+            },
+            inpaint: Vec::new(),
+        });
+        app.status = "TEST-UI build: fake white page with fake OCR entries loaded.".to_string();
+    }
     let fonts_task =
         Task::perform(async move { enumerate_system_fonts() }, Message::SystemFonts);
     (app, Task::batch([font_task, models_task, fonts_task]))
+}
+
+/// Fake OCR entries for TEST builds: a small batch of Korean bubbles spread
+/// over a page-sized canvas. Used at `test-ui` boot and by the fake OCR run.
+#[cfg_attr(all(feature = "ocr", not(feature = "test-ui")), allow(dead_code))]
+fn fake_ocr_entries() -> Vec<NewEntry> {
+    use scanlateit_model::EntrySource;
+    let (w, h) = (900.0f32, 1200.0f32);
+    let box_at = |cx: f32, cy: f32, bw: f32, bh: f32| {
+        Quad {
+            points: [
+                [cx - bw / 2.0, cy - bh / 2.0],
+                [cx + bw / 2.0, cy - bh / 2.0],
+                [cx + bw / 2.0, cy + bh / 2.0],
+                [cx - bw / 2.0, cy + bh / 2.0],
+            ],
+        }
+    };
+    let specs = [
+        ("안녕하세요!", 0.5 * w, 0.10 * h, 0.28 * w, 0.05 * h),
+        ("오늘은 좋은 날이네요.", 0.45 * w, 0.22 * h, 0.32 * w, 0.05 * h),
+        ("저기 보이는 게 뭐지?", 0.55 * w, 0.34 * h, 0.30 * w, 0.05 * h),
+        ("조심해서 가자.", 0.35 * w, 0.50 * h, 0.24 * w, 0.05 * h),
+        ("정말 멋진 풍경이야!", 0.60 * w, 0.62 * h, 0.32 * w, 0.05 * h),
+        ("다음에 또 만나요.", 0.45 * w, 0.78 * h, 0.26 * w, 0.05 * h),
+    ];
+    specs
+        .into_iter()
+        .map(|(text, cx, cy, bw, bh)| NewEntry {
+            source: EntrySource::AutoOcr,
+            text: text.to_string(),
+            score: 0.9,
+            quad: box_at(cx, cy, bw, bh),
+        })
+        .collect()
 }
 
 /// Enumerates installed system fonts (family name + file path) with fontdb
@@ -1119,6 +1283,7 @@ fn enumerate_system_fonts() -> Vec<(String, String)> {
 /// `OcrStreamRun` handler, on the UI thread, where the committed state is
 /// authoritative. The old [`Engine`] is kept for the undecodable-page
 /// fallback path only.
+#[cfg(feature = "ocr")]
 fn start_ocr_stream(app: &mut App) -> Task<Message> {
     let pipeline = app
         .pipeline
@@ -1168,6 +1333,7 @@ fn start_ocr_stream(app: &mut App) -> Task<Message> {
 /// Spawns one inpainting run: the full-res decode, mask build and LaMa
 /// inference all happen on the blocking pool, the UI thread only stores the
 /// finished patch.
+#[cfg(feature = "inpaint")]
 fn start_inpaint(
     app: &mut App,
     engine: InpaintEngine,
@@ -1194,6 +1360,7 @@ fn start_inpaint(
 /// Spawns per-entry style-classification jobs for every visible entry whose
 /// style has not already been set by the classifier. Builds the engine lazily
 /// on first use; queued jobs start when the engine finishes loading.
+#[cfg(feature = "styling")]
 fn classify_entries(app: &mut App) -> Task<Message> {
     match app.styling.engine() {
         Some(engine) => start_style_jobs(app, engine.clone()),
@@ -1208,6 +1375,7 @@ fn classify_entries(app: &mut App) -> Task<Message> {
 /// Spawns one classification `Task` per unclassified visible entry, each on
 /// the blocking pool. Entries are marked in-flight up front so a later
 /// auto-run never schedules the same entry twice.
+#[cfg(feature = "styling")]
 fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
     // Immutable reference captured by the inner closures so a `move` does not
     // move `app` itself; disjoint-field borrows of the images and the tracker
@@ -1261,6 +1429,7 @@ fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
 
 /// Appends per-page entries to their projects, updating `ocr_total`. The
 /// assembly itself (resolve, dedup, distribute) lives in [`ocr::assemble`].
+#[cfg(feature = "ocr")]
 fn commit_per_page(app: &mut App, per_page: Vec<(usize, Vec<NewEntry>)>) {
     for (page, entries) in per_page {
         let Some(image) = app.images.get_mut(page) else {
@@ -1273,6 +1442,7 @@ fn commit_per_page(app: &mut App, per_page: Vec<(usize, Vec<NewEntry>)>) {
 /// Appends any boundary candidates still held — their bubbles were captured
 /// whole on the page above the seam and must not be lost when the next run
 /// fails, is cancelled, never starts or took the fallback path.
+#[cfg(feature = "ocr")]
 fn flush_held_boundary(app: &mut App) {
     if let Some(state) = app.held_boundary.take() {
         for candidate in state.candidates {
@@ -1286,6 +1456,7 @@ fn flush_held_boundary(app: &mut App) {
 /// Starts the OCR stream once both engines (the parallel pipeline and the
 /// fallback engine) are ready; called from `StartOcr`, `EngineReady` and
 /// `ParallelEngineReady`.
+#[cfg(feature = "ocr")]
 fn maybe_start_ocr(app: &mut App) -> Task<Message> {
     if app.running && app.pipeline.is_some() && app.engine.is_some() {
         app.cancel = app
@@ -1306,6 +1477,7 @@ fn maybe_start_ocr(app: &mut App) -> Task<Message> {
     }
 }
 
+#[cfg(feature = "ocr")]
 fn finalize_run(app: &mut App) {
     // Flush any boundary candidates still held — the next run failed, was
     // cancelled or never started: their bubbles were captured whole on the
@@ -1330,6 +1502,7 @@ fn finalize_run(app: &mut App) {
 
 pub fn update(app: &mut App, message: Message) -> Task<Message> {
     match message {
+        #[cfg(feature = "translation")]
         Message::FetchModels => {
             let ids = app.tx.fetch_ids();
             if ids.is_empty() {
@@ -1338,6 +1511,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 Task::perform(translation::fetch_providers(ids), Message::ModelsFetched)
             }
         }
+        #[cfg(feature = "translation")]
         Message::ModelsFetched(providers) => {
             app.tx.on_fetched(providers);
             Task::none()
@@ -1394,6 +1568,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 Task::none()
             }
         },
+        #[cfg(feature = "ocr")]
         Message::Ui(UiEvent::StartOcr) => {
             if app.images.is_empty() {
                 app.status = "Open images first.".to_string();
@@ -1448,6 +1623,27 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 Task::batch(tasks)
             }
         }
+        // TEST builds without OCR: append fake entries instantly instead of
+        // spawning engines.
+        #[cfg(not(feature = "ocr"))]
+        Message::Ui(UiEvent::StartOcr) => {
+            if app.images.is_empty() {
+                app.status = "Open images first.".to_string();
+                return Task::none();
+            }
+            if app.running {
+                return Task::none();
+            }
+            app.running = true;
+            let mut added = 0;
+            for image in &mut app.images {
+                added += image.project.append_ocr(fake_ocr_entries());
+            }
+            app.running = false;
+            app.status = format!("Fake OCR done: {added} line(s) (no OCR engine in this build).");
+            Task::none()
+        }
+        #[cfg(feature = "ocr")]
         Message::EngineReady(result) => match result {
             Ok(engine) => {
                 app.engine = Some(engine.clone());
@@ -1459,6 +1655,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 Task::none()
             }
         },
+        #[cfg(feature = "ocr")]
         Message::ParallelEngineReady(result) => match result {
             Ok(pipeline) => {
                 app.pipeline = Some(pipeline.clone());
@@ -1470,6 +1667,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 Task::none()
             }
         },
+        #[cfg(feature = "inpaint")]
         Message::InpaintEngineReady(result) => match result {
             Ok(engine) => {
                 app.inpaint_engine = Some(engine.clone());
@@ -1486,6 +1684,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 Task::none()
             }
         },
+        #[cfg(feature = "styling")]
         Message::StylingEngineReady(result) => match result {
             Ok(engine) => {
                 if app.styling.set_engine(engine.clone()) {
@@ -1500,6 +1699,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 Task::none()
             }
         },
+        #[cfg(feature = "styling")]
         Message::StyleDetected(index, id, result) => {
             if let (Some(image), Ok(style)) = (app.images.get_mut(index), result) {
                 image.project.set_entry_style(id, style);
@@ -1508,6 +1708,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        #[cfg(feature = "inpaint")]
         Message::InpaintFinished(index, result) => {
             app.inpainting = false;
             match result {
@@ -1545,6 +1746,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        #[cfg(feature = "ocr")]
         Message::Ui(UiEvent::StopOcr) => {
             if let Some(token) = &app.cancel {
                 token.cancel();
@@ -1553,6 +1755,12 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.status = "Cancelling OCR...".to_string();
             Task::none()
         }
+        #[cfg(not(feature = "ocr"))]
+        Message::Ui(UiEvent::StopOcr) => {
+            app.status = "OCR is not available in this build.".to_string();
+            Task::none()
+        }
+        #[cfg(feature = "ocr")]
         Message::OcrStreamRun(result) => {
             app.pending = app.pending.saturating_sub(1);
             match result {
@@ -1599,6 +1807,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     }
                 }
             }
+            #[cfg_attr(not(feature = "styling"), allow(unused_mut))]
             let mut tasks: Vec<Task<Message>> = Vec::new();
             if app.pending == 0 || app.ocr_cancelled {
                 finalize_run(app);
@@ -1612,6 +1821,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             // Classify newly appended entries (including those resolved across
             // a run boundary) when auto-detect is enabled.
+            #[cfg(feature = "styling")]
             if app.auto_style_detect {
                 tasks.push(classify_entries(app));
             }
@@ -1621,6 +1831,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 Task::batch(tasks)
             }
         }
+        #[cfg(feature = "ocr")]
         Message::OcrStreamFailed(e) => {
             app.ocr_failed += 1;
             if e == "cancelled" {
@@ -1634,6 +1845,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        #[cfg(feature = "ocr")]
         Message::OcrTick => Task::none(),
         Message::FontLoaded => {
             app.font = Some(Font::with_name(KOREAN_FONT_NAME));
@@ -1717,6 +1929,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        #[cfg(feature = "translation")]
         Message::Ui(UiEvent::Translate) => {
             if app.translating || app.running {
                 return Task::none();
@@ -1784,6 +1997,12 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 |(jobs, result)| Message::TranslateFinished(jobs, result),
             )
         }
+        #[cfg(not(feature = "translation"))]
+        Message::Ui(UiEvent::Translate) => {
+            app.status = "Translation is not available in this build.".to_string();
+            Task::none()
+        }
+        #[cfg(feature = "translation")]
         Message::Ui(UiEvent::TranslateProvider(name)) => {
             // The picker option is the display name; map it back to the id.
             let id = app
@@ -1798,14 +2017,26 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        #[cfg(not(feature = "translation"))]
+        Message::Ui(UiEvent::TranslateProvider(_name)) => {
+            app.status = "Translation is not available in this build.".to_string();
+            Task::none()
+        }
+        #[cfg(feature = "translation")]
         Message::Ui(UiEvent::TranslateModel(model)) => {
             app.tx.selected_model = model;
             Task::none()
         }
+        #[cfg(not(feature = "translation"))]
+        Message::Ui(UiEvent::TranslateModel(_model)) => Task::none(),
+        #[cfg(feature = "translation")]
         Message::Ui(UiEvent::TranslateLang(lang)) => {
             app.translate_lang = lang;
             Task::none()
         }
+        #[cfg(not(feature = "translation"))]
+        Message::Ui(UiEvent::TranslateLang(_lang)) => Task::none(),
+        #[cfg(feature = "translation")]
         Message::Ui(UiEvent::TranslateConnect(provider_id)) => {
             let is_custom = translation::is_custom(&provider_id);
             let existing = app.tx.connections.get(&provider_id);
@@ -1821,6 +2052,9 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             });
             Task::none()
         }
+        #[cfg(not(feature = "translation"))]
+        Message::Ui(UiEvent::TranslateConnect(_provider_id)) => Task::none(),
+        #[cfg(feature = "translation")]
         Message::Ui(UiEvent::TranslateDisconnect(provider_id)) => {
             app.tx.disconnect(&provider_id);
             app.status = format!(
@@ -1829,6 +2063,8 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             );
             Task::none()
         }
+        #[cfg(not(feature = "translation"))]
+        Message::Ui(UiEvent::TranslateDisconnect(_provider_id)) => Task::none(),
         Message::Ui(UiEvent::ConnectModalKey(key)) => {
             if let Some(modal) = &mut app.connect_modal {
                 modal.api_key = key;
@@ -1850,6 +2086,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        #[cfg(feature = "translation")]
         Message::Ui(UiEvent::ConnectModalSubmit) => {
             let Some(modal) = app.connect_modal.take() else {
                 return Task::none();
@@ -1885,14 +2122,23 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 )
             }
         }
+        #[cfg(not(feature = "translation"))]
+        Message::Ui(UiEvent::ConnectModalSubmit) => {
+            app.connect_modal = None;
+            app.status = "Translation is not available in this build.".to_string();
+            Task::none()
+        }
         Message::Ui(UiEvent::ConnectModalCancel) => {
             app.connect_modal = None;
             Task::none()
         }
+        #[cfg(feature = "translation")]
         Message::Ui(UiEvent::FreeModelsOnlyToggle(enabled)) => {
             app.tx.set_free_only(enabled);
             Task::none()
         }
+        #[cfg(not(feature = "translation"))]
+        Message::Ui(UiEvent::FreeModelsOnlyToggle(_enabled)) => Task::none(),
         Message::Ui(UiEvent::EntryClicked(selection)) => {
             clear_editing(app);
             match selection {
@@ -1916,6 +2162,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::PanelEntryEdit((index, id))) => {
             start_inline_edit(app, index, id, EditOrigin::Panel)
         }
+        #[cfg(feature = "translation")]
         Message::Ui(UiEvent::RetranslateEntry((index, entry_id))) => {
             if app.translating || app.running {
                 return Task::none();
@@ -1956,6 +2203,11 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 },
                 |(job, result)| Message::RetranslateFinished(job, result),
             )
+        }
+        #[cfg(not(feature = "translation"))]
+        Message::Ui(UiEvent::RetranslateEntry(_)) => {
+            app.status = "Translation is not available in this build.".to_string();
+            Task::none()
         }
         Message::Ui(UiEvent::Inpaint) => {
             if app.inpainting || app.running || app.translating || app.images.is_empty() {
@@ -2027,6 +2279,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        #[cfg(feature = "inpaint")]
         Message::Ui(UiEvent::InpaintSelection((index, rect))) => {
             if app.inpainting || app.running || app.translating {
                 return Task::none();
@@ -2059,6 +2312,11 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     )
                 }
             }
+        }
+        #[cfg(not(feature = "inpaint"))]
+        Message::Ui(UiEvent::InpaintSelection(_)) => {
+            app.status = "Inpaint is not available in this build.".to_string();
+            Task::none()
         }
         Message::Ui(UiEvent::EditAction(action)) => {
             let Some(content) = app.edit_content.as_mut() else {
@@ -2204,12 +2462,28 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::Ui(UiEvent::StylePresetMenuDismiss) => Task::none(),
+        #[cfg(feature = "styling")]
         Message::Ui(UiEvent::StyleAutoDetect) => {
             let Some((index, id)) = app.selected else { return Task::none() };
             // The entry must leave the done set so it is eligible again, even
             // if auto-detect already classified it.
             app.styling.reopen(index, id);
             classify_entries(app)
+        }
+        // TEST builds without the styling model: apply a canned default
+        // style instantly so the styling panel still has something to show.
+        #[cfg(not(feature = "styling"))]
+        Message::Ui(UiEvent::StyleAutoDetect) => {
+            let Some((index, id)) = app.selected else { return Task::none() };
+            let style = EntryStyle {
+                bold: true,
+                italic: false,
+                ..EntryStyle::default()
+            };
+            app.images[index].project.set_entry_style(id, style);
+            app.status = "Applied a fake auto-detected text style (no styling model in this build)."
+                .to_string();
+            Task::none()
         }
         Message::Ui(UiEvent::StyleAutoDetectToggle(enabled)) => {
             app.auto_style_detect = enabled;
@@ -2241,11 +2515,16 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.settings_open = false;
             app.connect_modal = None;
             let settings = crate::settings::Settings {
+                #[cfg(feature = "translation")]
                 connections: app.tx.connections.clone(),
+                #[cfg(feature = "translation")]
                 last_provider: (!app.tx.selected_id.is_empty())
                     .then(|| app.tx.selected_id.clone()),
+                #[cfg(feature = "styling")]
                 auto_style_detect: app.auto_style_detect,
+                #[cfg(feature = "ocr")]
                 ocr_workers: app.ocr_workers.parse().unwrap_or(2),
+                #[cfg(feature = "translation")]
                 free_models_only: app.tx.free_only,
             };
             if let Err(e) = settings.save() {
@@ -2257,6 +2536,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.settings_tab = tab;
             Task::none()
         }
+        #[cfg(feature = "translation")]
         Message::TranslateFinished(jobs, result) => {
             app.translating = false;
             match result {
@@ -2285,6 +2565,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        #[cfg(feature = "translation")]
         Message::RetranslateFinished((index, entry_id), result) => {
             app.translating = false;
             match result {
@@ -2328,12 +2609,12 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
 /// Keeps the frame loop alive while the OCR stream is running so queued
 /// `OcrStreamRun` messages are drained and assembled per run instead of all
 /// at once when the stream finishes.
-pub fn subscription(app: &App) -> Subscription<Message> {
-    if app.running {
-        iced::time::every(Duration::from_millis(16)).map(|_| Message::OcrTick)
-    } else {
-        Subscription::none()
+pub fn subscription(_app: &App) -> Subscription<Message> {
+    #[cfg(feature = "ocr")]
+    if _app.running {
+        return iced::time::every(Duration::from_millis(16)).map(|_| Message::OcrTick);
     }
+    Subscription::none()
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {

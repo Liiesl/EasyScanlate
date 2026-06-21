@@ -2,9 +2,11 @@
 //! once at boot, saved whenever the settings modal closes.
 
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "translation")]
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+#[cfg(feature = "translation")]
 use scanlateit_translation::Connection;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12,25 +14,31 @@ pub struct Settings {
     /// Stored translation connections, keyed by provider id (`openai`,
     /// `deepseek`, `custom-openai`, ...). A provider is "connected" when it
     /// has an entry here; disconnect removes the entry.
+    #[cfg(feature = "translation")]
     #[serde(default)]
     pub connections: BTreeMap<String, Connection>,
     /// The connection used by the translation bar; `None` falls back to the
     /// first connected provider.
+    #[cfg(feature = "translation")]
     #[serde(default)]
     pub last_provider: Option<String>,
     /// When enabled, OCR-detected entries are auto-classified by the ONNX
     /// styling model and their style set from the prediction.
+    #[cfg(feature = "styling")]
     #[serde(default)]
     pub auto_style_detect: bool,
     /// Number of parallel OCR detection sessions (one thread each) feeding
     /// the single recognition session.
+    #[cfg(feature = "ocr")]
     #[serde(default = "default_ocr_workers")]
     pub ocr_workers: usize,
     /// When enabled, the translation model picker only lists free models.
+    #[cfg(feature = "translation")]
     #[serde(default)]
     pub free_models_only: bool,
 }
 
+#[cfg(feature = "ocr")]
 fn default_ocr_workers() -> usize {
     2
 }
@@ -38,10 +46,15 @@ fn default_ocr_workers() -> usize {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "translation")]
             connections: BTreeMap::new(),
+            #[cfg(feature = "translation")]
             last_provider: None,
+            #[cfg(feature = "styling")]
             auto_style_detect: false,
+            #[cfg(feature = "ocr")]
             ocr_workers: default_ocr_workers(),
+            #[cfg(feature = "translation")]
             free_models_only: false,
         }
     }
@@ -81,6 +94,7 @@ impl Settings {
 mod tests {
     use super::*;
 
+    #[cfg(all(feature = "translation", feature = "ocr", feature = "styling"))]
     #[test]
     fn settings_round_trips_through_json() {
         let settings = Settings {
@@ -124,6 +138,7 @@ mod tests {
         assert_eq!(back.free_models_only, true);
     }
 
+    #[cfg(all(feature = "translation", feature = "ocr", feature = "styling"))]
     #[test]
     fn missing_fields_default() {
         let back: Settings = serde_json::from_str("{}").unwrap();
@@ -134,6 +149,7 @@ mod tests {
         assert_eq!(back.free_models_only, false);
     }
 
+    #[cfg(feature = "translation")]
     #[test]
     fn legacy_api_key_field_is_ignored() {
         let back: Settings = serde_json::from_str(r#"{"api_key": "kilo"}"#).unwrap();
