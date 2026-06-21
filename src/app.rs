@@ -1,6 +1,4 @@
-use std::collections::{HashMap, HashSet};
-#[cfg(feature = "translation")]
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 #[cfg(feature = "ocr")]
 use std::time::Duration;
@@ -25,8 +23,7 @@ use scanlateit_model::InpaintPatch;
 use scanlateit_ocr::{self as ocr, Engine, OcrCancellationToken, ParallelEngine};
 #[cfg(feature = "styling")]
 use scanlateit_styling::{Engine as StylingEngine, JobTracker};
-#[cfg(feature = "translation")]
-use scanlateit_translation as translation;
+use scanlateit_ui::translation as translation;
 use scanlateit_ui::color::rgba_to_color;
 #[cfg(feature = "inpaint")]
 use scanlateit_ui::loaded::InpaintLayer;
@@ -102,13 +99,10 @@ pub enum Message {
     SettleElapsed(u64),
     /// A request to (re)fetch the translation model lists from the models
     /// mirror; handled the same way as the boot fetch.
-    #[cfg(feature = "translation")]
     FetchModels,
     /// The fetched translation gateway configs, keyed by provider id (each
     /// already filtered and sorted, or the fallback on failure).
-    #[cfg(feature = "translation")]
     ModelsFetched(std::collections::HashMap<String, translation::Provider>),
-    #[cfg(feature = "translation")]
     TranslateFinished(
         Vec<(usize, EntryId, String, String)>,
         Result<Vec<String>, String>,
@@ -116,7 +110,6 @@ pub enum Message {
     /// The per-row retranslate finished: the new text for `(image index,
     /// entry id)`, or the error message. The result is stored in the selected
     /// profile (forking a new one when the Default profile is selected).
-    #[cfg(feature = "translation")]
     RetranslateFinished((usize, EntryId), Result<String, String>),
 }
 
@@ -195,9 +188,7 @@ pub struct App {
     pub(crate) translating: bool,
     /// The connected-provider session: stored connections, selection, model
     /// picker lists and the free-only filter (see [`translation::Session`]).
-    #[cfg(feature = "translation")]
     pub(crate) tx: translation::Session,
-    #[cfg(feature = "translation")]
     pub(crate) translate_lang: String,
     /// The API-key entry modal open over the settings modal, if any.
     pub(crate) connect_modal: Option<ConnectModal>,
@@ -295,9 +286,7 @@ impl App {
             #[cfg(feature = "ocr")]
             held_boundary: None,
             translating: false,
-            #[cfg(feature = "translation")]
             tx: translation::Session::default(),
-            #[cfg(feature = "translation")]
             translate_lang: translation::LANGUAGES[0].to_string(),
             connect_modal: None,
             settings_open: false,
@@ -414,36 +403,18 @@ impl UiState for App {
         &self.status
     }
 
-    #[cfg(feature = "translation")]
-    fn translate_provider(&self) -> String {
-        translation::provider_name(&self.tx.selected_id)
+    fn translate_model_groups(&self) -> Vec<(String, String, Vec<String>)> {
+        self.tx.model_groups()
     }
 
-    #[cfg(feature = "translation")]
-    fn translate_providers(&self) -> Vec<String> {
-        self.tx
-            .connected_ids
-            .iter()
-            .map(|id| translation::provider_name(id))
-            .collect()
+    fn translate_model_selection(&self) -> (String, String) {
+        (self.tx.selected_id.clone(), self.tx.selected_model.clone())
     }
 
-    #[cfg(feature = "translation")]
-    fn translate_model(&self) -> &String {
-        &self.tx.selected_model
-    }
-
-    #[cfg(feature = "translation")]
-    fn translate_models(&self) -> &[String] {
-        &self.tx.models
-    }
-
-    #[cfg(feature = "translation")]
     fn translate_lang(&self) -> &str {
         &self.translate_lang
     }
 
-    #[cfg(feature = "translation")]
     fn connections(&self) -> &BTreeMap<String, translation::Connection> {
         &self.tx.connections
     }
@@ -452,7 +423,6 @@ impl UiState for App {
         self.connect_modal.as_ref()
     }
 
-    #[cfg(feature = "translation")]
     fn free_models_only(&self) -> bool {
         self.tx.free_only
     }
@@ -1213,7 +1183,34 @@ pub fn boot() -> (App, Task<Message>) {
             },
             inpaint: Vec::new(),
         });
-        app.status = "TEST-UI build: fake white page with fake OCR entries loaded.".to_string();
+        // TEST-UI without the translation subsystem: seed a fake connected
+        // provider with its fake model list so the translation bar and
+        // settings tab are fully exercisable (no rig, no API keys) — the
+        // translation analogue of the fake OCR entries above.
+        #[cfg(all(feature = "test-ui", not(feature = "translation")))]
+        {
+            let mut tx = translation::Session::new(
+                BTreeMap::from([(
+                    translation::FAKE_PROVIDER.to_string(),
+                    translation::Connection {
+                        api_key: "fake-key-1234".to_string(),
+                        base_url: None,
+                        model: None,
+                    },
+                )]),
+                Some(translation::FAKE_PROVIDER.to_string()),
+            );
+            tx.fetched.insert(
+                translation::FAKE_PROVIDER.to_string(),
+                translation::catalog_provider(translation::FAKE_PROVIDER)
+                    .expect("the fake provider must be in the fake catalog")
+                    .clone(),
+            );
+            tx.sync_models();
+            app.tx = tx;
+        }
+        app.status = "TEST-UI build: fake white page with fake OCR entries and fake translation loaded."
+            .to_string();
     }
     let fonts_task =
         Task::perform(async move { enumerate_system_fonts() }, Message::SystemFonts);
@@ -1502,7 +1499,6 @@ fn finalize_run(app: &mut App) {
 
 pub fn update(app: &mut App, message: Message) -> Task<Message> {
     match message {
-        #[cfg(feature = "translation")]
         Message::FetchModels => {
             let ids = app.tx.fetch_ids();
             if ids.is_empty() {
@@ -1511,7 +1507,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 Task::perform(translation::fetch_providers(ids), Message::ModelsFetched)
             }
         }
-        #[cfg(feature = "translation")]
         Message::ModelsFetched(providers) => {
             app.tx.on_fetched(providers);
             Task::none()
@@ -1929,7 +1924,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        #[cfg(feature = "translation")]
         Message::Ui(UiEvent::Translate) => {
             if app.translating || app.running {
                 return Task::none();
@@ -1997,46 +1991,14 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 |(jobs, result)| Message::TranslateFinished(jobs, result),
             )
         }
-        #[cfg(not(feature = "translation"))]
-        Message::Ui(UiEvent::Translate) => {
-            app.status = "Translation is not available in this build.".to_string();
+        Message::Ui(UiEvent::TranslateModelSelect { provider, model }) => {
+            app.tx.select_model(provider, model);
             Task::none()
         }
-        #[cfg(feature = "translation")]
-        Message::Ui(UiEvent::TranslateProvider(name)) => {
-            // The picker option is the display name; map it back to the id.
-            let id = app
-                .tx
-                .connected_ids
-                .iter()
-                .find(|id| translation::provider_name(id) == name)
-                .cloned()
-                .unwrap_or_default();
-            if !id.is_empty() {
-                app.tx.select(id);
-            }
-            Task::none()
-        }
-        #[cfg(not(feature = "translation"))]
-        Message::Ui(UiEvent::TranslateProvider(_name)) => {
-            app.status = "Translation is not available in this build.".to_string();
-            Task::none()
-        }
-        #[cfg(feature = "translation")]
-        Message::Ui(UiEvent::TranslateModel(model)) => {
-            app.tx.selected_model = model;
-            Task::none()
-        }
-        #[cfg(not(feature = "translation"))]
-        Message::Ui(UiEvent::TranslateModel(_model)) => Task::none(),
-        #[cfg(feature = "translation")]
         Message::Ui(UiEvent::TranslateLang(lang)) => {
             app.translate_lang = lang;
             Task::none()
         }
-        #[cfg(not(feature = "translation"))]
-        Message::Ui(UiEvent::TranslateLang(_lang)) => Task::none(),
-        #[cfg(feature = "translation")]
         Message::Ui(UiEvent::TranslateConnect(provider_id)) => {
             let is_custom = translation::is_custom(&provider_id);
             let existing = app.tx.connections.get(&provider_id);
@@ -2052,9 +2014,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             });
             Task::none()
         }
-        #[cfg(not(feature = "translation"))]
-        Message::Ui(UiEvent::TranslateConnect(_provider_id)) => Task::none(),
-        #[cfg(feature = "translation")]
         Message::Ui(UiEvent::TranslateDisconnect(provider_id)) => {
             app.tx.disconnect(&provider_id);
             app.status = format!(
@@ -2063,8 +2022,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             );
             Task::none()
         }
-        #[cfg(not(feature = "translation"))]
-        Message::Ui(UiEvent::TranslateDisconnect(_provider_id)) => Task::none(),
         Message::Ui(UiEvent::ConnectModalKey(key)) => {
             if let Some(modal) = &mut app.connect_modal {
                 modal.api_key = key;
@@ -2086,7 +2043,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        #[cfg(feature = "translation")]
         Message::Ui(UiEvent::ConnectModalSubmit) => {
             let Some(modal) = app.connect_modal.take() else {
                 return Task::none();
@@ -2122,23 +2078,14 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 )
             }
         }
-        #[cfg(not(feature = "translation"))]
-        Message::Ui(UiEvent::ConnectModalSubmit) => {
-            app.connect_modal = None;
-            app.status = "Translation is not available in this build.".to_string();
-            Task::none()
-        }
         Message::Ui(UiEvent::ConnectModalCancel) => {
             app.connect_modal = None;
             Task::none()
         }
-        #[cfg(feature = "translation")]
         Message::Ui(UiEvent::FreeModelsOnlyToggle(enabled)) => {
             app.tx.set_free_only(enabled);
             Task::none()
         }
-        #[cfg(not(feature = "translation"))]
-        Message::Ui(UiEvent::FreeModelsOnlyToggle(_enabled)) => Task::none(),
         Message::Ui(UiEvent::EntryClicked(selection)) => {
             clear_editing(app);
             match selection {
@@ -2162,7 +2109,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::PanelEntryEdit((index, id))) => {
             start_inline_edit(app, index, id, EditOrigin::Panel)
         }
-        #[cfg(feature = "translation")]
         Message::Ui(UiEvent::RetranslateEntry((index, entry_id))) => {
             if app.translating || app.running {
                 return Task::none();
@@ -2203,11 +2149,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 },
                 |(job, result)| Message::RetranslateFinished(job, result),
             )
-        }
-        #[cfg(not(feature = "translation"))]
-        Message::Ui(UiEvent::RetranslateEntry(_)) => {
-            app.status = "Translation is not available in this build.".to_string();
-            Task::none()
         }
         Message::Ui(UiEvent::Inpaint) => {
             if app.inpainting || app.running || app.translating || app.images.is_empty() {
@@ -2536,7 +2477,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.settings_tab = tab;
             Task::none()
         }
-        #[cfg(feature = "translation")]
         Message::TranslateFinished(jobs, result) => {
             app.translating = false;
             match result {
@@ -2565,7 +2505,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        #[cfg(feature = "translation")]
         Message::RetranslateFinished((index, entry_id), result) => {
             app.translating = false;
             match result {

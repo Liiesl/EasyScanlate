@@ -49,10 +49,7 @@ pub fn view<'a, S: UiState + ?Sized>(
     let modal = state
         .connect_modal()
         .expect("connect modal view is only rendered while the modal is open");
-    #[cfg(feature = "translation")]
-    let title = scanlateit_translation::provider_name(&modal.provider_id);
-    #[cfg(not(feature = "translation"))]
-    let title = modal.provider_id.clone();
+    let title = crate::translation::provider_name(&modal.provider_id);
 
     let mut fields: Vec<Element<'_, UiEvent>> = Vec::new();
     fields.push(text("API key").size(12).color(MUTED_FG).into());
