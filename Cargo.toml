@@ -23,3 +23,6 @@ scanlateit-translation = { path = "translation" }
 scanlateit-ui = { path = "ui" }
 tokio = { version = "1", features = ["rt", "time"] }
 fontdb = "0.24"
+
+[profile.dev.package."*"]
+debug = "line-tables-only"

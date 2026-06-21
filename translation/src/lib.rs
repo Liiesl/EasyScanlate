@@ -485,6 +485,46 @@ pub async fn translate_all(
         ));
     }
 
+    let key = resolve_credentials(api_key, provider)?;
+
+    let prompt = build_prompt(items, target);
+    let output = complete(&prompt, provider, model, &key).await?;
+    eprintln!(
+        "[translation] response:\n{output}\n---"
+    );
+
+    let parsed = parse_translation_file(&output);
+    let translations = align(items, parsed)?;
+    eprintln!("[translation] OK ({} lines)", translations.len());
+    Ok(translations)
+}
+
+/// Translates one line with the simple single-line prompt used by the
+/// per-row "Retranslate" action (ManhwaOCR mechanics): the model replies
+/// with only the translated text, no wire format. The result is returned
+/// as-is; the caller strips quotes the model may wrap the answer in.
+pub async fn translate_one(
+    text: &str,
+    target: &str,
+    provider: &Provider,
+    model: &str,
+    api_key: Option<String>,
+) -> Result<String, String> {
+    let key = resolve_credentials(api_key, provider)?;
+    let prompt = format!(
+        "Translate the following text to {target}. Respond ONLY with the \
+translation, no explanation.\n\nText: {text}"
+    );
+    let output = complete(&prompt, provider, model, &key).await?;
+    Ok(output.trim().to_string())
+}
+
+/// Resolves the API key for a request: `api_key` overrides the provider's
+/// environment variable when set (in-memory only; never persisted).
+fn resolve_credentials(
+    api_key: Option<String>,
+    provider: &Provider,
+) -> Result<String, String> {
     let key = api_key
         .filter(|key| !key.is_empty())
         .or_else(|| std::env::var(&provider.api_key_env).ok())
@@ -501,51 +541,52 @@ pub async fn translate_all(
             provider.name
         ));
     }
+    Ok(key)
+}
 
-    let prompt = build_prompt(items, target);
-    let output = match provider.kind {
+/// Sends `prompt` to `model` on the given gateway (dispatched by its
+/// [`CompatKind`]) and returns the raw completion text.
+async fn complete(
+    prompt: &str,
+    provider: &Provider,
+    model: &str,
+    key: &str,
+) -> Result<String, String> {
+    match provider.kind {
         CompatKind::OpenAI => {
             let client = openai::CompletionsClient::builder()
-                .api_key(&key)
+                .api_key(key)
                 .base_url(&provider.api)
                 .build()
                 .map_err(|e| format!("Translation init failed: {e}"))?;
             let completion = client.completion_model(model);
             let response = completion
-                .completion_request(&prompt)
+                .completion_request(prompt)
                 .preamble(SYSTEM.to_string())
                 .temperature(1.0)
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
-            choice_text(&response)
+            Ok(choice_text(&response))
         }
         CompatKind::Anthropic => {
             let client = rig::providers::anthropic::Client::builder()
-                .api_key(&key)
+                .api_key(key)
                 .base_url(&provider.api)
                 .build()
                 .map_err(|e| format!("Translation init failed: {e}"))?;
             let completion = client.completion_model(model);
             let response = completion
-                .completion_request(&prompt)
+                .completion_request(prompt)
                 .preamble(SYSTEM.to_string())
                 .max_tokens(ANTHROPIC_MAX_TOKENS)
                 .temperature(1.0)
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
-            choice_text(&response)
+            Ok(choice_text(&response))
         }
-    };
-    eprintln!(
-        "[translation] response:\n{output}\n---"
-    );
-
-    let parsed = parse_translation_file(&output);
-    let translations = align(items, parsed)?;
-    eprintln!("[translation] OK ({} lines)", translations.len());
-    Ok(translations)
+    }
 }
 
 fn build_prompt(items: &[TranslateItem], target: &str) -> String {

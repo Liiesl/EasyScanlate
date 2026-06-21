@@ -98,8 +98,8 @@ pub enum UiEvent {
     /// the overlay: the row's current-profile side becomes the live editor.
     PanelEntryEdit((usize, EntryId)),
     /// The user pressed "Retranslate" on a results row: re-run machine
-    /// translation for that entry. Not implemented yet; the app only
-    /// acknowledges it.
+    /// translation for that entry. The result replaces the entry's text in
+    /// the selected profile.
     RetranslateEntry((usize, EntryId)),
     EntryMoved((usize, EntryId, Quad)),
     /// A button of the selection toolbar under the selected entry.

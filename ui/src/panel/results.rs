@@ -168,7 +168,12 @@ fn entry_row<'a, S: UiState + ?Sized>(
             .on_press(UiEvent::EntryToolbar((index, entry_id, ToolbarAction::Delete))),
         button(text("Retranslate").size(10))
             .padding([2, 6])
-            .on_press(UiEvent::RetranslateEntry((index, entry_id))),
+            .on_press_maybe(
+                (!state.translating()
+                    && !state.running()
+                    && !state.connections().is_empty())
+                .then_some(UiEvent::RetranslateEntry((index, entry_id))),
+            ),
     ]
     .spacing(4);
 
