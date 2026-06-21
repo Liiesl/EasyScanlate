@@ -286,6 +286,16 @@ struct ModelInfo {
     last_updated: Option<String>,
     #[serde(default)]
     cost: Option<ModelCost>,
+    #[serde(default)]
+    modalities: Option<ModelModalities>,
+}
+
+/// Model input/output modality arrays (models.dev schema). Translation only
+/// works with models that emit plain text.
+#[derive(Debug, Deserialize, Default)]
+struct ModelModalities {
+    #[serde(default)]
+    output: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -404,14 +414,19 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
     provider
 }
 
-/// Applies the listing filters: drops deprecated models, keeps only the
-/// newest release of each family for paid models, always lists free models
-/// (input or output cost 0), and sorts the result by id.
+/// Applies the listing filters: drops deprecated models and any model that
+/// outputs something other than text (image/audio/video generators are not
+/// usable for translation), keeps only the newest release of each family for
+/// paid models, always lists free models (input or output cost 0), and sorts
+/// the result by id.
 fn select_models(listing: &ProviderListing) -> Vec<Model> {
     let mut ids: Vec<Model> = Vec::new();
     let mut latest: BTreeMap<String, (&str, &ModelInfo)> = BTreeMap::new();
     for (id, info) in &listing.models {
         if info.status.as_deref() == Some("deprecated") {
+            continue;
+        }
+        if !outputs_text_only(info) {
             continue;
         }
         if is_free(info) {
@@ -445,6 +460,20 @@ fn select_models(listing: &ProviderListing) -> Vec<Model> {
 /// A model whose input or output cost is zero is free and always listed.
 fn is_free(info: &ModelInfo) -> bool {
     matches!(&info.cost, Some(cost) if cost.input == Some(0.0) || cost.output == Some(0.0))
+}
+
+/// Whether the model emits plain text only. Models whose output modalities
+/// include anything else (image, audio, video) or that declare no output at
+/// all cannot produce the text translation and are filtered out. Models
+/// without modality info are kept (the mirror always provides it, but a
+/// listing change must not silently drop every model).
+fn outputs_text_only(info: &ModelInfo) -> bool {
+    match &info.modalities {
+        Some(modalities) => {
+            !modalities.output.is_empty() && modalities.output.iter().all(|m| m == "text")
+        }
+        None => true,
+    }
 }
 
 /// Whether `info` is a newer release than `current`; release date first,
@@ -893,6 +922,7 @@ mod tests {
                         family: Some("paid".into()),
                         release_date: Some("2025-01-01".into()),
                         last_updated: None,
+                        modalities: None,
                         cost: Some(ModelCost {
                             input: Some(2.0),
                             output: Some(4.0),
@@ -906,6 +936,7 @@ mod tests {
                         family: Some("paid".into()),
                         release_date: Some("2025-06-01".into()),
                         last_updated: None,
+                        modalities: None,
                         cost: Some(ModelCost {
                             input: Some(2.0),
                             output: Some(4.0),
@@ -919,6 +950,7 @@ mod tests {
                         family: Some("free".into()),
                         release_date: Some("2024-01-01".into()),
                         last_updated: None,
+                        modalities: None,
                         cost: Some(ModelCost {
                             input: Some(0.0),
                             output: Some(1.0),
@@ -932,6 +964,7 @@ mod tests {
                         family: Some("free".into()),
                         release_date: Some("2025-01-01".into()),
                         last_updated: None,
+                        modalities: None,
                         cost: Some(ModelCost {
                             input: Some(1.0),
                             output: Some(0.0),
@@ -945,6 +978,7 @@ mod tests {
                         family: Some("retired".into()),
                         release_date: Some("2025-01-01".into()),
                         last_updated: None,
+                        modalities: None,
                         cost: Some(ModelCost {
                             input: Some(2.0),
                             output: Some(4.0),
@@ -958,6 +992,7 @@ mod tests {
                         family: None,
                         release_date: Some("2025-01-01".into()),
                         last_updated: None,
+                        modalities: None,
                         cost: Some(ModelCost {
                             input: Some(2.0),
                             output: Some(4.0),
@@ -971,6 +1006,7 @@ mod tests {
                         family: None,
                         release_date: Some("2025-07-01".into()),
                         last_updated: None,
+                        modalities: None,
                         cost: Some(ModelCost {
                             input: Some(2.0),
                             output: Some(4.0),
@@ -1001,6 +1037,58 @@ mod tests {
     }
 
     #[test]
+    fn models_with_non_text_output_are_filtered_out() {
+        fn info(output: &[&str]) -> ModelInfo {
+            ModelInfo {
+                status: None,
+                family: None,
+                release_date: None,
+                last_updated: None,
+                modalities: Some(ModelModalities {
+                    output: output.iter().map(|m| m.to_string()).collect(),
+                }),
+                cost: None,
+            }
+        }
+        let listing = ProviderListing {
+            api: None,
+            env: vec![],
+            models: BTreeMap::from([
+                ("text-only".into(), info(&["text"])),
+                ("image-gen".into(), info(&["text", "image"])),
+                ("audio-only".into(), info(&["audio"])),
+                ("video-only".into(), info(&["video"])),
+                ("no-output".into(), info(&[])),
+            ]),
+        };
+        let selected = select_models(&listing);
+        let ids: Vec<&str> = selected.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["text-only"]);
+    }
+
+    #[test]
+    fn models_without_modality_info_are_kept() {
+        let listing = ProviderListing {
+            api: None,
+            env: vec![],
+            models: BTreeMap::from([(
+                "no-modalities".into(),
+                ModelInfo {
+                    status: None,
+                    family: None,
+                    release_date: None,
+                    last_updated: None,
+                    modalities: None,
+                    cost: None,
+                },
+            )]),
+        };
+        let selected = select_models(&listing);
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].id, "no-modalities");
+    }
+
+    #[test]
     fn listing_parse_recovers_api_env_and_family_fields() {
         let json = r#"{
             "id": "opencode",
@@ -1013,6 +1101,7 @@ mod tests {
                     "name": "DeepSeek V4 Flash Free",
                     "family": "deepseek-flash",
                     "release_date": "2026-07-31",
+                    "modalities": {"input": ["text"], "output": ["text"]},
                     "cost": {"input": 0, "output": 0}
                 }
             }
@@ -1023,6 +1112,7 @@ mod tests {
         let info = &listing.models["deepseek-v4-flash-free"];
         assert_eq!(info.family.as_deref(), Some("deepseek-flash"));
         assert!(is_free(info));
+        assert!(outputs_text_only(info));
         assert_eq!(
             select_models(&listing),
             vec![Model {
