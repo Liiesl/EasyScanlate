@@ -59,6 +59,14 @@ const TOOLBAR_FG: Color = Color::from_rgba8(215, 220, 235, 1.0);
 const HANDLE_FILL: Color = Color::WHITE;
 const HANDLE_BORDER: Color = Color::from_rgba8(92, 190, 255, 1.0);
 
+/// Geometry of the quick-action overlay buttons (go to top / save / go to
+/// bottom) pinned as a vertical column to the viewer's bottom-left corner,
+/// in viewport pixels.
+const OVERLAY_BTN_WIDTH: f32 = 56.0;
+const OVERLAY_BTN_HEIGHT: f32 = 24.0;
+const OVERLAY_BTN_GAP: f32 = 6.0;
+const OVERLAY_BTN_MARGIN: f32 = 10.0;
+
 /// Length of the stem connecting the rotation knob to the box, in viewport
 /// pixels.
 const ROTATE_STEM: f32 = 16.0;
@@ -269,6 +277,29 @@ where
     }
 }
 
+/// One of the quick-action overlay buttons pinned to the viewer's bottom-left
+/// corner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OverlayButton {
+    /// Jump the viewport to the top of the content.
+    GoTop,
+    /// Placeholder action; nothing wired up yet.
+    Save,
+    /// Jump the viewport to the bottom of the content.
+    GoBottom,
+}
+
+impl OverlayButton {
+    /// The buttons in column order (top to bottom) with their labels.
+    fn column() -> [(OverlayButton, &'static str); 3] {
+        [
+            (OverlayButton::GoTop, "Top"),
+            (OverlayButton::Save, "Save"),
+            (OverlayButton::GoBottom, "Bottom"),
+        ]
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Interaction {
     None,
@@ -366,6 +397,12 @@ enum Interaction {
         index: usize,
         id: EntryId,
         action: ToolbarAction,
+    },
+    /// A press on a quick-action overlay button (go to top / save / go to
+    /// bottom); resolves (performs the action) on release iff the cursor is
+    /// still over the same button.
+    OverlayButtonPressed {
+        button: OverlayButton,
     },
     /// A drag on the tile targeted by `inpaint_mode`: selects the range to
     /// clean. `start`/`current` are in tile-local (content) coordinates.
@@ -1019,6 +1056,46 @@ fn toolbar_width() -> f32 {
         .sum()
 }
 
+/// The rects of the quick-action overlay buttons in widget-relative
+/// coordinates, top button first. The column is anchored to the bottom-left
+/// corner, a margin inside the edges.
+fn overlay_button_rects(bounds: Rectangle) -> [Rectangle; 3] {
+    let total = OVERLAY_BTN_HEIGHT * 3.0 + OVERLAY_BTN_GAP * 2.0;
+    let top = (bounds.height - OVERLAY_BTN_MARGIN - total).max(0.0);
+    let mut rects = [Rectangle::new(Point::ORIGIN, Size::ZERO); 3];
+    for (index, (_button, _)) in OverlayButton::column().iter().enumerate() {
+        rects[index] = Rectangle::new(
+            Point::new(
+                OVERLAY_BTN_MARGIN,
+                top + index as f32 * (OVERLAY_BTN_HEIGHT + OVERLAY_BTN_GAP),
+            ),
+            Size::new(OVERLAY_BTN_WIDTH, OVERLAY_BTN_HEIGHT),
+        );
+    }
+    rects
+}
+
+/// The quick-action button under `local` (same space as `bounds`), if any.
+fn hit_overlay_button(bounds: Rectangle, local: Point) -> Option<OverlayButton> {
+    overlay_button_rects(bounds)
+        .into_iter()
+        .zip(OverlayButton::column())
+        .find_map(|(rect, (button, _))| rect.contains(local).then_some(button))
+}
+
+/// Draws the quick-action overlay buttons; `hovered` highlights that button.
+fn draw_overlay_buttons<F>(frame: &mut F, bounds: Rectangle, hovered: Option<OverlayButton>)
+where
+    F: geometry::frame::Backend,
+{
+    for (rect, (button, label)) in overlay_button_rects(bounds)
+        .into_iter()
+        .zip(OverlayButton::column())
+    {
+        draw_action_button(frame, rect, label, hovered == Some(button));
+    }
+}
+
 /// The toolbar rect under the selected box: horizontally centered and
 /// clamped inside `width`, flipped above the box when it would cross
 /// `flip_at` (the tile's bottom, in the same coordinate space as `rect`).
@@ -1669,6 +1746,19 @@ where
                 renderer.draw_geometry(frame.into_geometry());
             });
         }
+
+        let hovered_button = cursor
+            .position_over(bounds)
+            .map(|position| {
+                let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                hit_overlay_button(local_bounds, local)
+            })
+            .unwrap_or(None);
+        renderer.with_layer(local_bounds, |renderer| {
+            let mut frame = renderer.new_frame(local_bounds);
+            draw_overlay_buttons(&mut frame, local_bounds, hovered_button);
+            renderer.draw_geometry(frame.into_geometry());
+        });
         });
     }
 
@@ -1729,6 +1819,11 @@ where
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(position) = cursor.position_over(bounds) {
                     let local = local_point(position, bounds);
+                    if let Some(button) = hit_overlay_button(bounds, local) {
+                        state.interaction = Interaction::OverlayButtonPressed { button };
+                        shell.capture_event();
+                        return;
+                    }
                     if self.editing.is_none() {
                         if let Some((index, id, action)) = hit_toolbar(&self.tiles, state, local) {
                             state.interaction = Interaction::ToolbarPressed { index, id, action };
@@ -1914,6 +2009,38 @@ where
                         }
                     }
                 }
+                if let Interaction::OverlayButtonPressed { button } = state.interaction {
+                    if let Some(position) = cursor.position_over(bounds) {
+                        let local = local_point(position, bounds);
+                        if hit_overlay_button(bounds, local) == Some(button) {
+                            match button {
+                                OverlayButton::GoTop | OverlayButton::GoBottom => {
+                                    let max_offset =
+                                        (state.content_height - state.viewport_height).max(0.0);
+                                    let target = match button {
+                                        OverlayButton::GoTop => 0.0,
+                                        _ => max_offset,
+                                    };
+                                    if (target - state.offset).abs() > f32::EPSILON {
+                                        state.offset = target;
+                                        shell.request_redraw();
+                                        publish_visible(
+                                            shell,
+                                            &self.tiles,
+                                            state,
+                                            &self.on_visible_range,
+                                        );
+                                        if let Some(callback) = self.on_scroll_ended.as_ref() {
+                                            shell.publish(callback());
+                                        }
+                                    }
+                                }
+                                // Placeholder: no action wired up yet.
+                                OverlayButton::Save => {}
+                            }
+                        }
+                    }
+                }
                 let ended_scroll = matches!(state.interaction, Interaction::ScrollerGrabbed { .. });
                 if matches!(
                     state.interaction,
@@ -1927,6 +2054,7 @@ where
                         | Interaction::RotatePending { .. }
                         | Interaction::Rotating { .. }
                         | Interaction::ToolbarPressed { .. }
+                        | Interaction::OverlayButtonPressed { .. }
                         | Interaction::InpaintSelecting { .. }
                 ) {
                     state.interaction = Interaction::None;
@@ -2127,6 +2255,9 @@ where
                     Interaction::ToolbarPressed { .. } => {
                         shell.capture_event();
                     }
+                    Interaction::OverlayButtonPressed { .. } => {
+                        shell.capture_event();
+                    }
                     Interaction::None | Interaction::TouchScrolling { .. } => {}
                 }
             }
@@ -2166,6 +2297,7 @@ where
             | Interaction::RotatePending { .. }
             | Interaction::Rotating { .. }
             | Interaction::ToolbarPressed { .. }
+            | Interaction::OverlayButtonPressed { .. }
             | Interaction::InpaintSelecting { .. } => {
                 mouse::Interaction::Grabbing
             }
@@ -2173,6 +2305,9 @@ where
                 let bounds = layout.bounds();
                 if let Some(position) = cursor.position_over(bounds) {
                     let local = local_point(position, bounds);
+                    if hit_overlay_button(bounds, local).is_some() {
+                        return mouse::Interaction::Pointer;
+                    }
                     if self.editing.is_none() {
                         if hit_toolbar(&self.tiles, state, local).is_some() {
                             return mouse::Interaction::Pointer;
