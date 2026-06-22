@@ -1,8 +1,9 @@
-//! Right column: the tall scrollable OCR results list on top and the short
+//! Right column: a pinned header (the "TRANSLATION" label and the profile
+//! dropdown), the tall scrollable OCR results list below it and the short
 //! translation controls (the merged model dropdown, the language picker and
-//! the translate button) below it. The list shows one row per entry with two
-//! side-by-side inputs: the read-only original OCR text on the left and the
-//! selected profile's text on the right. The right side starts the same
+//! the translate button) at the bottom. The list shows one row per entry with
+//! two side-by-side inputs: the read-only original OCR text on the left and
+//! the selected profile's text on the right. The right side starts the same
 //! multi-line inline edit as the main area (fork on first keystroke, Enter =
 //! newline, Escape/Ctrl+Enter to commit); clicking a row selects the entry,
 //! highlighted with a border. The API key is configured in the settings
@@ -24,7 +25,7 @@ use crate::loaded::LoadedImage;
 use crate::panel::MUTED_FG;
 use crate::state::UiState;
 use crate::translation;
-use scanlateit_model::{EntryId, OcrEntry};
+use scanlateit_model::{EntryId, OcrEntry, ProfileId};
 
 /// Widget id of the multi-line editor shown in a row while the entry is
 /// edited from the panel; must match the app's focus id.
@@ -247,6 +248,59 @@ impl ToString for ModelOption {
     }
 }
 
+/// One entry of the profile dropdown in the results header: the profile's id
+/// and display name. Wraps [`ProfileId`] because the dropdown requires a
+/// `ToString` value and the id alone has no display rendering.
+#[derive(Debug, Clone, PartialEq)]
+struct ProfileOption {
+    id: ProfileId,
+    name: String,
+}
+
+impl ToString for ProfileOption {
+    fn to_string(&self) -> String {
+        self.name.clone()
+    }
+}
+
+/// The pinned header of the results column: the "TRANSLATION" label on the
+/// left and the profile dropdown on the right. The dropdown lists every
+/// profile of the first image's project (all projects share the same
+/// profiles) with a "+ New Profile" footer row that creates a fresh one.
+fn profile_header<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
+    let mut entries: Vec<MenuItem<'a, ProfileOption, UiEvent, iced::Theme, iced::Renderer>> =
+        Vec::new();
+    let mut selected = None;
+    if let Some(project) = state.images().first().map(|i| &i.project) {
+        for profile in project.profiles.iter() {
+            let option = ProfileOption {
+                id: profile.id,
+                name: profile.name.clone(),
+            };
+            if profile.id == project.profiles.selected_id() {
+                selected = Some(option.clone());
+            }
+            entries.push(MenuItem::Item(Item::new(option, profile.name.clone())));
+        }
+    }
+
+    row![
+        text("TRANSLATION").size(11).color(MUTED_FG),
+        space::horizontal(),
+        text("profile").size(11).color(MUTED_FG),
+        advanced_dropdown(entries, selected, |option| UiEvent::ProfileSelect(option.id))
+            .placeholder("Profile…")
+            .text_size(12)
+            .width(150)
+            .on_new_item(UiEvent::ProfileCreate)
+            .new_item_label("+ New Profile"),
+    ]
+    .spacing(6)
+    .align_y(iced::Alignment::Center)
+    .width(FillLength)
+    .into()
+}
+
 /// The bottom translation bar: one row with the merged provider/model
 /// dropdown, the target-language picker and the translate button. When no
 /// connection is configured the bar collapses to a status row with a
@@ -263,7 +317,7 @@ fn translate_bar<'a, S: UiState + ?Sized>(
             Vec::new();
         let mut selected = None;
         for (provider_id, provider_name, models) in state.translate_model_groups() {
-            entries.push(MenuItem::Label(provider_name.clone().into()));
+            entries.push(MenuItem::Label(provider_name.clone()));
             for model in models {
                 let option = ModelOption {
                     provider_id: provider_id.clone(),
@@ -345,6 +399,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let bar = translate_bar(state, has_entries);
 
     column![
+        profile_header(state),
         scrollable(Column::with_children(results_list).spacing(4))
             .id(PANEL_LIST_ID)
             .height(FillLength)

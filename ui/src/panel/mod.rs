@@ -1,9 +1,10 @@
 //! The right panel, laid out in two rows. The top row holds the action
-//! buttons (open images, start/stop OCR, live status, profile cycling,
-//! settings). Below it two columns share the remaining height: the styling
-//! controls on the left and, on the right, the tall scrollable OCR results
-//! list over the short translation bar (the merged model dropdown, the
-//! language picker and the translate button).
+//! buttons (open images, start/stop OCR, live status, settings). Below it
+//! two columns share the remaining height: the styling controls on the left
+//! and, on the right, the results column — a pinned header with the
+//! "TRANSLATION" label and the profile dropdown over the tall scrollable OCR
+//! results list over the short translation bar (the merged model dropdown,
+//! the language picker and the translate button).
 
 pub mod actions;
 pub mod results;

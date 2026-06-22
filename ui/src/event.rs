@@ -4,7 +4,7 @@ use iced::widget::pane_grid;
 use iced::widget::text_editor;
 use iced::{Color, Rectangle};
 
-use scanlateit_model::{EntryId, Quad, TextAlign, TextGradientDir};
+use scanlateit_model::{EntryId, ProfileId, Quad, TextAlign, TextGradientDir};
 
 /// The actions offered by the selection decorations around the selected
 /// overlay box in the main area.
@@ -61,7 +61,12 @@ pub enum UiEvent {
     OpenImages,
     StartOcr,
     StopOcr,
-    CycleProfile,
+    /// The user selected profile `id` in the results panel's profile
+    /// dropdown; the app switches every image's project to it.
+    ProfileSelect(ProfileId),
+    /// The user pressed the "+ New Profile" row of the profile dropdown:
+    /// create and select a fresh profile in every project.
+    ProfileCreate,
     TilesVisible(Range<usize>),
     /// The user finished a scrollbar drag or touch pan: the viewport will
     /// not move again until a new input, so the app can settle immediately

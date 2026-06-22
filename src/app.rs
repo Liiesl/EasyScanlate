@@ -14,7 +14,7 @@ use fontdb;
 #[cfg(feature = "inpaint")]
 use scanlateit_inpaint::Engine as InpaintEngine;
 use scanlateit_model::{
-    EntryId, EntryStyle, NewEntry, ProfileId, Project, Quad, StylePresets, TextAlign,
+    EntryId, EntryStyle, NewEntry, Project, Quad, StylePresets, TextAlign,
     TextGradientDir,
 };
 #[cfg(feature = "inpaint")]
@@ -1867,24 +1867,28 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.status = format!("Font \"{name}\" loaded.");
             Task::none()
         }
-        Message::Ui(UiEvent::CycleProfile) => {
-            let Some(first) = app.images.first() else {
+        Message::Ui(UiEvent::ProfileSelect(id)) => {
+            if app.images.is_empty() {
                 return Task::none();
-            };
-            let ids: Vec<ProfileId> = first.project.profiles.iter().map(|p| p.id).collect();
-            if ids.len() > 1 {
-                let current = first.project.profiles.selected_id();
-                let next = ids
-                    .iter()
-                    .position(|id| *id == current)
-                    .map(|i| ids[(i + 1) % ids.len()])
-                    .unwrap_or(ids[0]);
-                for img in &mut app.images {
-                    img.project.profiles.select(next);
-                }
-                let name = app.images[0].project.profiles.selected().name.clone();
-                app.status = format!("Profile: {name}");
             }
+            for img in &mut app.images {
+                img.project.profiles.select(id);
+            }
+            let name = app.images[0].project.profiles.selected().name.clone();
+            app.status = format!("Profile: {name}");
+            Task::none()
+        }
+        Message::Ui(UiEvent::ProfileCreate) => {
+            if app.images.is_empty() {
+                return Task::none();
+            }
+            for img in &mut app.images {
+                let name = img.project.profiles.next_available_name();
+                let id = img.project.profiles.add(name);
+                img.project.profiles.select(id);
+            }
+            let name = app.images[0].project.profiles.selected().name.clone();
+            app.status = format!("Profile: {name} (created)");
             Task::none()
         }
         Message::Ui(UiEvent::TilesVisible(range)) => app
