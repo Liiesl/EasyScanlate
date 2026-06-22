@@ -1,11 +1,15 @@
-//! Middle section: per-entry text styling controls (bold/italic, text color,
-//! stroke color/width, background color/radius) applied to exactly one OCR
-//! entry: the one selected in the main area. When no entry is selected the
-//! controls stay visible but are inert. Colors are picked with the
-//! `neverliie_iced_widgets` `ColorPicker`; its button underlay is a flat
-//! rectangle filled with the entry's current color.
+//! The styling panel, laid out like a compact typography inspector: a
+//! header with the panel title, an auto-detect action and a reset button
+//! (visual only), the font picker, a toolbar of bold/italic toggles next
+//! to the alignment segments, then labeled sections for the text fill
+//! (solid vs gradient tabs), the stroke and the background/corner radius.
+//! All controls edit exactly one OCR entry: the one selected in the main
+//! area. When no entry is selected the controls stay visible but are inert.
+//! Colors are picked with the `neverliie_iced_widgets` `ColorPicker`; its
+//! button underlay is a flat rectangle filled with the entry's current
+//! color, shown next to its hex value.
 //!
-//! Below the controls a horizontally scrollable grid of style presets (in
+//! Below the sections a horizontally scrollable grid of style presets (in
 //! memory only): one square per preset slot — checkerboard underlay, the
 //! preset's background on top and "Aa" in its text color; empty slots show
 //! a checkerboard dot — plus a "+" tile that fills the first empty slot
@@ -13,13 +17,14 @@
 //! selected entry; right-clicking opens a context menu to replace the
 //! slot with the current style or to remove the preset (emptying it).
 
+use iced::font::Weight;
 use iced::widget::button::Status;
 use iced::widget::image::{self, Handle};
 use iced::widget::{
-    button, checkbox, column, pick_list, row, scrollable, space::Space, text, text_input,
+    button, column, container, pick_list, row, rule, scrollable, space::Space, text, text_input,
 };
 use iced::{
-    Background, Border, Color, Element, Fill as FillLength, Font, Padding, Shadow, Vector,
+    Background, Border, Color, Element, Fill as FillLength, Font, Length, Padding, Shadow, Vector,
 };
 
 use neverliie_iced_widgets::advanced_dropdown::{advanced_dropdown, Item, MenuItem};
@@ -34,9 +39,19 @@ use crate::main_area::overlay::styled_font;
 use crate::panel::MUTED_FG;
 use crate::state::UiState;
 
-const LABEL_WIDTH: f32 = 84.0;
-const SWATCH_HEIGHT: f32 = 20.0;
+const SWATCH_SIDE: f32 = 20.0;
 const HINT: &str = "Select a text entry in the image to style it.";
+
+/// Accent color of active segments, tabs and glyphs.
+const ACCENT: Color = Color::from_rgb8(92, 190, 255);
+/// Near-white label color, for active tab labels.
+const TEXT_MAIN: Color = Color::from_rgb8(243, 244, 246);
+/// Fill of inputs and segmented groups (darker than the panel background).
+const INPUT_BG: Color = Color::from_rgb8(20, 20, 25);
+/// Hover / active-segment fill.
+const INPUT_HOVER: Color = Color::from_rgb8(29, 30, 38);
+/// Border of inputs and segmented groups.
+const BORDER: Color = Color::from_rgb8(50, 50, 62);
 
 /// Side of a preset square, in points.
 const PRESET_SIDE: f32 = 56.0;
@@ -54,16 +69,134 @@ fn to_color(rgba: [u8; 4]) -> Color {
     Color::from_rgba8(rgba[0], rgba[1], rgba[2], rgba[3] as f32 / 255.0)
 }
 
-fn field_row<'a>(
-    label: &'a str,
-    input: Element<'a, UiEvent>,
+/// A muted, uppercase section label ("Fill", "Stroke", ...).
+fn section_title<'a>(label: &'a str) -> Element<'a, UiEvent> {
+    text(label).size(11).color(MUTED_FG).into()
+}
+
+/// A dark, bordered wrapper for inputs and swatch rows.
+fn field_wrap<'a>(content: Element<'a, UiEvent>, padding: Padding) -> Element<'a, UiEvent> {
+    container(content)
+        .padding(padding)
+        .width(FillLength)
+        .style(|_theme| container::Style {
+            background: Some(INPUT_BG.into()),
+            border: Border {
+                radius: 4.0.into(),
+                width: 1.0,
+                color: BORDER,
+            },
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// One cell of a segmented control: equal-width button that lights up with
+/// the accent when `active`. `on_press` is `None` (inert) while no entry
+/// is selected; the disabled state renders identically to the idle one.
+fn segment<'a>(
+    active: bool,
+    glyph: &'a str,
+    on_press: Option<UiEvent>,
+    font: Font,
 ) -> Element<'a, UiEvent> {
+    button(text(glyph).size(12).font(font).width(FillLength).center())
+        .width(FillLength)
+        .padding([8, 0])
+        .on_press_maybe(on_press)
+        .style(move |_theme, status: Status| {
+            let hovered = matches!(status, Status::Hovered | Status::Pressed);
+            button::Style {
+                background: (active || hovered).then_some(Background::Color(INPUT_HOVER)),
+                border: Border::default(),
+                shadow: Shadow::default(),
+                text_color: if active {
+                    ACCENT
+                } else if hovered {
+                    TEXT_MAIN
+                } else {
+                    MUTED_FG
+                },
+                ..button::Style::default()
+            }
+        })
+        .into()
+}
+
+/// A bordered pill holding equally-sized [`segment`]s.
+fn segmented_group<'a>(segments: Vec<Element<'a, UiEvent>>) -> Element<'a, UiEvent> {
+    container(row(segments).spacing(2))
+        .padding(2)
+        .width(FillLength)
+        .style(|_theme| container::Style {
+            background: Some(INPUT_BG.into()),
+            border: Border {
+                radius: 4.0.into(),
+                width: 1.0,
+                color: BORDER,
+            },
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// One tab of the fill tabs: an underline (accent when active) under the
+/// label, like the mockup's bottom-border tab bar.
+fn tab<'a>(label: &'a str, active: bool, on_press: Option<UiEvent>) -> Element<'a, UiEvent> {
+    let underline: Element<'a, UiEvent> = if active {
+        rule::horizontal(2)
+            .style(|_theme: &iced::Theme| rule::Style {
+                color: ACCENT,
+                radius: 0.0.into(),
+                fill_mode: rule::FillMode::Full,
+                snap: true,
+            })
+            .into()
+    } else {
+        Space::new().height(2.0).into()
+    };
+    column![
+        button(text(label).size(11))
+            .width(FillLength)
+            .padding([5, 0])
+            .on_press_maybe(on_press)
+            .style(move |_theme, status: Status| {
+                let hovered = matches!(status, Status::Hovered | Status::Pressed);
+                button::Style {
+                    background: None,
+                    border: Border::default(),
+                    shadow: Shadow::default(),
+                    text_color: if active || hovered { TEXT_MAIN } else { MUTED_FG },
+                    ..button::Style::default()
+                }
+            }),
+        underline,
+    ]
+    .width(FillLength)
+    .into()
+}
+
+/// The "Solid | Gradient" tab bar; the tabs mirror `style.text_gradient`.
+fn fill_tabs<'a>(gradient: bool, selected: bool) -> Element<'a, UiEvent> {
     row![
-        text(label).size(12).color(MUTED_FG).width(LABEL_WIDTH),
-        input,
+        tab("Solid", !gradient, selected.then_some(UiEvent::StyleGradientToggle(false))),
+        tab("Gradient", gradient, selected.then_some(UiEvent::StyleGradientToggle(true))),
     ]
     .spacing(4)
     .into()
+}
+
+/// The uppercase hex value of `color`, or "None" for fully transparent
+/// colors (matching the mockup's background swatch).
+fn hex_label(color: Color) -> String {
+    let [r, g, b, a] = color.into_rgba8();
+    if a == 0 {
+        "None".to_string()
+    } else if a == 255 {
+        format!("#{r:02X}{g:02X}{b:02X}")
+    } else {
+        format!("#{r:02X}{g:02X}{b:02X}{a:02X}")
+    }
 }
 
 /// A flat rectangle button filled with `color`; the underlay of the color
@@ -71,8 +204,8 @@ fn field_row<'a>(
 /// is selected.
 fn swatch_button(color: Color, on_open: Option<UiEvent>) -> Element<'static, UiEvent> {
     button(Space::new())
-        .width(FillLength)
-        .height(SWATCH_HEIGHT)
+        .width(SWATCH_SIDE)
+        .height(SWATCH_SIDE)
         .padding(Padding::ZERO)
         .on_press_maybe(on_open)
         .style(move |_theme, status: Status| {
@@ -95,9 +228,9 @@ fn swatch_button(color: Color, on_open: Option<UiEvent>) -> Element<'static, UiE
         .into()
 }
 
-/// A color field for `field`: a `ColorPicker` whose underlay is a rectangle
-/// filled with the current value. The picker opens anchored to the bottom-
-/// right corner of the swatch button (the click target) and applies on OK.
+/// A color field for `field`: a swatch with its hex value, wrapped in an
+/// input-style box. The picker opens anchored to the bottom-right corner
+/// of the swatch (the click target) and applies on OK.
 fn color_field<'a, S: UiState + ?Sized>(
     state: &'a S,
     field: StyleField,
@@ -105,27 +238,108 @@ fn color_field<'a, S: UiState + ?Sized>(
 ) -> Element<'a, UiEvent> {
     let show_picker = state.style_picker_open() == Some(field);
     let on_open = state.selected().map(|_| UiEvent::StyleColorOpen(field));
-    ColorPicker::new(
-        show_picker,
-        color,
-        swatch_button(color, on_open),
-        UiEvent::StyleColorCancel(field),
-        move |picked| UiEvent::StyleColorSubmit(field, picked),
+    field_wrap(
+        row![
+            ColorPicker::new(
+                show_picker,
+                color,
+                swatch_button(color, on_open),
+                UiEvent::StyleColorCancel(field),
+                move |picked| UiEvent::StyleColorSubmit(field, picked),
+            )
+            .position(Position::Parent {
+                anchor: Anchor::BottomRight,
+                offset: Vector::new(0.0, 4.0),
+            }),
+            text(hex_label(color))
+                .size(11)
+                .font(Font::MONOSPACE)
+                .color(TEXT_MAIN),
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center)
+        .into(),
+        Padding {
+            top: 3.0,
+            right: 8.0,
+            bottom: 3.0,
+            left: 4.0,
+        },
     )
-    .position(Position::Parent {
-        anchor: Anchor::BottomRight,
-        offset: Vector::new(0.0, 4.0),
-    })
-    .into()
 }
 
-fn number_input(value: &str, on_input: Option<fn(String) -> UiEvent>) -> Element<'_, UiEvent> {
-    text_input("0.0", value)
-        .on_input_maybe(on_input)
-        .padding(4)
-        .size(12)
-        .width(FillLength)
-        .into()
+/// A number input with a muted glyph prefix, wrapped in an input-style box.
+fn number_field<'a>(
+    prefix: &'a str,
+    value: &'a str,
+    on_input: Option<fn(String) -> UiEvent>,
+) -> Element<'a, UiEvent> {
+    field_wrap(
+        row![
+            text(prefix).size(12).color(MUTED_FG),
+            text_input("0", value)
+                .on_input_maybe(on_input)
+                .padding(0)
+                .size(12)
+                .width(FillLength)
+                .style(|_theme, _status| text_input::Style {
+                    background: Background::Color(Color::TRANSPARENT),
+                    border: Border::default(),
+                    icon: MUTED_FG,
+                    placeholder: MUTED_FG,
+                    value: TEXT_MAIN,
+                    selection: ACCENT,
+                }),
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center)
+        .into(),
+        Padding {
+            top: 4.0,
+            right: 8.0,
+            bottom: 4.0,
+            left: 8.0,
+        },
+    )
+}
+
+/// The panel header: title, auto-detect action and the reset button
+/// (visual only — it has no event wired up).
+fn header_row<'a>(selected: bool) -> Element<'a, UiEvent> {
+    row![
+        text("Typography").size(12).color(MUTED_FG),
+        Space::new().width(FillLength),
+        button(text("Auto-detect").size(11))
+            .on_press_maybe(selected.then_some(UiEvent::StyleAutoDetect))
+            .padding([4, 8])
+            .style(|_theme, status: Status| {
+                let hovered = matches!(status, Status::Hovered | Status::Pressed);
+                button::Style {
+                    background: Some(Background::Color(INPUT_BG)),
+                    border: Border {
+                        radius: 4.0.into(),
+                        width: 1.0,
+                        color: BORDER,
+                    },
+                    shadow: Shadow::default(),
+                    text_color: if hovered { TEXT_MAIN } else { MUTED_FG },
+                    ..button::Style::default()
+                }
+            }),
+        button(text("↺").size(13))
+            .on_press_maybe(None::<UiEvent>)
+            .padding([4, 6])
+            .style(|_theme, _status| button::Style {
+                background: None,
+                border: Border::default(),
+                shadow: Shadow::default(),
+                text_color: MUTED_FG,
+                ..button::Style::default()
+            }),
+    ]
+    .align_y(iced::Alignment::Center)
+    .spacing(6)
+    .into()
 }
 
 /// The font picker: a searchable `advanced_dropdown` over the installed
@@ -144,6 +358,145 @@ fn font_field<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
     .searchable(true)
     .text_size(12)
     .width(FillLength)
+    .into()
+}
+
+/// The bold/italic toggles next to the alignment segments.
+fn format_align_row<'a>(
+    style: &EntryStyle,
+    selected: bool,
+) -> Element<'a, UiEvent> {
+    let bold = Font {
+        weight: Weight::Bold,
+        ..Font::DEFAULT
+    };
+    let italic = Font {
+        style: iced::font::Style::Italic,
+        ..Font::DEFAULT
+    };
+    row![
+        container(segmented_group(vec![
+            segment(style.bold, "B", selected.then_some(UiEvent::StyleBold(!style.bold)), bold),
+            segment(style.italic, "I", selected.then_some(UiEvent::StyleItalic(!style.italic)), italic),
+        ]))
+        .width(Length::FillPortion(1)),
+        container(segmented_group(vec![
+            segment(
+                style.text_align == TextAlign::Left,
+                "L",
+                selected.then_some(UiEvent::StyleTextAlign(TextAlign::Left)),
+                Font::DEFAULT,
+            ),
+            segment(
+                style.text_align == TextAlign::Center,
+                "C",
+                selected.then_some(UiEvent::StyleTextAlign(TextAlign::Center)),
+                Font::DEFAULT,
+            ),
+            segment(
+                style.text_align == TextAlign::Right,
+                "R",
+                selected.then_some(UiEvent::StyleTextAlign(TextAlign::Right)),
+                Font::DEFAULT,
+            ),
+            segment(
+                style.text_align == TextAlign::Circular,
+                "◎",
+                selected.then_some(UiEvent::StyleTextAlign(TextAlign::Circular)),
+                Font::DEFAULT,
+            ),
+        ]))
+        .width(Length::FillPortion(2)),
+    ]
+    .spacing(8)
+    .into()
+}
+
+/// The "Fill" section: solid (text color) vs gradient (two colors plus
+/// direction) tabs.
+fn fill_section<'a, S: UiState + ?Sized>(
+    state: &'a S,
+    style: &EntryStyle,
+    selected: bool,
+) -> Element<'a, UiEvent> {
+    let gradient = style.text_gradient;
+    column![
+        section_title("Fill"),
+        fill_tabs(gradient, selected),
+        if gradient {
+            column![
+                row![
+                    color_field(state, StyleField::GradientA, state.style_gradient_a()),
+                    color_field(state, StyleField::GradientB, state.style_gradient_b()),
+                ]
+                .spacing(8),
+                pick_list(TextGradientDir::LABELS, Some(style.gradient_dir.label()), |l| {
+                    UiEvent::StyleGradientDir(TextGradientDir::from_label(&l))
+                })
+                .text_size(12)
+                .width(FillLength),
+            ]
+            .spacing(8)
+            .into()
+        } else {
+            color_field(state, StyleField::Text, state.style_text_color())
+        },
+    ]
+    .spacing(8)
+    .into()
+}
+
+/// The "Stroke" section: color plus width.
+fn stroke_section<'a, S: UiState + ?Sized>(
+    state: &'a S,
+    selected: bool,
+) -> Element<'a, UiEvent> {
+    column![
+        section_title("Stroke"),
+        row![
+            container(color_field(
+                state,
+                StyleField::Stroke,
+                state.style_stroke_color(),
+            ))
+            .width(Length::FillPortion(2)),
+            container(number_field(
+                "─",
+                state.style_stroke_width(),
+                selected.then_some(UiEvent::StyleStrokeWidth),
+            ))
+            .width(Length::FillPortion(1)),
+        ]
+        .spacing(8),
+    ]
+    .spacing(8)
+    .into()
+}
+
+/// The "Background & Corner" section: background color plus corner radius.
+fn background_section<'a, S: UiState + ?Sized>(
+    state: &'a S,
+    selected: bool,
+) -> Element<'a, UiEvent> {
+    column![
+        section_title("Background & Corner"),
+        row![
+            container(color_field(
+                state,
+                StyleField::Background,
+                state.style_bg_color(),
+            ))
+            .width(Length::FillPortion(2)),
+            container(number_field(
+                "▣",
+                state.style_bg_radius(),
+                selected.then_some(UiEvent::StyleBgRadius),
+            ))
+            .width(Length::FillPortion(1)),
+        ]
+        .spacing(8),
+    ]
+    .spacing(8)
     .into()
 }
 
@@ -334,155 +687,19 @@ fn presets_grid<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
 
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let style = state.style_working();
-    let Some((image_index, entry_id)) = state.selected() else {
-        return scrollable(column![
-            text("Styling").size(14),
-            row![
-                checkbox(style.bold).label("Bold").text_size(12),
-                checkbox(style.italic).label("Italic").text_size(12),
-            ]
-            .spacing(16),
-            field_row(
-                "Font",
-                font_field(state),
-            ),
-            field_row(
-                "Align",
-                pick_list(TextAlign::LABELS, Some(style.text_align.label()), |l| {
-                    UiEvent::StyleTextAlign(TextAlign::from_label(&l))
-                })
-                .text_size(12)
-                .width(FillLength)
-                .into(),
-            ),
-            row![
-                checkbox(style.text_gradient).label("Text gradient").text_size(12),
-            ]
-            .spacing(16),
-            field_row(
-                "Gradient A",
-                color_field(state, StyleField::GradientA, state.style_gradient_a()),
-            ),
-            field_row(
-                "Gradient B",
-                color_field(state, StyleField::GradientB, state.style_gradient_b()),
-            ),
-            field_row(
-                "Direction",
-                pick_list(TextGradientDir::LABELS, Some(style.gradient_dir.label()), |l| {
-                    UiEvent::StyleGradientDir(TextGradientDir::from_label(&l))
-                })
-                .text_size(12)
-                .width(FillLength)
-                .into(),
-            ),
-            field_row(
-                "Text color",
-                color_field(state, StyleField::Text, state.style_text_color()),
-            ),
-            field_row(
-                "Stroke color",
-                color_field(state, StyleField::Stroke, state.style_stroke_color()),
-            ),
-            field_row("Stroke width", number_input(state.style_stroke_width(), None)),
-            field_row(
-                "Background",
-                color_field(state, StyleField::Background, state.style_bg_color()),
-            ),
-            field_row("Corner radius", number_input(state.style_bg_radius(), None)),
-            text(HINT).size(12).color(MUTED_FG),
-            presets_grid(state),
-        ]
-        .spacing(6))
-        .width(FillLength)
-        .height(FillLength)
-        .into();
-    };
-
-    let entry = state.images()[image_index].project.ocr.get(entry_id);
-    let heading = entry
-        .map(|e| {
-            let entry_text = state.images()[image_index].project.display_text(e);
-            let short: String = entry_text.chars().take(24).collect();
-            if entry_text.chars().count() > 24 {
-                format!("Styling — \"{short}…\"")
-            } else {
-                format!("Styling — \"{short}\"")
-            }
-        })
-        .unwrap_or_else(|| "Styling — entry".to_string());
+    let selected = state.selected().is_some();
 
     scrollable(column![
-        text(heading).size(14),
-        button(text("Auto-detect style").size(12))
-            .on_press(UiEvent::StyleAutoDetect)
-            .padding(6)
-            .width(FillLength),
-        row![
-            checkbox(style.bold)
-                .label("Bold")
-                .text_size(12)
-                .on_toggle(UiEvent::StyleBold),
-            checkbox(style.italic)
-                .label("Italic")
-                .text_size(12)
-                .on_toggle(UiEvent::StyleItalic),
-        ]
-        .spacing(16),
-        field_row(
-            "Font",
-            font_field(state),
-        ),
-        field_row(
-            "Align",
-            pick_list(TextAlign::LABELS, Some(style.text_align.label()), |l| {
-                UiEvent::StyleTextAlign(TextAlign::from_label(&l))
-            })
-            .text_size(12)
-            .width(FillLength)
-            .into(),
-        ),
-        field_row(
-            "Text color",
-            color_field(state, StyleField::Text, state.style_text_color()),
-        ),
-        field_row(
-            "Stroke color",
-            color_field(state, StyleField::Stroke, state.style_stroke_color()),
-        ),
-        field_row("Stroke width", number_input(state.style_stroke_width(), Some(UiEvent::StyleStrokeWidth))),
-        field_row(
-            "Background",
-            color_field(state, StyleField::Background, state.style_bg_color()),
-        ),
-        field_row("Corner radius", number_input(state.style_bg_radius(), Some(UiEvent::StyleBgRadius))),
-        row![
-            checkbox(style.text_gradient)
-                .label("Text gradient")
-                .text_size(12)
-                .on_toggle(UiEvent::StyleGradientToggle),
-        ]
-        .spacing(16),
-        field_row(
-            "Gradient A",
-            color_field(state, StyleField::GradientA, state.style_gradient_a()),
-        ),
-        field_row(
-            "Gradient B",
-            color_field(state, StyleField::GradientB, state.style_gradient_b()),
-        ),
-        field_row(
-            "Direction",
-            pick_list(TextGradientDir::LABELS, Some(style.gradient_dir.label()), |l| {
-                UiEvent::StyleGradientDir(TextGradientDir::from_label(&l))
-            })
-            .text_size(12)
-            .width(FillLength)
-            .into(),
-        ),
+        header_row(selected),
+        font_field(state),
+        format_align_row(style, selected),
+        fill_section(state, style, selected),
+        stroke_section(state, selected),
+        background_section(state, selected),
         presets_grid(state),
+        text(HINT).size(12).color(MUTED_FG),
     ]
-    .spacing(6))
+    .spacing(10))
     .width(FillLength)
     .height(FillLength)
     .into()
