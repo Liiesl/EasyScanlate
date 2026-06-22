@@ -6,8 +6,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use super::{
-    Connection, Provider, is_custom, provider_for_connection, CUSTOM_ANTHROPIC, CUSTOM_OPENAI,
-    SUPPORTED_PROVIDERS,
+    Connection, Provider, is_custom, provider_for_connection, provider_name, CUSTOM_ANTHROPIC,
+    CUSTOM_OPENAI, SUPPORTED_PROVIDERS,
 };
 
 /// The connected-provider session state of the translation bar.
@@ -124,6 +124,43 @@ impl Session {
         if self.selected_id != id {
             self.selected_id = id;
             self.sync_models();
+        }
+    }
+
+    /// Every connected provider's selectable models, in connected order:
+    /// `(provider id, display name, model ids)`. The model ids respect the
+    /// free-only filter; providers without selectable models are skipped.
+    /// This is what the merged model dropdown of the translation bar renders,
+    /// grouped by provider.
+    pub fn model_groups(&self) -> Vec<(String, String, Vec<String>)> {
+        let free_only = self.free_only;
+        self.connected_ids
+            .iter()
+            .filter_map(|id| {
+                let provider = self.fetched.get(id).cloned().or_else(|| {
+                    self.connections
+                        .get(id)
+                        .map(|connection| provider_for_connection(id, connection))
+                })?;
+                let models = provider.selectable_models(free_only);
+                (!models.is_empty())
+                    .then(|| (id.clone(), provider_name(id), models))
+            })
+            .collect()
+    }
+
+    /// Selects a provider and pins a specific model for it in one step, the
+    /// way the merged model dropdown selects. `sync_models` keeps the model
+    /// choice valid: it rebuilds the selected provider's list first, then the
+    /// requested model wins when it is on that list.
+    pub fn select_model(&mut self, id: String, model: String) {
+        if id.is_empty() || !self.connected_ids.contains(&id) {
+            return;
+        }
+        self.selected_id = id;
+        self.sync_models();
+        if self.models.contains(&model) {
+            self.selected_model = model;
         }
     }
 
@@ -398,5 +435,107 @@ mod tests {
             )
             .is_connected()
         );
+    }
+
+    #[test]
+    fn model_groups_lists_every_connected_provider() {
+        let session = Session::new(
+            BTreeMap::from([
+                ("deepseek".to_string(), connection("sk-d")),
+                ("openai".to_string(), connection("sk-o")),
+            ]),
+            Some("deepseek".to_string()),
+        );
+        assert_eq!(
+            session.model_groups(),
+            vec![
+                (
+                    "openai".to_string(),
+                    "OpenAI".to_string(),
+                    vec!["gpt-4o-mini".to_string(), "gpt-5-nano".to_string()],
+                ),
+                (
+                    "deepseek".to_string(),
+                    "DeepSeek".to_string(),
+                    vec!["deepseek-chat".to_string(), "deepseek-reasoner".to_string()],
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn model_groups_use_fetched_models_and_the_free_filter() {
+        let mut session = Session::new(
+            BTreeMap::from([("deepseek".to_string(), connection("sk-d"))]),
+            Some("deepseek".to_string()),
+        );
+        session.on_fetched(HashMap::from([("deepseek".to_string(), fetched_deepseek())]));
+        assert_eq!(
+            session.model_groups(),
+            vec![(
+                "deepseek".to_string(),
+                "DeepSeek".to_string(),
+                vec!["free-1".to_string(), "paid-1".to_string()],
+            )]
+        );
+        session.set_free_only(true);
+        assert_eq!(
+            session.model_groups(),
+            vec![(
+                "deepseek".to_string(),
+                "DeepSeek".to_string(),
+                vec!["free-1".to_string()],
+            )]
+        );
+    }
+
+    #[test]
+    fn model_groups_include_custom_connections() {
+        let session = Session::new(
+            BTreeMap::from([(
+                CUSTOM_OPENAI.to_string(),
+                Connection {
+                    api_key: "sk-custom".to_string(),
+                    base_url: Some("http://localhost:11434/v1".to_string()),
+                    model: Some("llama-3.1-8b".to_string()),
+                },
+            )]),
+            Some(CUSTOM_OPENAI.to_string()),
+        );
+        assert_eq!(
+            session.model_groups(),
+            vec![(
+                CUSTOM_OPENAI.to_string(),
+                "Custom (OpenAI-compatible)".to_string(),
+                vec!["llama-3.1-8b".to_string()],
+            )]
+        );
+    }
+
+    #[test]
+    fn model_groups_are_empty_without_connections() {
+        let session = Session::new(BTreeMap::new(), None);
+        assert!(session.model_groups().is_empty());
+    }
+
+    #[test]
+    fn select_model_sets_provider_and_model_in_one_step() {
+        let mut session = Session::new(
+            BTreeMap::from([
+                ("openai".to_string(), connection("sk-o")),
+                ("deepseek".to_string(), connection("sk-d")),
+            ]),
+            Some("openai".to_string()),
+        );
+        session.select_model("deepseek".to_string(), "deepseek-reasoner".to_string());
+        assert_eq!(session.selected_id, "deepseek");
+        assert_eq!(session.selected_model, "deepseek-reasoner");
+        // An unknown model falls back to the provider's first model.
+        session.select_model("openai".to_string(), "does-not-exist".to_string());
+        assert_eq!(session.selected_id, "openai");
+        assert_eq!(session.selected_model, "gpt-4o-mini");
+        // Unknown providers are ignored.
+        session.select_model("nope".to_string(), "gpt-4o-mini".to_string());
+        assert_eq!(session.selected_id, "openai");
     }
 }

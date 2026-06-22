@@ -68,8 +68,9 @@ pub enum UiEvent {
     /// without waiting out the debounce.
     TileScrollEnded,
     Translate,
-    TranslateProvider(String),
-    TranslateModel(String),
+    /// The user picked a (provider, model) pair in the merged model dropdown
+    /// of the translation bar; both are selected together.
+    TranslateModelSelect { provider: String, model: String },
     TranslateLang(String),
     /// The user pressed "Connect" for the translation provider id; the app
     /// opens the API-key entry modal.

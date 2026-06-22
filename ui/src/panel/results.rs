@@ -1,10 +1,10 @@
 //! Right column: the tall scrollable OCR results list on top and the short
-//! translation controls (model/language pickers, translate button) below it.
-//! The list shows one row per entry with two side-by-side inputs: the
-//! read-only original OCR text on the left and the selected profile's text
-//! on the right. The right side starts the same multi-line inline edit as
-//! the main area (fork on first keystroke, Enter = newline,
-//! Escape/Ctrl+Enter to commit); clicking a row selects the entry,
+//! translation controls (the merged model dropdown, the language picker and
+//! the translate button) below it. The list shows one row per entry with two
+//! side-by-side inputs: the read-only original OCR text on the left and the
+//! selected profile's text on the right. The right side starts the same
+//! multi-line inline edit as the main area (fork on first keystroke, Enter =
+//! newline, Escape/Ctrl+Enter to commit); clicking a row selects the entry,
 //! highlighted with a border. The API key is configured in the settings
 //! modal, not here.
 
@@ -13,22 +13,18 @@ use iced::advanced::widget::{operate, Id as WidgetId};
 use iced::widget::operation::AbsoluteOffset;
 use iced::widget::text_editor;
 use iced::widget::{
-    button, column, container, mouse_area, row, scrollable, text, Column, Id,
+    button, column, container, mouse_area, pick_list, row, scrollable, space, text, Column, Id,
 };
-#[cfg(feature = "translation")]
-use iced::widget::{pick_list, space};
 use iced::{keyboard, Background, Border, Color, Element, Fill as FillLength, Font, Padding,
     Rectangle, Vector};
+use neverliie_iced_widgets::advanced_dropdown::{advanced_dropdown, Item, MenuItem};
 
-use crate::event::{EditOrigin, ToolbarAction, UiEvent};
-#[cfg(feature = "translation")]
-use crate::event::SettingsTab;
+use crate::event::{EditOrigin, SettingsTab, ToolbarAction, UiEvent};
 use crate::loaded::LoadedImage;
 use crate::panel::MUTED_FG;
 use crate::state::UiState;
+use crate::translation;
 use scanlateit_model::{EntryId, OcrEntry};
-#[cfg(feature = "translation")]
-use scanlateit_translation as translation;
 
 /// Widget id of the multi-line editor shown in a row while the entry is
 /// edited from the panel; must match the app's focus id.
@@ -167,14 +163,12 @@ fn entry_row<'a, S: UiState + ?Sized>(
             .into()
     };
 
-    #[cfg_attr(not(feature = "translation"), allow(unused_mut))]
     let mut buttons: Vec<Element<'_, UiEvent>> = vec![
         button(text("Delete").size(10))
             .padding([2, 6])
             .on_press(UiEvent::EntryToolbar((index, entry_id, ToolbarAction::Delete)))
             .into(),
     ];
-    #[cfg(feature = "translation")]
     buttons.push(
         button(text("Retranslate").size(10))
             .padding([2, 6])
@@ -237,71 +231,75 @@ fn image_results<'a, S: UiState + ?Sized>(
     elements
 }
 
-/// The bottom translation bar: the connection status and (when connected)
-/// the provider/model/language pickers and the translate button. When no
-/// provider is connected the bar collapses to a status row with a
-/// "Configure…" button that opens the settings modal on the Translation
-/// tab.
-#[cfg(feature = "translation")]
+/// One entry of the merged model dropdown of the translation bar: the model
+/// id plus its provider's id and display name. The closed dropdown renders
+/// this as `{provider}:{model}`.
+#[derive(Debug, Clone, PartialEq)]
+struct ModelOption {
+    provider_id: String,
+    provider_name: String,
+    model: String,
+}
+
+impl ToString for ModelOption {
+    fn to_string(&self) -> String {
+        format!("{}:{}", self.provider_name, self.model)
+    }
+}
+
+/// The bottom translation bar: one row with the merged provider/model
+/// dropdown, the target-language picker and the translate button. When no
+/// connection is configured the bar collapses to a status row with a
+/// "Configure…" button that opens the settings modal on the Translation tab;
+/// the configure button is never shown otherwise.
 fn translate_bar<'a, S: UiState + ?Sized>(
     state: &'a S,
     has_entries: bool,
-    total_results: usize,
 ) -> Element<'a, UiEvent> {
     let connected = !state.connections().is_empty();
     let body: Element<'_, UiEvent> = if connected {
-        column![
-            row![
-                text("Service:").size(12),
-                pick_list(
-                    state.translate_providers(),
-                    Some(state.translate_provider()),
-                    |p| UiEvent::TranslateProvider(p),
-                )
-                .text_size(12)
-                .width(FillLength),
-                button(text("Configure…").size(11))
-                    .padding([2, 6])
-                    .on_press(UiEvent::SettingsOpenTab(SettingsTab::Translation)),
-            ]
-            .spacing(6),
-            row![
-                text("Model:").size(12),
-                pick_list(
-                    state.translate_models(),
-                    Some(state.translate_model()),
-                    |m| UiEvent::TranslateModel(m.to_string()),
-                )
-                .text_size(12)
-                .width(FillLength),
-                text("To:").size(12),
-                pick_list(
-                    translation::LANGUAGES,
-                    Some(state.translate_lang()),
-                    |l| UiEvent::TranslateLang(l.to_string()),
-                )
-                .text_size(12)
-                .width(FillLength),
-            ]
-            .spacing(6),
-            row![
-                button("Translate").on_press_maybe(
-                    (has_entries && !state.translating() && !state.running())
-                        .then_some(UiEvent::Translate)
-                ),
-                space::horizontal(),
-                text(format!(
-                    "{} image(s), {} result(s)",
-                    state.images().len(),
-                    total_results
-                ))
-                .size(12)
-                .color(MUTED_FG),
-            ]
-            .spacing(6)
-            .align_y(iced::Alignment::Center),
+        let (sel_provider, sel_model) = state.translate_model_selection();
+        let mut entries: Vec<MenuItem<'a, ModelOption, UiEvent, iced::Theme, iced::Renderer>> =
+            Vec::new();
+        let mut selected = None;
+        for (provider_id, provider_name, models) in state.translate_model_groups() {
+            entries.push(MenuItem::Label(provider_name.clone().into()));
+            for model in models {
+                let option = ModelOption {
+                    provider_id: provider_id.clone(),
+                    provider_name: provider_name.clone(),
+                    model: model.clone(),
+                };
+                if provider_id == sel_provider && model == sel_model {
+                    selected = Some(option.clone());
+                }
+                entries.push(MenuItem::Item(Item::new(option, model)));
+            }
+        }
+
+        row![
+            advanced_dropdown(entries, selected, |option| UiEvent::TranslateModelSelect {
+                provider: option.provider_id.clone(),
+                model: option.model.clone(),
+            })
+            .placeholder("Select a model…")
+            .searchable(true)
+            .text_size(12)
+            .width(FillLength),
+            text("To:").size(12),
+            pick_list(
+                translation::LANGUAGES,
+                Some(state.translate_lang()),
+                |l| UiEvent::TranslateLang(l.to_string()),
+            )
+            .text_size(12),
+            button("Translate").on_press_maybe(
+                (has_entries && !state.translating() && !state.running())
+                    .then_some(UiEvent::Translate)
+            ),
         ]
         .spacing(6)
+        .align_y(iced::Alignment::Center)
         .into()
     } else {
         row![
@@ -329,7 +327,6 @@ fn translate_bar<'a, S: UiState + ?Sized>(
 
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let total_results: usize = state.images().iter().map(|i| i.project.ocr.visible_count()).sum();
-    #[cfg_attr(not(feature = "translation"), allow(unused_variables))]
     let has_entries = total_results > 0;
 
     let mut results_list: Vec<Element<'_, UiEvent>> = Vec::new();
@@ -345,22 +342,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         );
     }
 
-    #[cfg(feature = "translation")]
-    let bar = translate_bar(state, has_entries, total_results);
-    #[cfg(not(feature = "translation"))]
-    let bar: Element<'_, UiEvent> = container(
-        text("Translation is not available in this build.")
-            .size(12)
-            .color(MUTED_FG),
-    )
-    .width(FillLength)
-    .padding(6)
-    .style(|_theme| container::Style {
-        background: Some(BOX_BG.into()),
-        border: Border::default().rounded(4.0),
-        ..container::Style::default()
-    })
-    .into();
+    let bar = translate_bar(state, has_entries);
 
     column![
         scrollable(Column::with_children(results_list).spacing(4))

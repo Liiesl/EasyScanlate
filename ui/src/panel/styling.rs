@@ -22,6 +22,7 @@ use iced::{
     Background, Border, Color, Element, Fill as FillLength, Font, Padding, Shadow, Vector,
 };
 
+use neverliie_iced_widgets::advanced_dropdown::{advanced_dropdown, Item, MenuItem};
 use neverliie_iced_widgets::color_picker::ColorPicker;
 use neverliie_iced_widgets::context_menu::{ContextMenu, Menu};
 use neverliie_iced_widgets::overlay::{Anchor, Position};
@@ -125,6 +126,25 @@ fn number_input(value: &str, on_input: Option<fn(String) -> UiEvent>) -> Element
         .size(12)
         .width(FillLength)
         .into()
+}
+
+/// The font picker: a searchable `advanced_dropdown` over the installed
+/// fonts, emitting `StyleFont` on selection.
+fn font_field<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
+    let entries: Vec<MenuItem<'a, String, UiEvent, iced::Theme, iced::Renderer>> = state
+        .installed_fonts()
+        .iter()
+        .map(|font| MenuItem::Item(Item::new(font.clone(), font.clone())))
+        .collect();
+    advanced_dropdown(
+        entries,
+        state.style_working().font_family.clone(),
+        UiEvent::StyleFont,
+    )
+    .searchable(true)
+    .text_size(12)
+    .width(FillLength)
+    .into()
 }
 
 /// The checkerboard image shared by every preset square: a 64px RGBA bitmap
@@ -324,12 +344,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .spacing(16),
             field_row(
                 "Font",
-                pick_list(state.installed_fonts(), style.font_family.as_ref(), |f| {
-                    UiEvent::StyleFont(f.clone())
-                })
-                .text_size(12)
-                .width(FillLength)
-                .into(),
+                font_field(state),
             ),
             field_row(
                 "Align",
@@ -416,12 +431,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         .spacing(16),
         field_row(
             "Font",
-            pick_list(state.installed_fonts(), style.font_family.as_ref(), |f| {
-                UiEvent::StyleFont(f.clone())
-            })
-            .text_size(12)
-            .width(FillLength)
-            .into(),
+            font_field(state),
         ),
         field_row(
             "Align",

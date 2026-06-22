@@ -2,8 +2,8 @@
 //! buttons (open images, start/stop OCR, live status, profile cycling,
 //! settings). Below it two columns share the remaining height: the styling
 //! controls on the left and, on the right, the tall scrollable OCR results
-//! list over the short translation controls (model/language pickers and the
-//! translate button).
+//! list over the short translation bar (the merged model dropdown, the
+//! language picker and the translate button).
 
 pub mod actions;
 pub mod results;

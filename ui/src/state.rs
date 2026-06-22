@@ -1,12 +1,10 @@
-#[cfg(feature = "translation")]
 use std::collections::BTreeMap;
 
 use iced::widget::text_editor;
 use iced::{Color, Font, Rectangle};
 
 use scanlateit_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
-#[cfg(feature = "translation")]
-use scanlateit_translation::Connection;
+use crate::translation::Connection;
 
 use crate::connect::ConnectModal;
 use crate::event::{EditOrigin, SettingsTab, StyleField};
@@ -19,27 +17,21 @@ pub trait UiState {
     fn running(&self) -> bool;
     fn translating(&self) -> bool;
     fn status(&self) -> &str;
-    /// Display name of the currently selected translation provider.
-    #[cfg(feature = "translation")]
-    fn translate_provider(&self) -> String;
-    /// Display names of every connected translation provider, in catalog
-    /// order (the picker options of the translation bar).
-    #[cfg(feature = "translation")]
-    fn translate_providers(&self) -> Vec<String>;
-    #[cfg(feature = "translation")]
-    fn translate_model(&self) -> &String;
-    #[cfg(feature = "translation")]
-    fn translate_models(&self) -> &[String];
-    #[cfg(feature = "translation")]
+    /// Every connected translation provider's selectable models, in connected
+    /// order: `(provider id, display name, model ids)`. The model ids already
+    /// respect the free-only filter. The merged model dropdown of the
+    /// translation bar groups these by provider.
+    fn translate_model_groups(&self) -> Vec<(String, String, Vec<String>)>;
+    /// The currently selected `(provider id, model id)` of the merged model
+    /// dropdown; both are always one of `translate_model_groups`.
+    fn translate_model_selection(&self) -> (String, String);
     fn translate_lang(&self) -> &str;
     /// The stored translation connections, keyed by provider id; a provider
     /// is connected exactly when it has an entry here.
-    #[cfg(feature = "translation")]
     fn connections(&self) -> &BTreeMap<String, Connection>;
     /// The connect modal open over the settings modal, if any.
     fn connect_modal(&self) -> Option<&ConnectModal>;
     /// Whether the translation model picker only lists free models.
-    #[cfg(feature = "translation")]
     fn free_models_only(&self) -> bool;
     fn selected(&self) -> Option<(usize, EntryId)>;
     fn style_working(&self) -> &EntryStyle;
