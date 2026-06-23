@@ -18,6 +18,8 @@ use scanlateit_model::{
     TextGradientDir,
 };
 #[cfg(feature = "inpaint")]
+use scanlateit_model::InpaintBackend;
+#[cfg(feature = "inpaint")]
 use scanlateit_model::InpaintPatch;
 #[cfg(feature = "ocr")]
 use scanlateit_ocr::{self as ocr, Engine, OcrCancellationToken, ParallelEngine};
@@ -144,14 +146,23 @@ pub struct App {
     ocr_dims: Vec<(u32, u32)>,
     #[cfg(feature = "inpaint")]
     inpaint_engine: Option<InpaintEngine>,
+    /// The inpainting backend picked in the settings modal; the cached engine
+    /// is rebuilt whenever this (or `inpaint_radius`) changes.
+    #[cfg(feature = "inpaint")]
+    pub(crate) inpaint_backend: InpaintBackend,
+    /// The Telea interpolation radius, as typed in the settings modal
+    /// (parsed, fallback 5, when inpainting starts).
+    #[cfg(feature = "inpaint")]
+    inpaint_radius: String,
     /// Buffered inpainting job waiting for the engine to finish loading,
     /// as `(image index, path, rect, mask quads)`.
     #[cfg(feature = "inpaint")]
     pending_inpaint: Option<(usize, String, [f32; 4], Vec<Quad>)>,
     /// True while an inpainting inference is in flight.
     pub(crate) inpainting: bool,
-    /// The image whose tile is in inpainting selection mode.
-    pub(crate) inpaint_mode: Option<usize>,
+    /// Whether inpainting range drags are enabled; when `true` a drag on
+    /// any tile selects the range to clean.
+    pub(crate) inpaint_mode: bool,
     /// Whether the overlay text is drawn over the pages in the main area.
     pub(crate) show_overlay_text: bool,
     /// Whether applied inpainting patches are drawn over the pages.
@@ -269,9 +280,13 @@ impl App {
             #[cfg(feature = "inpaint")]
             inpaint_engine: None,
             #[cfg(feature = "inpaint")]
+            inpaint_backend: InpaintBackend::default(),
+            #[cfg(feature = "inpaint")]
+            inpaint_radius: "5".to_string(),
+            #[cfg(feature = "inpaint")]
             pending_inpaint: None,
             inpainting: false,
-            inpaint_mode: None,
+            inpaint_mode: false,
             show_overlay_text: true,
             show_inpaint: true,
             view_mode: MainAreaMode::View,
@@ -506,6 +521,16 @@ impl UiState for App {
         &self.ocr_workers
     }
 
+    #[cfg(feature = "inpaint")]
+    fn inpaint_backend(&self) -> InpaintBackend {
+        self.inpaint_backend
+    }
+
+    #[cfg(feature = "inpaint")]
+    fn inpaint_radius(&self) -> &str {
+        &self.inpaint_radius
+    }
+
     fn editing(&self) -> Option<(usize, EntryId)> {
         self.editing
     }
@@ -526,7 +551,7 @@ impl UiState for App {
         self.font
     }
 
-    fn inpaint_mode(&self) -> Option<usize> {
+    fn inpaint_mode(&self) -> bool {
         self.inpaint_mode
     }
 
@@ -1175,6 +1200,11 @@ pub fn boot() -> (App, Task<Message>) {
     {
         app.ocr_workers = settings.ocr_workers.to_string();
     }
+    #[cfg(feature = "inpaint")]
+    {
+        app.inpaint_backend = settings.inpaint_backend;
+        app.inpaint_radius = settings.inpaint_radius.to_string();
+    }
     #[cfg(feature = "translation")]
     let models_task = {
         let fetch_ids = app.tx.fetch_ids();
@@ -1761,7 +1791,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                             .inpaint_patches
                             .push(InpaintPatch { bounds });
                     }
-                    app.inpaint_mode = None;
+                    app.inpaint_mode = false;
                     app.show_inpaint = true;
                     app.status = format!("Inpainted {count} region(s).");
                 }
@@ -2188,17 +2218,13 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             if app.inpainting || app.running || app.translating || app.images.is_empty() {
                 return Task::none();
             }
-            let index = app.selected.map(|(i, _)| i).unwrap_or(0);
-            app.inpaint_mode = if app.inpaint_mode == Some(index) {
-                None
-            } else {
-                Some(index)
-            };
-            app.status = match app.inpaint_mode {
-                Some(_) => "Inpaint mode: drag a rectangle over the text to remove; \
+            app.inpaint_mode = !app.inpaint_mode;
+            app.status = if app.inpaint_mode {
+                "Inpaint mode: drag a rectangle over the text to remove; \
                            click Inpaint again to cancel."
-                    .to_string(),
-                None => "Inpaint mode cancelled.".to_string(),
+                    .to_string()
+            } else {
+                "Inpaint mode cancelled.".to_string()
             };
             Task::none()
         }
@@ -2291,13 +2317,22 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     .to_string();
             }
             let path = image.path.clone();
-            match app.inpaint_engine.clone() {
+            let backend = app.inpaint_backend;
+            let radius = app.inpaint_radius.parse::<i32>().unwrap_or(5).max(1);
+            let cached = app
+                .inpaint_engine
+                .clone()
+                .filter(|engine| engine.backend() == backend && engine.radius() == radius);
+            match cached {
                 Some(engine) => start_inpaint(app, engine, index, path, rect, quads),
                 None => {
                     app.pending_inpaint = Some((index, path, rect, quads));
-                    app.status = "Loading the inpainting model...".to_string();
+                    app.status = match backend {
+                        InpaintBackend::Lama => "Loading the inpainting model...".to_string(),
+                        InpaintBackend::Telea => "Inpainting...".to_string(),
+                    };
                     Task::perform(
-                        async move { InpaintEngine::build() },
+                        async move { InpaintEngine::build(backend, radius) },
                         Message::InpaintEngineReady,
                     )
                 }
@@ -2488,6 +2523,22 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.ocr_workers = text;
             Task::none()
         }
+        #[cfg(feature = "inpaint")]
+        Message::Ui(UiEvent::InpaintBackend(backend)) => {
+            if app.inpaint_backend != backend {
+                app.inpaint_backend = backend;
+                app.inpaint_engine = None;
+                app.status = format!("Inpaint backend: {backend}.");
+            }
+            Task::none()
+        }
+        #[cfg(feature = "inpaint")]
+        Message::Ui(UiEvent::InpaintRadius(text)) => {
+            app.inpaint_radius = text;
+            Task::none()
+        }
+        #[cfg(not(feature = "inpaint"))]
+        Message::Ui(UiEvent::InpaintBackend(_) | UiEvent::InpaintRadius(_)) => Task::none(),
         Message::Ui(UiEvent::PanelResized(resized)) => {
             app.panes.resize(resized.split, resized.ratio);
             Task::none()
@@ -2516,6 +2567,10 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 ocr_workers: app.ocr_workers.parse().unwrap_or(2),
                 #[cfg(feature = "translation")]
                 free_models_only: app.tx.free_only,
+                #[cfg(feature = "inpaint")]
+                inpaint_backend: app.inpaint_backend,
+                #[cfg(feature = "inpaint")]
+                inpaint_radius: app.inpaint_radius.parse().unwrap_or(5).clamp(1, u8::MAX as i32) as u8,
             };
             if let Err(e) = settings.save() {
                 app.status = e;

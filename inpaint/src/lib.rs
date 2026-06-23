@@ -1,11 +1,14 @@
-//! CPU-only image inpainting with the LaMa ONNX model (`lama-manga.onnx`).
+//! CPU image inpainting with two interchangeable backends: the pure-Rust
+//! Telea algorithm from the [`inpaint`] crate (the default: no model, no
+//! download) and the LaMa ONNX model (`lama-manga.onnx`).
 //!
-//! [`Engine`] holds one shared inference session (built for the CPU
-//! execution provider by design) and inpaints image regions one at a time:
-//! the caller supplies an image path, a rectangle and the text-box quads
-//! inside it; the box pixels are masked out (black/white mask) and
-//! reconstructed by LaMa, and each box comes back as its own RGBA crop an
-//! app layers over the original image without writing anything to disk.
+//! [`Engine`] owns the backend chosen at build time. The LaMa backend holds
+//! one shared inference session (CPU execution provider by design) and
+//! inpaints image regions one at a time; the Telea backend is stateless and
+//! rewrites masked pixels in place. Both take the same job: an image path, a
+//! rectangle and the text-box quads inside it; the box pixels are masked out
+//! and reconstructed, and each box comes back as its own RGBA crop an app
+//! layers over the original image without writing anything to disk.
 
 use std::fmt;
 use std::path::Path;
@@ -13,11 +16,12 @@ use std::sync::{Arc, Mutex};
 
 use image::{GrayImage, Rgb, RgbImage, RgbaImage};
 use imageproc::drawing::draw_polygon_mut;
+use inpaint::prelude::*;
 use ndarray::{Array4, ArrayD};
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::TensorRef;
-use scanlateit_model::Quad;
+use scanlateit_model::{InpaintBackend, Quad};
 
 /// The fixed square input size of the LaMa model.
 pub const MODEL_EDGE: u32 = 512;
@@ -25,38 +29,73 @@ pub const MODEL_EDGE: u32 = 512;
 const MODEL_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../models");
 const MODEL_FILE: &str = "lama-manga.onnx";
 
-/// Cloneable handle to the shared inpainting session. Only one inference
-/// runs at a time; runs are serialized through the inner mutex.
+/// Cloneable handle to the shared inpainting engine: either the stateless
+/// Telea backend or the LaMa session (one inference at a time, serialized
+/// through the inner mutex).
 #[derive(Clone)]
-pub struct Engine(Arc<Mutex<Session>>);
+pub struct Engine {
+    backend: InpaintBackend,
+    /// Telea's interpolation radius in pixels; ignored by the LaMa backend.
+    radius: i32,
+    /// The shared LaMa session; `None` for the Telea backend.
+    session: Option<Arc<Mutex<Session>>>,
+}
 
 impl fmt::Debug for Engine {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Engine")
+        f.debug_struct("Engine")
+            .field("backend", &self.backend)
+            .field("radius", &self.radius)
+            .finish()
     }
 }
 
 impl Engine {
-    /// Loads the LaMa model with a CPU-only session.
-    pub fn build() -> Result<Self, String> {
-        let path = Path::new(MODEL_DIR).join(MODEL_FILE);
-        let session = Session::builder()
-            .map_err(|e| format!("ORT init failed: {e}"))?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| format!("ORT init failed: {e}"))?
-            .with_intra_threads(4)
-            .map_err(|e| format!("ORT init failed: {e}"))?
-            .with_execution_providers([ort::ep::CPU::default().build()])
-            .map_err(|e| format!("ORT init failed: {e}"))?
-            .commit_from_file(&path)
-            .map_err(|e| format!("failed to load inpainting model {}: {e}", path.display()))?;
-        Ok(Self(Arc::new(Mutex::new(session))))
+    /// Builds the engine for `backend`. The Telea backend is instant and
+    /// stateless; the LaMa backend loads its model with a CPU-only session.
+    pub fn build(backend: InpaintBackend, radius: i32) -> Result<Self, String> {
+        let session = match backend {
+            InpaintBackend::Telea => None,
+            InpaintBackend::Lama => {
+                let path = Path::new(MODEL_DIR).join(MODEL_FILE);
+                let session = Session::builder()
+                    .map_err(|e| format!("ORT init failed: {e}"))?
+                    .with_optimization_level(GraphOptimizationLevel::Level3)
+                    .map_err(|e| format!("ORT init failed: {e}"))?
+                    .with_intra_threads(4)
+                    .map_err(|e| format!("ORT init failed: {e}"))?
+                    .with_execution_providers([ort::ep::CPU::default().build()])
+                    .map_err(|e| format!("ORT init failed: {e}"))?
+                    .commit_from_file(&path)
+                    .map_err(|e| {
+                        format!("failed to load inpainting model {}: {e}", path.display())
+                    })?;
+                Some(Arc::new(Mutex::new(session)))
+            }
+        };
+        Ok(Self {
+            backend,
+            radius: radius.max(1),
+            session,
+        })
+    }
+
+    /// The backend this engine was built for; the app rebuilds the engine
+    /// when the configured backend or radius changes.
+    pub fn backend(&self) -> InpaintBackend {
+        self.backend
+    }
+
+    /// The Telea interpolation radius this engine was built with.
+    pub fn radius(&self) -> i32 {
+        self.radius
     }
 
     /// Decodes `path` and inpaints the area `rect`, masking out the given
     /// quads (or the whole area when there are none). The original file is
     /// never modified; each returned patch is the RGBA crop of one mask quad
-    /// (`[x, y, w, h]` in image pixels), with the text reconstructed by LaMa.
+    /// (`[x, y, w, h]` in image pixels), with the text reconstructed by the
+    /// engine's backend.
     pub fn run_blocking(
         &self,
         path: &str,
@@ -70,11 +109,18 @@ impl Engine {
             .decode()
             .map_err(|e| format!("Failed to decode {path}: {e}"))?
             .into_rgba8();
-        let mut session = self
-            .0
-            .lock()
-            .map_err(|e| format!("Inpaint engine lock poisoned: {e}"))?;
-        inpaint_crop(&mut session, &image, rect, quads)
+        match self.backend {
+            InpaintBackend::Telea => telea_inpaint_crop(&image, rect, quads, self.radius),
+            InpaintBackend::Lama => {
+                let mut session = self
+                    .session
+                    .as_ref()
+                    .ok_or("LaMa engine has no session")?
+                    .lock()
+                    .map_err(|e| format!("Inpaint engine lock poisoned: {e}"))?;
+                inpaint_crop(&mut session, &image, rect, quads)
+            }
+        }
     }
 }
 
@@ -335,6 +381,31 @@ fn bbox_crops(patch: RgbaImage, origin: [f32; 2], quads: &[Quad]) -> Vec<(RgbaIm
     crops
 }
 
+/// Inpaints `rect` of `image` with the Telea algorithm from the [`inpaint`]
+/// crate: every pixel covered by the mask quads (or the whole `rect` when
+/// there are none) is rewritten in place from the surrounding pixels, so no
+/// model, canvas or windowing is needed. `radius` is the neighborhood size
+/// the interpolation samples. Returns the same per-mask-box crops as
+/// [`inpaint_crop`], with the alpha channel interpolated like every other
+/// channel (opaque manga pages keep alpha at 255).
+pub fn telea_inpaint_crop(
+    image: &RgbaImage,
+    rect: [f32; 4],
+    quads: &[Quad],
+    radius: i32,
+) -> Result<Vec<(RgbaImage, [f32; 4])>, String> {
+    let [rx, ry, rw, rh] = rect;
+    let [x, y, crop_w, crop_h] =
+        crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
+    let origin = [x as f32, y as f32];
+
+    let mask = build_mask(crop_w, crop_h, quads, origin);
+    let mut crop = image::imageops::crop_imm(image, x, y, crop_w, crop_h).to_image();
+    crop.telea_inpaint(&mask, radius)
+        .map_err(|e| format!("Telea inpaint failed: {e}"))?;
+    Ok(bbox_crops(crop, origin, quads))
+}
+
 /// Inpaints `rect` of `image` with the given box quads masked out, where
 /// `rect` is `[x, y, w, h]` in image pixels. Returns one RGBA crop per mask
 /// box (or a single crop of the whole rect when `quads` is empty), with the
@@ -383,6 +454,52 @@ mod tests {
 
     fn quad(points: [[f32; 2]; 4]) -> Quad {
         Quad { points }
+    }
+
+    #[test]
+    fn telea_inpaint_crop_fills_the_masked_box() {
+        let mut image = RgbaImage::from_pixel(64, 64, Rgba([0, 0, 0, 255]));
+        for y in 20..40 {
+            for x in 20..40 {
+                image.put_pixel(x, y, Rgba([255, 255, 255, 255]));
+            }
+        }
+        let quads = [quad([[20.0, 20.0], [40.0, 20.0], [40.0, 40.0], [20.0, 40.0]])];
+        let patches = telea_inpaint_crop(&image, [0.0, 0.0, 64.0, 64.0], &quads, 5).unwrap();
+        assert_eq!(patches.len(), 1);
+        let (patch, bounds) = &patches[0];
+        assert_eq!(bounds, &[20.0, 20.0, 20.0, 20.0]);
+        assert_eq!(patch.dimensions(), (20, 20));
+        let in_patch = |px: u32, py: u32| {
+            let x = (px - 20).clamp(0, 19);
+            let y = (py - 20).clamp(0, 19);
+            patch.get_pixel(x, y)
+        };
+        assert_eq!(
+            in_patch(30, 30)[0] < 128,
+            true,
+            "the white box center must be rewritten towards the black background"
+        );
+        assert_eq!(
+            in_patch(22, 22)[0] < 128,
+            true,
+            "the box edge is reconstructed from the surrounding pixels too"
+        );
+    }
+
+    #[test]
+    fn telea_inpaint_crop_masks_the_whole_rect_without_quads() {
+        let mut image = RgbaImage::from_pixel(32, 32, Rgba([10, 20, 30, 255]));
+        for y in 0..32 {
+            for x in 0..32 {
+                if (x / 8 + y / 8) % 2 == 0 {
+                    image.put_pixel(x, y, Rgba([200, 200, 200, 255]));
+                }
+            }
+        }
+        let patches = telea_inpaint_crop(&image, [0.0, 0.0, 32.0, 32.0], &[], 3).unwrap();
+        assert_eq!(patches.len(), 1, "an empty quad list returns one whole-rect patch");
+        assert_eq!(patches[0].1, [0.0, 0.0, 32.0, 32.0]);
     }
 
     #[test]

@@ -4,6 +4,8 @@ use iced::widget::text_editor;
 use iced::{Color, Font, Rectangle};
 
 use scanlateit_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
+#[cfg(feature = "inpaint")]
+use scanlateit_model::InpaintBackend;
 use crate::translation::Connection;
 
 use crate::connect::ConnectModal;
@@ -65,14 +67,21 @@ pub trait UiState {
     /// the settings modal (parsed when OCR starts).
     #[cfg(feature = "ocr")]
     fn ocr_workers(&self) -> &str;
+    /// The inpainting backend picked in the settings modal.
+    #[cfg(feature = "inpaint")]
+    fn inpaint_backend(&self) -> InpaintBackend;
+    /// The Telea interpolation radius, as typed in the settings modal
+    /// (parsed when inpainting starts).
+    #[cfg(feature = "inpaint")]
+    fn inpaint_radius(&self) -> &str;
     fn editing(&self) -> Option<(usize, EntryId)>;
     fn editing_origin(&self) -> EditOrigin;
     fn editing_rect(&self) -> Option<Rectangle>;
     fn edit_content(&self) -> Option<&text_editor::Content>;
     fn font(&self) -> Option<Font>;
-    /// The image whose tile is accepting inpainting range drags; `None`
-    /// disables the mode.
-    fn inpaint_mode(&self) -> Option<usize>;
+    /// Whether inpainting range drags are enabled; when `true` a drag on
+    /// any tile selects the range to clean.
+    fn inpaint_mode(&self) -> bool;
     /// Whether the overlay text is drawn over the pages in the main area.
     fn show_overlay_text(&self) -> bool;
     /// Whether applied inpainting patches are drawn over the pages.

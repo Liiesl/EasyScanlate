@@ -4,7 +4,7 @@ use iced::widget::pane_grid;
 use iced::widget::text_editor;
 use iced::{Color, Rectangle};
 
-use scanlateit_model::{EntryId, ProfileId, Quad, TextAlign, TextGradientDir};
+use scanlateit_model::{EntryId, InpaintBackend, ProfileId, Quad, TextAlign, TextGradientDir};
 
 /// The actions offered by the selection decorations around the selected
 /// overlay box in the main area.
@@ -178,6 +178,11 @@ pub enum UiEvent {
     /// The user typed in the OCR detection workers field of the settings
     /// modal; the string is parsed (with a fallback) when OCR starts.
     OcrWorkers(String),
+    /// The user picked an inpainting backend in the settings modal.
+    InpaintBackend(InpaintBackend),
+    /// The user typed in the Telea radius field of the settings modal; the
+    /// string is parsed (with a fallback) when inpainting starts.
+    InpaintRadius(String),
     /// The user dragged the divider between the main area and the side panel.
     PanelResized(pane_grid::ResizeEvent),
     /// Open the settings modal from the toolbar.

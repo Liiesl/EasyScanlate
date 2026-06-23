@@ -190,7 +190,7 @@ fn build_viewer<'a, S: UiState + ?Sized>(
     if original {
         viewer = viewer
             .on_entry_clicked(UiEvent::EntryClicked)
-            .inpaint_mode(None)
+            .inpaint_mode(false)
             .show_inpaint(false)
             .show_overlay_text(false)
             .show_scrollbar(false);

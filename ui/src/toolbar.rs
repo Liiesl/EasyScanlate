@@ -42,7 +42,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     .padding(4)
     .on_press_maybe(can_toggle.then_some(UiEvent::ToggleInpaintLayer));
 
-    let inpaint_active = state.inpaint_mode().is_some();
+    let inpaint_active = state.inpaint_mode();
     let inpaint = button(
         text(if inpaint_active {
             "Cancel Inpaint"

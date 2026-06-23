@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 image = "0.25"
 imageproc = "0.25"
+inpaint = { version = "0.1", features = ["image"] }
 ndarray = "0.17"
 ort = "2.0.0-rc.12"
 scanlateit-model = { path = "../model" }

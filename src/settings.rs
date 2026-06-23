@@ -8,6 +8,8 @@ use std::path::PathBuf;
 
 #[cfg(feature = "translation")]
 use scanlateit_translation::Connection;
+#[cfg(feature = "inpaint")]
+use scanlateit_model::InpaintBackend;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -36,6 +38,20 @@ pub struct Settings {
     #[cfg(feature = "translation")]
     #[serde(default)]
     pub free_models_only: bool,
+    /// Which inpainting implementation is used: the pure-Rust Telea
+    /// algorithm (default) or the LaMa ONNX model.
+    #[cfg(feature = "inpaint")]
+    #[serde(default)]
+    pub inpaint_backend: InpaintBackend,
+    /// The Telea interpolation radius in pixels (ignored by LaMa).
+    #[cfg(feature = "inpaint")]
+    #[serde(default = "default_inpaint_radius")]
+    pub inpaint_radius: u8,
+}
+
+#[cfg(feature = "inpaint")]
+fn default_inpaint_radius() -> u8 {
+    5
 }
 
 #[cfg(feature = "ocr")]
@@ -56,6 +72,10 @@ impl Default for Settings {
             ocr_workers: default_ocr_workers(),
             #[cfg(feature = "translation")]
             free_models_only: false,
+            #[cfg(feature = "inpaint")]
+            inpaint_backend: InpaintBackend::default(),
+            #[cfg(feature = "inpaint")]
+            inpaint_radius: default_inpaint_radius(),
         }
     }
 }
@@ -94,7 +114,12 @@ impl Settings {
 mod tests {
     use super::*;
 
-    #[cfg(all(feature = "translation", feature = "ocr", feature = "styling"))]
+    #[cfg(all(
+        feature = "translation",
+        feature = "ocr",
+        feature = "styling",
+        feature = "inpaint"
+    ))]
     #[test]
     fn settings_round_trips_through_json() {
         let settings = Settings {
@@ -120,6 +145,8 @@ mod tests {
             auto_style_detect: true,
             ocr_workers: 3,
             free_models_only: true,
+            inpaint_backend: InpaintBackend::Lama,
+            inpaint_radius: 7,
         };
         let text = serde_json::to_string(&settings).unwrap();
         let back: Settings = serde_json::from_str(&text).unwrap();
@@ -136,9 +163,16 @@ mod tests {
         assert_eq!(back.auto_style_detect, true);
         assert_eq!(back.ocr_workers, 3);
         assert_eq!(back.free_models_only, true);
+        assert_eq!(back.inpaint_backend, InpaintBackend::Lama);
+        assert_eq!(back.inpaint_radius, 7);
     }
 
-    #[cfg(all(feature = "translation", feature = "ocr", feature = "styling"))]
+    #[cfg(all(
+        feature = "translation",
+        feature = "ocr",
+        feature = "styling",
+        feature = "inpaint"
+    ))]
     #[test]
     fn missing_fields_default() {
         let back: Settings = serde_json::from_str("{}").unwrap();
@@ -147,6 +181,8 @@ mod tests {
         assert_eq!(back.auto_style_detect, false);
         assert_eq!(back.ocr_workers, 2);
         assert_eq!(back.free_models_only, false);
+        assert_eq!(back.inpaint_backend, InpaintBackend::Telea);
+        assert_eq!(back.inpaint_radius, 5);
     }
 
     #[cfg(feature = "translation")]

@@ -12,6 +12,7 @@
 
 pub mod entry;
 pub mod extras;
+pub mod inpaint;
 pub mod ocr_result;
 pub mod profile;
 pub mod project;
@@ -19,6 +20,7 @@ pub mod style;
 
 pub use entry::{EntryId, EntrySource, NewEntry, OcrEntry, Quad};
 pub use extras::{Extras, InpaintPatch};
+pub use inpaint::InpaintBackend;
 pub use ocr_result::OcrResult;
 pub use profile::{ProfileId, Profiles};
 pub use project::Project;

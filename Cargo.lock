@@ -1568,6 +1568,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "151665d9be52f9bb40fc7966565d39666f2d1e69233571b71b87791c7e0528b3"
 
 [[package]]
+name = "glam"
+version = "0.30.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19fc433e8437a212d1b6f1e68c7824af3aed907da60afa994e7f542d18d12aa9"
+
+[[package]]
 name = "glob"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1880,7 +1886,7 @@ version = "0.14.0"
 dependencies = [
  "bitflags 2.13.1",
  "bytes",
- "glam",
+ "glam 0.25.0",
  "lilt",
  "log",
  "num-traits",
@@ -1986,7 +1992,7 @@ dependencies = [
  "bytemuck",
  "cryoglyph",
  "futures",
- "glam",
+ "glam 0.25.0",
  "guillotiere",
  "iced_debug",
  "iced_graphics",
@@ -2155,6 +2161,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "image-ndarray"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "366ec4e7613badea5930852b9fc8781fdbb010a59845a3a5c1cf61d0ccc3f133"
+dependencies = [
+ "image",
+ "ndarray 0.16.1",
+ "num-traits",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "image-webp"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2202,6 +2220,20 @@ checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
+]
+
+[[package]]
+name = "inpaint"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9e2ec4bc21d7568050b8dc1b60093b798adb62e0819ea6bb253699bbea186e7"
+dependencies = [
+ "glam 0.30.10",
+ "image",
+ "image-ndarray",
+ "ndarray 0.16.1",
+ "num-traits",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -2762,6 +2794,21 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "tempfile",
+]
+
+[[package]]
+name = "ndarray"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "882ed72dce9365842bf196bdeedf5055305f11fc8c03dee7bb0194a6cad34841"
+dependencies = [
+ "matrixmultiply",
+ "num-complex",
+ "num-integer",
+ "num-traits",
+ "portable-atomic",
+ "portable-atomic-util",
+ "rawpointer",
 ]
 
 [[package]]
@@ -3408,7 +3455,7 @@ version = "2.0.0-rc.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4336a1e2b38848325241c72889086886004e589b7c74f335e60a8e8db5138a0b"
 dependencies = [
- "ndarray",
+ "ndarray 0.17.2",
  "ort-sys",
  "smallvec",
  "tracing",
@@ -3919,7 +3966,7 @@ dependencies = [
  "anyhow",
  "image",
  "imageproc",
- "ndarray",
+ "ndarray 0.17.2",
  "ort",
  "serde",
  "sha2",
@@ -4485,7 +4532,8 @@ version = "0.1.0"
 dependencies = [
  "image",
  "imageproc",
- "ndarray",
+ "inpaint",
+ "ndarray 0.17.2",
  "ort",
  "scanlateit-model",
 ]
@@ -4493,6 +4541,9 @@ dependencies = [
 [[package]]
 name = "scanlateit-model"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "scanlateit-ocr"
@@ -4508,7 +4559,7 @@ name = "scanlateit-styling"
 version = "0.1.0"
 dependencies = [
  "image",
- "ndarray",
+ "ndarray 0.17.2",
  "ort",
  "scanlateit-model",
 ]

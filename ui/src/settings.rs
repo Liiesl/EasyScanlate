@@ -7,9 +7,14 @@ use iced::widget::{
     button, center, checkbox, column, container, mouse_area, opaque, row, scrollable, space, stack,
     text,
 };
-#[cfg(feature = "ocr")]
+#[cfg(feature = "inpaint")]
+use iced::widget::pick_list;
+#[cfg(any(feature = "ocr", feature = "inpaint"))]
 use iced::widget::text_input;
 use iced::{Color, Element, Fill as FillLength, Length};
+
+#[cfg(feature = "inpaint")]
+use scanlateit_model::InpaintBackend;
 
 use crate::translation::{self, CUSTOM_ANTHROPIC, CUSTOM_OPENAI};
 
@@ -172,6 +177,51 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                 );
                 items.push(
                     text("Parallel OCR detection sessions; 2 fits a potato-laptop CPU.")
+                        .size(11)
+                        .color(MUTED_FG)
+                        .into(),
+                );
+            }
+            #[cfg(feature = "inpaint")]
+            {
+                items.push(
+                    row![
+                        container(text("Inpaint backend").size(12).color(MUTED_FG))
+                            .width(Length::Fixed(150.0)),
+                        pick_list(
+                            [InpaintBackend::Telea, InpaintBackend::Lama],
+                            Some(state.inpaint_backend()),
+                            UiEvent::InpaintBackend,
+                        )
+                        .padding(4)
+                        .text_size(12),
+                    ]
+                    .spacing(6)
+                    .into(),
+                );
+                items.push(
+                    text("Telea (the `inpaint` crate) needs no model and is instant; \
+                          LaMa runs the ONNX model and handles complex backgrounds better.")
+                        .size(11)
+                        .color(MUTED_FG)
+                        .into(),
+                );
+                items.push(
+                    row![
+                        container(text("Telea radius").size(12).color(MUTED_FG))
+                            .width(Length::Fixed(150.0)),
+                        text_input("5", state.inpaint_radius())
+                            .on_input(UiEvent::InpaintRadius)
+                            .padding(4)
+                            .size(12)
+                            .width(Length::Fixed(64.0)),
+                    ]
+                    .spacing(6)
+                    .into(),
+                );
+                items.push(
+                    text("How many pixels around the mask Telea samples; larger \
+                          smooths more but blurs. Ignored by LaMa.")
                         .size(11)
                         .color(MUTED_FG)
                         .into(),

@@ -127,8 +127,8 @@ pub struct TileView<
     /// Called when a button of the selection decorations (the toolbar under
     /// the selected entry's box or the revert button above it) is clicked.
     on_toolbar_action: Option<M>,
-    /// Called when the user finishes dragging an inpainting range on the
-    /// tile whose index matches [`TileView::inpaint_mode`]; the rectangle is
+    /// Called when the user finishes dragging an inpainting range on any
+    /// tile while [`TileView::inpaint_mode`] is enabled; the rectangle is
     /// in image pixels.
     on_inpaint_selection: Option<Q>,
     /// Called when a scrollbar drag or touch pan ends, after the final
@@ -137,9 +137,10 @@ pub struct TileView<
     /// The overlay entry currently being edited with a floating text input;
     /// its drawn overlay is hidden and its viewport rect is published.
     editing: Option<(usize, EntryId)>,
-    /// The image index whose tile accepts inpainting range drags; `None`
-    /// disables the mode. Set by the app from the panel's Inpaint button.
-    inpaint_mode: Option<usize>,
+    /// Whether inpainting range drags are enabled; when `true` a drag on
+    /// any tile selects the range to clean. Set by the app from the
+    /// panel's Inpaint button.
+    inpaint_mode: bool,
     /// Whether applied inpainting patches are drawn over the page rasters.
     show_inpaint: bool,
     /// Whether the overlay text is drawn over the pages; `false` hides only
@@ -191,7 +192,7 @@ where
             on_inpaint_selection: None,
             on_scroll_ended: None,
             editing: None,
-            inpaint_mode: None,
+            inpaint_mode: false,
             show_inpaint: true,
             show_overlay_text: true,
             show_overlay_buttons: true,
@@ -270,17 +271,15 @@ where
         self
     }
 
-    /// Called when the user finishes dragging an inpainting range on the
-    /// tile whose index matches [`Self::inpaint_mode`]; the rectangle is in
-    /// image pixels.
+    /// Called when the user finishes dragging an inpainting range on any
+    /// tile while inpaint mode is enabled; the rectangle is in image pixels.
     pub fn on_inpaint_selection(mut self, f: Q) -> Self {
         self.on_inpaint_selection = Some(f);
         self
     }
 
-    /// Marks the tile that accepts inpainting range drags; `None` disables
-    /// the mode.
-    pub fn inpaint_mode(mut self, inpaint_mode: Option<usize>) -> Self {
+    /// Enables or disables inpainting range drags on any tile.
+    pub fn inpaint_mode(mut self, inpaint_mode: bool) -> Self {
         self.inpaint_mode = inpaint_mode;
         self
     }
@@ -535,9 +534,9 @@ struct TileViewState {
     /// Current keyboard modifiers, cached from `ModifiersChanged` so a press
     /// can tell a plain handle drag from a Ctrl free-transform drag.
     keyboard_modifiers: keyboard::Modifiers,
-    /// The image index whose tile accepts inpainting range drags (`None`
-    /// disables the mode). Mirrors the widget field every frame.
-    inpaint_mode: Option<usize>,
+    /// Whether inpainting range drags are enabled. Mirrors the widget field
+    /// every frame.
+    inpaint_mode: bool,
     /// The last `reveal` request consumed in `layout()`; requests fire once
     /// per selection change.
     last_revealed: Option<(usize, EntryId)>,
@@ -548,9 +547,8 @@ struct TileViewState {
 }
 
 impl TileViewState {
-    /// The mirror of the widget's inpainting mode when the last frame was
-    /// drawn.
-    fn inpaint_mode(&self) -> Option<usize> {
+    /// Whether inpainting range drags are enabled.
+    fn inpaint_mode(&self) -> bool {
         self.inpaint_mode
     }
 }
@@ -567,7 +565,7 @@ impl Default for TileViewState {
             last_click: None,
             last_edit_rect: None,
             keyboard_modifiers: keyboard::Modifiers::default(),
-            inpaint_mode: None,
+            inpaint_mode: false,
             last_revealed: None,
             last_published_offset: None,
         }
@@ -1057,7 +1055,7 @@ fn hit_top_decor(
         tile.overlays.iter().find(|e| e.selected).map(|e| (index, e))
     })?;
     let id = entry.id;
-    if state.inpaint_mode() == Some(index) {
+    if state.inpaint_mode() {
         return None;
     }
     let (_, rect) = selected_rect(tiles, state)?;
@@ -1547,10 +1545,10 @@ fn draw_selection_decorations<'a, F>(
             (entry.bounds[3] - entry.bounds[1]) * scale,
         ),
     );
-    // While inpainting mode is on for this tile, the transform handles and
-    // the rotation knob are hidden so the range drag has an uncluttered
-    // canvas; the panel's Inpaint button toggles the mode back off.
-    if state.inpaint_mode() != Some(tile_index) {
+    // While inpainting mode is on, the transform handles and the rotation
+    // knob are hidden so the range drag has an uncluttered canvas; the
+    // panel's Inpaint button toggles the mode back off.
+    if !state.inpaint_mode() {
         let anchors = handle_anchors(quad);
         for (_, anchor) in anchors {
             let handle = handle_rect(anchor);
@@ -1798,7 +1796,7 @@ where
                             );
                             // The inpainting range marquee, drawn last so it
                             // sits on top of the tile's content.
-                            if state.inpaint_mode() == Some(index) {
+                            if state.inpaint_mode() {
                                 if let Interaction::InpaintSelecting {
                                     index: selecting,
                                     start,
@@ -1918,22 +1916,24 @@ where
                             shell.capture_event();
                             return;
                         }
-                        // Inpainting mode: a drag anywhere on the targeted
-                        // tile selects the range to clean (the scrollbar
-                        // keeps working below).
-                        if let (Some(hover_index), Some(mode_index)) =
-                            (hit_tile(&self.tiles, state, local), self.inpaint_mode)
-                        {
-                            if hover_index == mode_index && !track_rect(bounds).contains(local) {
-                                let (layout, _) = tile_layout(&self.tiles, state.width);
-                                let content = tile_local_point(&layout, mode_index, local, state.offset);
-                                state.interaction = Interaction::InpaintSelecting {
-                                    index: mode_index,
-                                    start: content,
-                                    current: content,
-                                };
-                                shell.capture_event();
-                                return;
+                        // Inpainting mode: a drag anywhere on any tile
+                        // selects the range to clean (the scrollbar keeps
+                        // working below).
+                        if self.inpaint_mode {
+                            if let Some(hover_index) =
+                                hit_tile(&self.tiles, state, local)
+                            {
+                                if !track_rect(bounds).contains(local) {
+                                    let (layout, _) = tile_layout(&self.tiles, state.width);
+                                    let content = tile_local_point(&layout, hover_index, local, state.offset);
+                                    state.interaction = Interaction::InpaintSelecting {
+                                        index: hover_index,
+                                        start: content,
+                                        current: content,
+                                    };
+                                    shell.capture_event();
+                                    return;
+                                }
                             }
                         }
                         if let Some((index, id, hit)) = hit_top_decor(&self.tiles, state, local) {
@@ -2412,7 +2412,7 @@ where
                         if let Some((_, _, handle)) = hit_handle(&self.tiles, state, local) {
                             return handle.cursor();
                         }
-                        if hit_tile(&self.tiles, state, local) == self.inpaint_mode {
+                        if self.inpaint_mode && hit_tile(&self.tiles, state, local).is_some() {
                             return mouse::Interaction::Crosshair;
                         }
                     }
