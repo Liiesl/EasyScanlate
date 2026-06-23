@@ -105,6 +105,7 @@ pub struct TileView<
     M = fn((usize, EntryId, ToolbarAction)) -> Message,
     P = fn() -> Message,
     Q = fn((usize, Rectangle)) -> Message,
+    R = fn(f32) -> Message,
 > where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -114,6 +115,7 @@ pub struct TileView<
     M: Fn((usize, EntryId, ToolbarAction)) -> Message,
     P: Fn() -> Message,
     Q: Fn((usize, Rectangle)) -> Message,
+    R: Fn(f32) -> Message,
 {
     tiles: Vec<TileSpec<'a>>,
     font: Font,
@@ -143,13 +145,28 @@ pub struct TileView<
     /// Whether the overlay text is drawn over the pages; `false` hides only
     /// the text, keeping the boxes and selection decorations interactive.
     show_overlay_text: bool,
+    /// Whether the quick-action Top/Save/Bottom column is drawn and
+    /// interactive. Compare mode shows it on the original pane only, so it
+    /// appears exactly once.
+    show_overlay_buttons: bool,
+    /// Whether the scrollbar is drawn and interactive. Compare mode shows it
+    /// on the current pane only, so it appears exactly once.
+    show_scrollbar: bool,
     /// A request (from a selection change elsewhere in the UI) to scroll the
     /// entry `(index, id)` into view, centered if out of view; `None` when
     /// there is nothing to reveal. Consumed once in `layout()`.
     reveal: Option<(usize, EntryId)>,
+    /// Called whenever the viewport scroll offset changes, with the new
+    /// offset in content pixels; the app mirrors it into the peer pane in
+    /// Compare mode.
+    on_scroll: Option<R>,
+    /// A request to jump the viewport to this content offset (clamped) on
+    /// the next layout; the app feeds the peer pane's published offset here
+    /// to keep Compare panes in sync. Re-applied every frame (idempotent).
+    scroll_to: Option<f32>,
 }
 
-impl<'a, Message, F, G, H, K, L, M, P, Q> TileView<'a, Message, F, G, H, K, L, M, P, Q>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R> TileView<'a, Message, F, G, H, K, L, M, P, Q, R>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -159,6 +176,7 @@ where
     M: Fn((usize, EntryId, ToolbarAction)) -> Message,
     P: Fn() -> Message,
     Q: Fn((usize, Rectangle)) -> Message,
+    R: Fn(f32) -> Message,
 {
     pub fn new(tiles: Vec<TileSpec<'a>>, font: Font) -> Self {
         Self {
@@ -176,7 +194,11 @@ where
             inpaint_mode: None,
             show_inpaint: true,
             show_overlay_text: true,
+            show_overlay_buttons: true,
+            show_scrollbar: true,
             reveal: None,
+            on_scroll: None,
+            scroll_to: None,
         }
     }
 
@@ -233,6 +255,21 @@ where
         self
     }
 
+    /// Called whenever the viewport scroll offset changes, with the new
+    /// offset in content pixels.
+    pub fn on_scroll(mut self, f: R) -> Self {
+        self.on_scroll = Some(f);
+        self
+    }
+
+    /// Requests that the viewport be scrolled to this content offset on the
+    /// next layout (clamped to the content); idempotent, so it is safe to
+    /// feed every frame.
+    pub fn scroll_to(mut self, offset: f32) -> Self {
+        self.scroll_to = Some(offset);
+        self
+    }
+
     /// Called when the user finishes dragging an inpainting range on the
     /// tile whose index matches [`Self::inpaint_mode`]; the rectangle is in
     /// image pixels.
@@ -259,6 +296,21 @@ where
     /// text, keeping the boxes and selection decorations interactive.
     pub fn show_overlay_text(mut self, show_overlay_text: bool) -> Self {
         self.show_overlay_text = show_overlay_text;
+        self
+    }
+
+    /// Controls whether the quick-action Top/Save/Bottom column is drawn and
+    /// interactive. Compare mode shows it on the original pane only, so it
+    /// appears exactly once.
+    pub fn show_overlay_buttons(mut self, show_overlay_buttons: bool) -> Self {
+        self.show_overlay_buttons = show_overlay_buttons;
+        self
+    }
+
+    /// Controls whether the scrollbar is drawn and interactive. Compare mode
+    /// shows it on the current pane only, so it appears exactly once.
+    pub fn show_scrollbar(mut self, show_scrollbar: bool) -> Self {
+        self.show_scrollbar = show_scrollbar;
         self
     }
 
@@ -489,6 +541,10 @@ struct TileViewState {
     /// The last `reveal` request consumed in `layout()`; requests fire once
     /// per selection change.
     last_revealed: Option<(usize, EntryId)>,
+    /// The last scroll offset published through `on_scroll`; publishing only
+    /// fires on real changes so mirrored panes converge instead of
+    /// ping-ponging.
+    last_published_offset: Option<f32>,
 }
 
 impl TileViewState {
@@ -513,6 +569,7 @@ impl Default for TileViewState {
             keyboard_modifiers: keyboard::Modifiers::default(),
             inpaint_mode: None,
             last_revealed: None,
+            last_published_offset: None,
         }
     }
 }
@@ -584,6 +641,25 @@ fn publish_visible<'a, Message, F>(
         state.last_visible = range.clone();
         if let (Some(range), Some(callback)) = (range, on_visible_range.as_ref()) {
             shell.publish(callback(range));
+        }
+    }
+}
+
+/// Publishes the current scroll offset through `on_scroll` whenever it
+/// changes; the app mirrors it into the peer pane in Compare mode. Only
+/// fires on real changes, so two panes mirroring each other converge and
+/// never ping-pong.
+fn publish_offset<'a, Message, R>(
+    shell: &mut Shell<'_, Message>,
+    state: &mut TileViewState,
+    on_scroll: &Option<R>,
+) where
+    R: Fn(f32) -> Message,
+{
+    if state.last_published_offset != Some(state.offset) {
+        state.last_published_offset = Some(state.offset);
+        if let Some(callback) = on_scroll.as_ref() {
+            shell.publish(callback(state.offset));
         }
     }
 }
@@ -1497,8 +1573,8 @@ fn draw_selection_decorations<'a, F>(
     }
 }
 
-impl<'a, Message, F, G, H, K, L, M, P, Q, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for TileView<'a, Message, F, G, H, K, L, M, P, Q>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for TileView<'a, Message, F, G, H, K, L, M, P, Q, R>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -1508,6 +1584,7 @@ where
     M: Fn((usize, EntryId, ToolbarAction)) -> Message,
     P: Fn() -> Message,
     Q: Fn((usize, Rectangle)) -> Message,
+    R: Fn(f32) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
     fn size(&self) -> Size<Length> {
@@ -1544,6 +1621,13 @@ where
         }
         if state.viewport_height > 0.0 {
             state.offset = state.offset.min((content_height - state.viewport_height).max(0.0));
+        }
+        if let Some(target) = self.scroll_to {
+            let max_offset = (content_height - state.viewport_height).max(0.0);
+            let clamped = target.clamp(0.0, max_offset);
+            if (clamped - state.offset).abs() > f32::EPSILON {
+                state.offset = clamped;
+            }
         }
         layout::Node::new(Size::new(width, limits.max().height))
     }
@@ -1739,7 +1823,7 @@ where
             }
         });
 
-        if state.content_height > visible_bounds.height + 1.0 {
+        if self.show_scrollbar && state.content_height > visible_bounds.height + 1.0 {
             renderer.with_layer(local_bounds, |renderer| {
                 let mut frame = renderer.new_frame(local_bounds);
                 draw_scrollbar(&mut frame, state, local_bounds);
@@ -1747,18 +1831,20 @@ where
             });
         }
 
-        let hovered_button = cursor
-            .position_over(bounds)
-            .map(|position| {
-                let local = Point::new(position.x - bounds.x, position.y - bounds.y);
-                hit_overlay_button(local_bounds, local)
-            })
-            .unwrap_or(None);
-        renderer.with_layer(local_bounds, |renderer| {
-            let mut frame = renderer.new_frame(local_bounds);
-            draw_overlay_buttons(&mut frame, local_bounds, hovered_button);
-            renderer.draw_geometry(frame.into_geometry());
-        });
+        if self.show_overlay_buttons {
+            let hovered_button = cursor
+                .position_over(bounds)
+                .map(|position| {
+                    let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                    hit_overlay_button(local_bounds, local)
+                })
+                .unwrap_or(None);
+            renderer.with_layer(local_bounds, |renderer| {
+                let mut frame = renderer.new_frame(local_bounds);
+                draw_overlay_buttons(&mut frame, local_bounds, hovered_button);
+                renderer.draw_geometry(frame.into_geometry());
+            });
+        }
         });
     }
 
@@ -1819,10 +1905,12 @@ where
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(position) = cursor.position_over(bounds) {
                     let local = local_point(position, bounds);
-                    if let Some(button) = hit_overlay_button(bounds, local) {
-                        state.interaction = Interaction::OverlayButtonPressed { button };
-                        shell.capture_event();
-                        return;
+                    if self.show_overlay_buttons {
+                        if let Some(button) = hit_overlay_button(bounds, local) {
+                            state.interaction = Interaction::OverlayButtonPressed { button };
+                            shell.capture_event();
+                            return;
+                        }
                     }
                     if self.editing.is_none() {
                         if let Some((index, id, action)) = hit_toolbar(&self.tiles, state, local) {
@@ -1913,7 +2001,7 @@ where
                             }
                         }
                     }
-                    if track_rect(bounds).contains(local) {
+                    if self.show_scrollbar && track_rect(bounds).contains(local) {
                         state.interaction = Interaction::ScrollerGrabbed {
                             grab_offset: local.y - thumb_rect(bounds, state).y,
                         };
@@ -2274,6 +2362,7 @@ where
         }
 
         publish_edit_rect(shell, &self.tiles, state, self.editing, &self.on_edit_rect);
+        publish_offset(shell, state, &self.on_scroll);
     }
 
     fn mouse_interaction(
@@ -2305,8 +2394,10 @@ where
                 let bounds = layout.bounds();
                 if let Some(position) = cursor.position_over(bounds) {
                     let local = local_point(position, bounds);
-                    if hit_overlay_button(bounds, local).is_some() {
-                        return mouse::Interaction::Pointer;
+                    if self.show_overlay_buttons {
+                        if hit_overlay_button(bounds, local).is_some() {
+                            return mouse::Interaction::Pointer;
+                        }
                     }
                     if self.editing.is_none() {
                         if hit_toolbar(&self.tiles, state, local).is_some() {
@@ -2325,7 +2416,8 @@ where
                             return mouse::Interaction::Crosshair;
                         }
                     }
-                    if track_rect(bounds).contains(local) || thumb_rect(bounds, state).contains(local)
+                    if self.show_scrollbar
+                        && (track_rect(bounds).contains(local) || thumb_rect(bounds, state).contains(local))
                     {
                         return mouse::Interaction::Pointer;
                     }
@@ -2336,8 +2428,8 @@ where
     }
 }
 
-impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Q: 'a, Theme, Renderer>
-    From<TileView<'a, Message, F, G, H, K, L, M, P, Q>> for Element<'a, Message, Theme, Renderer>
+impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Q: 'a, R: 'a, Theme, Renderer>
+    From<TileView<'a, Message, F, G, H, K, L, M, P, Q, R>> for Element<'a, Message, Theme, Renderer>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -2347,9 +2439,10 @@ where
     M: Fn((usize, EntryId, ToolbarAction)) -> Message,
     P: Fn() -> Message,
     Q: Fn((usize, Rectangle)) -> Message,
+    R: Fn(f32) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
-    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P, Q>) -> Self {
+    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P, Q, R>) -> Self {
         Self::new(view)
     }
 }

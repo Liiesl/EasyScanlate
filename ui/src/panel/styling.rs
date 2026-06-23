@@ -36,22 +36,11 @@ use scanlateit_model::{EntryStyle, TextAlign, TextGradientDir};
 
 use crate::event::{StyleField, UiEvent};
 use crate::main_area::overlay::styled_font;
-use crate::panel::MUTED_FG;
+use crate::segmented::{segment, segmented_group, ACCENT, BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
 use crate::state::UiState;
 
 const SWATCH_SIDE: f32 = 20.0;
 const HINT: &str = "Select a text entry in the image to style it.";
-
-/// Accent color of active segments, tabs and glyphs.
-const ACCENT: Color = Color::from_rgb8(92, 190, 255);
-/// Near-white label color, for active tab labels.
-const TEXT_MAIN: Color = Color::from_rgb8(243, 244, 246);
-/// Fill of inputs and segmented groups (darker than the panel background).
-const INPUT_BG: Color = Color::from_rgb8(20, 20, 25);
-/// Hover / active-segment fill.
-const INPUT_HOVER: Color = Color::from_rgb8(29, 30, 38);
-/// Border of inputs and segmented groups.
-const BORDER: Color = Color::from_rgb8(50, 50, 62);
 
 /// Side of a preset square, in points.
 const PRESET_SIDE: f32 = 56.0;
@@ -78,55 +67,6 @@ fn section_title<'a>(label: &'a str) -> Element<'a, UiEvent> {
 fn field_wrap<'a>(content: Element<'a, UiEvent>, padding: Padding) -> Element<'a, UiEvent> {
     container(content)
         .padding(padding)
-        .width(FillLength)
-        .style(|_theme| container::Style {
-            background: Some(INPUT_BG.into()),
-            border: Border {
-                radius: 4.0.into(),
-                width: 1.0,
-                color: BORDER,
-            },
-            ..container::Style::default()
-        })
-        .into()
-}
-
-/// One cell of a segmented control: equal-width button that lights up with
-/// the accent when `active`. `on_press` is `None` (inert) while no entry
-/// is selected; the disabled state renders identically to the idle one.
-fn segment<'a>(
-    active: bool,
-    glyph: &'a str,
-    on_press: Option<UiEvent>,
-    font: Font,
-) -> Element<'a, UiEvent> {
-    button(text(glyph).size(12).font(font).width(FillLength).center())
-        .width(FillLength)
-        .padding([8, 0])
-        .on_press_maybe(on_press)
-        .style(move |_theme, status: Status| {
-            let hovered = matches!(status, Status::Hovered | Status::Pressed);
-            button::Style {
-                background: (active || hovered).then_some(Background::Color(INPUT_HOVER)),
-                border: Border::default(),
-                shadow: Shadow::default(),
-                text_color: if active {
-                    ACCENT
-                } else if hovered {
-                    TEXT_MAIN
-                } else {
-                    MUTED_FG
-                },
-                ..button::Style::default()
-            }
-        })
-        .into()
-}
-
-/// A bordered pill holding equally-sized [`segment`]s.
-fn segmented_group<'a>(segments: Vec<Element<'a, UiEvent>>) -> Element<'a, UiEvent> {
-    container(row(segments).spacing(2))
-        .padding(2)
         .width(FillLength)
         .style(|_theme| container::Style {
             background: Some(INPUT_BG.into()),

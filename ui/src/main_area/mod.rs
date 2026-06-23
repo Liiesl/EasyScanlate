@@ -6,14 +6,16 @@ pub mod overlay;
 pub mod tile_view;
 
 use iced::keyboard::{key, Key};
-use iced::widget::{container, space, text, text_editor};
+use iced::widget::space::Space;
+use iced::widget::{column, container, row, space, text, text_editor};
 use iced::{Background, Border, Color, Element, Font, Length, Size};
 
 use scanlateit_model::EntryStyle;
 
-use crate::event::{EditOrigin, UiEvent};
+use crate::event::{EditOrigin, MainAreaMode, UiEvent};
 use crate::main_area::overlay::OverlayEntry;
 use crate::main_area::tile_view::{TileSpec, TileView};
+use crate::segmented::{segment, segmented_group};
 use crate::state::UiState;
 
 /// Widget id of the floating inline editor; must match the app's focus id.
@@ -109,16 +111,36 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .height(Length::Fill)
             .into()
     } else {
-        let tiles: Vec<TileSpec<'_>> = state
-            .images()
-            .iter()
-            .enumerate()
-            .map(|(index, image)| TileSpec {
-                source_width: image.width as u32,
-                source_height: image.height as u32,
-                decode: &image.decode,
-                inpaint: &image.inpaint,
-                overlays: image
+        match state.view_mode() {
+            MainAreaMode::View => {
+                let viewer = build_viewer(state, tiles(state, false), false);
+                iced::widget::stack![viewer, edit_overlay(state), mode_switcher(state)].into()
+            }
+            MainAreaMode::Compare => {
+                let left = build_viewer(state, tiles(state, true), true);
+                let right = build_viewer(state, tiles(state, false), false);
+                iced::widget::stack![
+                    row![left, iced::widget::stack![right, edit_overlay(state)]].spacing(2),
+                    mode_switcher(state),
+                ]
+                .into()
+            }
+        }
+    }
+}
+
+/// Builds the tile specs of one viewer pane. `original` strips everything
+/// the compare pane must not show: no inpaint layers, no overlay entries.
+fn tiles<'a, S: UiState + ?Sized>(state: &'a S, original: bool) -> Vec<TileSpec<'a>> {
+    state
+        .images()
+        .iter()
+        .enumerate()
+        .map(|(index, image)| {
+            let overlays: Vec<OverlayEntry<'a>> = if original {
+                Vec::new()
+            } else {
+                image
                     .project
                     .ocr
                     .visible()
@@ -136,12 +158,44 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                         hide_text: state.editing() == Some((index, entry.id))
                             && state.editing_origin() == EditOrigin::Overlay,
                     })
-                    .collect(),
-            })
-            .collect();
-        let viewer = TileView::new(tiles, state.font().unwrap_or(Font::DEFAULT))
-            .on_visible_range(UiEvent::TilesVisible)
-            .on_scroll_ended(|| UiEvent::TileScrollEnded)
+                    .collect()
+            };
+            TileSpec {
+                source_width: image.width as u32,
+                source_height: image.height as u32,
+                decode: &image.decode,
+                inpaint: if original { &[] } else { &image.inpaint },
+                overlays,
+            }
+        })
+        .collect()
+}
+
+/// Builds one `TileView` pane. `original` renders a pure raster pane in
+/// Compare mode: no inpaint, no overlays, no entry interactions, no inpaint
+/// mode, no editing/reveal — but keeps the empty-click (deselect) behavior.
+/// Both panes publish their scroll offset and mirror the peer's via
+/// `viewer_scroll`.
+fn build_viewer<'a, S: UiState + ?Sized>(
+    state: &'a S,
+    tiles: Vec<TileSpec<'a>>,
+    original: bool,
+) -> TileView<'a, UiEvent> {
+    let mut viewer: TileView<'a, UiEvent> = TileView::new(tiles, state.font().unwrap_or(Font::DEFAULT));
+    viewer = viewer
+        .on_visible_range(UiEvent::TilesVisible)
+        .on_scroll_ended(|| UiEvent::TileScrollEnded)
+        .on_scroll(UiEvent::ViewerScroll)
+        .scroll_to(state.viewer_scroll());
+    if original {
+        viewer = viewer
+            .on_entry_clicked(UiEvent::EntryClicked)
+            .inpaint_mode(None)
+            .show_inpaint(false)
+            .show_overlay_text(false)
+            .show_scrollbar(false);
+    } else {
+        viewer = viewer
             .on_entry_clicked(UiEvent::EntryClicked)
             .on_entry_double_clicked(|(index, id)| UiEvent::EntryDoubleClicked((index, id)))
             .on_edit_rect(UiEvent::EditRect)
@@ -151,8 +205,48 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .inpaint_mode(state.inpaint_mode())
             .show_inpaint(state.show_inpaint())
             .show_overlay_text(state.show_overlay_text())
+            .show_overlay_buttons(false)
             .editing(state.editing())
             .reveal(state.selected());
-        iced::widget::stack![viewer, edit_overlay(state)].into()
     }
+    viewer
+}
+
+/// The floating "View | Compare" mode switcher, pinned to the center-top of
+/// the main area. A transparent full-size container so clicks pass through
+/// everywhere except the pill; the pill has a fixed width so the two
+/// segments stay equal cells instead of stretching with the filler spaces.
+fn mode_switcher<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
+    let mode = state.view_mode();
+    let pill = container(segmented_group(vec![
+        segment(
+            mode == MainAreaMode::View,
+            "View",
+            Some(UiEvent::MainAreaMode(MainAreaMode::View)),
+            Font::DEFAULT,
+        ),
+        segment(
+            mode == MainAreaMode::Compare,
+            "Compare",
+            Some(UiEvent::MainAreaMode(MainAreaMode::Compare)),
+            Font::DEFAULT,
+        ),
+    ]))
+    .width(Length::Fixed(180.0))
+    .padding(6);
+    container(
+        column![
+            row![
+                Space::new().width(Length::Fill),
+                pill,
+                Space::new().width(Length::Fill)
+            ],
+            Space::new().height(Length::Fill),
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }

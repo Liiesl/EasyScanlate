@@ -38,6 +38,16 @@ pub enum EditOrigin {
     Panel,
 }
 
+/// The display mode of the main area.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MainAreaMode {
+    /// The single scrollable column with overlays (the default).
+    #[default]
+    View,
+    /// Original (no inpaint/overlay) vs current (with both), side by side.
+    Compare,
+}
+
 /// The color field a styling [`ColorPicker`] edits: the text color, the
 /// stroke (outline) color, or the background color of the selected entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,6 +127,11 @@ pub enum UiEvent {
     ToggleOverlayText,
     /// Toggle showing the applied inpainting patches over the pages.
     ToggleInpaintLayer,
+    /// The user clicked a main-area mode button (View or Compare).
+    MainAreaMode(MainAreaMode),
+    /// A main-area viewer's scroll offset changed; the app mirrors it into
+    /// the peer pane in Compare mode.
+    ViewerScroll(f32),
     /// The user finished dragging an inpainting range on `index`'s tile;
     /// `Rectangle` is `(x, y, w, h)` in image pixels.
     InpaintSelection((usize, Rectangle)),

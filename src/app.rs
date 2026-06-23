@@ -30,7 +30,7 @@ use scanlateit_ui::loaded::InpaintLayer;
 use scanlateit_ui::main_area::decode::{DecodedPage, PageDecode, Scheduler, Tier};
 use scanlateit_ui::panel::results::scroll_to_row;
 use scanlateit_ui::{
-    event::{EditOrigin, SettingsTab, StyleField, ToolbarAction, UiEvent},
+    event::{EditOrigin, MainAreaMode, SettingsTab, StyleField, ToolbarAction, UiEvent},
     main_area, panel, settings as settings_modal, toolbar, ConnectModal, KOREAN_FONT_NAME,
     KOREAN_FONT_PATH, LoadedImage, UiState,
 };
@@ -156,6 +156,13 @@ pub struct App {
     pub(crate) show_overlay_text: bool,
     /// Whether applied inpainting patches are drawn over the pages.
     pub(crate) show_inpaint: bool,
+    /// The display mode of the main area: the single overlay column or the
+    /// original-vs-current side-by-side comparison.
+    pub(crate) view_mode: MainAreaMode,
+    /// The latest scroll offset published by a main-area viewer, in content
+    /// pixels; in Compare mode the panes mirror each other through it, and
+    /// switching modes keeps the scroll position.
+    pub(crate) viewer_scroll: f32,
     /// Auto style-detection bookkeeping: the lazily-built classifier engine,
     /// the in-flight build flag and the `(image index, entry id)` pairs
     /// already classified (see [`JobTracker`]).
@@ -267,6 +274,8 @@ impl App {
             inpaint_mode: None,
             show_overlay_text: true,
             show_inpaint: true,
+            view_mode: MainAreaMode::View,
+            viewer_scroll: 0.0,
             #[cfg(feature = "styling")]
             styling: JobTracker::new(),
             auto_style_detect: false,
@@ -529,6 +538,14 @@ impl UiState for App {
         self.show_inpaint
     }
 
+    fn view_mode(&self) -> MainAreaMode {
+        self.view_mode
+    }
+
+    fn viewer_scroll(&self) -> f32 {
+        self.viewer_scroll
+    }
+
     fn settings_open(&self) -> bool {
         self.settings_open
     }
@@ -709,6 +726,19 @@ for c in text.chars() {
             [0.0, 0.0, 10.0, 10.0],
             "dragging must never touch the OCR quad"
         );
+    }
+
+    #[test]
+    fn switching_main_area_mode_updates_state() {
+        let (mut app, _id) = app_with_entry();
+        assert_eq!(app.view_mode, MainAreaMode::View);
+
+        let _ = update(&mut app, Message::Ui(UiEvent::MainAreaMode(MainAreaMode::Compare)));
+        assert_eq!(app.view_mode, MainAreaMode::Compare);
+        assert!(app.status.contains("Compare mode"));
+
+        let _ = update(&mut app, Message::Ui(UiEvent::MainAreaMode(MainAreaMode::View)));
+        assert_eq!(app.view_mode, MainAreaMode::View);
     }
 
     #[test]
@@ -2190,6 +2220,21 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 "Inpaint layer hidden."
             }
             .to_string();
+            Task::none()
+        }
+        Message::Ui(UiEvent::MainAreaMode(mode)) => {
+            app.view_mode = mode;
+            app.status = match mode {
+                MainAreaMode::View => "View mode: single column with overlay.".to_string(),
+                MainAreaMode::Compare => {
+                    "Compare mode: original (left) vs current (right), scrolling in sync."
+                        .to_string()
+                }
+            };
+            Task::none()
+        }
+        Message::Ui(UiEvent::ViewerScroll(offset)) => {
+            app.viewer_scroll = offset;
             Task::none()
         }
         Message::Ui(UiEvent::EntryToolbar((index, id, action))) => match action {

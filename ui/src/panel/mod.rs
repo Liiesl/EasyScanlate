@@ -17,7 +17,7 @@ use crate::event::UiEvent;
 use crate::state::UiState;
 
 pub const PANEL_BG: Color = Color::from_rgb8(34, 36, 44);
-pub const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);
+pub use crate::segmented::MUTED_FG;
 
 /// Width share of the styling column vs the results column (weighted so the
 /// results list keeps each row's two side-by-side boxes readable).

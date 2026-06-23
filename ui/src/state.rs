@@ -7,7 +7,7 @@ use scanlateit_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
 use crate::translation::Connection;
 
 use crate::connect::ConnectModal;
-use crate::event::{EditOrigin, SettingsTab, StyleField};
+use crate::event::{EditOrigin, MainAreaMode, SettingsTab, StyleField};
 use crate::loaded::LoadedImage;
 
 /// Read-only view of the app state that the widgets render from. Implemented
@@ -77,6 +77,12 @@ pub trait UiState {
     fn show_overlay_text(&self) -> bool;
     /// Whether applied inpainting patches are drawn over the pages.
     fn show_inpaint(&self) -> bool;
+    /// The display mode of the main area (single column or side-by-side
+    /// comparison).
+    fn view_mode(&self) -> MainAreaMode;
+    /// The latest scroll offset published by a main-area viewer, in content
+    /// pixels; in Compare mode the panes mirror each other through it.
+    fn viewer_scroll(&self) -> f32;
     /// True while the settings modal is open.
     fn settings_open(&self) -> bool;
     /// The settings tab currently shown in the modal.
