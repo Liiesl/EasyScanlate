@@ -260,6 +260,11 @@ pub struct App {
     pub(crate) presets: StylePresets,
     /// The draggable split between the main area and the side panel.
     pub(crate) panes: pane_grid::State<PaneKind>,
+    // --- Aurora background theme (mirrors ManhwaOCR QSettings keys) ---
+    pub(crate) aurora_color: Color,
+    pub(crate) aurora_blob_count: u8,
+    pub(crate) aurora_is_dark: bool,
+    pub(crate) aurora_schema: u8,
 }
 impl App {
     fn new() -> Self {
@@ -338,6 +343,10 @@ impl App {
                 panes.resize(split, MAIN_AREA_DEFAULT_RATIO);
                 panes
             },
+            aurora_color: Color::from_rgb8(0x3b, 0x06, 0x00),
+            aurora_blob_count: 2,
+            aurora_is_dark: true,
+            aurora_schema: 1,
         }
     }
 }
@@ -577,6 +586,15 @@ impl UiState for App {
 
     fn settings_tab(&self) -> SettingsTab {
         self.settings_tab
+    }
+
+    fn aurora_config(&self) -> scanlateit_ui::background::AuroraConfig {
+        scanlateit_ui::background::AuroraConfig {
+            color: self.aurora_color,
+            blob_count: self.aurora_blob_count,
+            is_dark: self.aurora_is_dark,
+            schema: scanlateit_ui::background::AuroraSchema::from_index(self.aurora_schema),
+        }
     }
 }
 
@@ -1204,6 +1222,15 @@ pub fn boot() -> (App, Task<Message>) {
     {
         app.inpaint_backend = settings.inpaint_backend;
         app.inpaint_radius = settings.inpaint_radius.to_string();
+    }
+    {
+        use scanlateit_ui::background::AuroraConfig;
+        if let Some(col) = AuroraConfig::from_hex(&settings.aurora_color) {
+            app.aurora_color = col;
+        }
+        app.aurora_blob_count = AuroraConfig::clamped_blob_count(settings.aurora_blob_count);
+        app.aurora_is_dark = settings.aurora_is_dark;
+        app.aurora_schema = settings.aurora_schema % 4;
     }
     #[cfg(feature = "translation")]
     let models_task = {
@@ -2571,6 +2598,13 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 inpaint_backend: app.inpaint_backend,
                 #[cfg(feature = "inpaint")]
                 inpaint_radius: app.inpaint_radius.parse().unwrap_or(5).clamp(1, u8::MAX as i32) as u8,
+                aurora_color: {
+                    let [r, g, b, _] = app.aurora_color.into_rgba8();
+                    format!("#{r:02x}{g:02x}{b:02x}")
+                },
+                aurora_blob_count: app.aurora_blob_count,
+                aurora_is_dark: app.aurora_is_dark,
+                aurora_schema: app.aurora_schema,
             };
             if let Err(e) = settings.save() {
                 app.status = e;
@@ -2579,6 +2613,28 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         }
         Message::Ui(UiEvent::SettingsTab(tab)) => {
             app.settings_tab = tab;
+            Task::none()
+        }
+        Message::Ui(UiEvent::AuroraColor(rgba)) => {
+            app.aurora_color = Color::from_rgba8(rgba[0], rgba[1], rgba[2], rgba[3] as f32 / 255.0);
+            Task::none()
+        }
+        Message::Ui(UiEvent::AuroraHex(hex)) => {
+            if let Some(col) = scanlateit_ui::background::AuroraConfig::from_hex(&hex) {
+                app.aurora_color = col;
+            }
+            Task::none()
+        }
+        Message::Ui(UiEvent::AuroraCount(count)) => {
+            app.aurora_blob_count = scanlateit_ui::background::AuroraConfig::clamped_blob_count(count);
+            Task::none()
+        }
+        Message::Ui(UiEvent::AuroraDarkMode(is_dark)) => {
+            app.aurora_is_dark = is_dark;
+            Task::none()
+        }
+        Message::Ui(UiEvent::AuroraSchema(schema)) => {
+            app.aurora_schema = schema % 4;
             Task::none()
         }
         Message::TranslateFinished(jobs, result) => {
@@ -2677,10 +2733,21 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .spacing(2)
         .height(Length::Fill)
         .into();
+    // Global aurora behind everything (mirrors ManhwaOCR AuroraCanvas as centralWidget).
+    // Panels / toolbar are translucent so the blobs show through.
+    let aurora_cfg = scanlateit_ui::background::AuroraConfig {
+        color: app.aurora_color,
+        blob_count: app.aurora_blob_count,
+        is_dark: app.aurora_is_dark,
+        schema: scanlateit_ui::background::AuroraSchema::from_index(app.aurora_schema),
+    };
+    let aurora: Element<'_, UiEvent> =
+        scanlateit_ui::background::AuroraBackground::new(aurora_cfg).view();
+    let base: Element<'_, UiEvent> = iced::widget::Stack::with_children(vec![aurora, content]).into();
     let view: Element<'_, UiEvent> = if app.settings_open {
-        settings_modal::view(app, content)
+        settings_modal::view(app, base)
     } else {
-        content
+        base
     };
     let view: Element<'_, UiEvent> = if app.connect_modal.is_some() {
         scanlateit_ui::connect::view(app, view)

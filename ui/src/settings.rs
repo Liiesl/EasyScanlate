@@ -18,8 +18,10 @@ use scanlateit_model::InpaintBackend;
 
 use crate::translation::{self, CUSTOM_ANTHROPIC, CUSTOM_OPENAI};
 
+use crate::background::AuroraWheel;
 use crate::event::{SettingsTab, UiEvent};
 use crate::panel::PANEL_BG;
+use crate::segmented::{segment, segmented_group};
 use crate::state::UiState;
 
 const MODAL_WIDTH: f32 = 520.0;
@@ -135,6 +137,143 @@ fn custom_row<'a, S: UiState + ?Sized>(
     .spacing(6)
     .align_y(iced::Alignment::Center)
     .into()
+}
+
+/// Appearance tab — port of `ManhwaOCR/app/ui/components/background_settings.AuroraEditorPanel`.
+fn appearance_tab<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
+    let cfg = state.aurora_config();
+    let is_dark = cfg.is_dark;
+    let count = cfg.blob_count;
+    let schema = cfg.schema;
+    let hex = cfg.to_hex();
+
+    // Mode toggle (Light | Dark) — mirrors ManhwaOCR's two-button toggle.
+    let mode_row = segmented_group(vec![
+        segment(
+            !is_dark,
+            "Light",
+            Some(UiEvent::AuroraDarkMode(false)),
+            iced::Font::DEFAULT,
+        ),
+        segment(
+            is_dark,
+            "Dark",
+            Some(UiEvent::AuroraDarkMode(true)),
+            iced::Font::DEFAULT,
+        ),
+    ]);
+
+    // Wheel
+    let wheel = AuroraWheel::new(cfg.clone()).view();
+
+    // Count + schema row — mirrors background_settings.py: minus / "Solid" or "n | Schema" / plus / ⟳
+    let count_label = if count == 1 {
+        "Solid".to_string()
+    } else {
+        format!("{} | {}", count, schema.label())
+    };
+    let dec_btn: Element<'_, UiEvent> = button(text("−").size(14).width(FillLength).center())
+        .width(Length::Fixed(30.0))
+        .height(Length::Fixed(30.0))
+        .padding(0)
+        .on_press_maybe((count > 1).then_some(UiEvent::AuroraCount(count - 1)))
+        .style(|_theme: &iced::Theme, status| {
+            let bg = if status == iced::widget::button::Status::Hovered {
+                Color::from_rgba8(255, 255, 255, 0.30)
+            } else {
+                Color::from_rgba8(255, 255, 255, 0.15)
+            };
+            iced::widget::button::Style {
+                background: Some(bg.into()),
+                border: iced::Border::default().rounded(15.0),
+                text_color: Color::WHITE,
+                ..Default::default()
+            }
+        })
+        .into();
+    let inc_btn: Element<'_, UiEvent> = button(text("+").size(14).width(FillLength).center())
+        .width(Length::Fixed(30.0))
+        .height(Length::Fixed(30.0))
+        .padding(0)
+        .on_press_maybe((count < 5).then_some(UiEvent::AuroraCount(count + 1)))
+        .style(|_theme: &iced::Theme, status| {
+            let bg = if status == iced::widget::button::Status::Hovered {
+                Color::from_rgba8(255, 255, 255, 0.30)
+            } else {
+                Color::from_rgba8(255, 255, 255, 0.15)
+            };
+            iced::widget::button::Style {
+                background: Some(bg.into()),
+                border: iced::Border::default().rounded(15.0),
+                text_color: Color::WHITE,
+                ..Default::default()
+            }
+        })
+        .into();
+    let schema_btn: Element<'_, UiEvent> = button(text("⟳").size(16).width(FillLength).center())
+        .width(Length::Fixed(30.0))
+        .height(Length::Fixed(30.0))
+        .padding(0)
+        .on_press_maybe((count > 1).then_some(UiEvent::AuroraSchema(schema.index().wrapping_add(1) % 4)))
+        .style(|_theme: &iced::Theme, status| {
+            let bg = if status == iced::widget::button::Status::Hovered {
+                Color::from_rgba8(255, 255, 255, 0.30)
+            } else {
+                Color::from_rgba8(255, 255, 255, 0.15)
+            };
+            iced::widget::button::Style {
+                background: Some(bg.into()),
+                border: iced::Border::default().rounded(15.0),
+                text_color: Color::WHITE,
+                ..Default::default()
+            }
+        })
+        .into();
+
+    let count_row: Element<'_, UiEvent> = row![dec_btn, container(text(count_label).size(12).color(Color::WHITE).width(FillLength).center()).width(Length::Fixed(80.0)), inc_btn, space::horizontal(), schema_btn]
+        .spacing(6)
+        .align_y(iced::Alignment::Center)
+        .into();
+
+    let hex_row: Element<'_, UiEvent> = row![
+        container(text("Hex").size(12).color(MUTED_FG)).width(Length::Fixed(40.0)),
+        iced::widget::text_input(&hex, &hex)
+            .on_input(UiEvent::AuroraHex)
+            .padding(4)
+            .size(12)
+            .width(Length::Fixed(100.0)),
+        text(hex.clone()).size(11).color(MUTED_FG),
+    ]
+    .spacing(6)
+    .align_y(iced::Alignment::Center)
+    .into();
+
+    let inner: Element<'_, UiEvent> = column![
+        text("Appearance").size(14),
+        text("Animated aurora background — primary color, blobs, light/dark and color-theory schema (Vibrant / Analogous / Contrast / Neon). Mirrors ManhwaOCR's Background Editor.")
+            .size(11)
+            .color(MUTED_FG),
+        mode_row,
+        container(text("Primary Color").size(13).color(Color::WHITE).width(FillLength).center()).padding(4),
+        container(wheel).center_x(FillLength),
+        hex_row,
+        count_row,
+        text(if count == 1 { "Solid — single color, no blobs." } else { "Blobs blend with radial gradients at card corners/edges; schema shifts hue." })
+            .size(11)
+            .color(MUTED_FG),
+    ]
+    .spacing(10)
+    .into();
+
+    // Wrap in a translucent card like ManhwaOCR's AuroraEditorPanel (rgba 20,20,20,220 + border)
+    container(scrollable(inner).height(Length::Fill))
+        .padding(8)
+        .style(|_theme| container::Style {
+            background: Some(Color::from_rgba8(20, 20, 20, 0.86).into()),
+            border: iced::Border::default().rounded(12).color(Color::from_rgba8(255, 255, 255, 0.15)).width(1),
+            ..Default::default()
+        })
+        .into()
 }
 
 /// The field area of the currently selected tab.
@@ -273,6 +412,7 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             );
             scrollable(column(rows).spacing(4)).into()
         }
+        SettingsTab::Appearance => appearance_tab(state),
     }
 }
 
@@ -297,6 +437,7 @@ pub fn view<'a, S: UiState + ?Sized>(
                 container(
                     column![
                         tab_button(state, SettingsTab::General, "General"),
+                        tab_button(state, SettingsTab::Appearance, "Appearance"),
                         tab_button(state, SettingsTab::Translation, "Translation"),
                     ]
                     .spacing(4)

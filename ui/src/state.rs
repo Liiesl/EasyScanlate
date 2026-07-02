@@ -96,4 +96,6 @@ pub trait UiState {
     fn settings_open(&self) -> bool;
     /// The settings tab currently shown in the modal.
     fn settings_tab(&self) -> SettingsTab;
+    /// Aurora background theme config (global window background behind panels).
+    fn aurora_config(&self) -> crate::background::AuroraConfig;
 }

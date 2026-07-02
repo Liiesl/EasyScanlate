@@ -22,8 +22,10 @@ pub enum ToolbarAction {
 /// The tabs shown inside the settings modal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsTab {
-    /// Placeholder tab; nothing configurable yet.
+    /// General tunables (OCR workers, inpaint backend, ...).
     General,
+    /// Aurora background appearance (color, blobs, schema, light/dark).
+    Appearance,
     /// Machine-translation settings (API key).
     Translation,
 }
@@ -194,4 +196,14 @@ pub enum UiEvent {
     SettingsClose,
     /// Switch the visible settings tab.
     SettingsTab(SettingsTab),
+    /// Aurora background: primary color picked on the wheel (rgba 0..255).
+    AuroraColor([u8; 4]),
+    /// Aurora background: number of blobs (1..=5).
+    AuroraCount(u8),
+    /// Aurora background: dark (`true`) vs light (`false`) theme.
+    AuroraDarkMode(bool),
+    /// Aurora background: color-theory schema 0..3.
+    AuroraSchema(u8),
+    /// Aurora background: direct hex input (e.g. "#3b0600").
+    AuroraHex(String),
 }

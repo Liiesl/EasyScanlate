@@ -11,6 +11,19 @@ use scanlateit_translation::Connection;
 #[cfg(feature = "inpaint")]
 use scanlateit_model::InpaintBackend;
 
+fn default_aurora_color() -> String {
+    "#3b0600".to_string()
+}
+fn default_aurora_blob_count() -> u8 {
+    2
+}
+fn default_aurora_is_dark() -> bool {
+    true
+}
+fn default_aurora_schema() -> u8 {
+    1
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     /// Stored translation connections, keyed by provider id (`openai`,
@@ -47,6 +60,18 @@ pub struct Settings {
     #[cfg(feature = "inpaint")]
     #[serde(default = "default_inpaint_radius")]
     pub inpaint_radius: u8,
+    /// Aurora background theme: hex color like "#3b0600" (persisted as string for readability).
+    #[serde(default = "default_aurora_color")]
+    pub aurora_color: String,
+    /// Number of aurora blobs (1..=5). 1 = solid overlay.
+    #[serde(default = "default_aurora_blob_count")]
+    pub aurora_blob_count: u8,
+    /// Whether the aurora is in dark mode (dims base, brighter blobs).
+    #[serde(default = "default_aurora_is_dark")]
+    pub aurora_is_dark: bool,
+    /// Color-theory schema 0=Vibrant,1=Analogous,2=Contrast,3=Neon.
+    #[serde(default = "default_aurora_schema")]
+    pub aurora_schema: u8,
 }
 
 #[cfg(feature = "inpaint")]
@@ -76,6 +101,10 @@ impl Default for Settings {
             inpaint_backend: InpaintBackend::default(),
             #[cfg(feature = "inpaint")]
             inpaint_radius: default_inpaint_radius(),
+            aurora_color: default_aurora_color(),
+            aurora_blob_count: default_aurora_blob_count(),
+            aurora_is_dark: default_aurora_is_dark(),
+            aurora_schema: default_aurora_schema(),
         }
     }
 }
@@ -147,6 +176,10 @@ mod tests {
             free_models_only: true,
             inpaint_backend: InpaintBackend::Lama,
             inpaint_radius: 7,
+            aurora_color: "#112233".to_string(),
+            aurora_blob_count: 4,
+            aurora_is_dark: false,
+            aurora_schema: 2,
         };
         let text = serde_json::to_string(&settings).unwrap();
         let back: Settings = serde_json::from_str(&text).unwrap();
@@ -165,6 +198,10 @@ mod tests {
         assert_eq!(back.free_models_only, true);
         assert_eq!(back.inpaint_backend, InpaintBackend::Lama);
         assert_eq!(back.inpaint_radius, 7);
+        assert_eq!(back.aurora_color, "#112233");
+        assert_eq!(back.aurora_blob_count, 4);
+        assert_eq!(back.aurora_is_dark, false);
+        assert_eq!(back.aurora_schema, 2);
     }
 
     #[cfg(all(
@@ -183,6 +220,10 @@ mod tests {
         assert_eq!(back.free_models_only, false);
         assert_eq!(back.inpaint_backend, InpaintBackend::Telea);
         assert_eq!(back.inpaint_radius, 5);
+        assert_eq!(back.aurora_color, "#3b0600");
+        assert_eq!(back.aurora_blob_count, 2);
+        assert_eq!(back.aurora_is_dark, true);
+        assert_eq!(back.aurora_schema, 1);
     }
 
     #[cfg(feature = "translation")]
