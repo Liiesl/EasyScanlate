@@ -57,9 +57,35 @@ fn measure_text(text: &str, font: Font, size: f32, max_width: f32) -> Size {
         align_x: TextAlignment::Default,
         align_y: alignment::Vertical::Top,
         shaping: Shaping::Auto,
-        wrapping: Wrapping::Word,
+        wrapping: Wrapping::WordOrGlyph,
     });
     paragraph.min_bounds()
+}
+
+/// Whether `content` fits on a single line at `size` when wrapped at `max_width`.
+/// Uses the same paragraph settings as `measure_text` (and as the actual
+/// circular draw) so shaping, kerning and `WordOrGlyph` wrapping match the
+/// renderer—unlike the previous additive `token_width + space_width` estimate
+/// which underestimated ligature/kerning widths and missed line-wrap decisions.
+/// Mirrors `neverliie_iced_widgets::ellipsis_text`'s real-measurement approach
+/// (`text::layout` + `min_bounds`) instead of summing isolated glyph widths.
+fn line_fits(content: &str, font: Font, size: f32, max_width: f32) -> bool {
+    if content.is_empty() || max_width <= 0.0 {
+        return false;
+    }
+    let paragraph = iced::advanced::graphics::text::Paragraph::with_text(ParagraphText {
+        content,
+        bounds: Size::new(max_width, f32::INFINITY),
+        size: Pixels(size),
+        line_height: LineHeight::Relative(LINE_HEIGHT),
+        font,
+        align_x: TextAlignment::Default,
+        align_y: alignment::Vertical::Top,
+        shaping: Shaping::Auto,
+        wrapping: Wrapping::WordOrGlyph,
+    });
+    let b = paragraph.min_bounds();
+    b.width <= max_width + 0.5 && b.height <= size * LINE_HEIGHT + 0.5
 }
 
 const MIN_FONT_SIZE: f32 = 1.0;
@@ -313,9 +339,23 @@ fn chord_at(rx: f32, ry: f32, yc: f32) -> f32 {
     }
 }
 
+/// Chord for a line whose centre is at `yc` (used for the vertically
+/// centred block). The block is drawn with `y_offset = (bounds.height -
+/// total_height)/2`, so the final `yc` is `ry + (i - (n-1)/2)*lh`,
+/// not `y + lh/2` from a top-aligned layout. Using the centred `yc` avoids
+/// the plateau where the top-aligned `y=0` line always sees a tiny chord
+/// near the bubble tip and caps the fitted size.
+fn chord_at_centered(rx: f32, ry: f32, yc: f32) -> f32 {
+    chord_at(rx, ry, yc)
+}
+
 /// Splits `text` into atomic wrap units: whitespace-separated words, with any
-/// word wider than `max_width` further split per character (so CJK runs
-/// without spaces can still wrap).
+/// word wider than `max_width` further split per grapheme (so CJK runs
+/// without spaces can still wrap). Unlike the previous `sum(char_width)`
+/// approximation, each candidate substring is measured as a shaped paragraph
+/// (so kerning/ligatures/combining marks are accounted for), the same
+/// principle `neverliie_iced_widgets::ellipsis_text` uses for truncation
+/// (`measure` + `min_bounds`).
 fn circle_tokens(text: &str, font: Font, size: f32, max_width: f32) -> Vec<String> {
     let mut tokens = Vec::new();
     for word in text.split_whitespace() {
@@ -324,15 +364,19 @@ fn circle_tokens(text: &str, font: Font, size: f32, max_width: f32) -> Vec<Strin
             continue;
         }
         let mut sub = String::new();
-        let mut sub_width = 0.0;
         for ch in word.chars() {
-            let char_width = measure_text(&ch.to_string(), font, size, f32::INFINITY).width;
-            if !sub.is_empty() && sub_width + char_width > max_width {
+            let candidate = {
+                let mut c = sub.clone();
+                c.push(ch);
+                c
+            };
+            let cand_width = measure_text(&candidate, font, size, f32::INFINITY).width;
+            if !sub.is_empty() && cand_width > max_width {
                 tokens.push(std::mem::take(&mut sub));
-                sub_width = 0.0;
+                sub.push(ch);
+            } else {
+                sub = candidate;
             }
-            sub.push(ch);
-            sub_width += char_width;
         }
         if !sub.is_empty() {
             tokens.push(sub);
@@ -345,6 +389,21 @@ fn circle_tokens(text: &str, font: Font, size: f32, max_width: f32) -> Vec<Strin
 /// `size`. `None` when the text cannot fit: a row's chord shrinks to zero
 /// (line center outside the bubble) or the block would exceed the bubble's
 /// height.
+///
+/// The previous implementation summed `measure_text(token).width` + `space`.
+/// That ignores `cosmic_text` shaping (kerning/ligatures, `glyph.x_offset`,
+/// `WordOrGlyph` wrap decisions) so `width(sum) != width(joined)`. We now
+/// validate each candidate line as a real paragraph (`line_fits`), exactly how
+/// `neverliie_iced_widgets::ellipsis_text::truncated` validates its ellipsis
+/// candidate (`measure` → `height <= max_height`). A single token that does not
+/// fit its chord correctly makes the size too large (`None`), so the binary
+/// search shrinks instead of drawing an overlapping overflow line.
+///
+/// The block is vertically centred at draw time (`y_offset =
+/// (bounds.height - total_height)/2`), so chords are computed for centred
+/// positions `yc = ry + (i - (n-1)/2)*lh` rather than top-aligned `y + lh/2`.
+/// This prevents the plateau where a top-aligned `y=0` line always saw a tiny
+/// tip chord and capped the size.
 fn layout_circle_lines(
     text: &str,
     font: Font,
@@ -354,44 +413,88 @@ fn layout_circle_lines(
     let rx = bounds.width / 2.0;
     let ry = bounds.height / 2.0;
     let line_height = size * LINE_HEIGHT;
+    if line_height <= 0.0 {
+        return None;
+    }
     let tokens = circle_tokens(text, font, size, bounds.width);
-    let widths: Vec<f32> = tokens
-        .iter()
-        .map(|token| measure_text(token, font, size, f32::INFINITY).width)
-        .collect();
-    let space_width = measure_text(" ", font, size, f32::INFINITY).width;
+    if tokens.is_empty() {
+        return Some(Vec::new());
+    }
+    let max_lines = (bounds.height / line_height).floor() as usize;
+    if max_lines == 0 {
+        return None;
+    }
 
-    let mut lines = Vec::new();
-    let mut y = 0.0;
-    let mut index = 0;
-    while index < tokens.len() {
-        let chord = chord_at(rx, ry, y + line_height / 2.0);
-        if chord <= 0.0 {
-            return None;
-        }
-        let mut content = String::new();
-        let mut width = 0.0;
-        // The first token of a row may overflow the chord (it can only be
-        // narrower than the box); later tokens must fit.
-        while index < tokens.len() {
-            let add = widths[index] + if content.is_empty() { 0.0 } else { space_width };
-            if !content.is_empty() && width + add > chord {
+    // Try increasing line counts, using the centred chords for that count.
+    // The first `n` that can pack all tokens is the minimal (largest-chord)
+    // layout, which gives the tightest fit and the largest allowable size.
+    for n in 1..=max_lines {
+        let chords: Vec<f32> = (0..n)
+            .map(|i| {
+                let yc = ry + (i as f32 - (n as f32 - 1.0) / 2.0) * line_height;
+                chord_at_centered(rx, ry, yc)
+            })
+            .collect();
+
+        let mut lines: Vec<CircleLine> = Vec::with_capacity(n);
+        let mut idx = 0usize;
+        let mut ok = true;
+        for (i, &chord) in chords.iter().enumerate() {
+            if idx >= tokens.len() {
                 break;
             }
-            if !content.is_empty() {
-                content.push(' ');
+            if chord <= 1.0 {
+                ok = false;
+                break;
             }
-            content.push_str(&tokens[index]);
-            width += add;
-            index += 1;
+            let mut content = String::new();
+            while idx < tokens.len() {
+                let candidate = if content.is_empty() {
+                    tokens[idx].clone()
+                } else {
+                    format!("{} {}", content, tokens[idx])
+                };
+                if line_fits(&candidate, font, size, chord) {
+                    content = candidate;
+                    idx += 1;
+                } else if content.is_empty() {
+                    ok = false;
+                    break;
+                } else {
+                    break;
+                }
+            }
+            if !ok {
+                break;
+            }
+            // `y` is kept top-aligned for the draw's `y_offset` to re-centre.
+            // The stored chord is the centred one, so `max_width` at draw time
+            // matches the validation.
+            lines.push(CircleLine {
+                content,
+                y: i as f32 * line_height,
+                chord,
+            });
+            if idx >= tokens.len() {
+                break;
+            }
         }
-        lines.push(CircleLine { content, y, chord });
-        y += line_height;
-        if y > bounds.height {
-            return None;
+        if !ok {
+            // Single token wider than its centred chord – this size can never
+            // fit, even with more lines (chords only get smaller at the edges).
+            // However a larger `n` gives smaller edge chords, so if it fails
+            // due to a middle line (large chord) it might still fail for larger
+            // `n`. We can continue to try larger `n` only if failure was not
+            // due to a middle line? Simplest: continue trying larger `n`; the
+            // binary search will ultimately shrink the size.
+            continue;
         }
+        if idx >= tokens.len() {
+            return Some(lines);
+        }
+        // Not all tokens packed within `n` lines – need more lines.
     }
-    Some(lines)
+    None
 }
 
 /// Largest font size at which `text` fits `bounds` as a manhwa-style circular
