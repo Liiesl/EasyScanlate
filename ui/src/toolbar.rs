@@ -8,7 +8,6 @@ use iced::{Element, Length};
 
 use crate::event::UiEvent;
 use crate::state::UiState;
-use crate::panel::PANEL_BG;
 
 /// Fixed width of the toolbar, in pixels.
 pub const TOOLBAR_WIDTH: f32 = 76.0;
@@ -70,7 +69,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         .width(Length::Fixed(TOOLBAR_WIDTH))
         .height(Length::Fill)
         .style(|_theme| container::Style {
-            background: Some(PANEL_BG.into()),
+            background: None,
             ..container::Style::default()
         })
         .into()

@@ -51,11 +51,30 @@ const IMAGE_FILTERS: &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "webp", "ti
 /// of its previous ~1120px default.
 const MAIN_AREA_DEFAULT_RATIO: f32 = 0.26;
 
+/// Default share of the styling panel vs the results panel inside the side pane.
+const STYLING_DEFAULT_RATIO: f32 = 0.36;
+
+/// Transparent gap shown between every top-level component (toolbar / main area / action / styling / results).
+const GAP: f32 = 12.0;
+
+/// Corner radius of the floating panel cards.
+const CARD_RADIUS: f32 = 12.0;
+
+/// Padding around the whole app window — shows the aurora as an outer frame.
+const OUTER_PADDING: f32 = 10.0;
+
 /// The two panes of the app window: the page viewer and the side panel.
 #[derive(Debug, Clone, Copy)]
 pub enum PaneKind {
     MainArea,
     Panel,
+}
+
+/// The two panes inside the side panel: styling on the left, results/translation on the right.
+#[derive(Debug, Clone, Copy)]
+pub enum SidePaneKind {
+    Styling,
+    Results,
 }
 
 #[derive(Debug, Clone)]
@@ -260,6 +279,8 @@ pub struct App {
     pub(crate) presets: StylePresets,
     /// The draggable split between the main area and the side panel.
     pub(crate) panes: pane_grid::State<PaneKind>,
+    /// The draggable split between the styling panel and the translation/results panel.
+    pub(crate) side_panes: pane_grid::State<SidePaneKind>,
     // --- Aurora background theme (mirrors ManhwaOCR QSettings keys) ---
     pub(crate) aurora_color: Color,
     pub(crate) aurora_blob_count: u8,
@@ -341,6 +362,14 @@ impl App {
                     .split(pane_grid::Axis::Vertical, main, PaneKind::Panel)
                     .expect("initial pane split must succeed");
                 panes.resize(split, MAIN_AREA_DEFAULT_RATIO);
+                panes
+            },
+            side_panes: {
+                let (mut panes, styling) = pane_grid::State::new(SidePaneKind::Styling);
+                let (_, split) = panes
+                    .split(pane_grid::Axis::Vertical, styling, SidePaneKind::Results)
+                    .expect("side pane split must succeed");
+                panes.resize(split, STYLING_DEFAULT_RATIO);
                 panes
             },
             aurora_color: Color::from_rgb8(0x3b, 0x06, 0x00),
@@ -2570,6 +2599,10 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.panes.resize(resized.split, resized.ratio);
             Task::none()
         }
+        Message::Ui(UiEvent::SidePanelResized(resized)) => {
+            app.side_panes.resize(resized.split, resized.ratio);
+            Task::none()
+        }
         Message::Ui(UiEvent::SettingsOpen) => {
             app.settings_open = true;
             Task::none()
@@ -2719,18 +2752,86 @@ pub fn subscription(_app: &App) -> Subscription<Message> {
 pub fn view(app: &App) -> Element<'_, Message> {
     let grid: Element<'_, UiEvent> = pane_grid::PaneGrid::new(&app.panes, |_, kind, _| {
         pane_grid::Content::new(match kind {
-            PaneKind::MainArea => main_area::view(app),
-            PaneKind::Panel => panel::view(app),
+            PaneKind::MainArea => {
+                let el: Element<'_, UiEvent> = iced::widget::container(main_area::view(app))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .style(|_theme| iced::widget::container::Style {
+                        background: Some(panel::PANEL_BG.into()),
+                        border: iced::Border::default().rounded(CARD_RADIUS),
+                        ..Default::default()
+                    })
+                    .into();
+                el
+            }
+            PaneKind::Panel => {
+                // Inner split: styling ↔ translation/results, drag resizable with same GAP.
+                let side_grid: Element<'_, UiEvent> =
+                    pane_grid::PaneGrid::new(&app.side_panes, |_, inner, _| {
+                        pane_grid::Content::new(match inner {
+                            SidePaneKind::Styling => {
+                                let el: Element<'_, UiEvent> = iced::widget::container(
+                                    panel::styling::view(app),
+                                )
+                                .padding(10)
+                                .width(Length::Fill)
+                                .height(Length::Fill)
+                                .style(|_theme| iced::widget::container::Style {
+                                    background: Some(panel::PANEL_BG.into()),
+                                    border: iced::Border::default().rounded(CARD_RADIUS),
+                                    ..Default::default()
+                                })
+                                .into();
+                                el
+                            }
+                            SidePaneKind::Results => {
+                                let el: Element<'_, UiEvent> = iced::widget::container(
+                                    panel::results::view(app),
+                                )
+                                .padding(10)
+                                .width(Length::Fill)
+                                .height(Length::Fill)
+                                .style(|_theme| iced::widget::container::Style {
+                                    background: Some(panel::PANEL_BG.into()),
+                                    border: iced::Border::default().rounded(CARD_RADIUS),
+                                    ..Default::default()
+                                })
+                                .into();
+                                el
+                            }
+                        })
+                    })
+                    .spacing(GAP)
+                    .min_size(120)
+                    .on_resize(GAP, UiEvent::SidePanelResized)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into();
+
+                // Action bar is transparent; styling/results are translucent cards with GAP between them.
+                let el: Element<'_, UiEvent> =
+                    iced::widget::column![panel::actions::view(app), side_grid]
+                        .spacing(GAP)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .into();
+                el
+            }
         })
     })
-    .spacing(2)
+    .spacing(GAP)
     .min_size(160)
-    .on_resize(8, UiEvent::PanelResized)
+    .on_resize(GAP, UiEvent::PanelResized)
     .width(Length::Fill)
     .height(Length::Fill)
     .into();
     let content: Element<'_, UiEvent> = iced::widget::row![toolbar::view(app), grid]
-        .spacing(2)
+        .spacing(GAP)
+        .height(Length::Fill)
+        .into();
+    let padded_content: Element<'_, UiEvent> = iced::widget::container(content)
+        .padding(OUTER_PADDING)
+        .width(Length::Fill)
         .height(Length::Fill)
         .into();
     // Global aurora behind everything (mirrors ManhwaOCR AuroraCanvas as centralWidget).
@@ -2743,7 +2844,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
     };
     let aurora: Element<'_, UiEvent> =
         scanlateit_ui::background::AuroraBackground::new(aurora_cfg).view();
-    let base: Element<'_, UiEvent> = iced::widget::Stack::with_children(vec![aurora, content]).into();
+    let base: Element<'_, UiEvent> =
+        iced::widget::Stack::with_children(vec![aurora, padded_content]).into();
     let view: Element<'_, UiEvent> = if app.settings_open {
         settings_modal::view(app, base)
     } else {

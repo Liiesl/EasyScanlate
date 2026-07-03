@@ -22,7 +22,7 @@ use neverliie_iced_widgets::advanced_dropdown::{advanced_dropdown, Item, MenuIte
 
 use crate::event::{EditOrigin, SettingsTab, ToolbarAction, UiEvent};
 use crate::loaded::LoadedImage;
-use crate::panel::MUTED_FG;
+use crate::panel::{MUTED_FG, PANEL_BG};
 use crate::state::UiState;
 use crate::translation;
 use scanlateit_model::{EntryId, OcrEntry, ProfileId};
@@ -199,11 +199,11 @@ fn entry_row<'a, S: UiState + ?Sized>(
     .width(FillLength)
     .padding(ROW_PADDING)
     .style(move |_theme| container::Style {
-        background: selected.then_some(SELECTED_BG.into()),
+        background: Some(PANEL_BG.into()),
         border: Border::default()
             .width(1.0)
             .color(if selected { SELECTED_BORDER } else { ROW_BORDER })
-            .rounded(4.0),
+            .rounded(12.0),
         ..container::Style::default()
     });
 
@@ -400,7 +400,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
 
     column![
         profile_header(state),
-        scrollable(Column::with_children(results_list).spacing(4))
+        scrollable(Column::with_children(results_list).spacing(8))
             .id(PANEL_LIST_ID)
             .height(FillLength)
             .width(FillLength),
