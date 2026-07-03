@@ -2,8 +2,7 @@
 //! once at boot, saved whenever the settings modal closes.
 
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "translation")]
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 #[cfg(feature = "translation")]
@@ -51,6 +50,12 @@ pub struct Settings {
     #[cfg(feature = "translation")]
     #[serde(default)]
     pub free_models_only: bool,
+    /// Per-provider set of hidden model ids (Manage Models overlay). A model
+    /// is hidden by the user to filter unused entries; deprecated models are
+    /// always hidden and never stored here. The basic configuration (empty)
+    /// hides nothing beyond the default latest-per-family filter.
+    #[serde(default)]
+    pub hidden_models: BTreeMap<String, BTreeSet<String>>,
     /// Which inpainting implementation is used: the pure-Rust Telea
     /// algorithm (default) or the LaMa ONNX model.
     #[cfg(feature = "inpaint")]
@@ -97,6 +102,7 @@ impl Default for Settings {
             ocr_workers: default_ocr_workers(),
             #[cfg(feature = "translation")]
             free_models_only: false,
+            hidden_models: BTreeMap::new(),
             #[cfg(feature = "inpaint")]
             inpaint_backend: InpaintBackend::default(),
             #[cfg(feature = "inpaint")]
@@ -174,6 +180,10 @@ mod tests {
             auto_style_detect: true,
             ocr_workers: 3,
             free_models_only: true,
+            hidden_models: BTreeMap::from([(
+                "deepseek".to_string(),
+                BTreeSet::from(["deepseek-reasoner".to_string()]),
+            )]),
             inpaint_backend: InpaintBackend::Lama,
             inpaint_radius: 7,
             aurora_color: "#112233".to_string(),
@@ -196,6 +206,7 @@ mod tests {
         assert_eq!(back.auto_style_detect, true);
         assert_eq!(back.ocr_workers, 3);
         assert_eq!(back.free_models_only, true);
+        assert!(back.hidden_models["deepseek"].contains("deepseek-reasoner"));
         assert_eq!(back.inpaint_backend, InpaintBackend::Lama);
         assert_eq!(back.inpaint_radius, 7);
         assert_eq!(back.aurora_color, "#112233");
@@ -218,6 +229,7 @@ mod tests {
         assert_eq!(back.auto_style_detect, false);
         assert_eq!(back.ocr_workers, 2);
         assert_eq!(back.free_models_only, false);
+        assert!(back.hidden_models.is_empty());
         assert_eq!(back.inpaint_backend, InpaintBackend::Telea);
         assert_eq!(back.inpaint_radius, 5);
         assert_eq!(back.aurora_color, "#3b0600");

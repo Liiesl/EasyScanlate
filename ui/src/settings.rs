@@ -420,6 +420,20 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                     .into(),
             );
             rows.push(
+                row![
+                    text("Filter unused models from the translation dropdown.")
+                        .size(11)
+                        .color(MUTED_FG)
+                        .width(FillLength),
+                    button(text("Manage models…").size(11))
+                        .padding([3, 8])
+                        .on_press(UiEvent::ManageModelsOpen),
+                ]
+                .spacing(6)
+                .align_y(iced::Alignment::Center)
+                .into(),
+            );
+            rows.push(
                 text("Connections are saved to settings.json beside the executable.")
                     .size(11)
                     .color(MUTED_FG)

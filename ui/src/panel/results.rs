@@ -339,7 +339,8 @@ fn translate_bar<'a, S: UiState + ?Sized>(
             .placeholder("Select a model…")
             .searchable(true)
             .text_size(12)
-            .width(FillLength),
+            .width(FillLength)
+            .menu_max_height(280.0),
             text("To:").size(12),
             pick_list(
                 translation::LANGUAGES,

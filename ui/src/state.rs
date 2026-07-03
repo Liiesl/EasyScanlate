@@ -96,6 +96,13 @@ pub trait UiState {
     fn settings_open(&self) -> bool;
     /// The settings tab currently shown in the modal.
     fn settings_tab(&self) -> SettingsTab;
+    /// Whether the Manage Models overlay is open (over the settings modal).
+    fn manage_models_open(&self) -> bool;
+    /// Every connected provider's *all* toggleable models (deprecated already
+    /// removed) grouped by provider – shown in the Manage Models overlay.
+    fn all_model_groups(&self) -> Vec<(String, String, Vec<String>)>;
+    /// Whether `model` of `provider` is currently hidden.
+    fn is_model_hidden(&self, provider: &str, model: &str) -> bool;
     /// Aurora background theme config (global window background behind panels).
     fn aurora_config(&self) -> crate::background::AuroraConfig;
 }

@@ -110,6 +110,22 @@ pub enum UiEvent {
     ConnectModalCancel,
     /// The user toggled the "only free models" filter in the settings modal.
     FreeModelsOnlyToggle(bool),
+    /// Open the Manage Models overlay (over the settings modal).
+    ManageModelsOpen,
+    /// Close the Manage Models overlay.
+    ManageModelsClose,
+    /// Toggle visibility of one model in the Manage Models overlay.
+    ManageModelsToggle {
+        provider: String,
+        model: String,
+        visible: bool,
+    },
+    /// Show all models of one provider again.
+    ManageModelsShowAll(String),
+    /// Hide all models of one provider? No – clear hidden for that provider.
+    ManageModelsReset(String),
+    /// Show all models of all providers.
+    ManageModelsResetAll,
     EntryClicked(Option<(usize, EntryId)>),
     EntryDoubleClicked((usize, EntryId)),
     /// Start the inline text edit from the panel's results list instead of

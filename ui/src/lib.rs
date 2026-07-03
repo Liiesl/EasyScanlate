@@ -10,6 +10,7 @@ pub mod connect;
 pub mod event;
 pub mod loaded;
 pub mod main_area;
+pub mod manage_models;
 pub mod panel;
 pub mod segmented;
 pub mod settings;

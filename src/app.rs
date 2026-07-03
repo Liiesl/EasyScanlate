@@ -233,6 +233,8 @@ pub struct App {
     pub(crate) settings_open: bool,
     /// The settings tab shown inside the modal.
     pub(crate) settings_tab: SettingsTab,
+    /// True while the Manage Models overlay (over the settings modal) is open.
+    pub(crate) manage_models_open: bool,
     /// The currently selected overlay entry as `(image index, entry id)`;
     /// the style panel edits exactly this entry and nothing else.
     pub(crate) selected: Option<(usize, EntryId)>,
@@ -341,6 +343,7 @@ impl App {
             connect_modal: None,
             settings_open: false,
             settings_tab: SettingsTab::General,
+            manage_models_open: false,
             selected: None,
             editing: None,
             editing_origin: EditOrigin::Overlay,
@@ -615,6 +618,18 @@ impl UiState for App {
 
     fn settings_tab(&self) -> SettingsTab {
         self.settings_tab
+    }
+
+    fn manage_models_open(&self) -> bool {
+        self.manage_models_open
+    }
+
+    fn all_model_groups(&self) -> Vec<(String, String, Vec<String>)> {
+        self.tx.all_model_groups()
+    }
+
+    fn is_model_hidden(&self, provider: &str, model: &str) -> bool {
+        self.tx.is_hidden(provider, model)
     }
 
     fn aurora_config(&self) -> scanlateit_ui::background::AuroraConfig {
@@ -1237,7 +1252,15 @@ pub fn boot() -> (App, Task<Message>) {
     {
         app.tx = translation::Session::new(settings.connections, settings.last_provider);
         app.tx.free_only = settings.free_models_only;
+        app.tx.hidden_models = settings.hidden_models.clone();
         app.tx.sync();
+    }
+    #[cfg(all(not(feature = "translation"), feature = "test-ui"))]
+    {
+        // test-ui uses fake translation – still restore hidden models so the
+        // Manage Models overlay persists in that build as well.
+        app.tx.hidden_models = settings.hidden_models.clone();
+        app.tx.sync_models();
     }
     #[cfg(feature = "styling")]
     {
@@ -2244,6 +2267,63 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.tx.set_free_only(enabled);
             Task::none()
         }
+        Message::Ui(UiEvent::ManageModelsOpen) => {
+            app.manage_models_open = true;
+            Task::none()
+        }
+        Message::Ui(UiEvent::ManageModelsClose) => {
+            app.manage_models_open = false;
+            // Persist hidden models together with other settings when the overlay closes.
+            let settings = crate::settings::Settings {
+                #[cfg(feature = "translation")]
+                connections: app.tx.connections.clone(),
+                #[cfg(feature = "translation")]
+                last_provider: (!app.tx.selected_id.is_empty())
+                    .then(|| app.tx.selected_id.clone()),
+                #[cfg(feature = "styling")]
+                auto_style_detect: app.auto_style_detect,
+                #[cfg(feature = "ocr")]
+                ocr_workers: app.ocr_workers.parse().unwrap_or(2),
+                #[cfg(feature = "translation")]
+                free_models_only: app.tx.free_only,
+                hidden_models: app.tx.hidden_models.clone(),
+                #[cfg(feature = "inpaint")]
+                inpaint_backend: app.inpaint_backend,
+                #[cfg(feature = "inpaint")]
+                inpaint_radius: app.inpaint_radius.parse().unwrap_or(5).clamp(1, u8::MAX as i32) as u8,
+                aurora_color: {
+                    let [r, g, b, _] = app.aurora_color.into_rgba8();
+                    format!("#{r:02x}{g:02x}{b:02x}")
+                },
+                aurora_blob_count: app.aurora_blob_count,
+                aurora_is_dark: app.aurora_is_dark,
+                aurora_schema: app.aurora_schema,
+            };
+            if let Err(e) = settings.save() {
+                app.status = e;
+            }
+            Task::none()
+        }
+        Message::Ui(UiEvent::ManageModelsToggle {
+            provider,
+            model,
+            visible,
+        }) => {
+            app.tx.set_model_visible(provider, model, visible);
+            Task::none()
+        }
+        Message::Ui(UiEvent::ManageModelsShowAll(_)) => {
+            // legacy: treat as reset
+            Task::none()
+        }
+        Message::Ui(UiEvent::ManageModelsReset(provider)) => {
+            app.tx.clear_hidden(&provider);
+            Task::none()
+        }
+        Message::Ui(UiEvent::ManageModelsResetAll) => {
+            app.tx.clear_all_hidden();
+            Task::none()
+        }
         Message::Ui(UiEvent::EntryClicked(selection)) => {
             clear_editing(app);
             match selection {
@@ -2652,6 +2732,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         }
         Message::Ui(UiEvent::SettingsClose) => {
             app.settings_open = false;
+            app.manage_models_open = false;
             app.connect_modal = None;
             let settings = crate::settings::Settings {
                 #[cfg(feature = "translation")]
@@ -2665,6 +2746,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 ocr_workers: app.ocr_workers.parse().unwrap_or(2),
                 #[cfg(feature = "translation")]
                 free_models_only: app.tx.free_only,
+                hidden_models: app.tx.hidden_models.clone(),
                 #[cfg(feature = "inpaint")]
                 inpaint_backend: app.inpaint_backend,
                 #[cfg(feature = "inpaint")]
@@ -2891,6 +2973,11 @@ pub fn view(app: &App) -> Element<'_, Message> {
     };
     let view: Element<'_, UiEvent> = if app.connect_modal.is_some() {
         scanlateit_ui::connect::view(app, view)
+    } else {
+        view
+    };
+    let view: Element<'_, UiEvent> = if app.manage_models_open {
+        scanlateit_ui::manage_models::view(app, view)
     } else {
         view
     };

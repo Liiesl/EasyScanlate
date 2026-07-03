@@ -92,11 +92,14 @@ pub const LANGUAGES: [&str; 13] = [
 ];
 
 /// One selectable translation model: its id as shown in the UI and whether
-/// it is free (input or output cost 0).
+/// it is free (input or output cost 0). `family` is the models.dev family
+/// (if any), used to seed the default hidden set (older family members
+/// hidden until the user enables them in Manage Models).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Model {
     pub id: String,
     pub free: bool,
+    pub family: Option<String>,
 }
 
 /// One translation gateway: where to call, which environment variable holds
@@ -190,6 +193,7 @@ fn fallback_models(ids: &[&str]) -> Vec<Model> {
         .map(|id| Model {
             id: (*id).to_string(),
             free: false,
+            family: None,
         })
         .collect()
 }
@@ -420,7 +424,7 @@ pub async fn fetch_local_models(base_url: &str, id: &str) -> Result<Vec<Model>, 
                         .data
                         .into_iter()
                         .filter(|m| !m.id.trim().is_empty())
-                        .map(|m| Model { id: m.id, free: false })
+                        .map(|m| Model { id: m.id, free: false, family: None })
                         .collect();
                     if !ids.is_empty() {
                         ids.sort_by(|a, b| a.id.cmp(&b.id));
@@ -454,7 +458,7 @@ pub async fn fetch_local_models(base_url: &str, id: &str) -> Result<Vec<Model>, 
                         .into_iter()
                         .map(|m| {
                             let name = if !m.name.trim().is_empty() { m.name } else { m.model };
-                            Model { id: name, free: false }
+                            Model { id: name, free: false, family: None }
                         })
                         .filter(|m| !m.id.trim().is_empty())
                         .collect();
@@ -601,6 +605,7 @@ fn custom_fallback_provider(id: &str) -> Provider {
             .map(|m| Model {
                 id: (*m).to_string(),
                 free: false,
+                family: None,
             })
             .collect(),
     }
@@ -646,7 +651,7 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
         // fetched provider already had (empty until fetch completes).
         if let Some(model) = connection.model.clone().filter(|m| !m.trim().is_empty()) {
             if provider.models.is_empty() {
-                provider.models = vec![Model { id: model, free: false }];
+                provider.models = vec![Model { id: model, free: false, family: None }];
             }
         }
         return provider;
@@ -660,9 +665,49 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
         provider.models = vec![Model {
             id: model,
             free: false,
+            family: None,
         }];
     }
     provider
+}
+
+/// Returns every usable model from `listing`: drops deprecated models and
+/// any model that does not output plain text. Free flag preserved, no family
+/// de-duplication – this is the full list shown in the Manage Models overlay.
+pub fn usable_models(listing: &ProviderListing) -> Vec<Model> {
+    let mut out = Vec::new();
+    for (id, info) in &listing.models {
+        if info.status.as_deref() == Some("deprecated") {
+            continue;
+        }
+        if !outputs_text_only(info) {
+            continue;
+        }
+        out.push(Model {
+            id: id.clone(),
+            free: is_free(info),
+            family: info.family.clone(),
+        });
+    }
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    out
+}
+
+/// The ids of usable models that are hidden by the default family filter
+/// (older releases of each paid family). `usable` should be the result of
+/// `usable_models(listing)`; this recomputes the family latest selection to
+/// find the hidden tail. Free models and deprecated (already removed) are
+/// never hidden.
+pub fn default_hidden_ids(listing: &ProviderListing) -> std::collections::BTreeSet<String> {
+    let usable = usable_models(listing);
+    let visible = select_models(listing);
+    let visible_set: std::collections::BTreeSet<String> =
+        visible.into_iter().map(|m| m.id).collect();
+    usable
+        .into_iter()
+        .filter(|m| !m.free && !visible_set.contains(&m.id))
+        .map(|m| m.id)
+        .collect()
 }
 
 /// Applies the listing filters: drops deprecated models and any model that
@@ -684,6 +729,7 @@ fn select_models(listing: &ProviderListing) -> Vec<Model> {
             ids.push(Model {
                 id: id.clone(),
                 free: true,
+                family: info.family.clone(),
             });
             continue;
         }
@@ -699,9 +745,10 @@ fn select_models(listing: &ProviderListing) -> Vec<Model> {
     ids.extend(
         latest
             .into_values()
-            .map(|(id, _)| Model {
+            .map(|(id, info)| Model {
                 id: id.to_string(),
                 free: false,
+                family: info.family.clone(),
             }),
     );
     ids.sort_by(|a, b| a.id.cmp(&b.id));
@@ -1382,7 +1429,8 @@ mod tests {
             select_models(&listing),
             vec![Model {
                 id: "deepseek-v4-flash-free".to_string(),
-                free: true
+                free: true,
+                family: Some("deepseek-flash".to_string())
             }]
         );
     }
@@ -1478,8 +1526,8 @@ mod tests {
             kind: CompatKind::OpenAI,
             api_key_env: "TEST_API_KEY".to_string(),
             models: vec![
-                Model { id: "free-1".to_string(), free: true },
-                Model { id: "paid-1".to_string(), free: false },
+                Model { id: "free-1".to_string(), free: true, family: None },
+                Model { id: "paid-1".to_string(), free: false, family: None },
             ],
         };
         assert_eq!(provider.selectable_models(true), vec!["free-1"]);

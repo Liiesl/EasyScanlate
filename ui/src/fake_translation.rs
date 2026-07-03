@@ -9,7 +9,7 @@
 //! module (or the real one when the `translation` feature is enabled); both
 //! expose the same API surface used by the UI and the app.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::LazyLock;
 
 /// How the provider speaks: OpenAI chat-completions style or the Anthropic
@@ -69,6 +69,7 @@ pub const LANGUAGES: [&str; 13] = [
 pub struct Model {
     pub id: String,
     pub free: bool,
+    pub family: Option<String>,
 }
 
 /// One translation gateway: where to call, which environment variable holds
@@ -150,6 +151,7 @@ fn fallback_models(ids: &[&str]) -> Vec<Model> {
         .map(|id| Model {
             id: (*id).to_string(),
             free: false,
+            family: None,
         })
         .collect()
 }
@@ -346,7 +348,7 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
             .unwrap_or_else(|| provider.api.clone());
         if let Some(model) = connection.model.clone().filter(|m| !m.trim().is_empty()) {
             if provider.models.is_empty() {
-                provider.models = vec![Model { id: model, free: false }];
+                provider.models = vec![Model { id: model, free: false, family: None }];
             }
         }
         return provider;
@@ -360,6 +362,7 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
         provider.models = vec![Model {
             id: model,
             free: false,
+            family: None,
         }];
     }
     provider
@@ -410,6 +413,7 @@ pub struct Session {
     pub selected_model: String,
     /// Free-only filter for the model picker.
     pub free_only: bool,
+    pub hidden_models: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl Session {
@@ -455,6 +459,22 @@ impl Session {
         self.sync_models();
     }
 
+    fn visible_models(&self, provider: &Provider) -> Vec<String> {
+        let mut ids = provider.selectable_models(self.free_only);
+        if let Some(hidden) = self.hidden_models.get(&provider.id) {
+            ids.retain(|id| !hidden.contains(id));
+            if ids.is_empty() && !provider.models.is_empty() {
+                let mut fallback: Vec<String> =
+                    provider.models.iter().map(|m| m.id.clone()).collect();
+                fallback.retain(|id| !hidden.contains(id));
+                if !fallback.is_empty() {
+                    ids = fallback;
+                }
+            }
+        }
+        ids
+    }
+
     /// Rebuilds `models`/`selected_model` for the current provider.
     pub fn sync_models(&mut self) {
         if self.selected_id.is_empty() {
@@ -462,7 +482,6 @@ impl Session {
             self.selected_model = String::new();
             return;
         }
-        let free_only = self.free_only;
         let provider = self
             .fetched
             .get(&self.selected_id)
@@ -473,14 +492,24 @@ impl Session {
                 })
             });
         let models = provider
-            .map(|provider| provider.selectable_models(free_only))
+            .as_ref()
+            .map(|p| self.visible_models(p))
             .unwrap_or_default();
         if models.is_empty() {
+            self.models = Vec::new();
+            self.selected_model = String::new();
             return;
         }
         self.models = models;
         if !self.models.contains(&self.selected_model) {
             self.selected_model = self.models[0].clone();
+        }
+        if let Some(provider) = provider {
+            if let Some(hidden) = self.hidden_models.get_mut(&provider.id) {
+                let valid: BTreeSet<String> =
+                    provider.models.iter().map(|m| m.id.clone()).collect();
+                hidden.retain(|id| valid.contains(id));
+            }
         }
     }
 
@@ -512,10 +541,9 @@ impl Session {
 
     /// Every connected provider's selectable models, in connected order:
     /// `(provider id, display name, model ids)`. The model ids respect the
-    /// free-only filter; providers without selectable models are skipped.
-    /// Mirrors the real module's session.
+    /// free-only filter and hidden set; providers without selectable models
+    /// are skipped. Mirrors the real module's session.
     pub fn model_groups(&self) -> Vec<(String, String, Vec<String>)> {
-        let free_only = self.free_only;
         self.connected_ids
             .iter()
             .filter_map(|id| {
@@ -524,11 +552,61 @@ impl Session {
                         .get(id)
                         .map(|connection| provider_for_connection(id, connection))
                 })?;
-                let models = provider.selectable_models(free_only);
+                let models = self.visible_models(&provider);
                 (!models.is_empty())
                     .then(|| (id.clone(), provider_name(id), models))
             })
             .collect()
+    }
+
+    pub fn all_model_groups(&self) -> Vec<(String, String, Vec<String>)> {
+        self.connected_ids
+            .iter()
+            .filter_map(|id| {
+                let provider = self.fetched.get(id).cloned().or_else(|| {
+                    self.connections
+                        .get(id)
+                        .map(|connection| provider_for_connection(id, connection))
+                })?;
+                let mut ids: Vec<String> =
+                    provider.models.iter().map(|m| m.id.clone()).collect();
+                ids.sort();
+                (!ids.is_empty()).then(|| (id.clone(), provider_name(id), ids))
+            })
+            .collect()
+    }
+
+    pub fn is_hidden(&self, provider: &str, model: &str) -> bool {
+        self.hidden_models
+            .get(provider)
+            .is_some_and(|set| set.contains(model))
+    }
+
+    pub fn set_model_visible(&mut self, provider: String, model: String, visible: bool) {
+        if visible {
+            if let Some(set) = self.hidden_models.get_mut(&provider) {
+                set.remove(&model);
+                if set.is_empty() {
+                    self.hidden_models.remove(&provider);
+                }
+            }
+        } else {
+            self.hidden_models
+                .entry(provider.clone())
+                .or_default()
+                .insert(model);
+        }
+        self.sync_models();
+    }
+
+    pub fn clear_hidden(&mut self, provider: &str) {
+        self.hidden_models.remove(provider);
+        self.sync_models();
+    }
+
+    pub fn clear_all_hidden(&mut self) {
+        self.hidden_models.clear();
+        self.sync_models();
     }
 
     /// Selects a provider and pins a specific model for it in one step.
@@ -579,7 +657,7 @@ impl Session {
                         }
                     }
                 }
-                if let Some(catalog) = super::catalog_provider(id) {
+                if let Some(catalog) = catalog_provider(id) {
                     endpoints.insert(id.clone(), catalog.api.clone());
                 }
             }
