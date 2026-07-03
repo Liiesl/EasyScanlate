@@ -51,30 +51,50 @@ pub fn view<'a, S: UiState + ?Sized>(
         .expect("connect modal view is only rendered while the modal is open");
     let title = crate::translation::provider_name(&modal.provider_id);
 
+    let is_local = crate::translation::is_local(&modal.provider_id);
     let mut fields: Vec<Element<'_, UiEvent>> = Vec::new();
-    fields.push(text("API key").size(12).color(MUTED_FG).into());
-    fields.push(
-        text_input("sk-…", &modal.api_key)
-            .on_input(UiEvent::ConnectModalKey)
-            .secure(true)
-            .padding(4)
-            .size(12)
-            .width(FillLength)
-            .into(),
-    );
-    if modal.is_custom {
+    if !is_local {
+        fields.push(text("API key").size(12).color(MUTED_FG).into());
+        fields.push(
+            text_input("sk-…", &modal.api_key)
+                .on_input(UiEvent::ConnectModalKey)
+                .secure(true)
+                .padding(4)
+                .size(12)
+                .width(FillLength)
+                .into(),
+        );
+    }
+    if modal.is_custom || is_local {
+        let placeholder = if is_local {
+            match modal.provider_id.as_str() {
+                crate::translation::LOCAL_OLLAMA => "http://localhost:11434/v1",
+                crate::translation::LOCAL_VLLM => "http://localhost:8000/v1",
+                crate::translation::LOCAL_LLAMA_CPP => "http://localhost:8080/v1",
+                _ => "http://localhost:11434/v1",
+            }
+        } else {
+            "http://localhost:11434/v1"
+        };
         fields.push(text("Base URL").size(12).color(MUTED_FG).into());
         fields.push(
-            text_input(
-                "http://localhost:11434/v1",
-                &modal.base_url,
-            )
-            .on_input(UiEvent::ConnectModalBaseUrl)
-            .padding(4)
-            .size(12)
-            .width(FillLength)
-            .into(),
+            text_input(placeholder, &modal.base_url)
+                .on_input(UiEvent::ConnectModalBaseUrl)
+                .padding(4)
+                .size(12)
+                .width(FillLength)
+                .into(),
         );
+        if is_local {
+            fields.push(
+                text("Models are discovered automatically from the endpoint.")
+                    .size(11)
+                    .color(MUTED_FG)
+                    .into(),
+            );
+        }
+    }
+    if modal.is_custom {
         fields.push(text("Model").size(12).color(MUTED_FG).into());
         fields.push(
             text_input("llama-3.1-8b", &modal.model)

@@ -35,6 +35,12 @@ pub const CUSTOM_OPENAI: &str = "custom-openai";
 /// The id of the custom Anthropic-compatible connection.
 pub const CUSTOM_ANTHROPIC: &str = "custom-anthropic";
 
+/// Local providers — same ids as the real module, no API key needed.
+pub const LOCAL_OLLAMA: &str = "ollama";
+pub const LOCAL_VLLM: &str = "vllm";
+pub const LOCAL_LLAMA_CPP: &str = "llama cpp";
+pub const LOCAL_PROVIDERS: [&str; 3] = [LOCAL_OLLAMA, LOCAL_VLLM, LOCAL_LLAMA_CPP];
+
 /// Hardcoded model choices for a custom connection when the user did not
 /// enter one; the first entry is the default.
 pub const CUSTOM_OPENAI_MODELS: [&str; 2] = ["fake-openai-custom", "fake-deepseek-custom"];
@@ -166,6 +172,11 @@ pub fn is_custom(id: &str) -> bool {
     id == CUSTOM_OPENAI || id == CUSTOM_ANTHROPIC
 }
 
+/// Whether `id` is a local provider that needs an endpoint but no API key.
+pub fn is_local(id: &str) -> bool {
+    id == LOCAL_OLLAMA || id == LOCAL_VLLM || id == LOCAL_LLAMA_CPP
+}
+
 /// Display name for a connection id.
 pub fn provider_name(id: &str) -> String {
     if id == CUSTOM_OPENAI {
@@ -173,6 +184,15 @@ pub fn provider_name(id: &str) -> String {
     }
     if id == CUSTOM_ANTHROPIC {
         return "Custom (Anthropic-compatible)".to_string();
+    }
+    if id == LOCAL_OLLAMA {
+        return "Ollama".to_string();
+    }
+    if id == LOCAL_VLLM {
+        return "vLLM".to_string();
+    }
+    if id == LOCAL_LLAMA_CPP {
+        return "llama.cpp".to_string();
     }
     catalog_provider(id)
         .map(|p| p.name.to_string())
@@ -208,6 +228,21 @@ pub fn validate_connection(
         }
     }
     None
+}
+
+pub fn validate_connection_for(
+    id: &str,
+    api_key: &str,
+    base_url: &str,
+    model: &str,
+) -> Option<String> {
+    if is_local(id) {
+        if base_url.trim().is_empty() {
+            return Some("Enter a base URL.".to_string());
+        }
+        return None;
+    }
+    validate_connection(is_custom(id), api_key, base_url, model)
 }
 
 /// One OCR line to translate.
@@ -261,14 +296,61 @@ fn custom_fallback_provider(id: &str) -> Provider {
     }
 }
 
+fn local_fallback_provider(id: &str, base_url: &str) -> Provider {
+    let name = match id {
+        LOCAL_OLLAMA => "Ollama",
+        LOCAL_VLLM => "vLLM",
+        LOCAL_LLAMA_CPP => "llama.cpp",
+        _ => id,
+    };
+    Provider {
+        id: id.to_string(),
+        name: name.to_string(),
+        api: base_url.trim().trim_end_matches('/').to_string(),
+        kind: CompatKind::OpenAI,
+        api_key_env: String::new(),
+        models: Vec::new(),
+    }
+}
+
+/// Fake local discovery — in fake builds just returns the fallback.
+pub async fn fetch_local_models(_base_url: &str, _id: &str) -> Result<Vec<Model>, String> {
+    Err("fake discovery has no endpoint".to_string())
+}
+pub async fn fetch_local_provider(id: &str, base_url: &str) -> Provider {
+    local_fallback_provider(id, base_url)
+}
+pub async fn fetch_local_providers(
+    endpoints: HashMap<String, String>,
+) -> HashMap<String, Provider> {
+    let mut out = HashMap::new();
+    for (id, base) in endpoints {
+        out.insert(id.clone(), fetch_local_provider(&id, &base).await);
+    }
+    out
+}
+
 /// The `Provider` to send requests to for a connection: the catalog gateway
 /// for built-ins, or one built from the connection's own base URL and model
-/// for custom endpoints.
+/// for custom endpoints. Local providers use `base_url` as `api`.
 pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
     let mut provider = match catalog_provider(id) {
         Some(catalog) => catalog.clone(),
         None => custom_fallback_provider(id),
     };
+    if is_local(id) {
+        provider.api = connection
+            .base_url
+            .clone()
+            .map(|u| u.trim().trim_end_matches('/').to_string())
+            .unwrap_or_else(|| provider.api.clone());
+        if let Some(model) = connection.model.clone().filter(|m| !m.trim().is_empty()) {
+            if provider.models.is_empty() {
+                provider.models = vec![Model { id: model, free: false }];
+            }
+        }
+        return provider;
+    }
     if is_custom(id) {
         provider.api = connection.base_url.clone().unwrap_or_default();
         let model = connection
@@ -476,13 +558,33 @@ impl Session {
         self.sync_models();
     }
 
-    /// The ids that need a models fetch (connected, non-custom).
+    /// The ids that need a models fetch (connected, non-custom, non-local).
     pub fn fetch_ids(&self) -> Vec<String> {
         self.connected_ids
             .iter()
-            .filter(|id| !is_custom(id))
+            .filter(|id| !is_custom(id) && !is_local(id))
             .cloned()
             .collect()
+    }
+
+    pub fn local_fetch_endpoints(&self) -> HashMap<String, String> {
+        let mut endpoints = HashMap::new();
+        for id in &self.connected_ids {
+            if is_local(id) {
+                if let Some(conn) = self.connections.get(id) {
+                    if let Some(url) = &conn.base_url {
+                        if !url.trim().is_empty() {
+                            endpoints.insert(id.clone(), url.clone());
+                            continue;
+                        }
+                    }
+                }
+                if let Some(catalog) = super::catalog_provider(id) {
+                    endpoints.insert(id.clone(), catalog.api.clone());
+                }
+            }
+        }
+        endpoints
     }
 
     /// The requestable [`Provider`] for the selected connection (catalog or

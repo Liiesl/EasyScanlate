@@ -82,8 +82,23 @@ fn provider_row<'a, S: UiState + ?Sized>(
     provider: &'a translation::Provider,
 ) -> Element<'a, UiEvent> {
     let connected = state.connections().get(&provider.id);
+    let is_local = translation::is_local(&provider.id);
     let status = connected
-        .map(|connection| format!("Connected · {}", mask_key(&connection.api_key)))
+        .map(|connection| {
+            if is_local {
+                let base = connection
+                    .base_url
+                    .as_deref()
+                    .unwrap_or(provider.api.as_str());
+                if base.is_empty() {
+                    "Connected · Local".to_string()
+                } else {
+                    format!("Connected · Local · {base}")
+                }
+            } else {
+                format!("Connected · {}", mask_key(&connection.api_key))
+            }
+        })
         .unwrap_or_else(|| "Not connected".to_string());
     let button = match connected {
         Some(_) => button(text("Disconnect").size(11))

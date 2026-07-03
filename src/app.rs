@@ -1264,11 +1264,21 @@ pub fn boot() -> (App, Task<Message>) {
     #[cfg(feature = "translation")]
     let models_task = {
         let fetch_ids = app.tx.fetch_ids();
-        if fetch_ids.is_empty() {
+        let cloud_task = if fetch_ids.is_empty() {
             Task::none()
         } else {
             Task::perform(translation::fetch_providers(fetch_ids), Message::ModelsFetched)
-        }
+        };
+        let local_endpoints = app.tx.local_fetch_endpoints();
+        let local_task = if local_endpoints.is_empty() {
+            Task::none()
+        } else {
+            Task::perform(
+                translation::fetch_local_providers(local_endpoints),
+                Message::ModelsFetched,
+            )
+        };
+        Task::batch([cloud_task, local_task])
     };
     #[cfg(not(feature = "translation"))]
     let models_task = Task::none();
@@ -2167,8 +2177,8 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             let Some(modal) = app.connect_modal.take() else {
                 return Task::none();
             };
-            if let Some(error) = translation::validate_connection(
-                modal.is_custom,
+            if let Some(error) = translation::validate_connection_for(
+                &modal.provider_id,
                 &modal.api_key,
                 &modal.base_url,
                 &modal.model,
@@ -2180,17 +2190,45 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 return Task::none();
             }
             let id = modal.provider_id.clone();
+            let is_local = translation::is_local(&id);
+            let is_custom = translation::is_custom(&id);
+            let base_url = modal.base_url.trim().to_string();
             app.tx.connect(
                 id.clone(),
                 translation::Connection {
-                    api_key: modal.api_key.trim().to_string(),
-                    base_url: modal.is_custom.then(|| modal.base_url.trim().to_string()),
-                    model: modal.is_custom.then(|| modal.model.trim().to_string()),
+                    api_key: if is_local {
+                        id.clone()
+                    } else {
+                        modal.api_key.trim().to_string()
+                    },
+                    base_url: if is_local || is_custom {
+                        Some(base_url.clone())
+                    } else {
+                        None
+                    },
+                    model: if is_custom {
+                        Some(modal.model.trim().to_string())
+                    } else {
+                        None
+                    },
                 },
             );
             app.status = format!("Connected {}.", translation::provider_name(&id));
-            if translation::is_custom(&id) {
+            if is_custom {
                 Task::none()
+            } else if is_local {
+                let base = base_url.clone();
+                let fetch_id = id.clone();
+                Task::perform(
+                    async move {
+                        let provider =
+                            translation::fetch_local_provider(&fetch_id, &base).await;
+                        let mut map = HashMap::new();
+                        map.insert(fetch_id, provider);
+                        map
+                    },
+                    Message::ModelsFetched,
+                )
             } else {
                 Task::perform(
                     translation::fetch_providers(vec![id]),

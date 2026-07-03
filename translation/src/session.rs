@@ -6,8 +6,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use super::{
-    Connection, Provider, is_custom, provider_for_connection, provider_name, CUSTOM_ANTHROPIC,
-    CUSTOM_OPENAI, SUPPORTED_PROVIDERS,
+    is_custom, is_local, provider_for_connection, provider_name, Connection, Provider,
+    CUSTOM_ANTHROPIC, CUSTOM_OPENAI, SUPPORTED_PROVIDERS,
 };
 
 /// The connected-provider session state of the translation bar.
@@ -52,7 +52,8 @@ impl Session {
 
     /// Rebuilds `connected_ids` (catalog order + custom slots) and fixes
     /// `selected_id` when it dropped out (falls back to the first connected
-    /// provider, or empty). Calls `sync_models`.
+    /// provider, or empty). Calls `sync_models`. Local providers are part of
+    /// `SUPPORTED_PROVIDERS` so they appear in catalog order automatically.
     pub fn sync(&mut self) {
         let mut ids: Vec<String> = Vec::new();
         for provider in SUPPORTED_PROVIDERS.iter() {
@@ -178,13 +179,36 @@ impl Session {
         self.sync_models();
     }
 
-    /// The ids that need a models fetch (connected, non-custom).
+    /// The ids that need a models fetch (connected, non-custom, non-local).
+    /// Local providers are fetched via [`local_fetch_endpoints`] instead.
     pub fn fetch_ids(&self) -> Vec<String> {
         self.connected_ids
             .iter()
-            .filter(|id| !is_custom(id))
+            .filter(|id| !is_custom(id) && !is_local(id))
             .cloned()
             .collect()
+    }
+
+    /// The local providers that need discovery, keyed by `id -> base_url`.
+    /// Uses the stored `base_url` when present, otherwise the catalog default.
+    pub fn local_fetch_endpoints(&self) -> HashMap<String, String> {
+        let mut endpoints = HashMap::new();
+        for id in &self.connected_ids {
+            if is_local(id) {
+                if let Some(conn) = self.connections.get(id) {
+                    if let Some(url) = &conn.base_url {
+                        if !url.trim().is_empty() {
+                            endpoints.insert(id.clone(), url.clone());
+                            continue;
+                        }
+                    }
+                }
+                if let Some(catalog) = super::catalog_provider(id) {
+                    endpoints.insert(id.clone(), catalog.api.clone());
+                }
+            }
+        }
+        endpoints
     }
 
     /// The requestable [`Provider`] for the selected connection (catalog or

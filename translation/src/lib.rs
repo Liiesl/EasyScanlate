@@ -54,6 +54,15 @@ pub const CUSTOM_OPENAI: &str = "custom-openai";
 /// The id of the custom Anthropic-compatible connection.
 pub const CUSTOM_ANTHROPIC: &str = "custom-anthropic";
 
+/// Local providers that do not need an API key. Their `Connection.api_key`
+/// is the literal id (`"ollama"`, `"vllm"`, `"llama cpp"`), and `base_url`
+/// is required. Model lists are discovered from the endpoint itself.
+pub const LOCAL_OLLAMA: &str = "ollama";
+pub const LOCAL_VLLM: &str = "vllm";
+pub const LOCAL_LLAMA_CPP: &str = "llama cpp";
+/// All local provider ids in UI order.
+pub const LOCAL_PROVIDERS: [&str; 3] = [LOCAL_OLLAMA, LOCAL_VLLM, LOCAL_LLAMA_CPP];
+
 /// Hardcoded model choices for a custom connection when the user did not
 /// enter one; the first entry is the default.
 pub const CUSTOM_OPENAI_MODELS: [&str; 2] = ["gpt-4o-mini", "deepseek-chat"];
@@ -169,6 +178,10 @@ pub static SUPPORTED_PROVIDERS: LazyLock<Vec<Provider>> = LazyLock::new(|| {
         entry("opencode-go", "OpenCode Go", "https://opencode.ai/zen/go/v1", CompatKind::OpenAI, "OPENCODE_API_KEY", &["deepseek-v4-flash", "mimo-v2.5"]),
         entry("mistral", "Mistral", "https://api.mistral.ai/v1", CompatKind::OpenAI, "MISTRAL_API_KEY", &["mistral-small-latest", "mistral-medium-2508"]),
         entry("ollama-cloud", "Ollama Cloud", "https://ollama.com/v1", CompatKind::OpenAI, "OLLAMA_API_KEY", &["deepseek-v4-flash", "kimi-k3"]),
+        // Local providers — no API key, models discovered from endpoint
+        entry(LOCAL_OLLAMA, "Ollama", "http://localhost:11434/v1", CompatKind::OpenAI, "", &[]),
+        entry(LOCAL_VLLM, "vLLM", "http://localhost:8000/v1", CompatKind::OpenAI, "", &[]),
+        entry(LOCAL_LLAMA_CPP, "llama.cpp", "http://localhost:8080/v1", CompatKind::OpenAI, "", &[]),
     ]
 });
 
@@ -200,14 +213,28 @@ pub fn is_custom(id: &str) -> bool {
     id == CUSTOM_OPENAI || id == CUSTOM_ANTHROPIC
 }
 
+/// Whether `id` is a local provider that needs an endpoint but no API key.
+pub fn is_local(id: &str) -> bool {
+    id == LOCAL_OLLAMA || id == LOCAL_VLLM || id == LOCAL_LLAMA_CPP
+}
+
 /// Display name for a connection id: the catalog name, the custom labels,
-/// or the id itself as a last resort.
+/// the local labels, or the id itself as a last resort.
 pub fn provider_name(id: &str) -> String {
     if id == CUSTOM_OPENAI {
         return "Custom (OpenAI-compatible)".to_string();
     }
     if id == CUSTOM_ANTHROPIC {
         return "Custom (Anthropic-compatible)".to_string();
+    }
+    if id == LOCAL_OLLAMA {
+        return "Ollama".to_string();
+    }
+    if id == LOCAL_VLLM {
+        return "vLLM".to_string();
+    }
+    if id == LOCAL_LLAMA_CPP {
+        return "llama.cpp".to_string();
     }
     catalog_provider(id)
         .map(|p| p.name.to_string())
@@ -225,8 +252,9 @@ pub fn file_tag(path: &str) -> String {
 }
 
 /// First validation error of the connect modal form, if any:
-/// - api_key must be non-blank;
-/// - custom connections also need a base URL and a model id.
+/// - api_key must be non-blank (except for local providers `ollama`/`vllm`/`llama cpp`);
+/// - custom connections also need a base URL and a model id;
+/// - local providers need a base URL.
 pub fn validate_connection(
     is_custom: bool,
     api_key: &str,
@@ -245,6 +273,24 @@ pub fn validate_connection(
         }
     }
     None
+}
+
+/// Validates a connection by provider id: local providers (`ollama`/`vllm`/
+/// `llama cpp`) need only a base URL and no API key; customs need base URL
+/// + model; cloud needs an API key.
+pub fn validate_connection_for(
+    id: &str,
+    api_key: &str,
+    base_url: &str,
+    model: &str,
+) -> Option<String> {
+    if is_local(id) {
+        if base_url.trim().is_empty() {
+            return Some("Enter a base URL.".to_string());
+        }
+        return None;
+    }
+    validate_connection(is_custom(id), api_key, base_url, model)
 }
 
 const SYSTEM: &str = "You are a professional scanlation translator for comics, manga and manhwa. \
@@ -306,9 +352,171 @@ struct ModelCost {
     output: Option<f64>,
 }
 
+/// OpenAI-compatible `/v1/models` response shape.
+#[derive(Debug, Deserialize)]
+struct OpenAiModelsResponse {
+    #[serde(default)]
+    data: Vec<OpenAiModelEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiModelEntry {
+    #[serde(default)]
+    id: String,
+}
+
+/// Ollama native `/api/tags` response shape.
+#[derive(Debug, Deserialize)]
+struct OllamaTagsResponse {
+    #[serde(default)]
+    models: Vec<OllamaModelEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaModelEntry {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    model: String,
+}
+
+fn normalize_base_url(base: &str) -> String {
+    base.trim().trim_end_matches('/').to_string()
+}
+
+fn openai_models_urls(base: &str) -> Vec<String> {
+    let base = normalize_base_url(base);
+    if base.is_empty() {
+        return Vec::new();
+    }
+    let mut urls = Vec::new();
+    if base.ends_with("/v1") {
+        urls.push(format!("{base}/models"));
+        let root = base.trim_end_matches("/v1").trim_end_matches('/').to_string();
+        if !root.is_empty() {
+            urls.push(format!("{root}/v1/models"));
+            urls.push(format!("{root}/models"));
+        }
+    } else {
+        urls.push(format!("{base}/v1/models"));
+        urls.push(format!("{base}/models"));
+    }
+    urls
+}
+
+/// Tries OpenAI-compatible model discovery then, for `ollama`, falls back to
+/// Ollama's native `/api/tags`. Returns sorted deduped models.
+pub async fn fetch_local_models(base_url: &str, id: &str) -> Result<Vec<Model>, String> {
+    let base = normalize_base_url(base_url);
+    if base.is_empty() {
+        return Err("Base URL is empty.".to_string());
+    }
+    // Try OpenAI-compatible endpoints first
+    for url in openai_models_urls(&base) {
+        match reqwest::get(&url).await {
+            Ok(resp) if resp.status().is_success() => {
+                if let Ok(parsed) = resp.json::<OpenAiModelsResponse>().await {
+                    let mut ids: Vec<Model> = parsed
+                        .data
+                        .into_iter()
+                        .filter(|m| !m.id.trim().is_empty())
+                        .map(|m| Model { id: m.id, free: false })
+                        .collect();
+                    if !ids.is_empty() {
+                        ids.sort_by(|a, b| a.id.cmp(&b.id));
+                        ids.dedup_by(|a, b| a.id == b.id);
+                        eprintln!("[translation] {} model(s) discovered from {url}", ids.len());
+                        return Ok(ids);
+                    }
+                }
+            }
+            Ok(resp) => {
+                eprintln!("[translation] {url} returned {}", resp.status());
+            }
+            Err(e) => {
+                eprintln!("[translation] {url} fetch failed: {e}");
+            }
+        }
+    }
+    // Ollama native fallback
+    if id == LOCAL_OLLAMA {
+        let root = if base.ends_with("/v1") {
+            base.trim_end_matches("/v1").trim_end_matches('/').to_string()
+        } else {
+            base.clone()
+        };
+        let url = format!("{root}/api/tags");
+        match reqwest::get(&url).await {
+            Ok(resp) if resp.status().is_success() => {
+                if let Ok(parsed) = resp.json::<OllamaTagsResponse>().await {
+                    let mut ids: Vec<Model> = parsed
+                        .models
+                        .into_iter()
+                        .map(|m| {
+                            let name = if !m.name.trim().is_empty() { m.name } else { m.model };
+                            Model { id: name, free: false }
+                        })
+                        .filter(|m| !m.id.trim().is_empty())
+                        .collect();
+                    if !ids.is_empty() {
+                        ids.sort_by(|a, b| a.id.cmp(&b.id));
+                        ids.dedup_by(|a, b| a.id == b.id);
+                        eprintln!("[translation] {} model(s) discovered from {url}", ids.len());
+                        return Ok(ids);
+                    }
+                }
+            }
+            Ok(resp) => {
+                eprintln!("[translation] {url} returned {}", resp.status());
+            }
+            Err(e) => {
+                eprintln!("[translation] {url} fetch failed: {e}");
+            }
+        }
+    }
+    Err(format!("No models discovered from {base_url}"))
+}
+
+/// Fetches one local provider's model list from `base_url`. Falls back to
+/// the catalog on error so the provider remains usable.
+pub async fn fetch_local_provider(id: &str, base_url: &str) -> Provider {
+    let catalog = match catalog_provider(id) {
+        Some(c) => c.clone(),
+        None => local_fallback_provider(id, base_url),
+    };
+    match fetch_local_models(base_url, id).await {
+        Ok(models) => Provider {
+            id: catalog.id.clone(),
+            name: catalog.name.clone(),
+            api: normalize_base_url(base_url),
+            kind: catalog.kind,
+            api_key_env: catalog.api_key_env.clone(),
+            models,
+        },
+        Err(e) => {
+            eprintln!("[translation] {id} local fetch failed: {e}; using fallback");
+            let mut fallback = catalog;
+            if !base_url.trim().is_empty() {
+                fallback.api = normalize_base_url(base_url);
+            }
+            fallback
+        }
+    }
+}
+
+/// Fetches all requested local providers keyed by id, each using its own `base_url`.
+pub async fn fetch_local_providers(endpoints: HashMap<String, String>) -> HashMap<String, Provider> {
+    let mut out = HashMap::new();
+    for (id, base) in endpoints {
+        out.insert(id.clone(), fetch_local_provider(&id, &base).await);
+    }
+    out
+}
+
 /// Fetches and filters the model list of every requested gateway (by
-/// provider id), keyed by id. Each entry falls back to the catalog's
-/// offline defaults when its listing is unreachable.
+/// provider id), keyed by id. Local ids (`ollama`/`vllm`/`llama cpp`) are
+/// discovered from their catalog default endpoint; pass a connection-aware
+/// fetch via `fetch_local_providers` when the stored `base_url` should win.
 pub async fn fetch_providers(ids: Vec<String>) -> HashMap<String, Provider> {
     let mut providers = HashMap::new();
     for id in &ids {
@@ -320,8 +528,15 @@ pub async fn fetch_providers(ids: Vec<String>) -> HashMap<String, Provider> {
 /// Fetches one gateway's listing from the models mirror and returns the
 /// usable [`Provider`]: the API base URL and key environment variable come
 /// from the catalog. On any failure the catalog's fallback models are used,
-/// so the app always has something to show.
+/// so the app always has something to show. For local ids the default
+/// endpoint is probed instead of the mirror.
 pub async fn fetch_provider(id: &str) -> Provider {
+    if is_local(id) {
+        if let Some(catalog) = catalog_provider(id) {
+            return fetch_local_provider(id, &catalog.api).await;
+        }
+        return local_fallback_provider(id, "");
+    }
     let Some(catalog) = catalog_provider(id) else {
         return custom_fallback_provider(id);
     };
@@ -391,15 +606,51 @@ fn custom_fallback_provider(id: &str) -> Provider {
     }
 }
 
+fn local_fallback_provider(id: &str, base_url: &str) -> Provider {
+    let name = match id {
+        LOCAL_OLLAMA => "Ollama",
+        LOCAL_VLLM => "vLLM",
+        LOCAL_LLAMA_CPP => "llama.cpp",
+        _ => id,
+    };
+    Provider {
+        id: id.to_string(),
+        name: name.to_string(),
+        api: normalize_base_url(base_url),
+        kind: CompatKind::OpenAI,
+        api_key_env: String::new(),
+        models: Vec::new(),
+    }
+}
+
 /// The `Provider` to send requests to for a connection: the fetched/catalog
 /// gateway for built-ins, or one built from the connection's own base URL
 /// and model for custom endpoints. The model list is a single entry per
 /// connection, replaced by the connection's model or the kind's defaults.
+/// Local providers use the stored `base_url` as `api` and keep discovered
+/// models (fallback is the catalog default with overridden `api`).
 pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
     let mut provider = match catalog_provider(id) {
         Some(catalog) => catalog.clone(),
         None => custom_fallback_provider(id),
     };
+    if is_local(id) {
+        provider.api = connection
+            .base_url
+            .clone()
+            .map(|u| normalize_base_url(&u))
+            .unwrap_or_else(|| provider.api.clone());
+        // If the connection carries a pinned model (legacy manual entry),
+        // surface it as a single model so translation still works before
+        // discovery finishes. Otherwise keep whatever models the catalog/
+        // fetched provider already had (empty until fetch completes).
+        if let Some(model) = connection.model.clone().filter(|m| !m.trim().is_empty()) {
+            if provider.models.is_empty() {
+                provider.models = vec![Model { id: model, free: false }];
+            }
+        }
+        return provider;
+    }
     if is_custom(id) {
         provider.api = connection.base_url.clone().unwrap_or_default();
         let model = connection
@@ -550,10 +801,24 @@ translation, no explanation.\n\nText: {text}"
 
 /// Resolves the API key for a request: `api_key` overrides the provider's
 /// environment variable when set (in-memory only; never persisted).
+/// Local providers (`ollama`/`vllm`/`llama cpp`) do not need an API key; a
+/// dummy `provider.id` is used when none is supplied.
 fn resolve_credentials(
     api_key: Option<String>,
     provider: &Provider,
 ) -> Result<String, String> {
+    if is_local(&provider.id) {
+        let key = api_key
+            .filter(|key| !key.is_empty())
+            .unwrap_or_else(|| provider.id.clone());
+        if provider.api.is_empty() {
+            return Err(format!(
+                "Translation init failed: no base URL for {}; enter one in Settings.",
+                provider.name
+            ));
+        }
+        return Ok(key);
+    }
     let key = api_key
         .filter(|key| !key.is_empty())
         .or_else(|| std::env::var(&provider.api_key_env).ok())
