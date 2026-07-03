@@ -176,7 +176,7 @@ fn entry_row<'a, S: UiState + ?Sized>(
             .on_press_maybe(
                 (!state.translating()
                     && !state.running()
-                    && !state.connections().is_empty())
+                    && !scanlateit_settings::get(|s| s.connections.is_empty()))
                 .then_some(UiEvent::RetranslateEntry((index, entry_id))),
             )
             .into(),
@@ -310,7 +310,7 @@ fn translate_bar<'a, S: UiState + ?Sized>(
     state: &'a S,
     has_entries: bool,
 ) -> Element<'a, UiEvent> {
-    let connected = !state.connections().is_empty();
+    let connected = scanlateit_settings::get(|s| !s.connections.is_empty());
     let body: Element<'_, UiEvent> = if connected {
         let (sel_provider, sel_model) = state.translate_model_selection();
         let mut entries: Vec<MenuItem<'a, ModelOption, UiEvent, iced::Theme, iced::Renderer>> =

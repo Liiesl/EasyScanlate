@@ -18,5 +18,6 @@ bytes = "1.6"
 image = "0.25"
 neverliie-iced-widgets = { path = "../NeverLiieIcedWidgets" }
 scanlateit-model = { path = "../model" }
+scanlateit-settings = { path = "../settings" }
 scanlateit-translation = { path = "../translation", optional = true }
 tokio = { version = "1", features = ["rt", "time"] }

@@ -1,7 +1,9 @@
 //! The settings modal: a centered overlay opened from the toolbar with a
 //! vertical tab list on the left and the selected tab's fields on the right.
-//! Field edits flow through `UiEvent`s; the app persists them to
-//! `settings.json` next to the executable when the modal closes.
+//! Field edits are written straight into the shared `scanlateit_settings`
+//! store (write-through) and announced with the single
+//! [`UiEvent::SettingsChanged`]; the app re-syncs its runtime mirrors from
+//! the store on that one message.
 
 use iced::widget::{
     button, center, checkbox, column, container, mouse_area, opaque, row, scrollable, space, stack,
@@ -19,7 +21,7 @@ use scanlateit_model::InpaintBackend;
 use crate::translation::{self, CUSTOM_ANTHROPIC, CUSTOM_OPENAI};
 
 use crate::background::AuroraWheel;
-use crate::event::{SettingsTab, UiEvent};
+use crate::event::{SettingEdit, SettingsTab, UiEvent};
 use crate::panel::PANEL_BG;
 use crate::segmented::{segment, segmented_group};
 use crate::state::UiState;
@@ -29,6 +31,13 @@ const MODAL_HEIGHT: f32 = 400.0;
 const TAB_WIDTH: f32 = 140.0;
 const ACCENT: Color = Color::from_rgb8(92, 190, 255);
 const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);
+
+/// Writes one change into the shared settings store (write-through) and
+/// returns the single announcement event for the app.
+fn set(f: impl FnOnce(&mut scanlateit_settings::Settings)) -> UiEvent {
+    let _ = scanlateit_settings::modify(f);
+    UiEvent::SettingsChanged
+}
 
 /// One tab button of the vertical tab list; the active tab is highlighted.
 fn tab_button<'a, S: UiState + ?Sized>(
@@ -76,14 +85,13 @@ fn mask_key(key: &str) -> String {
 }
 
 /// One row of the supported-provider list: name, connection status and the
-/// Connect/Disconnect button.
-fn provider_row<'a, S: UiState + ?Sized>(
-    state: &'a S,
-    provider: &'a translation::Provider,
-) -> Element<'a, UiEvent> {
-    let connected = state.connections().get(&provider.id);
+/// Connect/Disconnect button. The connection state is read straight from
+/// the settings store.
+fn provider_row<'a>(provider: &'a translation::Provider) -> Element<'a, UiEvent> {
+    let connected = scanlateit_settings::get(|s| s.connections.get(&provider.id).cloned());
     let is_local = translation::is_local(&provider.id);
     let status = connected
+        .as_ref()
         .map(|connection| {
             if is_local {
                 let base = connection
@@ -123,13 +131,10 @@ fn provider_row<'a, S: UiState + ?Sized>(
 }
 
 /// One row of the custom-endpoint section.
-fn custom_row<'a, S: UiState + ?Sized>(
-    state: &'a S,
-    id: &'static str,
-    label: &'static str,
-) -> Element<'a, UiEvent> {
-    let connected = state.connections().get(id);
+fn custom_row<'a>(id: &'static str, label: &'static str) -> Element<'a, UiEvent> {
+    let connected = scanlateit_settings::get(|s| s.connections.get(id).cloned());
     let status = connected
+        .as_ref()
         .map(|connection| format!("Connected · {}", mask_key(&connection.api_key)))
         .unwrap_or_else(|| "Not connected".to_string());
     let button = match connected {
@@ -155,8 +160,9 @@ fn custom_row<'a, S: UiState + ?Sized>(
 }
 
 /// Appearance tab — port of `ManhwaOCR/app/ui/components/background_settings.AuroraEditorPanel`.
-fn appearance_tab<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
-    let cfg = state.aurora_config();
+/// Reads and writes the aurora theme directly in the settings store.
+fn appearance_tab() -> Element<'static, UiEvent> {
+    let cfg = crate::background::AuroraConfig::from_store();
     let is_dark = cfg.is_dark;
     let count = cfg.blob_count;
     let schema = cfg.schema;
@@ -167,13 +173,13 @@ fn appearance_tab<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         segment(
             !is_dark,
             "Light",
-            Some(UiEvent::AuroraDarkMode(false)),
+            Some(UiEvent::SettingEdit(SettingEdit::AuroraDarkMode(false))),
             iced::Font::DEFAULT,
         ),
         segment(
             is_dark,
             "Dark",
-            Some(UiEvent::AuroraDarkMode(true)),
+            Some(UiEvent::SettingEdit(SettingEdit::AuroraDarkMode(true))),
             iced::Font::DEFAULT,
         ),
     ]);
@@ -191,7 +197,9 @@ fn appearance_tab<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         .width(Length::Fixed(30.0))
         .height(Length::Fixed(30.0))
         .padding(0)
-        .on_press_maybe((count > 1).then_some(UiEvent::AuroraCount(count - 1)))
+        .on_press_maybe(
+            (count > 1).then(|| UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(count - 1))),
+        )
         .style(|_theme: &iced::Theme, status| {
             let bg = if status == iced::widget::button::Status::Hovered {
                 Color::from_rgba8(255, 255, 255, 0.30)
@@ -210,7 +218,9 @@ fn appearance_tab<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         .width(Length::Fixed(30.0))
         .height(Length::Fixed(30.0))
         .padding(0)
-        .on_press_maybe((count < 5).then_some(UiEvent::AuroraCount(count + 1)))
+        .on_press_maybe(
+            (count < 5).then(|| UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(count + 1))),
+        )
         .style(|_theme: &iced::Theme, status| {
             let bg = if status == iced::widget::button::Status::Hovered {
                 Color::from_rgba8(255, 255, 255, 0.30)
@@ -229,7 +239,13 @@ fn appearance_tab<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         .width(Length::Fixed(30.0))
         .height(Length::Fixed(30.0))
         .padding(0)
-        .on_press_maybe((count > 1).then_some(UiEvent::AuroraSchema(schema.index().wrapping_add(1) % 4)))
+        .on_press_maybe(
+            (count > 1).then(|| {
+                UiEvent::SettingEdit(SettingEdit::AuroraSchema(
+                    schema.index().wrapping_add(1) % 4,
+                ))
+            }),
+        )
         .style(|_theme: &iced::Theme, status| {
             let bg = if status == iced::widget::button::Status::Hovered {
                 Color::from_rgba8(255, 255, 255, 0.30)
@@ -253,7 +269,15 @@ fn appearance_tab<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let hex_row: Element<'_, UiEvent> = row![
         container(text("Hex").size(12).color(MUTED_FG)).width(Length::Fixed(40.0)),
         iced::widget::text_input(&hex, &hex)
-            .on_input(UiEvent::AuroraHex)
+            .on_input(|input| {
+                // Only valid hex reaches the store; invalid input keeps the
+                // previous color (the field snaps back on the next frame).
+                if crate::background::AuroraConfig::from_hex(&input).is_some() {
+                    set(move |s| s.aurora_color = input.clone())
+                } else {
+                    UiEvent::SettingsChanged
+                }
+            })
             .padding(4)
             .size(12)
             .width(Length::Fixed(100.0)),
@@ -299,6 +323,7 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             let mut items: Vec<Element<'_, UiEvent>> = vec![text("General").size(14).into()];
             #[cfg(feature = "styling")]
             {
+                let auto = scanlateit_settings::get(|s| s.auto_style_detect);
                 items.push(
                     text("Classify newly OCR-detected entries with the ONNX styling \
                           model and set their text style from the prediction.")
@@ -307,21 +332,22 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                         .into(),
                 );
                 items.push(
-                    checkbox(state.auto_style_detect())
+                    checkbox(auto)
                         .label("Auto-detect entry styles")
                         .text_size(12)
-                        .on_toggle(UiEvent::StyleAutoDetectToggle)
+                        .on_toggle(|v| set(move |s| s.auto_style_detect = v))
                         .into(),
                 );
             }
             #[cfg(feature = "ocr")]
             {
+                let workers = scanlateit_settings::get(|s| s.ocr_workers.clone());
                 items.push(
                     row![
                         container(text("OCR detection workers").size(12).color(MUTED_FG))
                             .width(Length::Fixed(150.0)),
-                        text_input("2", state.ocr_workers())
-                            .on_input(UiEvent::OcrWorkers)
+                        text_input("2", &workers)
+                            .on_input(|input| set(move |s| s.ocr_workers = input.clone()))
                             .padding(4)
                             .size(12)
                             .width(Length::Fixed(64.0)),
@@ -338,14 +364,16 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             }
             #[cfg(feature = "inpaint")]
             {
+                let backend = scanlateit_settings::get(|s| s.inpaint_backend);
+                let radius = scanlateit_settings::get(|s| s.inpaint_radius.clone());
                 items.push(
                     row![
                         container(text("Inpaint backend").size(12).color(MUTED_FG))
                             .width(Length::Fixed(150.0)),
                         pick_list(
                             [InpaintBackend::Telea, InpaintBackend::Lama],
-                            Some(state.inpaint_backend()),
-                            UiEvent::InpaintBackend,
+                            Some(backend),
+                            |backend| set(move |s| s.inpaint_backend = backend),
                         )
                         .padding(4)
                         .text_size(12),
@@ -364,8 +392,8 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                     row![
                         container(text("Telea radius").size(12).color(MUTED_FG))
                             .width(Length::Fixed(150.0)),
-                        text_input("5", state.inpaint_radius())
-                            .on_input(UiEvent::InpaintRadius)
+                        text_input("5", &radius)
+                            .on_input(|input| set(move |s| s.inpaint_radius = input.clone()))
                             .padding(4)
                             .size(12)
                             .width(Length::Fixed(64.0)),
@@ -394,7 +422,7 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                     .into(),
             );
             for provider in translation::SUPPORTED_PROVIDERS.iter() {
-                rows.push(provider_row(state, provider));
+                rows.push(provider_row(provider));
             }
             rows.push(text("Custom service").size(14).into());
             rows.push(
@@ -404,13 +432,14 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                     .color(MUTED_FG)
                     .into(),
             );
-            rows.push(custom_row(state, CUSTOM_OPENAI, "OpenAI-compatible"));
-            rows.push(custom_row(state, CUSTOM_ANTHROPIC, "Anthropic-compatible"));
+            rows.push(custom_row(CUSTOM_OPENAI, "OpenAI-compatible"));
+            rows.push(custom_row(CUSTOM_ANTHROPIC, "Anthropic-compatible"));
+            let free_only = scanlateit_settings::get(|s| s.free_models_only);
             rows.push(
-                checkbox(state.free_models_only())
+                checkbox(free_only)
                     .label("Only show free models")
                     .text_size(12)
-                    .on_toggle(UiEvent::FreeModelsOnlyToggle)
+                    .on_toggle(|v| set(move |s| s.free_models_only = v))
                     .into(),
             );
             rows.push(
@@ -434,14 +463,15 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                 .into(),
             );
             rows.push(
-                text("Connections are saved to settings.json beside the executable.")
+                text("Connections are saved to the app's settings file in the \
+                      system configuration directory.")
                     .size(11)
                     .color(MUTED_FG)
                     .into(),
             );
             scrollable(column(rows).spacing(4)).into()
         }
-        SettingsTab::Appearance => appearance_tab(state),
+        SettingsTab::Appearance => appearance_tab(),
     }
 }
 

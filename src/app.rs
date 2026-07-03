@@ -1,4 +1,6 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
+#[cfg(all(feature = "test-ui", not(feature = "translation")))]
+use std::collections::BTreeMap;
 use std::sync::Arc;
 #[cfg(feature = "ocr")]
 use std::time::Duration;
@@ -153,11 +155,6 @@ pub struct App {
     pipeline: Option<ParallelEngine>,
     #[cfg(feature = "ocr")]
     cancel: Option<OcrCancellationToken>,
-    /// Number of parallel OCR detection workers, as typed in the settings
-    /// modal; parsed (fallback 2) when OCR starts.
-    ocr_workers: String,
-    /// The current run plan, indexed by run number; the stream closure
-    /// captures a clone, the handler reads it back for assembly.
     #[cfg(feature = "ocr")]
     ocr_plans: Vec<ocr::RunPlan>,
     /// All images' `(width, height)` of the current run, in image order.
@@ -165,14 +162,6 @@ pub struct App {
     ocr_dims: Vec<(u32, u32)>,
     #[cfg(feature = "inpaint")]
     inpaint_engine: Option<InpaintEngine>,
-    /// The inpainting backend picked in the settings modal; the cached engine
-    /// is rebuilt whenever this (or `inpaint_radius`) changes.
-    #[cfg(feature = "inpaint")]
-    pub(crate) inpaint_backend: InpaintBackend,
-    /// The Telea interpolation radius, as typed in the settings modal
-    /// (parsed, fallback 5, when inpainting starts).
-    #[cfg(feature = "inpaint")]
-    inpaint_radius: String,
     /// Buffered inpainting job waiting for the engine to finish loading,
     /// as `(image index, path, rect, mask quads)`.
     #[cfg(feature = "inpaint")]
@@ -198,9 +187,6 @@ pub struct App {
     /// already classified (see [`JobTracker`]).
     #[cfg(feature = "styling")]
     styling: JobTracker,
-    /// When enabled, newly OCR-detected entries are auto-classified and their
-    /// style set from the prediction.
-    pub(crate) auto_style_detect: bool,
     pub(crate) running: bool,
     pub(crate) font: Option<Font>,
     pub(crate) status: String,
@@ -283,11 +269,6 @@ pub struct App {
     pub(crate) panes: pane_grid::State<PaneKind>,
     /// The draggable split between the styling panel and the translation/results panel.
     pub(crate) side_panes: pane_grid::State<SidePaneKind>,
-    // --- Aurora background theme (mirrors ManhwaOCR QSettings keys) ---
-    pub(crate) aurora_color: Color,
-    pub(crate) aurora_blob_count: u8,
-    pub(crate) aurora_is_dark: bool,
-    pub(crate) aurora_schema: u8,
 }
 impl App {
     fn new() -> Self {
@@ -300,17 +281,12 @@ impl App {
             pipeline: None,
             #[cfg(feature = "ocr")]
             cancel: None,
-            ocr_workers: "2".to_string(),
             #[cfg(feature = "ocr")]
             ocr_plans: Vec::new(),
             #[cfg(feature = "ocr")]
             ocr_dims: Vec::new(),
             #[cfg(feature = "inpaint")]
             inpaint_engine: None,
-            #[cfg(feature = "inpaint")]
-            inpaint_backend: InpaintBackend::default(),
-            #[cfg(feature = "inpaint")]
-            inpaint_radius: "5".to_string(),
             #[cfg(feature = "inpaint")]
             pending_inpaint: None,
             inpainting: false,
@@ -321,7 +297,6 @@ impl App {
             viewer_scroll: 0.0,
             #[cfg(feature = "styling")]
             styling: JobTracker::new(),
-            auto_style_detect: false,
             running: false,
             font: None,
             status: "Idle - open images to begin.".to_string(),
@@ -375,10 +350,6 @@ impl App {
                 panes.resize(split, STYLING_DEFAULT_RATIO);
                 panes
             },
-            aurora_color: Color::from_rgb8(0x3b, 0x06, 0x00),
-            aurora_blob_count: 2,
-            aurora_is_dark: true,
-            aurora_schema: 1,
         }
     }
 }
@@ -480,16 +451,8 @@ impl UiState for App {
         &self.translate_lang
     }
 
-    fn connections(&self) -> &BTreeMap<String, translation::Connection> {
-        &self.tx.connections
-    }
-
     fn connect_modal(&self) -> Option<&ConnectModal> {
         self.connect_modal.as_ref()
-    }
-
-    fn free_models_only(&self) -> bool {
-        self.tx.free_only
     }
 
     fn selected(&self) -> Option<(usize, EntryId)> {
@@ -552,26 +515,6 @@ impl UiState for App {
         self.style_working.gradient_dir
     }
 
-    #[cfg(feature = "styling")]
-    fn auto_style_detect(&self) -> bool {
-        self.auto_style_detect
-    }
-
-    #[cfg(feature = "ocr")]
-    fn ocr_workers(&self) -> &str {
-        &self.ocr_workers
-    }
-
-    #[cfg(feature = "inpaint")]
-    fn inpaint_backend(&self) -> InpaintBackend {
-        self.inpaint_backend
-    }
-
-    #[cfg(feature = "inpaint")]
-    fn inpaint_radius(&self) -> &str {
-        &self.inpaint_radius
-    }
-
     fn editing(&self) -> Option<(usize, EntryId)> {
         self.editing
     }
@@ -627,24 +570,12 @@ impl UiState for App {
     fn all_model_groups(&self) -> Vec<(String, String, Vec<String>)> {
         self.tx.all_model_groups()
     }
-
-    fn is_model_hidden(&self, provider: &str, model: &str) -> bool {
-        self.tx.is_hidden(provider, model)
-    }
-
-    fn aurora_config(&self) -> scanlateit_ui::background::AuroraConfig {
-        scanlateit_ui::background::AuroraConfig {
-            color: self.aurora_color,
-            blob_count: self.aurora_blob_count,
-            is_dark: self.aurora_is_dark,
-            schema: scanlateit_ui::background::AuroraSchema::from_index(self.aurora_schema),
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use scanlateit_model::INITIAL_PRESET_SLOTS;
 
     fn app_with_entry() -> (App, EntryId) {
@@ -1228,7 +1159,21 @@ for c in text.chars() {
     }
 }
 
+/// Re-syncs the translation session's persisted mirrors from the shared
+/// settings store: connections, free-only filter and hidden models. The
+/// current selection is kept (`sync` falls back when it dropped out); used
+/// at boot and on the single [`UiEvent::SettingsChanged`] announcement.
+fn sync_tx_from_store(app: &mut App) {
+    scanlateit_settings::get(|s| {
+        app.tx.connections = s.connections.clone();
+        app.tx.free_only = s.free_models_only;
+        app.tx.hidden_models = s.hidden_models.clone();
+    });
+    app.tx.sync();
+}
+
 pub fn boot() -> (App, Task<Message>) {
+    scanlateit_settings::init();
     let font_task = match std::fs::read(KOREAN_FONT_PATH) {
         Ok(bytes) => iced::font::load(bytes).map(|_| Message::FontLoaded),
         Err(_) => Task::none(),
@@ -1243,46 +1188,26 @@ pub fn boot() -> (App, Task<Message>) {
         allow(unused_mut)
     )]
     let mut app = App::new();
-    #[cfg_attr(
-        not(any(feature = "translation", feature = "styling", feature = "ocr")),
-        allow(unused_variables)
-    )]
-    let settings = crate::settings::Settings::load();
     #[cfg(feature = "translation")]
     {
-        app.tx = translation::Session::new(settings.connections, settings.last_provider);
-        app.tx.free_only = settings.free_models_only;
-        app.tx.hidden_models = settings.hidden_models.clone();
+        let (connections, last_provider, free_only, hidden) = scanlateit_settings::get(|s| {
+            (
+                s.connections.clone(),
+                s.last_provider.clone(),
+                s.free_models_only,
+                s.hidden_models.clone(),
+            )
+        });
+        app.tx = translation::Session::new(connections, last_provider);
+        app.tx.free_only = free_only;
+        app.tx.hidden_models = hidden;
         app.tx.sync();
     }
     #[cfg(all(not(feature = "translation"), feature = "test-ui"))]
     {
         // test-ui uses fake translation – still restore hidden models so the
         // Manage Models overlay persists in that build as well.
-        app.tx.hidden_models = settings.hidden_models.clone();
-        app.tx.sync_models();
-    }
-    #[cfg(feature = "styling")]
-    {
-        app.auto_style_detect = settings.auto_style_detect;
-    }
-    #[cfg(feature = "ocr")]
-    {
-        app.ocr_workers = settings.ocr_workers.to_string();
-    }
-    #[cfg(feature = "inpaint")]
-    {
-        app.inpaint_backend = settings.inpaint_backend;
-        app.inpaint_radius = settings.inpaint_radius.to_string();
-    }
-    {
-        use scanlateit_ui::background::AuroraConfig;
-        if let Some(col) = AuroraConfig::from_hex(&settings.aurora_color) {
-            app.aurora_color = col;
-        }
-        app.aurora_blob_count = AuroraConfig::clamped_blob_count(settings.aurora_blob_count);
-        app.aurora_is_dark = settings.aurora_is_dark;
-        app.aurora_schema = settings.aurora_schema % 4;
+        sync_tx_from_store(&mut app);
     }
     #[cfg(feature = "translation")]
     let models_task = {
@@ -1335,9 +1260,21 @@ pub fn boot() -> (App, Task<Message>) {
         // TEST-UI without the translation subsystem: seed a fake connected
         // provider with its fake model list so the translation bar and
         // settings tab are fully exercisable (no rig, no API keys) — the
-        // translation analogue of the fake OCR entries above.
+        // translation analogue of the fake OCR entries above. The connection
+        // is mirrored into the settings store too: the ui reads connected
+        // state from there.
         #[cfg(all(feature = "test-ui", not(feature = "translation")))]
         {
+            let _ = scanlateit_settings::modify(|s| {
+                s.connections.insert(
+                    translation::FAKE_PROVIDER.to_string(),
+                    scanlateit_settings::Connection {
+                        api_key: "fake-key-1234".to_string(),
+                        base_url: None,
+                        model: None,
+                    },
+                );
+            });
             let mut tx = translation::Session::new(
                 BTreeMap::from([(
                     translation::FAKE_PROVIDER.to_string(),
@@ -1454,7 +1391,7 @@ fn start_ocr_stream(app: &mut App) -> Task<Message> {
         .iter()
         .map(|run| run.below.map(|(page, _)| app.images[page].path.clone()))
         .collect();
-    let workers = app.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
+    let workers = scanlateit_settings::get(|s| s.ocr_workers.parse::<usize>().unwrap_or(2)).max(1);
     let mut session = ocr::RunSession::new(runs, dims, paths, above_paths, below_paths, workers);
     Task::stream(
         iced::stream::try_channel(1, move |mut sender: iced::futures::channel::mpsc::Sender<Message>| async move {
@@ -1744,7 +1681,9 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             );
             let mut tasks: Vec<Task<Message>> = Vec::new();
             if app.pipeline.is_none() {
-                let workers = app.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
+                let workers =
+                    scanlateit_settings::get(|s| s.ocr_workers.parse::<usize>().unwrap_or(2))
+                        .max(1);
                 app.status = format!(
                     "Loading the OCR engine ({workers} detection worker(s))..."
                 );
@@ -1966,7 +1905,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             // Classify newly appended entries (including those resolved across
             // a run boundary) when auto-detect is enabled.
             #[cfg(feature = "styling")]
-            if app.auto_style_detect {
+            if scanlateit_settings::get(|s| s.auto_style_detect) {
                 tasks.push(classify_entries(app));
             }
             if tasks.is_empty() {
@@ -2145,7 +2084,8 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             )
         }
         Message::Ui(UiEvent::TranslateModelSelect { provider, model }) => {
-            app.tx.select_model(provider, model);
+            app.tx.select_model(provider.clone(), model);
+            let _ = scanlateit_settings::modify(|s| s.last_provider = Some(provider));
             Task::none()
         }
         Message::Ui(UiEvent::TranslateLang(lang)) => {
@@ -2168,6 +2108,12 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::Ui(UiEvent::TranslateDisconnect(provider_id)) => {
+            let _ = scanlateit_settings::modify(|s| {
+                s.connections.remove(&provider_id);
+                if s.last_provider.as_deref() == Some(provider_id.as_str()) {
+                    s.last_provider = None;
+                }
+            });
             app.tx.disconnect(&provider_id);
             app.status = format!(
                 "Disconnected {}. Its API key was removed.",
@@ -2216,26 +2162,28 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             let is_local = translation::is_local(&id);
             let is_custom = translation::is_custom(&id);
             let base_url = modal.base_url.trim().to_string();
-            app.tx.connect(
-                id.clone(),
-                translation::Connection {
-                    api_key: if is_local {
-                        id.clone()
-                    } else {
-                        modal.api_key.trim().to_string()
-                    },
-                    base_url: if is_local || is_custom {
-                        Some(base_url.clone())
-                    } else {
-                        None
-                    },
-                    model: if is_custom {
-                        Some(modal.model.trim().to_string())
-                    } else {
-                        None
-                    },
+            let connection = translation::Connection {
+                api_key: if is_local {
+                    id.clone()
+                } else {
+                    modal.api_key.trim().to_string()
                 },
-            );
+                base_url: if is_local || is_custom {
+                    Some(base_url.clone())
+                } else {
+                    None
+                },
+                model: if is_custom {
+                    Some(modal.model.trim().to_string())
+                } else {
+                    None
+                },
+            };
+            let _ = scanlateit_settings::modify(|s| {
+                s.connections.insert(id.clone(), connection.clone());
+                s.last_provider = Some(id.clone());
+            });
+            app.tx.connect(id.clone(), connection);
             app.status = format!("Connected {}.", translation::provider_name(&id));
             if is_custom {
                 Task::none()
@@ -2263,65 +2211,12 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.connect_modal = None;
             Task::none()
         }
-        Message::Ui(UiEvent::FreeModelsOnlyToggle(enabled)) => {
-            app.tx.set_free_only(enabled);
-            Task::none()
-        }
         Message::Ui(UiEvent::ManageModelsOpen) => {
             app.manage_models_open = true;
             Task::none()
         }
         Message::Ui(UiEvent::ManageModelsClose) => {
             app.manage_models_open = false;
-            // Persist hidden models together with other settings when the overlay closes.
-            let settings = crate::settings::Settings {
-                #[cfg(feature = "translation")]
-                connections: app.tx.connections.clone(),
-                #[cfg(feature = "translation")]
-                last_provider: (!app.tx.selected_id.is_empty())
-                    .then(|| app.tx.selected_id.clone()),
-                #[cfg(feature = "styling")]
-                auto_style_detect: app.auto_style_detect,
-                #[cfg(feature = "ocr")]
-                ocr_workers: app.ocr_workers.parse().unwrap_or(2),
-                #[cfg(feature = "translation")]
-                free_models_only: app.tx.free_only,
-                hidden_models: app.tx.hidden_models.clone(),
-                #[cfg(feature = "inpaint")]
-                inpaint_backend: app.inpaint_backend,
-                #[cfg(feature = "inpaint")]
-                inpaint_radius: app.inpaint_radius.parse().unwrap_or(5).clamp(1, u8::MAX as i32) as u8,
-                aurora_color: {
-                    let [r, g, b, _] = app.aurora_color.into_rgba8();
-                    format!("#{r:02x}{g:02x}{b:02x}")
-                },
-                aurora_blob_count: app.aurora_blob_count,
-                aurora_is_dark: app.aurora_is_dark,
-                aurora_schema: app.aurora_schema,
-            };
-            if let Err(e) = settings.save() {
-                app.status = e;
-            }
-            Task::none()
-        }
-        Message::Ui(UiEvent::ManageModelsToggle {
-            provider,
-            model,
-            visible,
-        }) => {
-            app.tx.set_model_visible(provider, model, visible);
-            Task::none()
-        }
-        Message::Ui(UiEvent::ManageModelsShowAll(_)) => {
-            // legacy: treat as reset
-            Task::none()
-        }
-        Message::Ui(UiEvent::ManageModelsReset(provider)) => {
-            app.tx.clear_hidden(&provider);
-            Task::none()
-        }
-        Message::Ui(UiEvent::ManageModelsResetAll) => {
-            app.tx.clear_all_hidden();
             Task::none()
         }
         Message::Ui(UiEvent::EntryClicked(selection)) => {
@@ -2491,8 +2386,12 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     .to_string();
             }
             let path = image.path.clone();
-            let backend = app.inpaint_backend;
-            let radius = app.inpaint_radius.parse::<i32>().unwrap_or(5).max(1);
+            let (backend, radius) = scanlateit_settings::get(|s| {
+                (
+                    s.inpaint_backend,
+                    s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1),
+                )
+            });
             let cached = app
                 .inpaint_engine
                 .clone()
@@ -2684,35 +2583,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 .to_string();
             Task::none()
         }
-        Message::Ui(UiEvent::StyleAutoDetectToggle(enabled)) => {
-            app.auto_style_detect = enabled;
-            app.status = if enabled {
-                "Auto style detection enabled.".to_string()
-            } else {
-                "Auto style detection disabled.".to_string()
-            };
-            Task::none()
-        }
-        Message::Ui(UiEvent::OcrWorkers(text)) => {
-            app.ocr_workers = text;
-            Task::none()
-        }
-        #[cfg(feature = "inpaint")]
-        Message::Ui(UiEvent::InpaintBackend(backend)) => {
-            if app.inpaint_backend != backend {
-                app.inpaint_backend = backend;
-                app.inpaint_engine = None;
-                app.status = format!("Inpaint backend: {backend}.");
-            }
-            Task::none()
-        }
-        #[cfg(feature = "inpaint")]
-        Message::Ui(UiEvent::InpaintRadius(text)) => {
-            app.inpaint_radius = text;
-            Task::none()
-        }
-        #[cfg(not(feature = "inpaint"))]
-        Message::Ui(UiEvent::InpaintBackend(_) | UiEvent::InpaintRadius(_)) => Task::none(),
         Message::Ui(UiEvent::PanelResized(resized)) => {
             app.panes.resize(resized.split, resized.ratio);
             Task::none()
@@ -2734,60 +2604,38 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.settings_open = false;
             app.manage_models_open = false;
             app.connect_modal = None;
-            let settings = crate::settings::Settings {
-                #[cfg(feature = "translation")]
-                connections: app.tx.connections.clone(),
-                #[cfg(feature = "translation")]
-                last_provider: (!app.tx.selected_id.is_empty())
-                    .then(|| app.tx.selected_id.clone()),
-                #[cfg(feature = "styling")]
-                auto_style_detect: app.auto_style_detect,
-                #[cfg(feature = "ocr")]
-                ocr_workers: app.ocr_workers.parse().unwrap_or(2),
-                #[cfg(feature = "translation")]
-                free_models_only: app.tx.free_only,
-                hidden_models: app.tx.hidden_models.clone(),
-                #[cfg(feature = "inpaint")]
-                inpaint_backend: app.inpaint_backend,
-                #[cfg(feature = "inpaint")]
-                inpaint_radius: app.inpaint_radius.parse().unwrap_or(5).clamp(1, u8::MAX as i32) as u8,
-                aurora_color: {
-                    let [r, g, b, _] = app.aurora_color.into_rgba8();
-                    format!("#{r:02x}{g:02x}{b:02x}")
-                },
-                aurora_blob_count: app.aurora_blob_count,
-                aurora_is_dark: app.aurora_is_dark,
-                aurora_schema: app.aurora_schema,
-            };
-            if let Err(e) = settings.save() {
-                app.status = e;
-            }
             Task::none()
         }
         Message::Ui(UiEvent::SettingsTab(tab)) => {
             app.settings_tab = tab;
             Task::none()
         }
-        Message::Ui(UiEvent::AuroraColor(rgba)) => {
-            app.aurora_color = Color::from_rgba8(rgba[0], rgba[1], rgba[2], rgba[3] as f32 / 255.0);
+        Message::Ui(UiEvent::SettingsChanged) => {
+            // The ui crate already wrote the change into the settings store;
+            // re-sync every runtime mirror from there. This is the single
+            // message for all settings edits.
+            sync_tx_from_store(app);
+            app.status = "Settings saved.".to_string();
             Task::none()
         }
-        Message::Ui(UiEvent::AuroraHex(hex)) => {
-            if let Some(col) = scanlateit_ui::background::AuroraConfig::from_hex(&hex) {
-                app.aurora_color = col;
-            }
-            Task::none()
-        }
-        Message::Ui(UiEvent::AuroraCount(count)) => {
-            app.aurora_blob_count = scanlateit_ui::background::AuroraConfig::clamped_blob_count(count);
-            Task::none()
-        }
-        Message::Ui(UiEvent::AuroraDarkMode(is_dark)) => {
-            app.aurora_is_dark = is_dark;
-            Task::none()
-        }
-        Message::Ui(UiEvent::AuroraSchema(schema)) => {
-            app.aurora_schema = schema % 4;
+        Message::Ui(UiEvent::SettingEdit(edit)) => {
+            // Button-driven edits are deferred (button builders evaluate
+            // eagerly during view): apply the named change now, then sync.
+            let _ = scanlateit_settings::modify(|s| match edit {
+                scanlateit_ui::event::SettingEdit::AuroraDarkMode(v) => s.aurora_is_dark = v,
+                scanlateit_ui::event::SettingEdit::AuroraBlobCount(v) => {
+                    s.aurora_blob_count = v.clamp(1, 5);
+                }
+                scanlateit_ui::event::SettingEdit::AuroraSchema(v) => s.aurora_schema = v % 4,
+                scanlateit_ui::event::SettingEdit::HiddenModelsReset(provider) => {
+                    s.hidden_models.remove(&provider);
+                }
+                scanlateit_ui::event::SettingEdit::HiddenModelsResetAll => {
+                    s.hidden_models.clear();
+                }
+            });
+            sync_tx_from_store(app);
+            app.status = "Settings saved.".to_string();
             Task::none()
         }
         Message::TranslateFinished(jobs, result) => {
@@ -2956,12 +2804,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .into();
     // Global aurora behind everything (mirrors ManhwaOCR AuroraCanvas as centralWidget).
     // Panels / toolbar are translucent so the blobs show through.
-    let aurora_cfg = scanlateit_ui::background::AuroraConfig {
-        color: app.aurora_color,
-        blob_count: app.aurora_blob_count,
-        is_dark: app.aurora_is_dark,
-        schema: scanlateit_ui::background::AuroraSchema::from_index(app.aurora_schema),
-    };
+    let aurora_cfg = scanlateit_ui::background::AuroraConfig::from_store();
     let aurora: Element<'_, UiEvent> =
         scanlateit_ui::background::AuroraBackground::new(aurora_cfg).view();
     let base: Element<'_, UiEvent> =

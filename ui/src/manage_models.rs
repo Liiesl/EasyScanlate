@@ -2,7 +2,7 @@
 //! toggle each model per provider. Deprecated models are never listed here
 //! (they are filtered at the provider layer). The basic configuration (no
 //! hidden entry) shows the default latest-per-family filtered list; hiding
-//! is persisted to `settings.json`.
+//! is written straight into the shared settings store.
 
 use iced::widget::{
     button, center, checkbox, column, container, mouse_area, opaque, row, scrollable, space,
@@ -10,13 +10,20 @@ use iced::widget::{
 };
 use iced::{Color, Element, Fill as FillLength, Length};
 
-use crate::event::UiEvent;
+use crate::event::{SettingEdit, UiEvent};
 use crate::panel::PANEL_BG;
 use crate::state::UiState;
 
 const MODAL_WIDTH: f32 = 540.0;
 const MODAL_HEIGHT: f32 = 460.0;
 const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);
+
+/// Writes one change into the shared settings store (write-through) and
+/// returns the single announcement event for the app.
+fn set(f: impl FnOnce(&mut scanlateit_settings::Settings)) -> UiEvent {
+    let _ = scanlateit_settings::modify(f);
+    UiEvent::SettingsChanged
+}
 
 pub fn view<'a, S: UiState + ?Sized>(
     state: &'a S,
@@ -58,14 +65,20 @@ pub fn view<'a, S: UiState + ?Sized>(
                     space::horizontal(),
                     button(text("Show all").size(10))
                         .padding([2, 6])
-                        .on_press(UiEvent::ManageModelsReset(provider_id.clone())),
+                        .on_press(UiEvent::SettingEdit(SettingEdit::HiddenModelsReset(
+                            provider_id.clone(),
+                        ))),
                 ]
                 .align_y(iced::Alignment::Center)
                 .spacing(6)
                 .into(),
             );
             for model in models {
-                let hidden = state.is_model_hidden(&provider_id, &model);
+                let hidden = scanlateit_settings::get(|s| {
+                    s.hidden_models
+                        .get(&provider_id)
+                        .is_some_and(|set| set.contains(&model))
+                });
                 let visible = !hidden;
                 let pid = provider_id.clone();
                 let mid = model.clone();
@@ -73,10 +86,24 @@ pub fn view<'a, S: UiState + ?Sized>(
                     checkbox(visible)
                         .label(model.clone())
                         .text_size(12)
-                        .on_toggle(move |v| UiEvent::ManageModelsToggle {
-                            provider: pid.clone(),
-                            model: mid.clone(),
-                            visible: v,
+                        .on_toggle(move |v| {
+                            let pid = pid.clone();
+                            let mid = mid.clone();
+                            set(move |s| {
+                                if v {
+                                    if let Some(set) = s.hidden_models.get_mut(&pid) {
+                                        set.remove(&mid);
+                                        if set.is_empty() {
+                                            s.hidden_models.remove(&pid);
+                                        }
+                                    }
+                                } else {
+                                    s.hidden_models
+                                        .entry(pid)
+                                        .or_default()
+                                        .insert(mid);
+                                }
+                            })
                         })
                         .into(),
                 );
@@ -101,7 +128,7 @@ pub fn view<'a, S: UiState + ?Sized>(
     let footer = row![
         button(text("Reset all").size(11))
             .padding([4, 10])
-            .on_press(UiEvent::ManageModelsResetAll),
+            .on_press(UiEvent::SettingEdit(SettingEdit::HiddenModelsResetAll)),
         space::horizontal(),
         button(text("Close").size(11))
             .padding([4, 10])

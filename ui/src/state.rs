@@ -1,12 +1,7 @@
-use std::collections::BTreeMap;
-
 use iced::widget::text_editor;
 use iced::{Color, Font, Rectangle};
 
 use scanlateit_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
-#[cfg(feature = "inpaint")]
-use scanlateit_model::InpaintBackend;
-use crate::translation::Connection;
 
 use crate::connect::ConnectModal;
 use crate::event::{EditOrigin, MainAreaMode, SettingsTab, StyleField};
@@ -28,13 +23,8 @@ pub trait UiState {
     /// dropdown; both are always one of `translate_model_groups`.
     fn translate_model_selection(&self) -> (String, String);
     fn translate_lang(&self) -> &str;
-    /// The stored translation connections, keyed by provider id; a provider
-    /// is connected exactly when it has an entry here.
-    fn connections(&self) -> &BTreeMap<String, Connection>;
     /// The connect modal open over the settings modal, if any.
     fn connect_modal(&self) -> Option<&ConnectModal>;
-    /// Whether the translation model picker only lists free models.
-    fn free_models_only(&self) -> bool;
     fn selected(&self) -> Option<(usize, EntryId)>;
     fn style_working(&self) -> &EntryStyle;
     fn style_text_color(&self) -> Color;
@@ -60,20 +50,6 @@ pub trait UiState {
     fn style_gradient_b(&self) -> Color;
     /// The working style's gradient direction.
     fn style_gradient_dir(&self) -> TextGradientDir;
-    /// Whether automatic style detection for new OCR entries is enabled.
-    #[cfg(feature = "styling")]
-    fn auto_style_detect(&self) -> bool;
-    /// The configured number of parallel OCR detection workers, as typed in
-    /// the settings modal (parsed when OCR starts).
-    #[cfg(feature = "ocr")]
-    fn ocr_workers(&self) -> &str;
-    /// The inpainting backend picked in the settings modal.
-    #[cfg(feature = "inpaint")]
-    fn inpaint_backend(&self) -> InpaintBackend;
-    /// The Telea interpolation radius, as typed in the settings modal
-    /// (parsed when inpainting starts).
-    #[cfg(feature = "inpaint")]
-    fn inpaint_radius(&self) -> &str;
     fn editing(&self) -> Option<(usize, EntryId)>;
     fn editing_origin(&self) -> EditOrigin;
     fn editing_rect(&self) -> Option<Rectangle>;
@@ -101,8 +77,4 @@ pub trait UiState {
     /// Every connected provider's *all* toggleable models (deprecated already
     /// removed) grouped by provider – shown in the Manage Models overlay.
     fn all_model_groups(&self) -> Vec<(String, String, Vec<String>)>;
-    /// Whether `model` of `provider` is currently hidden.
-    fn is_model_hidden(&self, provider: &str, model: &str) -> bool;
-    /// Aurora background theme config (global window background behind panels).
-    fn aurora_config(&self) -> crate::background::AuroraConfig;
 }

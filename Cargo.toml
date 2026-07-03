@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["model", "inpaint", "ocr", "styling", "translation", "ui", "NeverLiieIcedWidgets"]
+members = ["model", "inpaint", "ocr", "styling", "translation", "ui", "settings", "NeverLiieIcedWidgets"]
 resolver = "3"
 exclude = ["iced", "rapidocr-core", "NeverLiieIcedWidgets/examples"]
 
@@ -31,9 +31,8 @@ iced = { version = "0.14.0", path = "iced", features = ["image", "canvas", "adva
 image = "0.25"
 bytes = "1.6"
 rfd = "0.17"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 scanlateit-model = { path = "model" }
+scanlateit-settings = { path = "settings" }
 scanlateit-inpaint = { path = "inpaint", optional = true }
 scanlateit-ocr = { path = "ocr", optional = true }
 scanlateit-styling = { path = "styling", optional = true }
@@ -41,6 +40,12 @@ scanlateit-translation = { path = "translation", optional = true }
 scanlateit-ui = { path = "ui", default-features = false }
 tokio = { version = "1", features = ["rt", "time"] }
 fontdb = "0.24"
+
+[profile.dev]
+# Required for sccache (.cargo/config.toml rustc-wrapper): incrementally
+# compiled units are never cached, so leaving this on would make every
+# compile a pass-through miss.
+incremental = false
 
 [profile.dev.package."*"]
 debug = "line-tables-only"

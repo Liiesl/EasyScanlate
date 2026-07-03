@@ -442,7 +442,7 @@ mod tests {
             bg_color_b: [8, 9, 10],
             bg_direction: [0.0, 1.0],
         };
-        let style = prediction.to_entry_style(base);
+        let style = prediction.to_entry_style(base.clone());
         assert_eq!(style.bg_color, base.bg_color, "no single color for gradients");
         assert_eq!(style.text_color, [1, 2, 3, 255]);
     }

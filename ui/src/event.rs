@@ -4,7 +4,7 @@ use iced::widget::pane_grid;
 use iced::widget::text_editor;
 use iced::{Color, Rectangle};
 
-use scanlateit_model::{EntryId, InpaintBackend, ProfileId, Quad, TextAlign, TextGradientDir};
+use scanlateit_model::{EntryId, ProfileId, Quad, TextAlign, TextGradientDir};
 
 /// The actions offered by the selection decorations around the selected
 /// overlay box in the main area.
@@ -66,6 +66,25 @@ pub enum StyleField {
     GradientB,
 }
 
+/// A deferred settings edit for widget builders that take a *message value*
+/// (iced buttons evaluate their builder eagerly during every view build):
+/// the payload names the change, and the app applies it to the settings
+/// store in `update`. Field-level widgets (text inputs, checkboxes, pick
+/// lists, the color wheel) keep writing the store directly instead.
+#[derive(Debug, Clone)]
+pub enum SettingEdit {
+    /// Aurora dark (`true`) vs light (`false`).
+    AuroraDarkMode(bool),
+    /// Aurora blob count target; clamped to 1..=5 when applied.
+    AuroraBlobCount(u8),
+    /// Aurora color-theory schema index; taken modulo 4 when applied.
+    AuroraSchema(u8),
+    /// Clear one provider's hidden-model set ("Show all").
+    HiddenModelsReset(String),
+    /// Clear every provider's hidden-model set ("Reset all").
+    HiddenModelsResetAll,
+}
+
 /// Widget-level events produced by the ui crate. The app maps these into its
 /// own `Message` and owns all state changes; widgets never see the app.
 #[derive(Debug, Clone)]
@@ -108,24 +127,10 @@ pub enum UiEvent {
     ConnectModalSubmit,
     /// The user cancelled the connect modal; nothing is stored.
     ConnectModalCancel,
-    /// The user toggled the "only free models" filter in the settings modal.
-    FreeModelsOnlyToggle(bool),
     /// Open the Manage Models overlay (over the settings modal).
     ManageModelsOpen,
     /// Close the Manage Models overlay.
     ManageModelsClose,
-    /// Toggle visibility of one model in the Manage Models overlay.
-    ManageModelsToggle {
-        provider: String,
-        model: String,
-        visible: bool,
-    },
-    /// Show all models of one provider again.
-    ManageModelsShowAll(String),
-    /// Hide all models of one provider? No – clear hidden for that provider.
-    ManageModelsReset(String),
-    /// Show all models of all providers.
-    ManageModelsResetAll,
     EntryClicked(Option<(usize, EntryId)>),
     EntryDoubleClicked((usize, EntryId)),
     /// Start the inline text edit from the panel's results list instead of
@@ -191,16 +196,6 @@ pub enum UiEvent {
     /// Run the ONNX style classifier on the selected entry and apply the
     /// result. Works regardless of the auto-detect setting.
     StyleAutoDetect,
-    /// Toggle automatic style detection for new OCR entries.
-    StyleAutoDetectToggle(bool),
-    /// The user typed in the OCR detection workers field of the settings
-    /// modal; the string is parsed (with a fallback) when OCR starts.
-    OcrWorkers(String),
-    /// The user picked an inpainting backend in the settings modal.
-    InpaintBackend(InpaintBackend),
-    /// The user typed in the Telea radius field of the settings modal; the
-    /// string is parsed (with a fallback) when inpainting starts.
-    InpaintRadius(String),
     /// The user dragged the divider between the main area and the side panel.
     PanelResized(pane_grid::ResizeEvent),
     /// The user dragged the divider between the styling and the translation/results panels.
@@ -210,18 +205,15 @@ pub enum UiEvent {
     /// Open the settings modal directly on the given tab (used by the
     /// translation bar's configure button).
     SettingsOpenTab(SettingsTab),
-    /// Close the settings modal; the app persists the settings.
+    /// Close the settings modal.
     SettingsClose,
     /// Switch the visible settings tab.
     SettingsTab(SettingsTab),
-    /// Aurora background: primary color picked on the wheel (rgba 0..255).
-    AuroraColor([u8; 4]),
-    /// Aurora background: number of blobs (1..=5).
-    AuroraCount(u8),
-    /// Aurora background: dark (`true`) vs light (`false`) theme.
-    AuroraDarkMode(bool),
-    /// Aurora background: color-theory schema 0..3.
-    AuroraSchema(u8),
-    /// Aurora background: direct hex input (e.g. "#3b0600").
-    AuroraHex(String),
+    /// Some setting was changed: the ui crate already wrote it into the
+    /// shared settings store; the app re-syncs its runtime mirrors from
+    /// there. This is the single message for every settings edit.
+    SettingsChanged,
+    /// A deferred button-driven settings edit (see [`SettingEdit`]): the
+    /// app applies it to the store, then re-syncs like `SettingsChanged`.
+    SettingEdit(SettingEdit),
 }

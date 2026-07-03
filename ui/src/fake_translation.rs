@@ -21,14 +21,9 @@ pub enum CompatKind {
 }
 
 /// One stored connection: the API key plus (for custom endpoints) the base
-/// URL and the single model id. In-memory only; never persisted in fake
-/// builds.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Connection {
-    pub api_key: String,
-    pub base_url: Option<String>,
-    pub model: Option<String>,
-}
+/// URL and the single model id. Owned by the settings crate (it is persisted
+/// data) and re-exported here, mirroring the real module.
+pub use scanlateit_settings::Connection;
 
 /// The id of the custom OpenAI-compatible connection.
 pub const CUSTOM_OPENAI: &str = "custom-openai";
