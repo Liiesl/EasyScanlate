@@ -17,8 +17,10 @@ pub trait UiState {
     /// Every connected translation provider's selectable models, in connected
     /// order: `(provider id, display name, model ids)`. The model ids already
     /// respect the free-only filter. The merged model dropdown of the
-    /// translation bar groups these by provider.
-    fn translate_model_groups(&self) -> Vec<(String, String, Vec<String>)>;
+    /// translation bar groups these by provider. Borrows from `&self` (the
+    /// session's cache), so the result is valid for as long as the state
+    /// borrow — enough for a frame.
+    fn translate_model_groups(&self) -> &[(String, String, Vec<String>)];
     /// The currently selected `(provider id, model id)` of the merged model
     /// dropdown; both are always one of `translate_model_groups`.
     fn translate_model_selection(&self) -> (String, String);

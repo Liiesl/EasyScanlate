@@ -409,6 +409,9 @@ pub struct Session {
     /// Free-only filter for the model picker.
     pub free_only: bool,
     pub hidden_models: BTreeMap<String, BTreeSet<String>>,
+    /// Cached output of [`Self::model_groups`]; rebuilt at the top of every
+    /// [`Self::sync_models`] call so callers can borrow it for the frame.
+    groups: Vec<(String, String, Vec<String>)>,
 }
 
 impl Session {
@@ -470,8 +473,11 @@ impl Session {
         ids
     }
 
-    /// Rebuilds `models`/`selected_model` for the current provider.
+    /// Rebuilds `models`/`selected_model` for the current provider. Also
+    /// refreshes the [`Self::model_groups`] cache, mirroring the real
+    /// session.
     pub fn sync_models(&mut self) {
+        self.groups = self.compute_model_groups();
         if self.selected_id.is_empty() {
             self.models = Vec::new();
             self.selected_model = String::new();
@@ -538,7 +544,16 @@ impl Session {
     /// `(provider id, display name, model ids)`. The model ids respect the
     /// free-only filter and hidden set; providers without selectable models
     /// are skipped. Mirrors the real module's session.
-    pub fn model_groups(&self) -> Vec<(String, String, Vec<String>)> {
+    ///
+    /// Returns a borrow of the internal cache (refreshed by
+    /// [`Self::sync_models`]) so view code can hold the `&str`s for a frame
+    /// without cloning.
+    pub fn model_groups(&self) -> &[(String, String, Vec<String>)] {
+        &self.groups
+    }
+
+    /// Recomputes [`Self::model_groups`] from scratch.
+    fn compute_model_groups(&self) -> Vec<(String, String, Vec<String>)> {
         self.connected_ids
             .iter()
             .filter_map(|id| {

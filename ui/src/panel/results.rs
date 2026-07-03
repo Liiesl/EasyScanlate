@@ -18,7 +18,7 @@ use iced::widget::{
 };
 use iced::{keyboard, Background, Border, Color, Element, Fill as FillLength, Font, Padding,
     Rectangle, Vector};
-use neverliie_iced_widgets::advanced_dropdown::{advanced_dropdown, Item, MenuItem};
+use neverliie_iced_widgets::advanced_dropdown::{advanced_dropdown, Footer, Item, MenuItem};
 
 use crate::event::{EditOrigin, SettingsTab, ToolbarAction, UiEvent};
 use crate::loaded::LoadedImage;
@@ -292,8 +292,7 @@ fn profile_header<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent>
             .placeholder("Profile…")
             .text_size(12)
             .width(150)
-            .on_new_item(UiEvent::ProfileCreate)
-            .new_item_label("+ New Profile"),
+            .footer(Footer::new("+ New Profile", UiEvent::ProfileCreate)),
     ]
     .spacing(6)
     .align_y(iced::Alignment::Center)
@@ -317,17 +316,17 @@ fn translate_bar<'a, S: UiState + ?Sized>(
             Vec::new();
         let mut selected = None;
         for (provider_id, provider_name, models) in state.translate_model_groups() {
-            entries.push(MenuItem::Label(provider_name.clone()));
+            entries.push(MenuItem::Label(provider_name.as_str()));
             for model in models {
                 let option = ModelOption {
                     provider_id: provider_id.clone(),
                     provider_name: provider_name.clone(),
                     model: model.clone(),
                 };
-                if provider_id == sel_provider && model == sel_model {
+                if provider_id.as_str() == sel_provider && model.as_str() == sel_model {
                     selected = Some(option.clone());
                 }
-                entries.push(MenuItem::Item(Item::new(option, model)));
+                entries.push(MenuItem::Item(Item::new(option, model.as_str())));
             }
         }
 

@@ -439,7 +439,7 @@ impl UiState for App {
         &self.status
     }
 
-    fn translate_model_groups(&self) -> Vec<(String, String, Vec<String>)> {
+    fn translate_model_groups(&self) -> &[(String, String, Vec<String>)] {
         self.tx.model_groups()
     }
 
