@@ -16,7 +16,7 @@ use iced::widget::text_input;
 use iced::{Color, Element, Fill as FillLength, Length};
 
 #[cfg(feature = "inpaint")]
-use scanlateit_model::InpaintBackend;
+use scanlateit_settings::InpaintBackend;
 
 use crate::translation::{self, CUSTOM_ANTHROPIC, CUSTOM_OPENAI};
 

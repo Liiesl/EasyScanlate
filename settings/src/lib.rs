@@ -11,11 +11,10 @@
 //! not call back into [`get`]/[`modify`] (re-entrant locking would deadlock).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::sync::{OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
-
-use scanlateit_model::InpaintBackend;
 
 /// The confy application name; decides the config directory name.
 const APP_NAME: &str = "scanlateit";
@@ -50,6 +49,30 @@ pub struct Connection {
     pub api_key: String,
     pub base_url: Option<String>,
     pub model: Option<String>,
+}
+
+/// Which inpainting implementation the app uses. Owned here (the settings
+/// crate, like every other persisted knob); the model crate stays pure
+/// image/data storage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InpaintBackend {
+    /// The pure-Rust Telea algorithm from the `inpaint` crate: no model, no
+    /// download, works instantly on CPU.
+    #[default]
+    Telea,
+    /// The LaMa ONNX model: better on complex backgrounds, needs the
+    /// `lama-manga.onnx` file next to the executable.
+    Lama,
+}
+
+impl fmt::Display for InpaintBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Telea => "Telea (inpaint crate)",
+            Self::Lama => "LaMa (ONNX)",
+        })
+    }
 }
 
 /// The whole persisted app configuration. Every field is unconditional:

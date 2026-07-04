@@ -20,7 +20,7 @@ use scanlateit_model::{
     TextGradientDir,
 };
 #[cfg(feature = "inpaint")]
-use scanlateit_model::InpaintBackend;
+use scanlateit_settings::InpaintBackend;
 #[cfg(feature = "inpaint")]
 use scanlateit_model::InpaintPatch;
 #[cfg(feature = "ocr")]

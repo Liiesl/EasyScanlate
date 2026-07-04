@@ -10,3 +10,4 @@ inpaint = { version = "0.1", features = ["image"] }
 ndarray = "0.17"
 ort = "2.0.0-rc.12"
 scanlateit-model = { path = "../model" }
+scanlateit-settings = { path = "../settings" }

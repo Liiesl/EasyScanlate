@@ -21,7 +21,8 @@ use ndarray::{Array4, ArrayD};
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::TensorRef;
-use scanlateit_model::{InpaintBackend, Quad};
+use scanlateit_model::Quad;
+use scanlateit_settings::InpaintBackend;
 
 /// The fixed square input size of the LaMa model.
 pub const MODEL_EDGE: u32 = 512;
