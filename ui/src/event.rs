@@ -83,6 +83,8 @@ pub enum SettingEdit {
     HiddenModelsReset(String),
     /// Clear every provider's hidden-model set ("Reset all").
     HiddenModelsResetAll,
+    /// UI base font size, like VS Code's `editor.fontSize`. Integer only.
+    UiFontSize(u32),
 }
 
 /// Widget-level events produced by the ui crate. The app maps these into its

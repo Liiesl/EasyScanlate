@@ -14,6 +14,7 @@ use iced::{Color, Element, Length, Point, Rectangle, Size};
 use iced::mouse;
 
 use crate::event::UiEvent;
+use crate::scale;
 
 // ---------------------------------------------------------------------------
 // Schema + Config
@@ -482,8 +483,8 @@ impl AuroraWheel {
     }
     pub fn view(self) -> Element<'static, UiEvent> {
         iced::widget::canvas(self)
-            .width(Length::Fixed(WHEEL_SIZE))
-            .height(Length::Fixed(WHEEL_SIZE))
+            .width(Length::Fixed(scale::s(WHEEL_SIZE)))
+            .height(Length::Fixed(scale::s(WHEEL_SIZE)))
             .into()
     }
 }
@@ -534,7 +535,7 @@ impl canvas::Program<UiEvent> for AuroraWheel {
         let cache = Cache::new();
         let geometry = cache.draw(renderer, bounds.size(), |frame| {
             let size = bounds.width.min(bounds.height);
-            let rect_size = size - WHEEL_MARGIN * 2.0;
+            let rect_size = size - scale::s(WHEEL_MARGIN) * 2.0;
             if rect_size <= 0.0 {
                 return;
             }
@@ -578,7 +579,7 @@ impl canvas::Program<UiEvent> for AuroraWheel {
             }
             // Border rect
             let rect = Rectangle::new(
-                Point::new(WHEEL_MARGIN, WHEEL_MARGIN),
+                Point::new(scale::s(WHEEL_MARGIN), scale::s(WHEEL_MARGIN)),
                 Size::new(rect_size, rect_size),
             );
             frame.stroke_rectangle(
@@ -633,7 +634,7 @@ impl canvas::Program<UiEvent> for AuroraWheel {
 
 fn color_at_position(pos: Point, bounds: Rectangle, config: &AuroraConfig) -> UiEvent {
     let size = bounds.width.min(bounds.height);
-    let rect_size = size - WHEEL_MARGIN * 2.0;
+    let rect_size = size - scale::s(WHEEL_MARGIN) * 2.0;
     let center = Point::new(size / 2.0, size / 2.0);
     let max_radius = (rect_size / 2.0 * std::f32::consts::SQRT_2).max(1.0);
     let dx = pos.x - center.x;

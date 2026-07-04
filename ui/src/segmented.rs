@@ -6,6 +6,7 @@ use iced::widget::{button, container, row, text};
 use iced::{Background, Border, Color, Element, Fill as FillLength, Font, Shadow};
 
 use crate::event::UiEvent;
+use crate::scale;
 
 /// Accent color of active segments, tabs and glyphs.
 pub const ACCENT: Color = Color::from_rgb8(92, 190, 255);
@@ -29,9 +30,9 @@ pub fn segment<'a>(
     on_press: Option<UiEvent>,
     font: Font,
 ) -> Element<'a, UiEvent> {
-    button(text(glyph).size(12).font(font).width(FillLength).center())
+    button(text(glyph).size(scale::s(12.0)).font(font).width(FillLength).center())
         .width(FillLength)
-        .padding([8, 0])
+        .padding([scale::s(8.0), scale::s(0.0)])
         .on_press_maybe(on_press)
         .style(move |_theme, status: Status| {
             let hovered = matches!(status, Status::Hovered | Status::Pressed);
@@ -54,14 +55,14 @@ pub fn segment<'a>(
 
 /// A bordered pill holding equally-sized [`segment`]s.
 pub fn segmented_group<'a>(segments: Vec<Element<'a, UiEvent>>) -> Element<'a, UiEvent> {
-    container(row(segments).spacing(2))
-        .padding(2)
+    container(row(segments).spacing(scale::s(2.0)))
+        .padding(scale::s(2.0))
         .width(FillLength)
         .style(|_theme| container::Style {
             background: Some(INPUT_BG.into()),
             border: Border {
-                radius: 4.0.into(),
-                width: 1.0,
+                radius: scale::s(4.0).into(),
+                width: scale::s(1.0),
                 color: BORDER,
             },
             ..container::Style::default()

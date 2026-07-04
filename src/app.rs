@@ -28,6 +28,7 @@ use scanlateit_model::InpaintPatch;
 use scanlateit_ocr::{self as ocr, Engine, OcrCancellationToken, ParallelEngine};
 #[cfg(feature = "styling")]
 use scanlateit_styling::{Engine as StylingEngine, JobTracker};
+use scanlateit_ui::scale;
 use scanlateit_ui::translation as translation;
 use scanlateit_ui::color::rgba_to_color;
 #[cfg(feature = "inpaint")]
@@ -2689,6 +2690,9 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 scanlateit_ui::event::SettingEdit::HiddenModelsResetAll => {
                     s.hidden_models.clear();
                 }
+                scanlateit_ui::event::SettingEdit::UiFontSize(v) => {
+                    s.ui_font_size = v.clamp(8, 30);
+                }
             });
             sync_tx_from_store(app);
             app.status = "Settings saved.".to_string();
@@ -2804,14 +2808,14 @@ pub fn view(app: &App) -> Element<'_, Message> {
                     .height(Length::Fill)
                     .style(|_theme| iced::widget::container::Style {
                         background: Some(panel::PANEL_BG.into()),
-                        border: iced::Border::default().rounded(CARD_RADIUS),
+                        border: iced::Border::default().rounded(scale::s(CARD_RADIUS)),
                         ..Default::default()
                     })
                     .into();
                 el
             }
             PaneKind::Panel => {
-                // Inner split: styling ↔ translation/results, drag resizable with same GAP.
+                // Inner split: styling ↔ translation/results, drag resizable with same GAP — base at 12pt.
                 let side_grid: Element<'_, UiEvent> =
                     pane_grid::PaneGrid::new(&app.side_panes, |_, inner, _| {
                         pane_grid::Content::new(match inner {
@@ -2819,12 +2823,12 @@ pub fn view(app: &App) -> Element<'_, Message> {
                                 let el: Element<'_, UiEvent> = iced::widget::container(
                                     panel::styling::view(app),
                                 )
-                                .padding(10)
+                                .padding(scale::s(10.0))
                                 .width(Length::Fill)
                                 .height(Length::Fill)
                                 .style(|_theme| iced::widget::container::Style {
                                     background: Some(panel::PANEL_BG.into()),
-                                    border: iced::Border::default().rounded(CARD_RADIUS),
+                                    border: iced::Border::default().rounded(scale::s(CARD_RADIUS)),
                                     ..Default::default()
                                 })
                                 .into();
@@ -2834,12 +2838,12 @@ pub fn view(app: &App) -> Element<'_, Message> {
                                 let el: Element<'_, UiEvent> = iced::widget::container(
                                     panel::results::view(app),
                                 )
-                                .padding(10)
+                                .padding(scale::s(10.0))
                                 .width(Length::Fill)
                                 .height(Length::Fill)
                                 .style(|_theme| iced::widget::container::Style {
                                     background: Some(panel::PANEL_BG.into()),
-                                    border: iced::Border::default().rounded(CARD_RADIUS),
+                                    border: iced::Border::default().rounded(scale::s(CARD_RADIUS)),
                                     ..Default::default()
                                 })
                                 .into();
@@ -2847,9 +2851,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
                             }
                         })
                     })
-                    .spacing(GAP)
-                    .min_size(120)
-                    .on_resize(GAP, UiEvent::SidePanelResized)
+                    .spacing(scale::s(GAP))
+                    .min_size(scale::s(120.0))
+                    .on_resize(scale::s(GAP), UiEvent::SidePanelResized)
                     .width(Length::Fill)
                     .height(Length::Fill)
                     .into();
@@ -2857,7 +2861,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 // Action bar is transparent; styling/results are translucent cards with GAP between them.
                 let el: Element<'_, UiEvent> =
                     iced::widget::column![panel::actions::view(app), side_grid]
-                        .spacing(GAP)
+                        .spacing(scale::s(GAP))
                         .width(Length::Fill)
                         .height(Length::Fill)
                         .into();
@@ -2865,20 +2869,20 @@ pub fn view(app: &App) -> Element<'_, Message> {
             }
         })
     })
-    .spacing(GAP)
-    .min_size(160)
-    .on_resize(GAP, UiEvent::PanelResized)
+    .spacing(scale::s(GAP))
+    .min_size(scale::s(160.0))
+    .on_resize(scale::s(GAP), UiEvent::PanelResized)
     .width(Length::Fill)
     .height(Length::Fill)
     .into();
     let content: Element<'_, UiEvent> = iced::widget::row![toolbar::view(app), grid]
-        .spacing(GAP)
+        .spacing(scale::s(GAP))
         .height(Length::Fill)
         .into();
     // OUTER_PADDING is applied to the content only – the title bar stays
     // edge-to-edge (outer_padding = 0 on the frame) per the requirements.
     let padded_content: Element<'_, UiEvent> = iced::widget::container(content)
-        .padding(OUTER_PADDING)
+        .padding(scale::s(OUTER_PADDING))
         .width(Length::Fill)
         .height(Length::Fill)
         .into();

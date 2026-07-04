@@ -23,6 +23,7 @@ use neverliie_iced_widgets::advanced_dropdown::{advanced_dropdown, Footer, Item,
 use crate::event::{EditOrigin, SettingsTab, ToolbarAction, UiEvent};
 use crate::loaded::LoadedImage;
 use crate::panel::{MUTED_FG, PANEL_BG};
+use crate::scale;
 use crate::state::UiState;
 use crate::translation;
 use scanlateit_model::{EntryId, OcrEntry, ProfileId};
@@ -65,10 +66,10 @@ const SELECTED_BG: Color = Color::from_rgba8(92, 190, 255, 0.08);
 fn input_box<'a>(content: impl Into<Element<'a, UiEvent>>) -> Element<'a, UiEvent> {
     container(content)
         .width(FillLength)
-        .padding(BOX_PADDING)
+        .padding(scale::s(BOX_PADDING))
         .style(|_theme| container::Style {
             background: Some(BOX_BG.into()),
-            border: Border::default().rounded(4.0),
+            border: Border::default().rounded(scale::s(4.0)),
             ..container::Style::default()
         })
         .into()
@@ -86,9 +87,9 @@ fn panel_editor<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         text_editor::TextEditor::new(content)
             .id(PANEL_EDIT_INPUT_ID)
             .font(state.font().unwrap_or(Font::DEFAULT))
-            .size(12)
+            .size(scale::s(12.0))
             .line_height(1.2)
-            .padding(0)
+            .padding(scale::s(0.0))
             .on_action(UiEvent::EditAction)
             .key_binding(|press| match press.modified_key.as_ref() {
                 keyboard::Key::Named(keyboard::key::Named::Escape) => {
@@ -101,7 +102,7 @@ fn panel_editor<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             })
             .style(|_theme, _status| text_editor::Style {
                 background: Background::Color(Color::TRANSPARENT),
-                border: Border::default().rounded(0.0),
+                border: Border::default().rounded(scale::s(0.0)),
                 placeholder: MUTED_FG,
                 value: Color::from_rgb(0.9, 0.9, 0.9),
                 selection: Color::from_rgba8(92, 190, 255, 0.35),
@@ -111,13 +112,13 @@ fn panel_editor<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
 
 /// The read-only original text of an entry, boxed like the other inputs.
 fn original_box(entry_text: &str, font: Font) -> Element<'_, UiEvent> {
-    input_box(text(entry_text).size(12).font(font))
+    input_box(text(entry_text).size(scale::s(12.0)).font(font))
 }
 
 /// The current profile's text of an entry, boxed like the other inputs;
 /// read-only until clicked, which starts the inline edit.
 fn current_box(value: String, font: Font) -> Element<'static, UiEvent> {
-    input_box(text(value).size(12).font(font))
+    input_box(text(value).size(scale::s(12.0)).font(font))
 }
 
 /// One results row: the original OCR text on the left, the selected
@@ -165,14 +166,14 @@ fn entry_row<'a, S: UiState + ?Sized>(
     };
 
     let mut buttons: Vec<Element<'_, UiEvent>> = vec![
-        button(text("Delete").size(10))
-            .padding([2, 6])
+        button(text("Delete").size(scale::s(10.0)))
+            .padding([scale::s(2.0), scale::s(6.0)])
             .on_press(UiEvent::EntryToolbar((index, entry_id, ToolbarAction::Delete)))
             .into(),
     ];
     buttons.push(
-        button(text("Retranslate").size(10))
-            .padding([2, 6])
+        button(text("Retranslate").size(scale::s(10.0)))
+            .padding([scale::s(2.0), scale::s(6.0)])
             .on_press_maybe(
                 (!state.translating()
                     && !state.running()
@@ -184,26 +185,31 @@ fn entry_row<'a, S: UiState + ?Sized>(
 
     let row = container(
         row![
-            column![text("kor").size(10).color(MUTED_FG), original]
-                .spacing(2)
+            column![text("kor").size(scale::s(10.0)).color(MUTED_FG), original]
+                .spacing(scale::s(2.0))
                 .width(FillLength),
-            column![text(profile_name).size(10).color(MUTED_FG), current]
-                .spacing(2)
+            column![text(profile_name).size(scale::s(10.0)).color(MUTED_FG), current]
+                .spacing(scale::s(2.0))
                 .width(FillLength),
-            column(buttons).spacing(4),
+            column(buttons).spacing(scale::s(4.0)),
         ]
-        .spacing(ROW_SPACING)
+        .spacing(scale::s(ROW_SPACING))
         .align_y(iced::Alignment::Center),
     )
     .id(panel_row_id(index, entry_id))
     .width(FillLength)
-    .padding(ROW_PADDING)
+    .padding(Padding {
+        top: scale::s(ROW_PADDING.top),
+        right: scale::s(ROW_PADDING.right),
+        bottom: scale::s(ROW_PADDING.bottom),
+        left: scale::s(ROW_PADDING.left),
+    })
     .style(move |_theme| container::Style {
         background: Some(PANEL_BG.into()),
         border: Border::default()
-            .width(1.0)
+            .width(scale::s(1.0))
             .color(if selected { SELECTED_BORDER } else { ROW_BORDER })
-            .rounded(12.0),
+            .rounded(scale::s(12.0)),
         ..container::Style::default()
     });
 
@@ -285,16 +291,16 @@ fn profile_header<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent>
     }
 
     row![
-        text("TRANSLATION").size(11).color(MUTED_FG),
+        text("TRANSLATION").size(scale::s(11.0)).color(MUTED_FG),
         space::horizontal(),
-        text("profile").size(11).color(MUTED_FG),
+        text("profile").size(scale::s(11.0)).color(MUTED_FG),
         advanced_dropdown(entries, selected, |option| UiEvent::ProfileSelect(option.id))
             .placeholder("Profile…")
-            .text_size(12)
-            .width(150)
+            .text_size(scale::s(12.0))
+            .width(scale::s(150.0))
             .footer(Footer::new("+ New Profile", UiEvent::ProfileCreate)),
     ]
-    .spacing(6)
+    .spacing(scale::s(6.0))
     .align_y(iced::Alignment::Center)
     .width(FillLength)
     .into()
@@ -337,44 +343,44 @@ fn translate_bar<'a, S: UiState + ?Sized>(
             })
             .placeholder("Select a model…")
             .searchable(true)
-            .text_size(12)
+            .text_size(scale::s(12.0))
             .width(FillLength)
             .menu_max_height(280.0)
             .footer(Footer::new("Manage models…", UiEvent::ManageModelsOpen)),
-            text("To:").size(12),
+            text("To:").size(scale::s(12.0)),
             pick_list(
                 translation::LANGUAGES,
                 Some(state.translate_lang()),
                 |l| UiEvent::TranslateLang(l.to_string()),
             )
-            .text_size(12),
+            .text_size(scale::s(12.0)),
             button("Translate").on_press_maybe(
                 (has_entries && !state.translating() && !state.running())
                     .then_some(UiEvent::Translate)
             ),
         ]
-        .spacing(6)
+        .spacing(scale::s(6.0))
         .align_y(iced::Alignment::Center)
         .into()
     } else {
         row![
-            text("Translation service: Not connected").size(12),
+            text("Translation service: Not connected").size(scale::s(12.0)),
             space::horizontal(),
-            button(text("Configure…").size(11))
-                .padding([2, 6])
+            button(text("Configure…").size(scale::s(11.0)))
+                .padding([scale::s(2.0), scale::s(6.0)])
                 .on_press(UiEvent::SettingsOpenTab(SettingsTab::Translation)),
         ]
-        .spacing(6)
+        .spacing(scale::s(6.0))
         .align_y(iced::Alignment::Center)
         .into()
     };
 
     container(body)
         .width(FillLength)
-        .padding(6)
+        .padding(scale::s(6.0))
         .style(|_theme| container::Style {
             background: Some(BOX_BG.into()),
-            border: Border::default().rounded(4.0),
+            border: Border::default().rounded(scale::s(4.0)),
             ..container::Style::default()
         })
         .into()
@@ -391,7 +397,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     if state.images().is_empty() {
         results_list.push(
             text("No images loaded. Open images to begin.")
-                .size(12)
+                .size(scale::s(12.0))
                 .color(MUTED_FG)
                 .into(),
         );
@@ -401,13 +407,13 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
 
     column![
         profile_header(state),
-        scrollable(Column::with_children(results_list).spacing(8))
+        scrollable(Column::with_children(results_list).spacing(scale::s(8.0)))
             .id(PANEL_LIST_ID)
             .height(FillLength)
             .width(FillLength),
         bar,
     ]
-    .spacing(8)
+    .spacing(scale::s(8.0))
     .height(FillLength)
     .into()
 }

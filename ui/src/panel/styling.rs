@@ -37,15 +37,16 @@ use scanlateit_model::{EntryStyle, TextAlign, TextGradientDir};
 use crate::event::{StyleField, UiEvent};
 use crate::main_area::overlay::styled_font;
 use crate::segmented::{segment, segmented_group, ACCENT, BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
+use crate::scale;
 use crate::state::UiState;
 
-const SWATCH_SIDE: f32 = 20.0;
+const SWATCH_SIDE: f32 = 16.0;
 const HINT: &str = "Select a text entry in the image to style it.";
 
-/// Side of a preset square, in points.
-const PRESET_SIDE: f32 = 56.0;
+/// Side of a preset square, in points — reduced from 56 (absurd at base) to 36.
+const PRESET_SIDE: f32 = 36.0;
 /// Corner radius of a preset square, in points.
-const PRESET_RADIUS: f32 = 6.0;
+const PRESET_RADIUS: f32 = 5.0;
 /// Checkerboard tiles behind a preset's background: the color picker's
 /// light/dark pair (`#E6E6E6` / `#C8C8C8`) at half alpha, so the panel
 /// shows through like in the color picker's swatches.
@@ -60,7 +61,7 @@ fn to_color(rgba: [u8; 4]) -> Color {
 
 /// A muted, uppercase section label ("Fill", "Stroke", ...).
 fn section_title<'a>(label: &'a str) -> Element<'a, UiEvent> {
-    text(label).size(11).color(MUTED_FG).into()
+    text(label).size(scale::s(11.0)).color(MUTED_FG).into()
 }
 
 /// A dark, bordered wrapper for inputs and swatch rows.
@@ -71,8 +72,8 @@ fn field_wrap<'a>(content: Element<'a, UiEvent>, padding: Padding) -> Element<'a
         .style(|_theme| container::Style {
             background: Some(INPUT_BG.into()),
             border: Border {
-                radius: 4.0.into(),
-                width: 1.0,
+                radius: scale::s(4.0).into(),
+                width: scale::s(1.0),
                 color: BORDER,
             },
             ..container::Style::default()
@@ -84,21 +85,21 @@ fn field_wrap<'a>(content: Element<'a, UiEvent>, padding: Padding) -> Element<'a
 /// label, like the mockup's bottom-border tab bar.
 fn tab<'a>(label: &'a str, active: bool, on_press: Option<UiEvent>) -> Element<'a, UiEvent> {
     let underline: Element<'a, UiEvent> = if active {
-        rule::horizontal(2)
+        rule::horizontal(scale::s(2.0))
             .style(|_theme: &iced::Theme| rule::Style {
                 color: ACCENT,
-                radius: 0.0.into(),
+                radius: scale::s(0.0).into(),
                 fill_mode: rule::FillMode::Full,
                 snap: true,
             })
             .into()
     } else {
-        Space::new().height(2.0).into()
+        Space::new().height(scale::s(2.0)).into()
     };
     column![
-        button(text(label).size(11))
+        button(text(label).size(scale::s(11.0)))
             .width(FillLength)
-            .padding([5, 0])
+            .padding([scale::s(5.0), scale::s(0.0)])
             .on_press_maybe(on_press)
             .style(move |_theme, status: Status| {
                 let hovered = matches!(status, Status::Hovered | Status::Pressed);
@@ -122,7 +123,7 @@ fn fill_tabs<'a>(gradient: bool, selected: bool) -> Element<'a, UiEvent> {
         tab("Solid", !gradient, selected.then_some(UiEvent::StyleGradientToggle(false))),
         tab("Gradient", gradient, selected.then_some(UiEvent::StyleGradientToggle(true))),
     ]
-    .spacing(4)
+    .spacing(scale::s(4.0))
     .into()
 }
 
@@ -144,8 +145,8 @@ fn hex_label(color: Color) -> String {
 /// is selected.
 fn swatch_button(color: Color, on_open: Option<UiEvent>) -> Element<'static, UiEvent> {
     button(Space::new())
-        .width(SWATCH_SIDE)
-        .height(SWATCH_SIDE)
+        .width(scale::s(SWATCH_SIDE))
+        .height(scale::s(SWATCH_SIDE))
         .padding(Padding::ZERO)
         .on_press_maybe(on_open)
         .style(move |_theme, status: Status| {
@@ -157,8 +158,8 @@ fn swatch_button(color: Color, on_open: Option<UiEvent>) -> Element<'static, UiE
             button::Style {
                 background: Some(Background::Color(color)),
                 border: Border {
-                    radius: 3.0.into(),
-                    width: 1.0,
+                    radius: scale::s(3.0).into(),
+                    width: scale::s(1.0),
                     color: border_color,
                 },
                 shadow: Shadow::default(),
@@ -192,18 +193,18 @@ fn color_field<'a, S: UiState + ?Sized>(
                 offset: Vector::new(0.0, 4.0),
             }),
             text(hex_label(color))
-                .size(11)
+                .size(scale::s(11.0))
                 .font(Font::MONOSPACE)
                 .color(TEXT_MAIN),
         ]
-        .spacing(6)
+        .spacing(scale::s(6.0))
         .align_y(iced::Alignment::Center)
         .into(),
         Padding {
-            top: 3.0,
-            right: 8.0,
-            bottom: 3.0,
-            left: 4.0,
+            top: scale::s(3.0),
+            right: scale::s(8.0),
+            bottom: scale::s(3.0),
+            left: scale::s(4.0),
         },
     )
 }
@@ -216,11 +217,11 @@ fn number_field<'a>(
 ) -> Element<'a, UiEvent> {
     field_wrap(
         row![
-            text(prefix).size(12).color(MUTED_FG),
+            text(prefix).size(scale::s(12.0)).color(MUTED_FG),
             text_input("0", value)
                 .on_input_maybe(on_input)
-                .padding(0)
-                .size(12)
+                .padding(scale::s(0.0))
+                .size(scale::s(12.0))
                 .width(FillLength)
                 .style(|_theme, _status| text_input::Style {
                     background: Background::Color(Color::TRANSPARENT),
@@ -231,14 +232,14 @@ fn number_field<'a>(
                     selection: ACCENT,
                 }),
         ]
-        .spacing(6)
+        .spacing(scale::s(6.0))
         .align_y(iced::Alignment::Center)
         .into(),
         Padding {
-            top: 4.0,
-            right: 8.0,
-            bottom: 4.0,
-            left: 8.0,
+            top: scale::s(4.0),
+            right: scale::s(8.0),
+            bottom: scale::s(4.0),
+            left: scale::s(8.0),
         },
     )
 }
@@ -247,18 +248,18 @@ fn number_field<'a>(
 /// (visual only — it has no event wired up).
 fn header_row<'a>(selected: bool) -> Element<'a, UiEvent> {
     row![
-        text("Typography").size(12).color(MUTED_FG),
+        text("Typography").size(scale::s(12.0)).color(MUTED_FG),
         Space::new().width(FillLength),
-        button(text("Auto-detect").size(11))
+        button(text("Auto-detect").size(scale::s(11.0)))
             .on_press_maybe(selected.then_some(UiEvent::StyleAutoDetect))
-            .padding([4, 8])
+            .padding([scale::s(4.0), scale::s(8.0)])
             .style(|_theme, status: Status| {
                 let hovered = matches!(status, Status::Hovered | Status::Pressed);
                 button::Style {
                     background: Some(Background::Color(INPUT_BG)),
                     border: Border {
-                        radius: 4.0.into(),
-                        width: 1.0,
+                        radius: scale::s(4.0).into(),
+                        width: scale::s(1.0),
                         color: BORDER,
                     },
                     shadow: Shadow::default(),
@@ -266,9 +267,9 @@ fn header_row<'a>(selected: bool) -> Element<'a, UiEvent> {
                     ..button::Style::default()
                 }
             }),
-        button(text("↺").size(13))
+        button(text("↺").size(scale::s(13.0)))
             .on_press_maybe(None::<UiEvent>)
-            .padding([4, 6])
+            .padding([scale::s(4.0), scale::s(6.0)])
             .style(|_theme, _status| button::Style {
                 background: None,
                 border: Border::default(),
@@ -278,7 +279,7 @@ fn header_row<'a>(selected: bool) -> Element<'a, UiEvent> {
             }),
     ]
     .align_y(iced::Alignment::Center)
-    .spacing(6)
+    .spacing(scale::s(6.0))
     .into()
 }
 
@@ -296,7 +297,7 @@ fn font_field<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
         UiEvent::StyleFont,
     )
     .searchable(true)
-    .text_size(12)
+    .text_size(scale::s(12.0))
     .width(FillLength)
     .into()
 }
@@ -348,7 +349,7 @@ fn format_align_row<'a>(
         ]))
         .width(Length::FillPortion(2)),
     ]
-    .spacing(8)
+    .spacing(scale::s(8.0))
     .into()
 }
 
@@ -369,20 +370,20 @@ fn fill_section<'a, S: UiState + ?Sized>(
                     color_field(state, StyleField::GradientA, state.style_gradient_a()),
                     color_field(state, StyleField::GradientB, state.style_gradient_b()),
                 ]
-                .spacing(8),
+                .spacing(scale::s(8.0)),
                 pick_list(TextGradientDir::LABELS, Some(style.gradient_dir.label()), |l| {
                     UiEvent::StyleGradientDir(TextGradientDir::from_label(&l))
                 })
-                .text_size(12)
+                .text_size(scale::s(12.0))
                 .width(FillLength),
             ]
-            .spacing(8)
+            .spacing(scale::s(8.0))
             .into()
         } else {
             color_field(state, StyleField::Text, state.style_text_color())
         },
     ]
-    .spacing(8)
+    .spacing(scale::s(8.0))
     .into()
 }
 
@@ -407,9 +408,9 @@ fn stroke_section<'a, S: UiState + ?Sized>(
             ))
             .width(Length::FillPortion(1)),
         ]
-        .spacing(8),
+        .spacing(scale::s(8.0)),
     ]
-    .spacing(8)
+    .spacing(scale::s(8.0))
     .into()
 }
 
@@ -434,9 +435,9 @@ fn background_section<'a, S: UiState + ?Sized>(
             ))
             .width(Length::FillPortion(1)),
         ]
-        .spacing(8),
+        .spacing(scale::s(8.0)),
     ]
-    .spacing(8)
+    .spacing(scale::s(8.0))
     .into()
 }
 
@@ -488,8 +489,8 @@ fn square_tile<'a>(
             button::Style {
                 background: fill.map(Background::Color),
                 border: Border {
-                    radius: PRESET_RADIUS.into(),
-                    width: 1.0,
+                    radius: scale::s(PRESET_RADIUS).into(),
+                    width: scale::s(1.0),
                     color: border_color,
                 },
                 shadow: Shadow::default(),
@@ -497,8 +498,8 @@ fn square_tile<'a>(
             }
         });
     iced::widget::stack![underlay, button]
-        .width(iced::Length::Fixed(PRESET_SIDE))
-        .height(iced::Length::Fixed(PRESET_SIDE))
+        .width(iced::Length::Fixed(scale::s(PRESET_SIDE)))
+        .height(iced::Length::Fixed(scale::s(PRESET_SIDE)))
         .into()
 }
 
@@ -590,13 +591,13 @@ fn presets_grid<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
                 let tile = empty_square();
                 return ContextMenu::new(tile, preset_menu(index, false))
                     .on_dismiss(UiEvent::StylePresetMenuDismiss)
-                    .text_size(12.0)
+                    .text_size(scale::s(12.0))
                     .into();
             };
             let tile = preset_square(preset.clone(), can_apply.then_some(UiEvent::StylePresetApply(index)));
             ContextMenu::new(tile, preset_menu(index, true))
                 .on_dismiss(UiEvent::StylePresetMenuDismiss)
-                .text_size(12.0)
+                .text_size(scale::s(12.0))
                 .into()
         })
         .collect();
@@ -609,19 +610,19 @@ fn presets_grid<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
         } else {
             tiles.remove(0)
         };
-        columns.push(column![top, bottom].spacing(6).into());
+        columns.push(column![top, bottom].spacing(scale::s(4.0)).into());
     }
     let strip = scrollable::Scrollable::with_direction(
-        row(columns).spacing(6),
+        row(columns).spacing(scale::s(4.0)),
         scrollable::Direction::Horizontal(scrollable::Scrollbar::new()),
     )
     .width(FillLength)
-    .height(PRESET_SIDE * 2.0 + 6.0 + 14.0);
+    .height(scale::s(PRESET_SIDE * 2.0 + 4.0 + 10.0));
     column![
-        text("Presets").size(12).color(MUTED_FG),
+        text("Presets").size(scale::s(12.0)).color(MUTED_FG),
         strip,
     ]
-    .spacing(6)
+    .spacing(scale::s(4.0))
     .into()
 }
 
@@ -637,9 +638,9 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         stroke_section(state, selected),
         background_section(state, selected),
         presets_grid(state),
-        text(HINT).size(12).color(MUTED_FG),
+        text(HINT).size(scale::s(12.0)).color(MUTED_FG),
     ]
-    .spacing(10))
+    .spacing(scale::s(10.0)))
     .width(FillLength)
     .height(FillLength)
     .into()

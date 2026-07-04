@@ -12,7 +12,6 @@ use iced::widget::{
 };
 #[cfg(feature = "inpaint")]
 use iced::widget::pick_list;
-#[cfg(any(feature = "ocr", feature = "inpaint"))]
 use iced::widget::text_input;
 use iced::{Color, Element, Fill as FillLength, Length};
 
@@ -24,6 +23,7 @@ use crate::translation::{self, CUSTOM_ANTHROPIC, CUSTOM_OPENAI};
 use crate::background::AuroraWheel;
 use crate::event::{SettingEdit, SettingsTab, UiEvent};
 use crate::panel::PANEL_BG;
+use crate::scale;
 use crate::segmented::{segment, segmented_group};
 use crate::state::UiState;
 
@@ -47,11 +47,11 @@ fn tab_button<'a, S: UiState + ?Sized>(
     let selected = state.settings_tab() == tab;
     button(
         text(label)
-            .size(13)
+            .size(scale::s(13.0))
             .color(if selected { Color::WHITE } else { MUTED_FG }),
     )
     .width(Length::Fill)
-    .padding(6)
+    .padding(scale::s(6.0))
     .on_press(UiEvent::SettingsTab(tab))
     .style(move |_theme, status| button::Style {
         background: Some(if selected {
@@ -67,7 +67,7 @@ fn tab_button<'a, S: UiState + ?Sized>(
         } else {
             Color::TRANSPARENT
         }.into()),
-        border: iced::Border::default().rounded(4),
+        border: iced::Border::default().rounded(scale::s(4.0)),
         text_color: if selected { Color::WHITE } else { MUTED_FG },
         ..button::Style::default()
     })
@@ -134,25 +134,25 @@ fn provider_row_with_connection<'a>(
         })
         .unwrap_or_else(|| "Not connected".to_string());
     let button = match connected {
-        Some(_) => button(text("Disconnect").size(11))
-            .padding([3, 8])
+        Some(_) => button(text("Disconnect").size(scale::s(11.0)))
+            .padding([scale::s(3.0), scale::s(8.0)])
             .on_press(UiEvent::TranslateDisconnect(provider.id.clone())),
-        None => button(text("Connect").size(11))
-            .padding([3, 8])
+        None => button(text("Connect").size(scale::s(11.0)))
+            .padding([scale::s(3.0), scale::s(8.0)])
             .on_press(UiEvent::TranslateConnect(provider.id.clone())),
     };
     row![
         column![
-            text(&provider.name).size(12),
-            text(status).size(11).color(MUTED_FG),
+            text(&provider.name).size(scale::s(12.0)),
+            text(status).size(scale::s(11.0)).color(MUTED_FG),
         ]
-        .spacing(1)
+        .spacing(scale::s(1.0))
         .width(FillLength),
         button,
     ]
-    .spacing(6)
+    .spacing(scale::s(6.0))
     .align_y(iced::Alignment::Center)
-    .padding([4, 0])
+    .padding([scale::s(4.0), 0.0])
     .into()
 }
 
@@ -176,25 +176,25 @@ fn custom_row_with_connection<'a>(
         .map(|connection| format!("Connected · {}", mask_key(&connection.api_key)))
         .unwrap_or_else(|| "Not connected".to_string());
     let button = match connected {
-        Some(_) => button(text("Disconnect").size(11))
-            .padding([3, 8])
+        Some(_) => button(text("Disconnect").size(scale::s(11.0)))
+            .padding([scale::s(3.0), scale::s(8.0)])
             .on_press(UiEvent::TranslateDisconnect(id.to_string())),
-        None => button(text("Connect…").size(11))
-            .padding([3, 8])
+        None => button(text("Connect…").size(scale::s(11.0)))
+            .padding([scale::s(3.0), scale::s(8.0)])
             .on_press(UiEvent::TranslateConnect(id.to_string())),
     };
     row![
         column![
-            text(label).size(12),
-            text(status).size(11).color(MUTED_FG),
+            text(label).size(scale::s(12.0)),
+            text(status).size(scale::s(11.0)).color(MUTED_FG),
         ]
-        .spacing(1)
+        .spacing(scale::s(1.0))
         .width(FillLength),
         button,
     ]
-    .spacing(6)
+    .spacing(scale::s(6.0))
     .align_y(iced::Alignment::Center)
-    .padding([4, 0])
+    .padding([scale::s(4.0), 0.0])
     .into()
 }
 
@@ -239,9 +239,9 @@ fn appearance_tab() -> Element<'static, UiEvent> {
     } else {
         format!("{} | {}", count, schema.label())
     };
-    let dec_btn: Element<'_, UiEvent> = button(text("−").size(14).width(FillLength).center())
-        .width(Length::Fixed(30.0))
-        .height(Length::Fixed(30.0))
+    let dec_btn: Element<'_, UiEvent> = button(text("−").size(scale::s(14.0)).width(FillLength).center())
+        .width(Length::Fixed(scale::s(30.0)))
+        .height(Length::Fixed(scale::s(30.0)))
         .padding(0)
         .on_press_maybe(
             (count > 1).then(|| UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(count - 1))),
@@ -254,15 +254,15 @@ fn appearance_tab() -> Element<'static, UiEvent> {
             };
             iced::widget::button::Style {
                 background: Some(bg.into()),
-                border: iced::Border::default().rounded(15.0),
+                border: iced::Border::default().rounded(scale::s(15.0)),
                 text_color: Color::WHITE,
                 ..Default::default()
             }
         })
         .into();
-    let inc_btn: Element<'_, UiEvent> = button(text("+").size(14).width(FillLength).center())
-        .width(Length::Fixed(30.0))
-        .height(Length::Fixed(30.0))
+    let inc_btn: Element<'_, UiEvent> = button(text("+").size(scale::s(14.0)).width(FillLength).center())
+        .width(Length::Fixed(scale::s(30.0)))
+        .height(Length::Fixed(scale::s(30.0)))
         .padding(0)
         .on_press_maybe(
             (count < 5).then(|| UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(count + 1))),
@@ -275,15 +275,15 @@ fn appearance_tab() -> Element<'static, UiEvent> {
             };
             iced::widget::button::Style {
                 background: Some(bg.into()),
-                border: iced::Border::default().rounded(15.0),
+                border: iced::Border::default().rounded(scale::s(15.0)),
                 text_color: Color::WHITE,
                 ..Default::default()
             }
         })
         .into();
-    let schema_btn: Element<'_, UiEvent> = button(text("⟳").size(16).width(FillLength).center())
-        .width(Length::Fixed(30.0))
-        .height(Length::Fixed(30.0))
+    let schema_btn: Element<'_, UiEvent> = button(text("⟳").size(scale::s(16.0)).width(FillLength).center())
+        .width(Length::Fixed(scale::s(30.0)))
+        .height(Length::Fixed(scale::s(30.0)))
         .padding(0)
         .on_press_maybe(
             (count > 1).then(|| {
@@ -300,20 +300,20 @@ fn appearance_tab() -> Element<'static, UiEvent> {
             };
             iced::widget::button::Style {
                 background: Some(bg.into()),
-                border: iced::Border::default().rounded(15.0),
+                border: iced::Border::default().rounded(scale::s(15.0)),
                 text_color: Color::WHITE,
                 ..Default::default()
             }
         })
         .into();
 
-    let count_row: Element<'_, UiEvent> = row![dec_btn, container(text(count_label).size(12).color(Color::WHITE).width(FillLength).center()).width(Length::Fixed(80.0)), inc_btn, space::horizontal(), schema_btn]
-        .spacing(6)
+    let count_row: Element<'_, UiEvent> = row![dec_btn, container(text(count_label).size(scale::s(12.0)).color(Color::WHITE).width(FillLength).center()).width(Length::Fixed(scale::s(80.0))), inc_btn, space::horizontal(), schema_btn]
+        .spacing(scale::s(6.0))
         .align_y(iced::Alignment::Center)
         .into();
 
     let hex_row: Element<'_, UiEvent> = row![
-        container(text("Hex").size(12).color(MUTED_FG)).width(Length::Fixed(40.0)),
+        container(text("Hex").size(scale::s(12.0)).color(MUTED_FG)).width(Length::Fixed(scale::s(40.0))),
         iced::widget::text_input(&hex, &hex)
             .on_input(|input| {
                 // Only valid hex reaches the store; invalid input keeps the
@@ -324,38 +324,38 @@ fn appearance_tab() -> Element<'static, UiEvent> {
                     UiEvent::SettingsChanged
                 }
             })
-            .padding(4)
-            .size(12)
-            .width(Length::Fixed(100.0)),
-        text(hex.clone()).size(11).color(MUTED_FG),
+            .padding(scale::s(4.0))
+            .size(scale::s(12.0))
+            .width(Length::Fixed(scale::s(100.0))),
+        text(hex.clone()).size(scale::s(11.0)).color(MUTED_FG),
     ]
-    .spacing(6)
+    .spacing(scale::s(6.0))
     .align_y(iced::Alignment::Center)
     .into();
 
     let inner: Element<'_, UiEvent> = column![
-        text("Appearance").size(14),
+        text("Appearance").size(scale::s(14.0)),
         text("Animated aurora background — primary color, blobs, light/dark and color-theory schema (Vibrant / Analogous / Contrast / Neon). Mirrors ManhwaOCR's Background Editor.")
-            .size(11)
+            .size(scale::s(11.0))
             .color(MUTED_FG),
         mode_row,
-        container(text("Primary Color").size(13).color(Color::WHITE).width(FillLength).center()).padding(4),
+        container(text("Primary Color").size(scale::s(13.0)).color(Color::WHITE).width(FillLength).center()).padding(scale::s(4.0)),
         container(wheel).center_x(FillLength),
         hex_row,
         count_row,
         text(if count == 1 { "Solid — single color, no blobs." } else { "Blobs blend with radial gradients at card corners/edges; schema shifts hue." })
-            .size(11)
+            .size(scale::s(11.0))
             .color(MUTED_FG),
     ]
-    .spacing(10)
+    .spacing(scale::s(10.0))
     .into();
 
     // Wrap in a translucent card like ManhwaOCR's AuroraEditorPanel (rgba 20,20,20,220 + border)
     container(scrollable(inner).height(Length::Fill))
-        .padding(8)
+        .padding(scale::s(8.0))
         .style(|_theme| container::Style {
             background: Some(Color::from_rgba8(20, 20, 20, 0.86).into()),
-            border: iced::Border::default().rounded(12).color(Color::from_rgba8(255, 255, 255, 0.15)).width(1),
+            border: iced::Border::default().rounded(scale::s(12.0)).color(Color::from_rgba8(255, 255, 255, 0.15)).width(scale::s(1.0)),
             ..Default::default()
         })
         .into()
@@ -366,21 +366,99 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     match state.settings_tab() {
         SettingsTab::General => {
             #[cfg_attr(not(any(feature = "styling", feature = "ocr")), allow(unused_mut))]
-            let mut items: Vec<Element<'_, UiEvent>> = vec![text("General").size(14).into()];
+            let mut items: Vec<Element<'_, UiEvent>> = vec![text("General").size(scale::s(14.0)).into()];
+            // ── UI font size: VS Code-style integer with stepper + free text input ──
+            {
+                let raw = scanlateit_settings::get(|s| s.ui_font_size);
+                let font_str = raw.to_string();
+                let clamped = scale::clamp_font_size(raw);
+                let dec: Element<'_, UiEvent> = button(text("−").size(scale::s(14.0)).width(FillLength).center())
+                    .width(Length::Fixed(scale::s(30.0)))
+                    .height(Length::Fixed(scale::s(30.0)))
+                    .padding(0)
+                    .on_press_maybe((clamped > scale::MIN_FONT_SIZE).then_some(UiEvent::SettingEdit(SettingEdit::UiFontSize(clamped - 1))))
+                    .style(|_theme: &iced::Theme, status| {
+                        let bg = if status == iced::widget::button::Status::Hovered {
+                            Color::from_rgba8(255, 255, 255, 0.30)
+                        } else {
+                            Color::from_rgba8(255, 255, 255, 0.15)
+                        };
+                        iced::widget::button::Style {
+                            background: Some(bg.into()),
+                            border: iced::Border::default().rounded(scale::s(15.0)),
+                            text_color: Color::WHITE,
+                            ..Default::default()
+                        }
+                    })
+                    .into();
+                let inc: Element<'_, UiEvent> = button(text("+").size(scale::s(14.0)).width(FillLength).center())
+                    .width(Length::Fixed(scale::s(30.0)))
+                    .height(Length::Fixed(scale::s(30.0)))
+                    .padding(0)
+                    .on_press_maybe((clamped < scale::MAX_FONT_SIZE).then_some(UiEvent::SettingEdit(SettingEdit::UiFontSize(clamped + 1))))
+                    .style(|_theme: &iced::Theme, status| {
+                        let bg = if status == iced::widget::button::Status::Hovered {
+                            Color::from_rgba8(255, 255, 255, 0.30)
+                        } else {
+                            Color::from_rgba8(255, 255, 255, 0.15)
+                        };
+                        iced::widget::button::Style {
+                            background: Some(bg.into()),
+                            border: iced::Border::default().rounded(scale::s(15.0)),
+                            text_color: Color::WHITE,
+                            ..Default::default()
+                        }
+                    })
+                    .into();
+                items.push(
+                    row![
+                        container(text("UI font size").size(scale::s(12.0)).color(MUTED_FG))
+                            .width(Length::Fixed(scale::s(150.0))),
+                        dec,
+                        text_input("12", &font_str)
+                            .on_input(move |input| {
+                                if let Ok(v) = input.trim().parse::<u32>() {
+                                    set(move |s| s.ui_font_size = v)
+                                } else if input.trim().is_empty() {
+                                    // keep previous while empty / half-typed; snap back next frame
+                                    UiEvent::SettingsChanged
+                                } else {
+                                    UiEvent::SettingsChanged
+                                }
+                            })
+                            .padding(scale::s(4.0))
+                            .size(scale::s(12.0))
+                            .width(Length::Fixed(scale::s(64.0))),
+                        inc,
+                    ]
+                    .spacing(scale::s(6.0))
+                    .align_y(iced::Alignment::Center)
+                    .into(),
+                );
+                items.push(
+                    text(format!(
+                        "Base font size for all UI text ({}–{}). Padding, spacing, border radius and item gaps scale with it. Window chrome and image overlays stay fixed.",
+                        scale::MIN_FONT_SIZE, scale::MAX_FONT_SIZE
+                    ))
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG)
+                        .into(),
+                );
+            }
             #[cfg(feature = "styling")]
             {
                 let auto = scanlateit_settings::get(|s| s.auto_style_detect);
                 items.push(
                     text("Classify newly OCR-detected entries with the ONNX styling \
                           model and set their text style from the prediction.")
-                        .size(12)
+                        .size(scale::s(12.0))
                         .color(MUTED_FG)
                         .into(),
                 );
                 items.push(
                     checkbox(auto)
                         .label("Auto-detect entry styles")
-                        .text_size(12)
+                        .text_size(scale::s(12.0))
                         .on_toggle(|v| set(move |s| s.auto_style_detect = v))
                         .into(),
                 );
@@ -390,20 +468,20 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                 let workers = scanlateit_settings::get(|s| s.ocr_workers.clone());
                 items.push(
                     row![
-                        container(text("OCR detection workers").size(12).color(MUTED_FG))
-                            .width(Length::Fixed(150.0)),
+                        container(text("OCR detection workers").size(scale::s(12.0)).color(MUTED_FG))
+                            .width(Length::Fixed(scale::s(150.0))),
                         text_input("2", &workers)
                             .on_input(|input| set(move |s| s.ocr_workers = input.clone()))
-                            .padding(4)
-                            .size(12)
-                            .width(Length::Fixed(64.0)),
+                            .padding(scale::s(4.0))
+                            .size(scale::s(12.0))
+                            .width(Length::Fixed(scale::s(64.0))),
                     ]
-                    .spacing(6)
+                    .spacing(scale::s(6.0))
                     .into(),
                 );
                 items.push(
                     text("Parallel OCR detection sessions; 2 fits a potato-laptop CPU.")
-                        .size(11)
+                        .size(scale::s(11.0))
                         .color(MUTED_FG)
                         .into(),
                 );
@@ -414,48 +492,48 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                 let radius = scanlateit_settings::get(|s| s.inpaint_radius.clone());
                 items.push(
                     row![
-                        container(text("Inpaint backend").size(12).color(MUTED_FG))
-                            .width(Length::Fixed(150.0)),
+                        container(text("Inpaint backend").size(scale::s(12.0)).color(MUTED_FG))
+                            .width(Length::Fixed(scale::s(150.0))),
                         pick_list(
                             [InpaintBackend::Telea, InpaintBackend::Lama],
                             Some(backend),
                             |backend| set(move |s| s.inpaint_backend = backend),
                         )
-                        .padding(4)
-                        .text_size(12),
+                        .padding(scale::s(4.0))
+                        .text_size(scale::s(12.0)),
                     ]
-                    .spacing(6)
+                    .spacing(scale::s(6.0))
                     .into(),
                 );
                 items.push(
                     text("Telea (the `inpaint` crate) needs no model and is instant; \
                           LaMa runs the ONNX model and handles complex backgrounds better.")
-                        .size(11)
+                        .size(scale::s(11.0))
                         .color(MUTED_FG)
                         .into(),
                 );
                 items.push(
                     row![
-                        container(text("Telea radius").size(12).color(MUTED_FG))
-                            .width(Length::Fixed(150.0)),
+                        container(text("Telea radius").size(scale::s(12.0)).color(MUTED_FG))
+                            .width(Length::Fixed(scale::s(150.0))),
                         text_input("5", &radius)
                             .on_input(|input| set(move |s| s.inpaint_radius = input.clone()))
-                            .padding(4)
-                            .size(12)
-                            .width(Length::Fixed(64.0)),
+                            .padding(scale::s(4.0))
+                            .size(scale::s(12.0))
+                            .width(Length::Fixed(scale::s(64.0))),
                     ]
-                    .spacing(6)
+                    .spacing(scale::s(6.0))
                     .into(),
                 );
                 items.push(
                     text("How many pixels around the mask Telea samples; larger \
                           smooths more but blurs. Ignored by LaMa.")
-                        .size(11)
+                        .size(scale::s(11.0))
                         .color(MUTED_FG)
                         .into(),
                 );
             }
-            column(items).spacing(6).into()
+            column(items).spacing(scale::s(6.0)).into()
         }
         SettingsTab::Translation => {
             // Single read for both connections and free-only flag to keep the
@@ -492,11 +570,11 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             }
 
             let mut rows: Vec<Element<'_, UiEvent>> = Vec::new();
-            rows.push(text("Translation Service").size(14).into());
+            rows.push(text("Translation Service").size(scale::s(14.0)).into());
             rows.push(
                 text("Connect the gateway used by the machine translator. \
                       Disconnect removes its API key.")
-                    .size(12)
+                    .size(scale::s(12.0))
                     .color(MUTED_FG)
                     .into(),
             );
@@ -504,14 +582,14 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             // ── Connected section (on top) ──────────────────────────────
             rows.push(
                 row![
-                    text("Connected").size(12).color(Color::WHITE),
+                    text("Connected").size(scale::s(12.0)).color(Color::WHITE),
                     space::horizontal(),
                     text(if connected_rows.is_empty() {
                         "—".to_string()
                     } else {
                         format!("{} connected", connected_rows.len())
                     })
-                    .size(11)
+                    .size(scale::s(11.0))
                     .color(MUTED_FG),
                 ]
                 .align_y(iced::Alignment::Center)
@@ -520,7 +598,7 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             if connected_rows.is_empty() {
                 rows.push(
                     text("No connected providers — connect one below.")
-                        .size(11)
+                        .size(scale::s(11.0))
                         .color(MUTED_FG)
                         .into(),
                 );
@@ -539,10 +617,10 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             // ── Available section ───────────────────────────────────────
             rows.push(
                 row![
-                    text("Available").size(12).color(Color::WHITE),
+                    text("Available").size(scale::s(12.0)).color(Color::WHITE),
                     space::horizontal(),
                     text(format!("{} available", available_rows.len()))
-                        .size(11)
+                        .size(scale::s(11.0))
                         .color(MUTED_FG),
                 ]
                 .align_y(iced::Alignment::Center)
@@ -551,7 +629,7 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             if available_rows.is_empty() {
                 rows.push(
                     text("All providers connected.")
-                        .size(11)
+                        .size(scale::s(11.0))
                         .color(MUTED_FG)
                         .into(),
                 );
@@ -571,21 +649,21 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             rows.push(
                 row![
                     column![
-                        text("Only show free models").size(12),
+                        text("Only show free models").size(scale::s(12.0)),
                         text("Hide paid models from the translation picker.")
-                            .size(11)
+                            .size(scale::s(11.0))
                             .color(MUTED_FG),
                     ]
-                    .spacing(1)
+                    .spacing(scale::s(1.0))
                     .width(FillLength),
                     toggler(free_only)
-                        .size(20.0)
+                        .size(scale::s(20.0))
                         .style(crate::toggler_style::style)
                         .on_toggle(|v| set(move |s| s.free_models_only = v)),
                 ]
-                .spacing(12)
+                .spacing(scale::s(12.0))
                 .align_y(iced::Alignment::Center)
-                .padding([4, 0])
+                .padding([scale::s(4.0), 0.0])
                 .into(),
             );
             rows.push(item_separator());
@@ -593,32 +671,32 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                 row![
                     column![
                         text("Filter unused models from the translation dropdown.")
-                            .size(11)
+                            .size(scale::s(11.0))
                             .color(MUTED_FG),
                         text("Hide models you never use; deprecated are always hidden.")
-                            .size(11)
+                            .size(scale::s(11.0))
                             .color(MUTED_FG),
                     ]
-                    .spacing(1)
+                    .spacing(scale::s(1.0))
                     .width(FillLength),
-                    button(text("Manage models…").size(11))
-                        .padding([3, 8])
+                    button(text("Manage models…").size(scale::s(11.0)))
+                        .padding([scale::s(3.0), scale::s(8.0)])
                         .on_press(UiEvent::ManageModelsOpen),
                 ]
-                .spacing(6)
+                .spacing(scale::s(6.0))
                 .align_y(iced::Alignment::Center)
-                .padding([4, 0])
+                .padding([scale::s(4.0), 0.0])
                 .into(),
             );
             rows.push(item_separator());
             rows.push(
                 text("Connections are saved to the app's settings file in the \
                       system configuration directory.")
-                    .size(11)
+                    .size(scale::s(11.0))
                     .color(MUTED_FG)
                     .into(),
             );
-            scrollable(column(rows).spacing(6))
+            scrollable(column(rows).spacing(scale::s(6.0)))
                 .height(Length::Fill)
                 .into()
         }
@@ -642,12 +720,12 @@ pub fn view<'a, S: UiState + ?Sized>(
             tab_button(state, SettingsTab::Appearance, "Appearance"),
             tab_button(state, SettingsTab::Translation, "Translation"),
         ]
-        .spacing(4)
-        .width(Length::Fixed(TAB_WIDTH)),
+        .spacing(scale::s(4.0))
+        .width(Length::Fixed(scale::s(TAB_WIDTH))),
     )
-    .width(Length::Fixed(TAB_WIDTH))
+    .width(Length::Fixed(scale::s(TAB_WIDTH)))
     .height(Length::Fill)
-    .padding(12)
+    .padding(scale::s(12.0))
     .style(|_theme| container::Style {
         background: Some(
             Color {
@@ -656,14 +734,14 @@ pub fn view<'a, S: UiState + ?Sized>(
             }
             .into()
         ),
-        border: iced::Border::default().rounded(iced::border::left(8)),
+        border: iced::Border::default().rounded(iced::border::left(scale::s(8.0))),
         ..container::Style::default()
     });
 
     let right = container(tab_fields(state))
         .width(FillLength)
         .height(Length::Fill)
-        .padding(12);
+        .padding(scale::s(12.0));
 
     let window = container(row![left, right].height(Length::Fill))
         .width(Length::Fill)
@@ -671,9 +749,9 @@ pub fn view<'a, S: UiState + ?Sized>(
         .style(|_theme| container::Style {
             background: Some(PANEL_BG.into()),
             border: iced::Border::default()
-                .rounded(8)
+                .rounded(scale::s(8.0))
                 .color(Color::from_rgb8(60, 63, 74))
-                .width(1),
+                .width(scale::s(1.0)),
             ..container::Style::default()
         });
 

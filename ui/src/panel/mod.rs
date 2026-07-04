@@ -14,6 +14,7 @@ use iced::widget::{column, container, row};
 use iced::{Color, Element, Fill as FillLength, Length};
 
 use crate::event::UiEvent;
+use crate::scale;
 use crate::state::UiState;
 
 pub const PANEL_BG: Color = Color::from_rgba8(34, 36, 44, 0.78);
@@ -37,19 +38,19 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                 container(styling::view(state)).width(Length::FillPortion(STYLE_COL_PORTS)),
                 container(results::view(state)).width(Length::FillPortion(RESULTS_COL_PORTS)),
             ]
-            .spacing(8)
+            .spacing(scale::s(8.0))
             .height(FillLength),
         ]
-        .spacing(8)
+        .spacing(scale::s(8.0))
         .width(FillLength)
         .height(FillLength),
     )
     .width(FillLength)
     .height(FillLength)
-    .padding(10)
+    .padding(scale::s(10.0))
     .style(|_theme| container::Style {
         background: Some(PANEL_BG.into()),
-        border: iced::Border::default().rounded(4),
+        border: iced::Border::default().rounded(scale::s(4.0)),
         ..container::Style::default()
     })
     .into()

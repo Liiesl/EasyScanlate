@@ -10,6 +10,7 @@ use iced::widget::{
 use iced::{Color, Element, Fill as FillLength, Length};
 
 use crate::event::UiEvent;
+use crate::scale;
 use crate::panel::PANEL_BG;
 use crate::state::UiState;
 
@@ -54,13 +55,13 @@ pub fn view<'a, S: UiState + ?Sized>(
     let is_local = crate::translation::is_local(&modal.provider_id);
     let mut fields: Vec<Element<'_, UiEvent>> = Vec::new();
     if !is_local {
-        fields.push(text("API key").size(12).color(MUTED_FG).into());
+        fields.push(text("API key").size(scale::s(12.0)).color(MUTED_FG).into());
         fields.push(
             text_input("sk-…", &modal.api_key)
                 .on_input(UiEvent::ConnectModalKey)
                 .secure(true)
-                .padding(4)
-                .size(12)
+                .padding(scale::s(4.0))
+                .size(scale::s(12.0))
                 .width(FillLength)
                 .into(),
         );
@@ -76,68 +77,68 @@ pub fn view<'a, S: UiState + ?Sized>(
         } else {
             "http://localhost:11434/v1"
         };
-        fields.push(text("Base URL").size(12).color(MUTED_FG).into());
+        fields.push(text("Base URL").size(scale::s(12.0)).color(MUTED_FG).into());
         fields.push(
             text_input(placeholder, &modal.base_url)
                 .on_input(UiEvent::ConnectModalBaseUrl)
-                .padding(4)
-                .size(12)
+                .padding(scale::s(4.0))
+                .size(scale::s(12.0))
                 .width(FillLength)
                 .into(),
         );
         if is_local {
             fields.push(
                 text("Models are discovered automatically from the endpoint.")
-                    .size(11)
+                    .size(scale::s(11.0))
                     .color(MUTED_FG)
                     .into(),
             );
         }
     }
     if modal.is_custom {
-        fields.push(text("Model").size(12).color(MUTED_FG).into());
+        fields.push(text("Model").size(scale::s(12.0)).color(MUTED_FG).into());
         fields.push(
             text_input("llama-3.1-8b", &modal.model)
                 .on_input(UiEvent::ConnectModalModel)
-                .padding(4)
-                .size(12)
+                .padding(scale::s(4.0))
+                .size(scale::s(12.0))
                 .width(FillLength)
                 .into(),
         );
     }
     if let Some(error) = &modal.error {
-        fields.push(text(error).size(11).color(ERROR_FG).into());
+        fields.push(text(error).size(scale::s(11.0)).color(ERROR_FG).into());
     }
 
     let window = container(
         column![
             row![
-                text(title).size(16),
+                text(title).size(scale::s(16.0)),
                 space::horizontal(),
                 button(text("✕"))
-                    .padding(2)
+                    .padding(scale::s(2.0))
                     .on_press(UiEvent::ConnectModalCancel),
             ],
-            column(fields).spacing(4).height(FillLength),
+            column(fields).spacing(scale::s(4.0)).height(FillLength),
             row![
                 space::horizontal(),
                 button(text("Cancel"))
-                    .padding([4, 10])
+                    .padding([scale::s(4.0), scale::s(10.0)])
                     .on_press(UiEvent::ConnectModalCancel),
                 button(text("Connect"))
-                    .padding([4, 10])
+                    .padding([scale::s(4.0), scale::s(10.0)])
                     .on_press(UiEvent::ConnectModalSubmit),
             ]
-            .spacing(6),
+            .spacing(scale::s(6.0)),
         ]
-        .spacing(10),
+        .spacing(scale::s(10.0)),
     )
-    .width(Length::Fixed(MODAL_WIDTH))
-    .height(Length::Fixed(MODAL_HEIGHT))
-    .padding(12)
+    .width(Length::Fixed(scale::s(MODAL_WIDTH)))
+    .height(Length::Fixed(scale::s(MODAL_HEIGHT)))
+    .padding(scale::s(12.0))
     .style(|_theme| container::Style {
         background: Some(PANEL_BG.into()),
-        border: iced::Border::default().rounded(8).color(Color::from_rgb8(60, 63, 74)).width(1),
+        border: iced::Border::default().rounded(scale::s(8.0)).color(Color::from_rgb8(60, 63, 74)).width(scale::s(1.0)),
         ..container::Style::default()
     });
 

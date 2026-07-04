@@ -12,6 +12,7 @@ use iced::{Color, Element, Fill as FillLength, Length};
 
 use crate::event::{SettingEdit, UiEvent};
 use crate::panel::PANEL_BG;
+use crate::scale;
 use crate::state::UiState;
 
 const MODAL_WIDTH: f32 = 540.0;
@@ -68,20 +69,20 @@ pub fn view<'a, S: UiState + ?Sized>(
     let is_filtering = !query.trim().is_empty();
 
     let header = row![
-        text("Manage Models").size(16),
+        text("Manage Models").size(scale::s(16.0)),
         space::horizontal(),
-        button(text("✕")).padding(2).on_press(UiEvent::ManageModelsClose),
+        button(text("✕")).padding(scale::s(2.0)).on_press(UiEvent::ManageModelsClose),
     ];
 
     let description = column![
         text("Toggle models per provider. Hidden models disappear from the translation dropdown.")
-            .size(11)
+            .size(scale::s(11.0))
             .color(MUTED_FG),
         text("Deprecated models are always hidden and never shown here.")
-            .size(11)
+            .size(scale::s(11.0))
             .color(MUTED_FG),
     ]
-    .spacing(2);
+    .spacing(scale::s(2.0));
 
     let search: Element<'_, UiEvent> = if groups.is_empty() {
         // No providers – no need for search field.
@@ -89,8 +90,8 @@ pub fn view<'a, S: UiState + ?Sized>(
     } else {
         text_input("Search models…", &query)
             .on_input(UiEvent::ManageModelsSearch)
-            .padding([6, 8])
-            .size(12)
+            .padding([scale::s(6.0), scale::s(8.0)])
+            .size(scale::s(12.0))
             .width(FillLength)
             .into()
     };
@@ -98,10 +99,10 @@ pub fn view<'a, S: UiState + ?Sized>(
     let body: Element<'_, UiEvent> = if groups.is_empty() {
         container(
             text("No connected providers – connect a translation service first.")
-                .size(12)
+                .size(scale::s(12.0))
                 .color(MUTED_FG),
         )
-        .padding(12)
+        .padding(scale::s(12.0))
         .into()
     } else {
         let mut provider_cols: Vec<Element<'_, UiEvent>> = Vec::new();
@@ -144,7 +145,7 @@ pub fn view<'a, S: UiState + ?Sized>(
                 let pid = provider_id.clone();
                 let filtered_for_toggle = filtered.clone();
                 let master_toggler: Element<'_, UiEvent> = toggler(master_on)
-                    .size(18.0)
+                    .size(scale::s(18.0))
                     .style(crate::toggler_style::style)
                     .on_toggle(move |v| {
                         let pid = pid.clone();
@@ -173,14 +174,14 @@ pub fn view<'a, S: UiState + ?Sized>(
 
                 rows.push(
                     row![
-                        text(provider_name.clone()).size(13),
-                        text(count_label).size(11).color(MUTED_FG),
+                        text(provider_name.clone()).size(scale::s(13.0)),
+                        text(count_label).size(scale::s(11.0)).color(MUTED_FG),
                         space::horizontal(),
                         master_toggler,
                     ]
                     .align_y(iced::Alignment::Center)
-                    .spacing(8)
-                    .padding([2, 0])
+                    .spacing(scale::s(8.0))
+                    .padding([scale::s(2.0), scale::s(0.0)])
                     .into(),
                 );
             }
@@ -197,9 +198,9 @@ pub fn view<'a, S: UiState + ?Sized>(
                 let pid = provider_id.clone();
                 let mid = model.clone();
                 let model_row: Element<'_, UiEvent> = row![
-                    text(model.clone()).size(12).width(FillLength),
+                    text(model.clone()).size(scale::s(12.0)).width(FillLength),
                     toggler(visible)
-                        .size(18.0)
+                        .size(scale::s(18.0))
                         .style(crate::toggler_style::style)
                         .on_toggle(move |v| {
                             let pid = pid.clone();
@@ -221,9 +222,9 @@ pub fn view<'a, S: UiState + ?Sized>(
                             })
                         }),
                 ]
-                .spacing(12)
+                .spacing(scale::s(12.0))
                 .align_y(iced::Alignment::Center)
-                .padding([4, 0])
+                .padding([scale::s(4.0), scale::s(0.0)])
                 .into();
                 rows.push(model_row);
                 if idx + 1 < filtered.len() {
@@ -231,11 +232,11 @@ pub fn view<'a, S: UiState + ?Sized>(
                 }
             }
             // Provider card — keep card, now with separators between each model row
-            let card = container(column(rows).spacing(4))
-                .padding(8)
+            let card = container(column(rows).spacing(scale::s(4.0)))
+                .padding(scale::s(8.0))
                 .style(|_theme| container::Style {
                     background: Some(Color::from_rgba8(255, 255, 255, 0.06).into()),
-                    border: iced::Border::default().rounded(6),
+                    border: iced::Border::default().rounded(scale::s(6.0)),
                     ..Default::default()
                 })
                 .width(FillLength)
@@ -246,46 +247,46 @@ pub fn view<'a, S: UiState + ?Sized>(
             // Filtering hid everything
             container(
                 column![
-                    text(format!("No models match “{query}”.")).size(12).color(MUTED_FG),
-                    text("Try a different search term.").size(11).color(MUTED_FG),
+                    text(format!("No models match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG),
+                    text("Try a different search term.").size(scale::s(11.0)).color(MUTED_FG),
                 ]
-                .spacing(4),
+                .spacing(scale::s(4.0)),
             )
-            .padding(12)
+            .padding(scale::s(12.0))
             .into()
         } else {
-            scrollable(column(provider_cols).spacing(10))
+            scrollable(column(provider_cols).spacing(scale::s(10.0)))
                 .height(Length::Fill)
                 .into()
         }
     };
 
     let footer = row![
-        button(text("Reset all").size(11))
-            .padding([4, 10])
+        button(text("Reset all").size(scale::s(11.0)))
+            .padding([scale::s(4.0), scale::s(10.0)])
             .on_press(UiEvent::SettingEdit(SettingEdit::HiddenModelsResetAll)),
         space::horizontal(),
-        button(text("Close").size(11))
-            .padding([4, 10])
+        button(text("Close").size(scale::s(11.0)))
+            .padding([scale::s(4.0), scale::s(10.0)])
             .on_press(UiEvent::ManageModelsClose),
     ]
-    .spacing(6)
+    .spacing(scale::s(6.0))
     .align_y(iced::Alignment::Center);
 
     let window = container(
         column![header, description, search, body, footer]
-            .spacing(10)
+            .spacing(scale::s(10.0))
             .height(FillLength),
     )
-    .width(Length::Fixed(MODAL_WIDTH))
-    .height(Length::Fixed(MODAL_HEIGHT))
-    .padding(12)
+    .width(Length::Fixed(scale::s(MODAL_WIDTH)))
+    .height(Length::Fixed(scale::s(MODAL_HEIGHT)))
+    .padding(scale::s(12.0))
     .style(|_theme| container::Style {
         background: Some(PANEL_BG.into()),
         border: iced::Border::default()
-            .rounded(8)
+            .rounded(scale::s(8.0))
             .color(Color::from_rgb8(60, 63, 74))
-            .width(1),
+            .width(scale::s(1.0)),
         ..container::Style::default()
     });
 

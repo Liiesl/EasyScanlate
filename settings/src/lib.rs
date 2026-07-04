@@ -40,6 +40,10 @@ fn default_ocr_workers() -> String {
     "2".to_string()
 }
 
+fn default_ui_font_size() -> u32 {
+    12
+}
+
 /// One stored translation connection: the API key plus (for custom
 /// endpoints) the base URL and the single model id. Persisted one entry per
 /// provider id. Owned here (the settings crate) so both the translation
@@ -120,6 +124,12 @@ pub struct Settings {
     /// Color-theory schema 0=Vibrant,1=Analogous,2=Contrast,3=Neon.
     #[serde(default = "default_aurora_schema")]
     pub aurora_schema: u8,
+    /// Base UI font size in points, like VS Code's `editor.fontSize`. Integer
+    /// only, scaled everywhere that has a connection to a font (text, padding,
+    /// border radius, gaps between items). Window chrome (`GAP`,
+    /// `OUTER_PADDING`, modal shell, viewer constants) stays fixed.
+    #[serde(default = "default_ui_font_size")]
+    pub ui_font_size: u32,
     /// Stored translation connections, keyed by provider id (`openai`,
     /// `deepseek`, `custom-openai`, ...). A provider is "connected" when it
     /// has an entry here; disconnect removes the entry.
@@ -148,6 +158,7 @@ impl Default for Settings {
             aurora_blob_count: default_aurora_blob_count(),
             aurora_is_dark: default_aurora_is_dark(),
             aurora_schema: default_aurora_schema(),
+            ui_font_size: default_ui_font_size(),
         }
     }
 }
@@ -231,6 +242,7 @@ mod tests {
             aurora_blob_count: 4,
             aurora_is_dark: false,
             aurora_schema: 2,
+            ui_font_size: 14,
         };
         let text = toml::to_string(&settings).unwrap();
         let back: Settings = toml::from_str(&text).unwrap();
@@ -254,6 +266,7 @@ mod tests {
         assert_eq!(back.aurora_blob_count, 4);
         assert!(!back.aurora_is_dark);
         assert_eq!(back.aurora_schema, 2);
+        assert_eq!(back.ui_font_size, 14);
     }
 
     #[test]
@@ -271,6 +284,7 @@ mod tests {
         assert_eq!(back.aurora_blob_count, 2);
         assert!(back.aurora_is_dark);
         assert_eq!(back.aurora_schema, 1);
+        assert_eq!(back.ui_font_size, 12);
     }
 
     #[test]
