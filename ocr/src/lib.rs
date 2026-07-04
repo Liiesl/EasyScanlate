@@ -145,6 +145,16 @@ impl ParallelEngine {
         })
     }
 
+    /// Blocks until any run's lines are ready, regardless of order.
+    /// The caller reorders to restore `0,1,2…` commit order. On cancel
+    /// returns `Err("cancelled")`.
+    pub fn recv_unordered(&self) -> Result<(usize, Vec<OcrLine>), String> {
+        self.0.recv_unordered().map_err(|e| match e {
+            PipelineError::Cancelled => "cancelled".to_string(),
+            other => other.to_string(),
+        })
+    }
+
     /// Cancels in-flight inference; the workers exit once they observe the
     /// cancellation at their next checkpoint.
     pub fn cancel(&self) {

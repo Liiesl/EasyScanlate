@@ -2,7 +2,7 @@
 //! submission, ordered result delivery, undecodable-page fallback. Iced-free:
 //! the app pumps `step()` and forwards the events to its message channel.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use crate::{
     Engine, OcrCancellationToken, OcrLine, ParallelEngine, RunPlan, RunResult, body_height,
@@ -87,6 +87,10 @@ pub(crate) fn build_canvas(
 }
 
 /// Drives the planned run set with a bounded in-flight window (`workers + 1`).
+/// Dispatch stays parallel (`window` canvases in flight), but results are
+/// emitted strictly in index order `0,1,2…` so `dedup` and `held` chains see
+/// committed state. Fallback results are buffered locally instead of
+/// returning immediately, which previously broke order when `workers>1`.
 pub struct RunSession {
     plans: Vec<RunPlan>,
     dims: Vec<(u32, u32)>,
@@ -96,8 +100,12 @@ pub struct RunSession {
     window: usize,
     dispatched: usize,
     in_flight: usize,
-    canvas_meta: VecDeque<(u32, u32)>,
+    /// Indexed by run so unordered completions can be matched even when the
+    /// pipeline completes `2` before `1`.
+    canvas_meta: VecDeque<(usize, u32, u32)>,
     total: usize,
+    next_emit: usize,
+    buffered: BTreeMap<usize, RunEvent>,
 }
 
 impl RunSession {
@@ -121,13 +129,17 @@ impl RunSession {
             in_flight: 0,
             canvas_meta: VecDeque::new(),
             total,
+            next_emit: 0,
+            buffered: BTreeMap::new(),
         }
     }
 
     /// Advances the run set by one step: fills the submission window, then
-    /// blocks on the pipeline's ordered `recv` when the window is full.
-    /// Returns `None` when every run is done. May block (image loads +
-    /// inference recv) — call from a background task/stream, never the UI.
+    /// blocks on the pipeline's `recv_unordered` and reorders locally. Returns
+    /// `None` when every run is done. May block (image loads + inference recv)
+    /// — call from a background task/stream, never the UI. Dispatch stays
+    /// parallel (`window` canvases in flight); emit is strictly `next_emit`
+    /// order so `dedup`/`held` chains never see a gap.
     pub fn step(
         &mut self,
         pipeline: &ParallelEngine,
@@ -135,6 +147,7 @@ impl RunSession {
         token: &OcrCancellationToken,
     ) -> Result<Option<RunEvent>, String> {
         loop {
+            // Fill window in parallel — Fallback does not occupy a pipeline slot.
             if self.dispatched < self.total && self.in_flight < self.window {
                 let index = self.dispatched;
                 let run = &self.plans[index];
@@ -149,7 +162,7 @@ impl RunSession {
                     &self.dims,
                 ) {
                     Ok(BuiltCanvas::Ready(canvas, width, margin_top)) => {
-                        self.canvas_meta.push_back((width, margin_top));
+                        self.canvas_meta.push_back((index, width, margin_top));
                         pipeline
                             .submit(index, canvas)
                             .map_err(|e| format!("OCR pipeline submit failed: {e}"))?;
@@ -157,28 +170,54 @@ impl RunSession {
                         self.dispatched += 1;
                     }
                     Ok(BuiltCanvas::Fallback(result)) => {
+                        self.buffered
+                            .insert(index, RunEvent::Fallback { index, result });
                         self.dispatched += 1;
-                        return Ok(Some(RunEvent::Fallback { index, result }));
                     }
                     Err(e) => return Err(e),
                 }
+                // Keep filling window before emitting; also check if next is ready.
+                if self.buffered.contains_key(&self.next_emit) {
+                    let ev = self.buffered.remove(&self.next_emit).expect("present");
+                    self.next_emit += 1;
+                    return Ok(Some(ev));
+                }
                 continue;
             }
-            if self.dispatched == self.total && self.in_flight == 0 {
+            // Emit in order if already buffered (e.g. 2 finished before 1).
+            if let Some(ev) = self.buffered.remove(&self.next_emit) {
+                self.next_emit += 1;
+                return Ok(Some(ev));
+            }
+            if self.dispatched == self.total && self.in_flight == 0 && self.buffered.is_empty() {
                 return Ok(None);
             }
-            let (idx, lines) = pipeline.recv()?;
+            // Need an unordered pipeline completion; buffer it until its turn.
+            let (idx, lines) = pipeline.recv_unordered()?;
             self.in_flight -= 1;
-            let (width, margin_top) = self
+            let pos = self
                 .canvas_meta
-                .pop_front()
-                .expect("canvas metadata arrives in submission order");
-            return Ok(Some(RunEvent::Canvas {
-                index: idx,
-                width,
-                margin_top,
-                lines,
-            }));
+                .iter()
+                .position(|(i, _, _)| *i == idx)
+                .expect("canvas metadata for idx must exist");
+            let (_, width, margin_top) = self
+                .canvas_meta
+                .remove(pos)
+                .expect("position was valid");
+            debug_assert!(
+                self.canvas_meta.iter().all(|(i, _, _)| *i != idx),
+                "duplicate metadata for idx {idx}"
+            );
+            self.buffered.insert(
+                idx,
+                RunEvent::Canvas {
+                    index: idx,
+                    width,
+                    margin_top,
+                    lines,
+                },
+            );
+            // Loop will emit if idx == next_emit, otherwise recv next.
         }
     }
 }
