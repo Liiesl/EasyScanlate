@@ -1,0 +1,251 @@
+use iced::{Point, Rectangle, Size};
+
+use scanlateit_model::EntryId;
+
+use crate::main_area::geometry::order_quad;
+
+use super::interaction::{OverlayButton, TopDecorHit};
+use super::layout::tile_layout;
+use super::motion::{button_width, handle_anchors, handle_rect, toolbar_buttons, toolbar_rect, top_decor_geometry};
+use super::state::TileViewState;
+use super::TileSpec;
+
+pub fn local_point(position: Point, bounds: Rectangle) -> Point {
+    Point::new(position.x - bounds.position().x, position.y - bounds.position().y)
+}
+
+pub fn hit_tile(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Option<usize> {
+    let (layout, _) = tile_layout(tiles, state.width);
+    let content_y = local.y + state.offset;
+    layout
+        .iter()
+        .enumerate()
+        .find(|(_, (y, height))| content_y >= *y && content_y < y + height)
+        .map(|(index, _)| index)
+}
+
+pub fn tile_local_point(layout: &[(f32, f32)], index: usize, local: Point, offset: f32) -> Point {
+    Point::new(local.x, local.y + offset - layout[index].0)
+}
+
+pub fn point_in_quad(point: Point, quad: [[f32; 2]; 4]) -> bool {
+    let p = [point.x, point.y];
+    let mut sign = 0.0;
+    for i in 0..4 {
+        let a = quad[i];
+        let b = quad[(i + 1) % 4];
+        let cross = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+        let side = cross.signum();
+        if side == 0.0 {
+            continue;
+        }
+        if sign == 0.0 {
+            sign = side;
+        } else if side != sign {
+            return false;
+        }
+    }
+    true
+}
+
+pub fn hit_entry(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Option<(usize, EntryId)> {
+    let (layout, _) = tile_layout(tiles, state.width);
+    let mut hit = None;
+    for (index, tile) in tiles.iter().enumerate() {
+        let (y, _) = layout[index];
+        let scale = if tile.source_width > 0 {
+            state.width / tile.source_width as f32
+        } else {
+            0.0
+        };
+        if scale <= 0.0 {
+            continue;
+        }
+        for entry in &tile.overlays {
+            let [min_x, min_y, max_x, max_y] = entry.bounds;
+            let rect = Rectangle::new(
+                Point::new(min_x * scale, y + min_y * scale - state.offset),
+                Size::new((max_x - min_x) * scale, (max_y - min_y) * scale),
+            );
+            if !rect.contains(local) {
+                continue;
+            }
+            let quad = order_quad(entry.quad.points.map(|p| {
+                [p[0] * scale, y + p[1] * scale - state.offset]
+            }));
+            if point_in_quad(local, quad) {
+                hit = Some((index, entry.id));
+            }
+        }
+    }
+    hit
+}
+
+pub fn entry_rect(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, id: EntryId) -> Option<Rectangle> {
+    let tile = tiles.get(index)?;
+    let (layout, _) = tile_layout(tiles, state.width);
+    let (y, _) = layout.get(index)?;
+    let scale = if tile.source_width > 0 {
+        state.width / tile.source_width as f32
+    } else {
+        0.0
+    };
+    let (min_x, min_y, max_x, max_y) = {
+        let [min_x, min_y, max_x, max_y] = tile.overlays.iter().find(|e| e.id == id)?.bounds;
+        (min_x, min_y, max_x, max_y)
+    };
+    Some(Rectangle::new(
+        Point::new(min_x * scale, y + min_y * scale - state.offset),
+        Size::new((max_x - min_x) * scale, (max_y - min_y) * scale),
+    ))
+}
+
+pub fn reveal_offset(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, id: EntryId) -> Option<f32> {
+    let tile = tiles.get(index)?;
+    let (layout, _) = tile_layout(tiles, state.width);
+    let (y, _) = layout.get(index)?;
+    let scale = if tile.source_width > 0 {
+        state.width / tile.source_width as f32
+    } else {
+        0.0
+    };
+    if scale <= 0.0 {
+        return None;
+    }
+    let entry = tile.overlays.iter().find(|e| e.id == id)?;
+    let [_, min_y, _, max_y] = entry.bounds;
+    let top = y + min_y * scale;
+    let bottom = y + max_y * scale;
+    let viewport = state.viewport_height;
+    if viewport <= 0.0 {
+        return None;
+    }
+    let max_offset = (state.content_height - viewport).max(0.0);
+    if top >= state.offset && bottom <= state.offset + viewport {
+        return None;
+    }
+    let target = (top - (viewport - (bottom - top)) / 2.0).clamp(0.0, max_offset);
+    (target != state.offset).then_some(target)
+}
+
+pub fn editing_rect(tiles: &[TileSpec<'_>], state: &TileViewState, editing: (usize, EntryId)) -> Option<Rectangle> {
+    let (index, id) = editing;
+    entry_rect(tiles, state, index, id)
+}
+
+pub fn selected_rect(tiles: &[TileSpec<'_>], state: &TileViewState) -> Option<(usize, Rectangle)> {
+    let (index, entry) = tiles
+        .iter()
+        .enumerate()
+        .find_map(|(index, tile)| tile.overlays.iter().find(|e| e.selected).map(|e| (index, e)))?;
+    Some((index, entry_rect(tiles, state, index, entry.id)?))
+}
+
+pub fn selected_quad_view(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize) -> Option<[[f32; 2]; 4]> {
+    let tile = tiles.get(index)?;
+    let (layout, _) = tile_layout(tiles, state.width);
+    let (y, _) = layout.get(index)?;
+    let scale = if tile.source_width > 0 {
+        state.width / tile.source_width as f32
+    } else {
+        0.0
+    };
+    if scale <= 0.0 {
+        return None;
+    }
+    let entry = tile.overlays.iter().find(|e| e.selected)?;
+    Some(order_quad(entry.quad.points.map(|p| {
+        [p[0] * scale, y + p[1] * scale - state.offset]
+    })))
+}
+
+pub fn entry_quad(tiles: &[TileSpec<'_>], index: usize, id: EntryId) -> Option<scanlateit_model::Quad> {
+    let tile = tiles.get(index)?;
+    tile.overlays.iter().find(|e| e.id == id).map(|e| e.quad)
+}
+
+pub fn hit_handle(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Option<(usize, EntryId, super::interaction::ResizeHandle)> {
+    let (index, entry) = tiles.iter().enumerate().find_map(|(index, tile)| {
+        tile.overlays.iter().find(|e| e.selected).map(|e| (index, e))
+    })?;
+    let id = entry.id;
+    let quad = selected_quad_view(tiles, state, index)?;
+    for (handle, anchor) in handle_anchors(quad) {
+        if handle_rect(anchor).contains(local) {
+            return Some((index, id, handle));
+        }
+    }
+    None
+}
+
+pub fn hit_top_decor(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Option<(usize, EntryId, TopDecorHit)> {
+    let (index, entry) = tiles.iter().enumerate().find_map(|(index, tile)| {
+        tile.overlays.iter().find(|e| e.selected).map(|e| (index, e))
+    })?;
+    let id = entry.id;
+    if state.inpaint_mode() {
+        return None;
+    }
+    let (_, rect) = selected_rect(tiles, state)?;
+    let quad = selected_quad_view(tiles, state, index)?;
+    let decor = top_decor_geometry(
+        rect,
+        quad,
+        state.width,
+        state.offset,
+        state.offset + state.viewport_height,
+    );
+    if handle_rect(decor.anchor).contains(local) {
+        return Some((index, id, TopDecorHit::Rotate));
+    }
+    if entry.quad_overridden && decor.revert.contains(local) {
+        return Some((index, id, TopDecorHit::Revert));
+    }
+    None
+}
+
+pub fn hit_toolbar_button(toolbar: Rectangle, local: Point) -> Option<crate::event::ToolbarAction> {
+    if !toolbar.contains(local) {
+        return None;
+    }
+    let mut x = toolbar.x;
+    for (action, label) in toolbar_buttons() {
+        let width = button_width(label);
+        if local.x < x + width {
+            return Some(action);
+        }
+        x += width;
+    }
+    None
+}
+
+pub fn hit_toolbar(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Option<(usize, EntryId, crate::event::ToolbarAction)> {
+    let (index, rect) = selected_rect(tiles, state)?;
+    let toolbar = toolbar_rect(rect, state.width, state.viewport_height);
+    let id = tiles[index].overlays.iter().find(|e| e.selected)?.id;
+    hit_toolbar_button(toolbar, local).map(|action| (index, id, action))
+}
+
+pub fn overlay_button_rects(bounds: Rectangle) -> [Rectangle; 3] {
+    use super::constants::{OVERLAY_BTN_GAP, OVERLAY_BTN_HEIGHT, OVERLAY_BTN_MARGIN, OVERLAY_BTN_WIDTH};
+    let total = OVERLAY_BTN_HEIGHT * 3.0 + OVERLAY_BTN_GAP * 2.0;
+    let top = (bounds.height - OVERLAY_BTN_MARGIN - total).max(0.0);
+    let mut rects = [Rectangle::new(Point::ORIGIN, Size::ZERO); 3];
+    for (index, (_button, _)) in OverlayButton::column().iter().enumerate() {
+        rects[index] = Rectangle::new(
+            Point::new(
+                OVERLAY_BTN_MARGIN,
+                top + index as f32 * (OVERLAY_BTN_HEIGHT + OVERLAY_BTN_GAP),
+            ),
+            Size::new(OVERLAY_BTN_WIDTH, OVERLAY_BTN_HEIGHT),
+        );
+    }
+    rects
+}
+
+pub fn hit_overlay_button(bounds: Rectangle, local: Point) -> Option<OverlayButton> {
+    overlay_button_rects(bounds)
+        .into_iter()
+        .zip(OverlayButton::column())
+        .find_map(|(rect, (button, _))| rect.contains(local).then_some(button))
+}
