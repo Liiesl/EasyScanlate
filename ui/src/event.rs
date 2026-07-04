@@ -131,6 +131,8 @@ pub enum UiEvent {
     ManageModelsOpen,
     /// Close the Manage Models overlay.
     ManageModelsClose,
+    /// The user typed in the Manage Models search field.
+    ManageModelsSearch(String),
     EntryClicked(Option<(usize, EntryId)>),
     EntryDoubleClicked((usize, EntryId)),
     /// Start the inline text edit from the panel's results list instead of

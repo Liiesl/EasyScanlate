@@ -5,9 +5,10 @@
 //! [`UiEvent::SettingsChanged`]; the app re-syncs its runtime mirrors from
 //! the store on that one message.
 
+#[allow(unused_imports)]
 use iced::widget::{
-    button, center, checkbox, column, container, mouse_area, opaque, row, scrollable, space, stack,
-    text,
+    button, center, checkbox, column, container, mouse_area, opaque, row, rule, scrollable, space,
+    stack, text, toggler,
 };
 #[cfg(feature = "inpaint")]
 use iced::widget::pick_list;
@@ -26,8 +27,6 @@ use crate::panel::PANEL_BG;
 use crate::segmented::{segment, segmented_group};
 use crate::state::UiState;
 
-const MODAL_WIDTH: f32 = 520.0;
-const MODAL_HEIGHT: f32 = 400.0;
 const TAB_WIDTH: f32 = 140.0;
 const ACCENT: Color = Color::from_rgb8(92, 190, 255);
 const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);
@@ -84,11 +83,37 @@ fn mask_key(key: &str) -> String {
     }
 }
 
+/// Thin separator after each provider / model row so its action button is
+/// not confused with the next item.
+fn item_separator<'a>() -> Element<'a, UiEvent> {
+    rule::horizontal(1)
+        .style(|_theme| rule::Style {
+            color: Color::from_rgba8(255, 255, 255, 0.08),
+            radius: 0.0.into(),
+            fill_mode: rule::FillMode::Full,
+            snap: true,
+        })
+        .into()
+}
+
+fn section_separator<'a>() -> Element<'a, UiEvent> {
+    rule::horizontal(1)
+        .style(|_theme| rule::Style {
+            color: Color::from_rgba8(255, 255, 255, 0.14),
+            radius: 0.0.into(),
+            fill_mode: rule::FillMode::Full,
+            snap: true,
+        })
+        .into()
+}
+
 /// One row of the supported-provider list: name, connection status and the
-/// Connect/Disconnect button. The connection state is read straight from
-/// the settings store.
-fn provider_row<'a>(provider: &'a translation::Provider) -> Element<'a, UiEvent> {
-    let connected = scanlateit_settings::get(|s| s.connections.get(&provider.id).cloned());
+/// Connect/Disconnect button. When `connected` is `Some` the row shows the
+/// masked key / local base URL, otherwise "Not connected".
+fn provider_row_with_connection<'a>(
+    provider: &'a translation::Provider,
+    connected: Option<scanlateit_settings::Connection>,
+) -> Element<'a, UiEvent> {
     let is_local = translation::is_local(&provider.id);
     let status = connected
         .as_ref()
@@ -127,12 +152,25 @@ fn provider_row<'a>(provider: &'a translation::Provider) -> Element<'a, UiEvent>
     ]
     .spacing(6)
     .align_y(iced::Alignment::Center)
+    .padding([4, 0])
     .into()
 }
 
-/// One row of the custom-endpoint section.
-fn custom_row<'a>(id: &'static str, label: &'static str) -> Element<'a, UiEvent> {
-    let connected = scanlateit_settings::get(|s| s.connections.get(id).cloned());
+/// One row of the supported-provider list: name, connection status and the
+/// Connect/Disconnect button. The connection state is read straight from
+/// the settings store.
+#[allow(dead_code)]
+fn provider_row<'a>(provider: &'a translation::Provider) -> Element<'a, UiEvent> {
+    let connected = scanlateit_settings::get(|s| s.connections.get(&provider.id).cloned());
+    provider_row_with_connection(provider, connected)
+}
+
+/// One row of the custom-endpoint section with an explicit connection.
+fn custom_row_with_connection<'a>(
+    id: &'static str,
+    label: &'static str,
+    connected: Option<scanlateit_settings::Connection>,
+) -> Element<'a, UiEvent> {
     let status = connected
         .as_ref()
         .map(|connection| format!("Connected · {}", mask_key(&connection.api_key)))
@@ -156,7 +194,15 @@ fn custom_row<'a>(id: &'static str, label: &'static str) -> Element<'a, UiEvent>
     ]
     .spacing(6)
     .align_y(iced::Alignment::Center)
+    .padding([4, 0])
     .into()
+}
+
+/// One row of the custom-endpoint section.
+#[allow(dead_code)]
+fn custom_row<'a>(id: &'static str, label: &'static str) -> Element<'a, UiEvent> {
+    let connected = scanlateit_settings::get(|s| s.connections.get(id).cloned());
+    custom_row_with_connection(id, label, connected)
 }
 
 /// Appearance tab — port of `ManhwaOCR/app/ui/components/background_settings.AuroraEditorPanel`.
@@ -412,6 +458,39 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             column(items).spacing(6).into()
         }
         SettingsTab::Translation => {
+            // Single read for both connections and free-only flag to keep the
+            // partition consistent for this frame.
+            let (connections, free_only) =
+                scanlateit_settings::get(|s| (s.connections.clone(), s.free_models_only));
+
+            // Partition every provider (cloud + local, already in SUPPORTED)
+            // and the two custom slots into connected vs available, preserving
+            // display order but with all connected items on top.  "Same" per
+            // user choice: custom + local share the same sections.
+            let mut connected_rows: Vec<Element<'_, UiEvent>> = Vec::new();
+            let mut available_rows: Vec<Element<'_, UiEvent>> = Vec::new();
+            for provider in translation::SUPPORTED_PROVIDERS.iter() {
+                let conn = connections.get(&provider.id).cloned();
+                let el = provider_row_with_connection(provider, conn.clone());
+                if conn.is_some() {
+                    connected_rows.push(el);
+                } else {
+                    available_rows.push(el);
+                }
+            }
+            for (id, label) in [
+                (CUSTOM_OPENAI, "OpenAI-compatible"),
+                (CUSTOM_ANTHROPIC, "Anthropic-compatible"),
+            ] {
+                let conn = connections.get(id).cloned();
+                let el = custom_row_with_connection(id, label, conn.clone());
+                if conn.is_some() {
+                    connected_rows.push(el);
+                } else {
+                    available_rows.push(el);
+                }
+            }
+
             let mut rows: Vec<Element<'_, UiEvent>> = Vec::new();
             rows.push(text("Translation Service").size(14).into());
             rows.push(
@@ -421,47 +500,117 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                     .color(MUTED_FG)
                     .into(),
             );
-            for provider in translation::SUPPORTED_PROVIDERS.iter() {
-                rows.push(provider_row(provider));
-            }
-            rows.push(text("Custom service").size(14).into());
-            rows.push(
-                text("Any other endpoint speaking the OpenAI or Anthropic \
-                      API, e.g. a local Ollama server.")
-                    .size(12)
-                    .color(MUTED_FG)
-                    .into(),
-            );
-            rows.push(custom_row(CUSTOM_OPENAI, "OpenAI-compatible"));
-            rows.push(custom_row(CUSTOM_ANTHROPIC, "Anthropic-compatible"));
-            let free_only = scanlateit_settings::get(|s| s.free_models_only);
-            rows.push(
-                checkbox(free_only)
-                    .label("Only show free models")
-                    .text_size(12)
-                    .on_toggle(|v| set(move |s| s.free_models_only = v))
-                    .into(),
-            );
-            rows.push(
-                text("Hide paid models from the translation picker.")
-                    .size(11)
-                    .color(MUTED_FG)
-                    .into(),
-            );
+
+            // ── Connected section (on top) ──────────────────────────────
             rows.push(
                 row![
-                    text("Filter unused models from the translation dropdown.")
+                    text("Connected").size(12).color(Color::WHITE),
+                    space::horizontal(),
+                    text(if connected_rows.is_empty() {
+                        "—".to_string()
+                    } else {
+                        format!("{} connected", connected_rows.len())
+                    })
+                    .size(11)
+                    .color(MUTED_FG),
+                ]
+                .align_y(iced::Alignment::Center)
+                .into(),
+            );
+            if connected_rows.is_empty() {
+                rows.push(
+                    text("No connected providers — connect one below.")
                         .size(11)
                         .color(MUTED_FG)
-                        .width(FillLength),
+                        .into(),
+                );
+            } else {
+                let len = connected_rows.len();
+                for (idx, el) in connected_rows.into_iter().enumerate() {
+                    rows.push(el);
+                    if idx + 1 < len {
+                        rows.push(item_separator());
+                    }
+                }
+            }
+
+            rows.push(section_separator());
+
+            // ── Available section ───────────────────────────────────────
+            rows.push(
+                row![
+                    text("Available").size(12).color(Color::WHITE),
+                    space::horizontal(),
+                    text(format!("{} available", available_rows.len()))
+                        .size(11)
+                        .color(MUTED_FG),
+                ]
+                .align_y(iced::Alignment::Center)
+                .into(),
+            );
+            if available_rows.is_empty() {
+                rows.push(
+                    text("All providers connected.")
+                        .size(11)
+                        .color(MUTED_FG)
+                        .into(),
+                );
+            } else {
+                let len = available_rows.len();
+                for (idx, el) in available_rows.into_iter().enumerate() {
+                    rows.push(el);
+                    if idx + 1 < len {
+                        rows.push(item_separator());
+                    }
+                }
+            }
+
+            rows.push(section_separator());
+
+            // ── Toggler + Manage models ─────────────────────────────────
+            rows.push(
+                row![
+                    column![
+                        text("Only show free models").size(12),
+                        text("Hide paid models from the translation picker.")
+                            .size(11)
+                            .color(MUTED_FG),
+                    ]
+                    .spacing(1)
+                    .width(FillLength),
+                    toggler(free_only)
+                        .size(20.0)
+                        .style(crate::toggler_style::style)
+                        .on_toggle(|v| set(move |s| s.free_models_only = v)),
+                ]
+                .spacing(12)
+                .align_y(iced::Alignment::Center)
+                .padding([4, 0])
+                .into(),
+            );
+            rows.push(item_separator());
+            rows.push(
+                row![
+                    column![
+                        text("Filter unused models from the translation dropdown.")
+                            .size(11)
+                            .color(MUTED_FG),
+                        text("Hide models you never use; deprecated are always hidden.")
+                            .size(11)
+                            .color(MUTED_FG),
+                    ]
+                    .spacing(1)
+                    .width(FillLength),
                     button(text("Manage models…").size(11))
                         .padding([3, 8])
                         .on_press(UiEvent::ManageModelsOpen),
                 ]
                 .spacing(6)
                 .align_y(iced::Alignment::Center)
+                .padding([4, 0])
                 .into(),
             );
+            rows.push(item_separator());
             rows.push(
                 text("Connections are saved to the app's settings file in the \
                       system configuration directory.")
@@ -469,7 +618,9 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                     .color(MUTED_FG)
                     .into(),
             );
-            scrollable(column(rows).spacing(4)).into()
+            scrollable(column(rows).spacing(6))
+                .height(Length::Fill)
+                .into()
         }
         SettingsTab::Appearance => appearance_tab(),
     }
@@ -477,76 +628,89 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
 
 /// The settings overlay: `base` (the whole window) dimmed under a centered
 /// modal window with the vertical tab list and the selected tab's fields.
-/// Clicking the backdrop closes the modal; clicks inside are consumed by the
-/// modal's own widgets.
+/// The modal occupies 80% of the window in both axes (1-8-1 FillPortion split).
+/// No header — closing is only by clicking the dimmed backdrop outside.
+/// The darker background covers the whole left section (full height), not just
+/// the button cluster.
 pub fn view<'a, S: UiState + ?Sized>(
     state: &'a S,
     base: Element<'a, UiEvent>,
 ) -> Element<'a, UiEvent> {
-    let window = container(
+    let left = container(
         column![
-            row![
-                text("Settings").size(18),
-                space::horizontal(),
-                button(text("✕"))
-                    .padding(2)
-                    .on_press(UiEvent::SettingsClose),
-            ],
-            row![
-                container(
-                    column![
-                        tab_button(state, SettingsTab::General, "General"),
-                        tab_button(state, SettingsTab::Appearance, "Appearance"),
-                        tab_button(state, SettingsTab::Translation, "Translation"),
-                    ]
-                    .spacing(4)
-                    .width(Length::Fixed(TAB_WIDTH)),
-                )
-                .padding(6)
-                .style(|_theme| container::Style {
-                    background: Some(
-                        Color {
-                            a: 0.5,
-                            ..Color::BLACK
-                        }
-                        .into()
-                    ),
-                    border: iced::Border::default().rounded(4),
-                    ..container::Style::default()
-                }),
-                container(tab_fields(state)).width(FillLength),
-            ]
-            .spacing(10)
-            .height(FillLength),
+            tab_button(state, SettingsTab::General, "General"),
+            tab_button(state, SettingsTab::Appearance, "Appearance"),
+            tab_button(state, SettingsTab::Translation, "Translation"),
         ]
-        .spacing(10),
+        .spacing(4)
+        .width(Length::Fixed(TAB_WIDTH)),
     )
-    .width(Length::Fixed(MODAL_WIDTH))
-    .height(Length::Fixed(MODAL_HEIGHT))
+    .width(Length::Fixed(TAB_WIDTH))
+    .height(Length::Fill)
     .padding(12)
     .style(|_theme| container::Style {
-        background: Some(PANEL_BG.into()),
-        border: iced::Border::default().rounded(8).color(Color::from_rgb8(60, 63, 74)).width(1),
+        background: Some(
+            Color {
+                a: 0.5,
+                ..Color::BLACK
+            }
+            .into()
+        ),
+        border: iced::Border::default().rounded(iced::border::left(8)),
+        ..container::Style::default()
+    });
+
+    let right = container(tab_fields(state))
+        .width(FillLength)
+        .height(Length::Fill)
+        .padding(12);
+
+    let window = container(row![left, right].height(Length::Fill))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme| container::Style {
+            background: Some(PANEL_BG.into()),
+            border: iced::Border::default()
+                .rounded(8)
+                .color(Color::from_rgb8(60, 63, 74))
+                .width(1),
+            ..container::Style::default()
+        });
+
+    // 80% centered modal: 1-8-1 split both axes => 8/10 = 80%
+    let dimmed = container(
+        row![
+            space::horizontal().width(Length::FillPortion(1)),
+            column![
+                space::vertical().height(Length::FillPortion(1)),
+                container(opaque(window))
+                    .width(Length::Fill)
+                    .height(Length::FillPortion(8)),
+                space::vertical().height(Length::FillPortion(1)),
+            ]
+            .width(Length::FillPortion(8))
+            .height(Length::Fill),
+            space::horizontal().width(Length::FillPortion(1)),
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(|_theme| container::Style {
+        background: Some(
+            Color {
+                a: 0.7,
+                ..Color::BLACK
+            }
+            .into()
+        ),
         ..container::Style::default()
     });
 
     stack![
         base,
-        opaque(
-            mouse_area(
-                center(opaque(window)).style(|_theme| container::Style {
-                    background: Some(
-                        Color {
-                            a: 0.7,
-                            ..Color::BLACK
-                        }
-                        .into()
-                    ),
-                    ..container::Style::default()
-                })
-            )
-            .on_press(UiEvent::SettingsClose)
-        )
+        opaque(mouse_area(dimmed).on_press(UiEvent::SettingsClose))
     ]
     .into()
 }

@@ -224,6 +224,8 @@ pub struct App {
     pub(crate) settings_tab: SettingsTab,
     /// True while the Manage Models overlay (over the settings modal) is open.
     pub(crate) manage_models_open: bool,
+    /// Filter text of the Manage Models search field; not persisted between opens.
+    pub(crate) manage_models_search: String,
     /// The currently selected overlay entry as `(image index, entry id)`;
     /// the style panel edits exactly this entry and nothing else.
     pub(crate) selected: Option<(usize, EntryId)>,
@@ -361,6 +363,7 @@ impl App {
             settings_open: false,
             settings_tab: SettingsTab::General,
             manage_models_open: false,
+            manage_models_search: String::new(),
             selected: None,
             editing: None,
             editing_origin: EditOrigin::Overlay,
@@ -607,6 +610,10 @@ impl UiState for App {
 
     fn manage_models_open(&self) -> bool {
         self.manage_models_open
+    }
+
+    fn manage_models_search(&self) -> &str {
+        &self.manage_models_search
     }
 
     fn all_model_groups(&self) -> Vec<(String, String, Vec<String>)> {
@@ -2256,10 +2263,16 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         }
         Message::Ui(UiEvent::ManageModelsOpen) => {
             app.manage_models_open = true;
+            app.manage_models_search.clear();
             Task::none()
         }
         Message::Ui(UiEvent::ManageModelsClose) => {
             app.manage_models_open = false;
+            app.manage_models_search.clear();
+            Task::none()
+        }
+        Message::Ui(UiEvent::ManageModelsSearch(query)) => {
+            app.manage_models_search = query;
             Task::none()
         }
         Message::Ui(UiEvent::EntryClicked(selection)) => {

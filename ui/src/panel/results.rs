@@ -339,7 +339,8 @@ fn translate_bar<'a, S: UiState + ?Sized>(
             .searchable(true)
             .text_size(12)
             .width(FillLength)
-            .menu_max_height(280.0),
+            .menu_max_height(280.0)
+            .footer(Footer::new("Manage models…", UiEvent::ManageModelsOpen)),
             text("To:").size(12),
             pick_list(
                 translation::LANGUAGES,

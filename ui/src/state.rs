@@ -76,6 +76,8 @@ pub trait UiState {
     fn settings_tab(&self) -> SettingsTab;
     /// Whether the Manage Models overlay is open (over the settings modal).
     fn manage_models_open(&self) -> bool;
+    /// Current filter text of the Manage Models search field.
+    fn manage_models_search(&self) -> &str;
     /// Every connected provider's *all* toggleable models (deprecated already
     /// removed) grouped by provider – shown in the Manage Models overlay.
     fn all_model_groups(&self) -> Vec<(String, String, Vec<String>)>;

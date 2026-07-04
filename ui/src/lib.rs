@@ -15,6 +15,7 @@ pub mod panel;
 pub mod segmented;
 pub mod settings;
 pub mod state;
+pub mod toggler_style;
 pub mod toolbar;
 
 pub use connect::ConnectModal;
