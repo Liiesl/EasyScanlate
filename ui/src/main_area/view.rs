@@ -19,7 +19,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     } else {
         match state.view_mode() {
             crate::event::MainAreaMode::View => {
-                let viewer = build_viewer(state, tiles(state, false), false);
+                let viewer = build_viewer(state, tiles(state, false), false).show_overlay_buttons(true);
                 iced::widget::stack![viewer, edit_overlay(state), mode_switcher(state)].into()
             }
             crate::event::MainAreaMode::Compare => {

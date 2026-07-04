@@ -253,6 +253,13 @@ where
         state.inpaint_mode = self.inpaint_mode;
         let (_, content_height) = tile_layout(&self.tiles, state.width);
         state.content_height = content_height;
+        if let Some(target) = self.scroll_to {
+            let max_offset = (content_height - state.viewport_height).max(0.0);
+            let clamped = target.clamp(0.0, max_offset);
+            if (clamped - state.offset).abs() > f32::EPSILON {
+                state.offset = clamped;
+            }
+        }
         if self.reveal != state.last_revealed {
             state.last_revealed = self.reveal;
             if let Some((index, id)) = self.reveal {
@@ -263,13 +270,6 @@ where
         }
         if state.viewport_height > 0.0 {
             state.offset = state.offset.min((content_height - state.viewport_height).max(0.0));
-        }
-        if let Some(target) = self.scroll_to {
-            let max_offset = (content_height - state.viewport_height).max(0.0);
-            let clamped = target.clamp(0.0, max_offset);
-            if (clamped - state.offset).abs() > f32::EPSILON {
-                state.offset = clamped;
-            }
         }
         iced_layout::Node::new(Size::new(width, limits.max().height))
     }
