@@ -2902,6 +2902,7 @@ dependencies = [
  "iced",
  "num-traits",
  "unicode-segmentation",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4553,6 +4554,7 @@ dependencies = [
  "fontdb 0.24.0",
  "iced",
  "image",
+ "neverliie-iced-widgets",
  "rfd",
  "scanlateit-inpaint",
  "scanlateit-model",
@@ -4574,6 +4576,7 @@ dependencies = [
  "ndarray 0.17.2",
  "ort",
  "scanlateit-model",
+ "scanlateit-settings",
 ]
 
 [[package]]
@@ -4597,7 +4600,6 @@ name = "scanlateit-settings"
 version = "0.1.0"
 dependencies = [
  "confy",
- "scanlateit-model",
  "serde",
  "tempfile",
  "toml 1.1.4+spec-1.1.0",

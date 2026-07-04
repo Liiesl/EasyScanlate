@@ -31,6 +31,7 @@ iced = { version = "0.14.0", path = "iced", features = ["image", "canvas", "adva
 image = "0.25"
 bytes = "1.6"
 rfd = "0.17"
+neverliie-iced-widgets = { path = "NeverLiieIcedWidgets" }
 scanlateit-model = { path = "model" }
 scanlateit-settings = { path = "settings" }
 scanlateit-inpaint = { path = "inpaint", optional = true }

@@ -10,7 +10,8 @@ use iced::widget::image::Handle;
 use iced::widget::{pane_grid, text_editor};
 #[cfg(feature = "ocr")]
 use iced::futures::{SinkExt, StreamExt};
-use iced::{Color, Element, Font, Length, Rectangle, Subscription, Task};
+use iced::{Color, Element, Font, Length, Rectangle, Subscription, Task, Theme};
+use neverliie_iced_widgets::title_bar::{FrameAction, NativeFrame};
 
 use fontdb;
 #[cfg(feature = "inpaint")]
@@ -81,6 +82,8 @@ pub enum SidePaneKind {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// Frame actions from the custom title bar.
+    Frame(FrameAction),
     /// A widget-level event from the ui crate.
     Ui(UiEvent),
     ImagesPicked(Result<Vec<(String, u32, u32)>, String>),
@@ -269,11 +272,50 @@ pub struct App {
     pub(crate) panes: pane_grid::State<PaneKind>,
     /// The draggable split between the styling panel and the translation/results panel.
     pub(crate) side_panes: pane_grid::State<SidePaneKind>,
+    /// The custom window frame (title bar) – single-window via `install_latest`.
+    pub frame: NativeFrame,
 }
 impl App {
-    fn new() -> Self {
+    pub fn theme(&self) -> Theme {
+        // Transparent frame: make the palette backgrounds transparent so the
+        // aurora canvas shows through the title bar and the window surface.
+        // Keep caption hover/pressed colors opaque by restoring them from an
+        // opaque palette; only `base` (surface) and `weakest` (title bar) stay
+        // transparent. This avoids patching `NeverLiieIcedWidgets`.
+        use iced::theme::palette::{Extended, Palette};
+        let is_dark = scanlateit_settings::get(|s| s.aurora_is_dark);
+        let base_palette = if is_dark { Palette::DARK } else { Palette::LIGHT };
+        let opaque_bg = base_palette.background;
+        let mut transparent_palette = base_palette;
+        transparent_palette.background = Color {
+            a: 0.0,
+            ..opaque_bg
+        };
+        Theme::custom_with_fn("TransparentAurora", transparent_palette, move |p| {
+            let mut ext = Extended::generate(p);
+            let opaque_palette = Palette {
+                background: opaque_bg,
+                ..p
+            };
+            let opaque_ext = Extended::generate(opaque_palette);
+            // caption hover/pressed use these – keep opaque
+            ext.background.weak = opaque_ext.background.weak;
+            ext.background.strong = opaque_ext.background.strong;
+            ext.background.stronger = opaque_ext.background.stronger;
+            ext.background.strongest = opaque_ext.background.strongest;
+            ext.background.weaker = opaque_ext.background.weaker;
+            ext.background.neutral = opaque_ext.background.neutral;
+            // keep text readable on aurora
+            ext.background.base.text = opaque_ext.background.base.text;
+            ext.background.weakest.text = opaque_ext.background.weakest.text;
+            ext
+        })
+    }
+
+    fn new(frame: NativeFrame) -> Self {
         let style = EntryStyle::default();
         Self {
+            frame,
             images: Vec::new(),
             #[cfg(feature = "ocr")]
             engine: None,
@@ -580,7 +622,7 @@ mod tests {
 
     fn app_with_entry() -> (App, EntryId) {
         use scanlateit_model::{EntrySource, NewEntry, Quad};
-        let mut app = App::new();
+        let mut app = App::new(NativeFrame::default());
         let mut project = Project::new();
         let id = project.ocr.append(NewEntry {
             source: EntrySource::AutoOcr,
@@ -1172,7 +1214,7 @@ fn sync_tx_from_store(app: &mut App) {
     app.tx.sync();
 }
 
-pub fn boot() -> (App, Task<Message>) {
+pub fn boot(frame: NativeFrame) -> (App, Task<Message>) {
     scanlateit_settings::init();
     let font_task = match std::fs::read(KOREAN_FONT_PATH) {
         Ok(bytes) => iced::font::load(bytes).map(|_| Message::FontLoaded),
@@ -1187,7 +1229,7 @@ pub fn boot() -> (App, Task<Message>) {
         )),
         allow(unused_mut)
     )]
-    let mut app = App::new();
+    let mut app = App::new(frame);
     #[cfg(feature = "translation")]
     {
         let (connections, last_provider, free_only, hidden) = scanlateit_settings::get(|s| {
@@ -1585,6 +1627,7 @@ fn finalize_run(app: &mut App) {
 
 pub fn update(app: &mut App, message: Message) -> Task<Message> {
     match message {
+        Message::Frame(action) => app.frame.update(action, Message::Frame),
         Message::FetchModels => {
             let ids = app.tx.fetch_ids();
             if ids.is_empty() {
@@ -2709,12 +2752,34 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
 /// Keeps the frame loop alive while the OCR stream is running so queued
 /// `OcrStreamRun` messages are drained and assembled per run instead of all
 /// at once when the stream finishes.
-pub fn subscription(_app: &App) -> Subscription<Message> {
+pub fn subscription(app: &App) -> Subscription<Message> {
+    let frame_sub = app.frame.subscription().map(Message::Frame);
+
     #[cfg(feature = "ocr")]
-    if _app.running {
-        return iced::time::every(Duration::from_millis(16)).map(|_| Message::OcrTick);
+    if app.running {
+        return Subscription::batch([
+            frame_sub,
+            iced::time::every(Duration::from_millis(16)).map(|_| Message::OcrTick),
+        ]);
     }
-    Subscription::none()
+    frame_sub
+}
+
+fn title_icon_handle() -> Option<iced::widget::image::Handle> {
+    use std::sync::OnceLock;
+    static ICON: OnceLock<Option<iced::widget::image::Handle>> = OnceLock::new();
+    ICON.get_or_init(|| {
+        const BYTES: &[u8] = include_bytes!("../app_icon.ico");
+        match image::load_from_memory(BYTES) {
+            Ok(img) => {
+                let rgba = img.to_rgba8();
+                let (w, h) = (rgba.width(), rgba.height());
+                Some(iced::widget::image::Handle::from_rgba(w, h, rgba.into_raw()))
+            }
+            Err(_) => None,
+        }
+    })
+    .clone()
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -2797,32 +2862,98 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .spacing(GAP)
         .height(Length::Fill)
         .into();
+    // OUTER_PADDING is applied to the content only – the title bar stays
+    // edge-to-edge (outer_padding = 0 on the frame) per the requirements.
     let padded_content: Element<'_, UiEvent> = iced::widget::container(content)
         .padding(OUTER_PADDING)
         .width(Length::Fill)
         .height(Length::Fill)
         .into();
-    // Global aurora behind everything (mirrors ManhwaOCR AuroraCanvas as centralWidget).
-    // Panels / toolbar are translucent so the blobs show through.
+
+    // Modals are chained at the UiEvent level before framing; they dim the
+    // content but the title bar (outside the frame's content) stays visible.
+    // Aurora is kept outside the frame so it can show through the
+    // transparent title bar.
+    let inner_with_modals: Element<'_, UiEvent> = {
+        let base: Element<'_, UiEvent> = padded_content;
+        let v: Element<'_, UiEvent> = if app.settings_open {
+            settings_modal::view(app, base)
+        } else {
+            base
+        };
+        let v: Element<'_, UiEvent> = if app.connect_modal.is_some() {
+            scanlateit_ui::connect::view(app, v)
+        } else {
+            v
+        };
+        if app.manage_models_open {
+            scanlateit_ui::manage_models::view(app, v)
+        } else {
+            v
+        }
+    };
+    let inner_mapped: Element<'_, Message> = inner_with_modals.map(Message::from);
+
+    // Frame it – single-window via `primary_window`. The frame's own title
+    // is left empty; we draw a truly-centered title+icon ourselves.
+    let framed: Element<'_, Message> = if let Some(window_id) = app.frame.primary_window() {
+        app.frame.view(window_id, "", None, None, inner_mapped, Message::Frame)
+    } else {
+        // First frame before `install_latest` resolves: show content undecorated.
+        inner_mapped
+    };
+
+    // Aurora behind the transparent frame (title bar + surface).
     let aurora_cfg = scanlateit_ui::background::AuroraConfig::from_store();
-    let aurora: Element<'_, UiEvent> =
-        scanlateit_ui::background::AuroraBackground::new(aurora_cfg).view();
-    let base: Element<'_, UiEvent> =
-        iced::widget::Stack::with_children(vec![aurora, padded_content]).into();
-    let view: Element<'_, UiEvent> = if app.settings_open {
-        settings_modal::view(app, base)
-    } else {
-        base
+    let aurora: Element<'_, Message> =
+        scanlateit_ui::background::AuroraBackground::new(aurora_cfg)
+            .view()
+            .map(Message::from);
+    let base_with_aurora: Element<'_, Message> =
+        iced::widget::Stack::with_children(vec![aurora, framed]).into();
+
+    // Truly centered title + app icon. The library's `show_title` is false
+    // and `window_icon` is None – this overlay is centered in the window,
+    // not in the filler between the icon and the caption buttons.
+    let title_overlay: Element<'_, Message> = {
+        let h = app.frame.config().title_bar_height;
+        let is_dark = scanlateit_settings::get(|s| s.aurora_is_dark);
+        let title_color = if is_dark {
+            Color::from_rgb(0.92, 0.92, 0.92)
+        } else {
+            Color::from_rgb(0.12, 0.12, 0.12)
+        };
+        let icon_element: Element<'_, Message> = match title_icon_handle() {
+            Some(handle) => iced::widget::image(handle)
+                .width(Length::Fixed(16.0))
+                .height(Length::Fixed(16.0))
+                .into(),
+            None => iced::widget::space::horizontal()
+                .width(Length::Fixed(16.0))
+                .height(Length::Fixed(16.0))
+                .into(),
+        };
+        let row = iced::widget::row![
+            icon_element,
+            iced::widget::text("Scanlateit").size(13).color(title_color)
+        ]
+        .spacing(8)
+        .align_y(iced::Center);
+        iced::widget::container(row)
+            .width(Length::Fill)
+            .height(Length::Fixed(h))
+            .center_x(Length::Fill)
+            .center_y(Length::Fixed(h))
+            .into()
     };
-    let view: Element<'_, UiEvent> = if app.connect_modal.is_some() {
-        scanlateit_ui::connect::view(app, view)
-    } else {
-        view
-    };
-    let view: Element<'_, UiEvent> = if app.manage_models_open {
-        scanlateit_ui::manage_models::view(app, view)
-    } else {
-        view
-    };
-    Element::map(view, Message::from)
+
+    // Stack the centered overlay on top of the aurora+frame. The overlay
+    // is inert (no mouse_area) so drags/double-clicks pass through to the
+    // frame's draggable filler underneath; only the caption buttons capture.
+    let title_bar_container: Element<'_, Message> = iced::widget::container(title_overlay)
+        .width(Length::Fill)
+        .height(Length::Fixed(app.frame.config().title_bar_height))
+        .into();
+
+    iced::widget::Stack::with_children(vec![base_with_aurora, title_bar_container]).into()
 }
