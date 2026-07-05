@@ -593,7 +593,7 @@ pub fn assemble(
     };
     let deduped = match &prev {
         Some((quads, prev_width, offset)) => {
-            dedup_with_previous(kept, quads, *prev_width, *offset, width)
+            dedup_with_previous(kept, quads, *prev_width, *offset, width, margin_top)
         }
         None => kept,
     };
@@ -900,18 +900,20 @@ fn overlap_area(a: [f32; 4], b: [f32; 4]) -> f32 {
 /// covered the band above (that page's stored entries include quads past its
 /// own band edge into this run's band), so both copies describe the same
 /// bubble and the copy here is dropped when its AABB overlaps a previous quad
-/// transformed into this run's canvas space: scaled by the width ratio and
+/// transformed into this run's canvas space: scaled by the width ratio,
 /// shifted up by `prev_offset` — the offset in the previous page's pixel
 /// space of the top edge of this run's canvas (the previous page's height for
-/// whole-page runs, the chunk's top for splits of a too-tall page). Only
-/// entries near the run's top edge can match: transformed previous quads all
-/// sit at `y <= 0` plus the margin overlap.
+/// whole-page runs, the chunk's top for splits of a too-tall page) — and
+/// shifted down by `margin_top`, the height of the top margin strip where the
+/// re-detection appears. Only entries near the run's top edge can match:
+/// transformed previous quads all sit at `y ≈ margin_top`.
 pub fn dedup_with_previous(
     lines: Vec<OcrLine>,
     prev_quads: &[Quad],
     prev_width: u32,
     prev_offset: u32,
     cur_width: u32,
+    margin_top: u32,
 ) -> Vec<OcrLine> {
     if prev_quads.is_empty() || prev_width == 0 || cur_width == 0 {
         return lines;
@@ -923,9 +925,9 @@ pub fn dedup_with_previous(
             let [min_x, min_y, max_x, max_y] = quad.bounds();
             [
                 min_x * scale,
-                (min_y - prev_offset as f32) * scale,
+                (min_y - prev_offset as f32) * scale + margin_top as f32,
                 max_x * scale,
-                (max_y - prev_offset as f32) * scale,
+                (max_y - prev_offset as f32) * scale + margin_top as f32,
             ]
         })
         .collect();
@@ -1463,13 +1465,15 @@ mod tests {
     #[test]
     fn dedup_drops_the_repeat_of_a_spanning_bubble() {
         // Previous page (height 500) captured the bubble in its bottom margin
-        // with a quad sticking 50px past its own bottom edge.
+        // with a quad sticking 50px past its own bottom edge. Top margin is
+        // 100px, so the re-detection appears around y=50..150 in the next
+        // canvas.
         let prev = vec![quad_xyxy(20.0, 450.0, 80.0, 550.0)];
         let cur = vec![
-            line("span", 20.0, -50.0, 80.0, 50.0, 0.9),
-            line("own", 20.0, 120.0, 80.0, 150.0, 0.9),
+            line("span", 20.0, 50.0, 80.0, 150.0, 0.9),
+            line("own", 20.0, 220.0, 80.0, 250.0, 0.9),
         ];
-        let kept = dedup_with_previous(cur, &prev, 100, 500, 100);
+        let kept = dedup_with_previous(cur, &prev, 100, 500, 100, 100);
         assert_eq!(kept.len(), 1, "spanning bubble deduped against previous page");
         assert_eq!(kept[0].text, "own");
     }
@@ -1477,10 +1481,11 @@ mod tests {
     #[test]
     fn dedup_scales_coordinates_for_different_page_widths() {
         // Previous page is twice as wide; its bottom margin maps to the
-        // current page's space via the same scale the stitch used.
+        // current page's space via the same scale the stitch used. Top margin
+        // 100px.
         let prev = vec![quad_xyxy(80.0, 450.0, 160.0, 540.0)];
-        let cur = vec![line("span", 40.0, -40.0, 80.0, 20.0, 0.9)];
-        let kept = dedup_with_previous(cur, &prev, 200, 500, 100);
+        let cur = vec![line("span", 40.0, 60.0, 80.0, 120.0, 0.9)];
+        let kept = dedup_with_previous(cur, &prev, 200, 500, 100, 100);
         assert!(kept.is_empty(), "scaled prev quad must still overlap the copy");
     }
 
@@ -1488,26 +1493,29 @@ mod tests {
     fn dedup_uses_chunk_offset_inside_the_same_page() {
         // Page height 600 split into two 300px chunks. The first chunk's run
         // stored bubbles past its own band edge (into the second chunk); the
-        // second chunk dedups against them with offset = 300.
+        // second chunk dedups against them with offset = 300. Top margin 100px.
         let prev = vec![quad_xyxy(10.0, 290.0, 60.0, 330.0)];
-        let cur = vec![line("span", 10.0, -10.0, 60.0, 30.0, 0.9)];
-        let kept = dedup_with_previous(cur, &prev, 100, 300, 100);
+        let cur = vec![line("span", 10.0, 90.0, 60.0, 130.0, 0.9)];
+        let kept = dedup_with_previous(cur, &prev, 100, 300, 100, 100);
         assert!(kept.is_empty(), "chunk boundary duplicate must be dropped");
     }
 
     #[test]
     fn dedup_keeps_distinct_bubbles_even_in_the_strip() {
         let prev = vec![quad_xyxy(10.0, 460.0, 40.0, 480.0)];
-        let cur = vec![line("other", 60.0, 10.0, 90.0, 40.0, 0.9)];
-        let kept = dedup_with_previous(cur, &prev, 100, 500, 100);
+        let cur = vec![line("other", 60.0, 110.0, 90.0, 140.0, 0.9)];
+        let kept = dedup_with_previous(cur, &prev, 100, 500, 100, 100);
         assert_eq!(kept.len(), 1, "non-overlapping boxes must survive");
     }
 
     #[test]
     fn dedup_without_previous_data_keeps_everything() {
-        let lines = vec![line("x", 0.0, -10.0, 10.0, 10.0, 0.9)];
-        assert_eq!(dedup_with_previous(lines.clone(), &[], 100, 500, 100).len(), 1);
-        assert_eq!(dedup_with_previous(lines, &[quad_xyxy(0.0, 0.0, 1.0, 1.0)], 0, 500, 100).len(), 1);
+        let lines = vec![line("x", 0.0, 90.0, 10.0, 110.0, 0.9)];
+        assert_eq!(dedup_with_previous(lines.clone(), &[], 100, 500, 100, 100).len(), 1);
+        assert_eq!(
+            dedup_with_previous(lines, &[quad_xyxy(0.0, 0.0, 1.0, 1.0)], 0, 500, 100, 100).len(),
+            1
+        );
     }
 
     fn candidate(canvas: [f32; 4], page: usize) -> BoundaryCandidate {
