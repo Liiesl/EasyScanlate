@@ -2307,15 +2307,28 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 app.status = "Connect a translation service in Settings first.".to_string();
                 return Task::none();
             }
-            let Some(entry) = app
-                .images
-                .get(index)
-                .and_then(|image| image.project.ocr.get(entry_id))
-            else {
-                app.status = "That result no longer exists.".to_string();
-                return Task::none();
+            let (text, filename, context_items) = {
+                let Some(image) = app.images.get(index) else {
+                    app.status = "That result no longer exists.".to_string();
+                    return Task::none();
+                };
+                let Some(entry) = image.project.ocr.get(entry_id) else {
+                    app.status = "That result no longer exists.".to_string();
+                    return Task::none();
+                };
+                let filename = translation::file_tag(&image.path);
+                let context_items: Vec<translation::TranslateItem> = image
+                    .project
+                    .ocr
+                    .visible()
+                    .map(|e| translation::TranslateItem {
+                        filename: filename.clone(),
+                        id: e.id.0,
+                        text: e.text.clone(),
+                    })
+                    .collect();
+                (entry.text.clone(), filename, context_items)
             };
-            let text = entry.text.clone();
             let target = app.translate_lang.clone();
             let (provider, api_key) = match app.tx.selected_provider() {
                 Some(provider) => (provider, app.tx.selected_api_key()),
@@ -2332,9 +2345,17 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             );
             Task::perform(
                 async move {
-                    let result =
-                        translation::translate_one(&text, &target, &provider, &model, api_key)
-                            .await;
+                    let result = translation::translate_one_with_context(
+                        &text,
+                        &target,
+                        &provider,
+                        &model,
+                        api_key,
+                        &context_items,
+                        entry_id.0,
+                        &filename,
+                    )
+                    .await;
                     ((index, entry_id), result)
                 },
                 |(job, result)| Message::RetranslateFinished(job, result),
@@ -2702,23 +2723,54 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.translating = false;
             match result {
                 Ok(translations) => {
-                    if translations.len() != jobs.len() {
-                        app.status = "Translation count mismatch; nothing saved.".to_string();
-                        return Task::none();
-                    }
                     let profile_name = translation::profile_name(&app.translate_lang);
-                    for ((image_index, entry_id, _path, _text), translation) in
-                        jobs.iter().zip(translations.iter())
-                    {
-                        let image = &mut app.images[*image_index];
-                        image
-                            .project
-                            .store_translation(&profile_name, *entry_id, Some(translation.clone()));
+                    if translations.len() != jobs.len() {
+                        // Legacy mismatch: store positionally what we can, but warn.
+                        let mut saved = 0usize;
+                        for ((image_index, entry_id, _path, _text), translation) in
+                            jobs.iter().zip(translations.iter())
+                        {
+                            if translation.is_empty() {
+                                continue;
+                            }
+                            let image = &mut app.images[*image_index];
+                            image
+                                .project
+                                .store_translation(&profile_name, *entry_id, Some(translation.clone()));
+                            saved += 1;
+                        }
+                        app.status = format!(
+                            "Translated {saved} of {} line(s) into '{profile_name}' (count mismatch, partial).",
+                            jobs.len()
+                        );
+                    } else {
+                        let mut saved = 0usize;
+                        let mut skipped = 0usize;
+                        for ((image_index, entry_id, _path, _text), translation) in
+                            jobs.iter().zip(translations.iter())
+                        {
+                            if translation.is_empty() {
+                                skipped += 1;
+                                continue;
+                            }
+                            let image = &mut app.images[*image_index];
+                            image
+                                .project
+                                .store_translation(&profile_name, *entry_id, Some(translation.clone()));
+                            saved += 1;
+                        }
+                        if skipped > 0 {
+                            app.status = format!(
+                                "Translated {saved} of {} line(s) into '{profile_name}' ({skipped} still missing after retry, skipped).",
+                                jobs.len()
+                            );
+                        } else {
+                            app.status = format!(
+                                "Translated {saved} line(s) into '{profile_name}'.",
+                                saved
+                            );
+                        }
                     }
-                    app.status = format!(
-                        "Translated {} line(s) into '{profile_name}'.",
-                        translations.len()
-                    );
                 }
                 Err(e) => {
                     app.status = e;

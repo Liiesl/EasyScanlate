@@ -12,7 +12,7 @@
 //! result is a `Vec<String>` aligned with the input order, which the app
 //! stores into the selected profile named `english(auto)` style.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::LazyLock;
 
 use rig::completion::{AssistantContent, CompletionResponse};
@@ -26,6 +26,11 @@ pub use session::Session;
 /// Hard cap on lines per request; a single unbounded prompt is guaranteed to
 /// blow the model's context window on big projects.
 const MAX_LINES: usize = 1000;
+
+/// Context window for retranslate: number of neighboring lines included as
+/// `<context>` on each side of a selected row. Mirrors
+/// `ManhwaOCR/app/core/translations.py:generate_retranslate_content`.
+const RETRANSLATE_CONTEXT: usize = 3;
 
 /// Model listing mirror. Provider-specific paths (`/openai`, `/deepseek`, ...)
 /// keep the payload small instead of the ~6 MB full index.
@@ -856,24 +861,189 @@ pub async fn translate_all(
         ));
     }
 
-    let key = resolve_credentials(api_key, provider)?;
+    let key = resolve_credentials(api_key.clone(), provider)?;
 
     let prompt = build_prompt(items, target);
     let output = complete(&prompt, provider, model, &key).await?;
-    eprintln!(
-        "[translation] response:\n{output}\n---"
-    );
+    eprintln!("[translation] response:\n{output}\n---");
 
-    let parsed = parse_translation_file(&output);
-    let translations = align(items, parsed)?;
-    eprintln!("[translation] OK ({} lines)", translations.len());
-    Ok(translations)
+    let mut parsed = parse_translation_file(&output);
+
+    // Find missing entries
+    let missing: Vec<&TranslateItem> = items
+        .iter()
+        .filter(|it| !parsed.contains_key(&(it.filename.clone(), it.id)))
+        .collect();
+
+    if !missing.is_empty() {
+        let missing_ids: Vec<u64> = missing.iter().map(|m| m.id).collect();
+        eprintln!(
+            "[translation] missing {} entries {:?}, retrying with context (retranslate logic)",
+            missing_ids.len(),
+            missing_ids
+        );
+        // Build retranslate content for all missing, grouped by proximity like ManhwaOCR
+        let selected: Vec<(String, u64)> = missing
+            .iter()
+            .map(|m| (m.filename.clone(), m.id))
+            .collect();
+        let retry_content = build_retranslate_content(items, &selected, RETRANSLATE_CONTEXT);
+        if !retry_content.trim().is_empty() {
+            let retry_prompt = format!(
+                "Translate the text to {target}. Keep everything else exactly as it is; \
+do not add, merge, drop or reorder any line. Respond only with the file.\n\n{}",
+                retry_content
+            );
+            match complete(&retry_prompt, provider, model, &key).await {
+                Ok(retry_output) => {
+                    eprintln!("[translation] retry response:\n{retry_output}\n---");
+                    let retry_parsed = parse_translation_file(&retry_output);
+                    let mut recovered = 0usize;
+                    for miss in &missing {
+                        if let Some(t) = retry_parsed.get(&(miss.filename.clone(), miss.id)) {
+                            if !t.is_empty() {
+                                parsed.insert((miss.filename.clone(), miss.id), t.clone());
+                                recovered += 1;
+                            }
+                        }
+                    }
+                    eprintln!(
+                        "[translation] retry recovered {}/{} missing",
+                        recovered,
+                        missing.len()
+                    );
+                    // Fallback per-item isolated retry for any still missing (using translate_one logic)
+                    let still_missing: Vec<&TranslateItem> = items
+                        .iter()
+                        .filter(|it| !parsed.contains_key(&(it.filename.clone(), it.id)))
+                        .collect();
+                    if !still_missing.is_empty() {
+                        for miss in still_missing {
+                            // Isolated single-line retry as last resort
+                            let single_prompt = format!(
+                                "Translate the following text to {target}. Respond ONLY with the \
+translation, no explanation.\n\nText: {}",
+                                miss.text
+                            );
+                            match complete(&single_prompt, provider, model, &key).await {
+                                Ok(single_out) => {
+                                    let t = single_out.trim().to_string();
+                                    if !t.is_empty() {
+                                        parsed.insert((miss.filename.clone(), miss.id), t);
+                                        eprintln!("[translation] single retry recovered {}", miss.id);
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[translation] single retry for {} failed: {}", miss.id, e);
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[translation] retry request failed: {e}");
+                }
+            }
+        }
+    }
+
+    // After retries, build aligned result but don't fail the whole batch if some still missing.
+    // We return Ok with placeholders for still-missing so the caller can store successes.
+    let mut translations = Vec::with_capacity(items.len());
+    let mut still_missing_ids = Vec::new();
+    for item in items {
+        if let Some(t) = parsed.get(&(item.filename.clone(), item.id)) {
+            translations.push(t.clone());
+        } else {
+            still_missing_ids.push(item.id);
+            translations.push(String::new()); // placeholder for missing, caller skips empty
+        }
+    }
+    if still_missing_ids.is_empty() {
+        eprintln!("[translation] OK ({} lines, after retry if any)", translations.len());
+        Ok(translations)
+    } else {
+        eprintln!(
+            "[translation] partial OK: {} of {} lines; still missing after retry: {}; returning partial (empty placeholders skipped by caller)",
+            translations.len() - still_missing_ids.len(),
+            items.len(),
+            still_missing_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        // Return Ok with partial (caller skips empty). This implements "don't skip entire translations".
+        Ok(translations)
+    }
 }
 
-/// Translates one line with the simple single-line prompt used by the
-/// per-row "Retranslate" action (ManhwaOCR mechanics): the model replies
-/// with only the translated text, no wire format. The result is returned
-/// as-is; the caller strips quotes the model may wrap the answer in.
+/// Translates one line with context-aware retranslate logic (ManhwaOCR
+/// `generate_retranslate_content`): the target row is wrapped with
+/// `RETRANSLATE_CONTEXT` neighbors as `<context>` inside a
+/// `<re-translation>` block. When `context_items` is empty it falls back
+/// to the simple isolated prompt.
+pub async fn translate_one_with_context(
+    text: &str,
+    target: &str,
+    provider: &Provider,
+    model: &str,
+    api_key: Option<String>,
+    context_items: &[TranslateItem],
+    selected_id: u64,
+    filename: &str,
+) -> Result<String, String> {
+    let key = resolve_credentials(api_key, provider)?;
+
+    // Build context-aware prompt if we have neighbors
+    let prompt = if context_items.is_empty() {
+        format!(
+            "Translate the following text to {target}. Respond ONLY with the \
+translation, no explanation.\n\nText: {text}"
+        )
+    } else {
+        // Build a temporary items list that includes context + selected, deduplicated
+        // `context_items` are the window (including the selected if present). Ensure selected is present.
+        let mut all_for_file: Vec<TranslateItem> = context_items.to_vec();
+        if !all_for_file.iter().any(|it| it.id == selected_id) {
+            all_for_file.push(TranslateItem {
+                filename: filename.to_string(),
+                id: selected_id,
+                text: text.to_string(),
+            });
+        }
+        // For build_retranslate_content we need the full items list; we use `all_for_file` sorted by id
+        // and selected single.
+        let selected = vec![(filename.to_string(), selected_id)];
+        // Sort all_for_file by id to mimic ManhwaOCR sorted order
+        all_for_file.sort_by_key(|it| it.id);
+        let content = build_retranslate_content(&all_for_file, &selected, RETRANSLATE_CONTEXT);
+        let inner = if content.trim().is_empty() {
+            // fallback to simple
+            format!("<{selected_id}>{}</{selected_id}>", escape(text))
+        } else {
+            content
+        };
+        format!(
+            "Translate the text to {target}. Keep everything else exactly as it is; \
+do not add, merge, drop or reorder any line. Respond only with the file.\n\n{}",
+            inner
+        )
+    };
+
+    let output = complete(&prompt, provider, model, &key).await?;
+    // Try to parse as file format first; if we got context format, extract the row.
+    let parsed = parse_translation_file(&output);
+    if let Some(t) = parsed.get(&(filename.to_string(), selected_id)) {
+        return Ok(t.trim().to_string());
+    }
+    // Fallback to raw trimmed output (isolated prompt case)
+    Ok(output.trim().to_string())
+}
+
+/// Translates one line. When called without explicit context it uses the
+/// simple isolated prompt for backward compatibility; callers that have
+/// context should use `translate_one_with_context`.
 pub async fn translate_one(
     text: &str,
     target: &str,
@@ -881,13 +1051,7 @@ pub async fn translate_one(
     model: &str,
     api_key: Option<String>,
 ) -> Result<String, String> {
-    let key = resolve_credentials(api_key, provider)?;
-    let prompt = format!(
-        "Translate the following text to {target}. Respond ONLY with the \
-translation, no explanation.\n\nText: {text}"
-    );
-    let output = complete(&prompt, provider, model, &key).await?;
-    Ok(output.trim().to_string())
+    translate_one_with_context(text, target, provider, model, api_key, &[], 0, "").await
 }
 
 /// Resolves the API key for a request: `api_key` overrides the provider's
@@ -1006,6 +1170,102 @@ fn build_content(items: &[TranslateItem]) -> String {
     content
 }
 
+/// Builds retranslate wire format with context, mirroring
+/// `ManhwaOCR/app/core/translations.py:generate_retranslate_content`.
+/// Groups selected rows by proximity (`context_size` overlap) into
+/// `<re-translation>` blocks and wraps non-selected neighbors as `<context>`.
+pub fn build_retranslate_content(
+    items: &[TranslateItem],
+    selected: &[(String, u64)],
+    context_size: usize,
+) -> String {
+    use std::collections::HashMap;
+
+    if selected.is_empty() {
+        return String::new();
+    }
+
+    // Organize all valid results by filename, sorted by id
+    let mut all_by_file: HashMap<String, Vec<&TranslateItem>> = HashMap::new();
+    for it in items {
+        all_by_file.entry(it.filename.clone()).or_default().push(it);
+    }
+    for v in all_by_file.values_mut() {
+        v.sort_by_key(|it| it.id);
+    }
+
+    // Organize selected by filename
+    let mut selected_by_file: HashMap<String, Vec<u64>> = HashMap::new();
+    for (filename, id) in selected {
+        selected_by_file.entry(filename.clone()).or_default().push(*id);
+    }
+
+    let mut filenames: Vec<String> = selected_by_file.keys().cloned().collect();
+    filenames.sort();
+
+    let mut content = String::new();
+    for filename in filenames {
+        let file_results = match all_by_file.get(&filename) {
+            Some(v) => v,
+            None => continue,
+        };
+        if file_results.is_empty() {
+            continue;
+        }
+        let mut row_to_idx: HashMap<String, usize> = HashMap::new();
+        for (idx, it) in file_results.iter().enumerate() {
+            row_to_idx.insert(it.id.to_string(), idx);
+        }
+        let mut selected_indices: Vec<usize> = selected_by_file[&filename]
+            .iter()
+            .filter_map(|id| row_to_idx.get(&id.to_string()).copied())
+            .collect();
+        selected_indices.sort_unstable();
+        if selected_indices.is_empty() {
+            continue;
+        }
+        content.push_str(&format!("<{}>\n", escape(&filename)));
+
+        // Group selected indices by proximity (overlapping context)
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        let mut current_group = vec![selected_indices[0]];
+        for &idx in &selected_indices[1..] {
+            let prev = *current_group.last().unwrap();
+            if idx.saturating_sub(context_size) <= prev + context_size {
+                current_group.push(idx);
+            } else {
+                groups.push(current_group);
+                current_group = vec![idx];
+            }
+        }
+        groups.push(current_group);
+
+        for group in groups {
+            content.push_str("<re-translation>\n");
+            let min_idx = group[0].saturating_sub(context_size);
+            let max_idx = (group[group.len() - 1] + context_size).min(file_results.len() - 1);
+            let selected_set: HashSet<usize> = group.into_iter().collect();
+            for idx in min_idx..=max_idx {
+                let it = file_results[idx];
+                let text = it.text.replace(['\r', '\n'], " ");
+                if selected_set.contains(&idx) {
+                    content.push_str(&format!(
+                        "<{}>{}</{}>\n",
+                        it.id,
+                        escape(&text),
+                        it.id
+                    ));
+                } else {
+                    content.push_str(&format!("<context>{}</context>\n", escape(&text)));
+                }
+            }
+            content.push_str("</re-translation>\n");
+        }
+        content.push_str(&format!("</{}>\n", escape(&filename)));
+    }
+    content
+}
+
 /// Best-effort parsing of whatever the model actually output, tolerant of
 /// missing closing tags and of the optional `<translate>` wrapper inside a
 /// row. Returns every recovered `(filename, entry id) -> text` pair; row
@@ -1094,6 +1354,7 @@ fn unescape(text: &str) -> String {
 /// Reorders the parsed translations to the input order, failing loudly when
 /// the model dropped or renamed any row. Extra rows in the answer are
 /// ignored, matching the ManhwaOCR import behaviour.
+#[allow(dead_code)]
 fn align(items: &[TranslateItem], parsed: HashMap<(String, u64), String>) -> Result<Vec<String>, String> {
     let mut missing = Vec::new();
     let mut translations = Vec::with_capacity(items.len());

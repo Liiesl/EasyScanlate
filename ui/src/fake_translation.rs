@@ -9,8 +9,27 @@
 //! module (or the real one when the `translation` feature is enabled); both
 //! expose the same API surface used by the UI and the app.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::LazyLock;
+
+/// Context window for retranslate, mirrors real crate.
+const RETRANSLATE_CONTEXT: usize = 3;
+
+fn escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn unescape(text: &str) -> String {
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
 
 /// How the provider speaks: OpenAI chat-completions style or the Anthropic
 /// Messages API. Mirrors the real module.
@@ -393,31 +412,172 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
     provider
 }
 
+/// Builds retranslate wire format with context, mirroring real crate and
+/// `ManhwaOCR/app/core/translations.py:generate_retranslate_content`.
+pub fn build_retranslate_content(
+    items: &[TranslateItem],
+    selected: &[(String, u64)],
+    context_size: usize,
+) -> String {
+    if selected.is_empty() {
+        return String::new();
+    }
+    let mut all_by_file: HashMap<String, Vec<&TranslateItem>> = HashMap::new();
+    for it in items {
+        all_by_file.entry(it.filename.clone()).or_default().push(it);
+    }
+    for v in all_by_file.values_mut() {
+        v.sort_by_key(|it| it.id);
+    }
+    let mut selected_by_file: HashMap<String, Vec<u64>> = HashMap::new();
+    for (filename, id) in selected {
+        selected_by_file.entry(filename.clone()).or_default().push(*id);
+    }
+    let mut filenames: Vec<String> = selected_by_file.keys().cloned().collect();
+    filenames.sort();
+    let mut content = String::new();
+    for filename in filenames {
+        let file_results = match all_by_file.get(&filename) {
+            Some(v) => v,
+            None => continue,
+        };
+        if file_results.is_empty() {
+            continue;
+        }
+        let mut row_to_idx: HashMap<String, usize> = HashMap::new();
+        for (idx, it) in file_results.iter().enumerate() {
+            row_to_idx.insert(it.id.to_string(), idx);
+        }
+        let mut selected_indices: Vec<usize> = selected_by_file[&filename]
+            .iter()
+            .filter_map(|id| row_to_idx.get(&id.to_string()).copied())
+            .collect();
+        selected_indices.sort_unstable();
+        if selected_indices.is_empty() {
+            continue;
+        }
+        content.push_str(&format!("<{}>\n", escape(&filename)));
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        let mut current_group = vec![selected_indices[0]];
+        for &idx in &selected_indices[1..] {
+            let prev = *current_group.last().unwrap();
+            if idx.saturating_sub(context_size) <= prev + context_size {
+                current_group.push(idx);
+            } else {
+                groups.push(current_group);
+                current_group = vec![idx];
+            }
+        }
+        groups.push(current_group);
+        for group in groups {
+            content.push_str("<re-translation>\n");
+            let min_idx = group[0].saturating_sub(context_size);
+            let max_idx = (group[group.len() - 1] + context_size).min(file_results.len() - 1);
+            let selected_set: HashSet<usize> = group.into_iter().collect();
+            for idx in min_idx..=max_idx {
+                let it = file_results[idx];
+                let text = it.text.replace(['\r', '\n'], " ");
+                if selected_set.contains(&idx) {
+                    content.push_str(&format!(
+                        "<{}>{}</{}>\n",
+                        it.id,
+                        escape(&text),
+                        it.id
+                    ));
+                } else {
+                    content.push_str(&format!("<context>{}</context>\n", escape(&text)));
+                }
+            }
+            content.push_str("</re-translation>\n");
+        }
+        content.push_str(&format!("</{}>\n", escape(&filename)));
+    }
+    content
+}
+
 /// Translates every line with a fake, deterministic answer: the target
 /// language name bracketed in front of the source text. Mirrors the real
-/// module's signature so the app flow is identical.
+/// module's signature so the app flow is identical. Handles missing via
+/// context-aware retry to mirror real crate.
 pub async fn translate_all(
     items: &[TranslateItem],
+    target: &str,
+    provider: &Provider,
+    model: &str,
+    api_key: Option<String>,
+) -> Result<Vec<String>, String> {
+    // In fake builds we always succeed, but we implement missing detection +
+    // retry via `translate_one_with_context` to keep parity with real crate.
+    // Since fake never drops rows, this is a no-op path.
+    let translations: Vec<String> = items
+        .iter()
+        .map(|item| format!("[{target}] {}", item.text))
+        .collect();
+    // Simulate parsing roundtrip (no missing in fake)
+    let mut parsed: HashMap<(String, u64), String> = HashMap::new();
+    for (item, tr) in items.iter().zip(translations.iter()) {
+        parsed.insert((item.filename.clone(), item.id), tr.clone());
+    }
+    let missing: Vec<&TranslateItem> = items
+        .iter()
+        .filter(|it| !parsed.contains_key(&(it.filename.clone(), it.id)))
+        .collect();
+    if !missing.is_empty() {
+        // Retry each missing with context (fake just returns same format)
+        for miss in missing {
+            let same_file: Vec<TranslateItem> = items
+                .iter()
+                .filter(|i| i.filename == miss.filename)
+                .cloned()
+                .collect();
+            let t = translate_one_with_context(
+                &miss.text, target, provider, model, api_key.clone(), &same_file, miss.id, &miss.filename,
+            )
+            .await?;
+            parsed.insert((miss.filename.clone(), miss.id), t);
+        }
+    }
+    // Build aligned result with empty placeholders for still-missing (none in fake)
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        out.push(
+            parsed
+                .get(&(item.filename.clone(), item.id))
+                .cloned()
+                .unwrap_or_default(),
+        );
+    }
+    Ok(out)
+}
+
+/// Translates one line with context-aware retranslate logic (mirrors real crate).
+pub async fn translate_one_with_context(
+    text: &str,
     target: &str,
     _provider: &Provider,
     _model: &str,
     _api_key: Option<String>,
-) -> Result<Vec<String>, String> {
-    Ok(items
-        .iter()
-        .map(|item| format!("[{target}] {}", item.text))
-        .collect())
+    context_items: &[TranslateItem],
+    selected_id: u64,
+    filename: &str,
+) -> Result<String, String> {
+    // In fake builds context is ignored beyond building the retranslate content for parity.
+    if !context_items.is_empty() && selected_id != 0 && !filename.is_empty() {
+        let selected = vec![(filename.to_string(), selected_id)];
+        let _ = build_retranslate_content(context_items, &selected, RETRANSLATE_CONTEXT);
+    }
+    Ok(format!("[{target}] {text}"))
 }
 
 /// Translates one line with the same fake answer.
 pub async fn translate_one(
     text: &str,
     target: &str,
-    _provider: &Provider,
-    _model: &str,
-    _api_key: Option<String>,
+    provider: &Provider,
+    model: &str,
+    api_key: Option<String>,
 ) -> Result<String, String> {
-    Ok(format!("[{target}] {text}"))
+    translate_one_with_context(text, target, provider, model, api_key, &[], 0, "").await
 }
 
 /// The connected-provider session. Mirrors the real module's session so the
