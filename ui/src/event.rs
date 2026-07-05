@@ -220,4 +220,7 @@ pub enum UiEvent {
     /// A deferred button-driven settings edit (see [`SettingEdit`]): the
     /// app applies it to the store, then re-syncs like `SettingsChanged`.
     SettingEdit(SettingEdit),
+    /// Open an external URL in the system browser (used for recommended
+    /// provider docs links).
+    OpenUrl(String),
 }

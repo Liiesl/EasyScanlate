@@ -205,6 +205,56 @@ fn custom_row<'a>(id: &'static str, label: &'static str) -> Element<'a, UiEvent>
     custom_row_with_connection(id, label, connected)
 }
 
+/// One row of the recommended section: provider name with a generic
+/// "Recommended" badge, the polished description, and Docs + Connect
+/// buttons. Always shows "Not connected" because connected providers are
+/// deduped (they already appear in the Connected section above).
+fn recommended_row<'a>(
+    provider: &'a translation::Provider,
+    info: &'a translation::RecommendedInfo,
+) -> Element<'a, UiEvent> {
+    let badge = container(
+        text("Recommended")
+            .size(scale::s(9.0))
+            .color(ACCENT),
+    )
+    .padding([scale::s(2.0), scale::s(6.0)])
+    .style(|_theme| container::Style {
+        background: Some(Color::from_rgba8(92, 190, 255, 0.15).into()),
+        border: iced::Border::default().rounded(scale::s(4.0)),
+        ..container::Style::default()
+    });
+
+    let docs_button = button(text("Docs").size(scale::s(11.0)))
+        .padding([scale::s(3.0), scale::s(8.0)])
+        .on_press(UiEvent::OpenUrl(info.docs_url.to_string()));
+
+    let connect_button = button(text("Connect").size(scale::s(11.0)))
+        .padding([scale::s(3.0), scale::s(8.0)])
+        .on_press(UiEvent::TranslateConnect(provider.id.clone()));
+
+    row![
+        column![
+            row![
+                text(&provider.name).size(scale::s(12.0)),
+                badge,
+            ]
+            .spacing(scale::s(6.0))
+            .align_y(iced::Alignment::Center),
+            text(info.description).size(scale::s(11.0)).color(MUTED_FG),
+            text("Not connected").size(scale::s(11.0)).color(MUTED_FG),
+        ]
+        .spacing(scale::s(2.0))
+        .width(FillLength),
+        docs_button,
+        connect_button,
+    ]
+    .spacing(scale::s(6.0))
+    .align_y(iced::Alignment::Center)
+    .padding([scale::s(4.0), 0.0])
+    .into()
+}
+
 /// Appearance tab — port of `ManhwaOCR/app/ui/components/background_settings.AuroraEditorPanel`.
 /// Reads and writes the aurora theme directly in the settings store.
 fn appearance_tab() -> Element<'static, UiEvent> {
@@ -613,6 +663,60 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             }
 
             rows.push(section_separator());
+
+            // ── Recommended section (between Connected and Available) ───
+            // Shown when RECOMMENDED is non-empty. Connected providers are
+            // deduped (they already appear in Connected above); not-connected
+            // ones remain in Available as well per "keep them".
+            if !translation::RECOMMENDED.is_empty() {
+                let mut recommended_rows: Vec<Element<'_, UiEvent>> = Vec::new();
+                for info in translation::RECOMMENDED.iter() {
+                    if connections.contains_key(info.id) {
+                        continue;
+                    }
+                    if let Some(provider) = translation::catalog_provider(info.id) {
+                        recommended_rows.push(recommended_row(provider, info));
+                    }
+                }
+                rows.push(
+                    row![
+                        text("Recommended").size(scale::s(12.0)).color(Color::WHITE),
+                        space::horizontal(),
+                        text(if recommended_rows.is_empty() {
+                            "—".to_string()
+                        } else {
+                            format!("{} recommended", recommended_rows.len())
+                        })
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG),
+                    ]
+                    .align_y(iced::Alignment::Center)
+                    .into(),
+                );
+                rows.push(
+                    text("Not sure where to start? Try one of these recommendations.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG)
+                        .into(),
+                );
+                if recommended_rows.is_empty() {
+                    rows.push(
+                        text("All recommended providers connected.")
+                            .size(scale::s(11.0))
+                            .color(MUTED_FG)
+                            .into(),
+                    );
+                } else {
+                    let len = recommended_rows.len();
+                    for (idx, el) in recommended_rows.into_iter().enumerate() {
+                        rows.push(el);
+                        if idx + 1 < len {
+                            rows.push(item_separator());
+                        }
+                    }
+                }
+                rows.push(section_separator());
+            }
 
             // ── Available section ───────────────────────────────────────
             rows.push(

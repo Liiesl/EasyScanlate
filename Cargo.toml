@@ -41,6 +41,7 @@ scanlateit-translation = { path = "translation", optional = true }
 scanlateit-ui = { path = "ui", default-features = false }
 tokio = { version = "1", features = ["rt", "time"] }
 fontdb = "0.24"
+open = "5"
 
 [profile.dev]
 # Required for sccache (.cargo/config.toml rustc-wrapper): incrementally

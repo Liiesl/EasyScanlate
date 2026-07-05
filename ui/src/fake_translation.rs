@@ -153,6 +153,22 @@ pub static SUPPORTED_PROVIDERS: LazyLock<Vec<Provider>> = LazyLock::new(|| {
     ]
 });
 
+/// Metadata for a recommended provider shown in the Translation settings.
+/// Mirrors `scanlateit_translation::RecommendedInfo` so the TEST-UI build can
+/// render the same section (with fake ids).
+#[derive(Debug, Clone, Copy)]
+pub struct RecommendedInfo {
+    pub id: &'static str,
+    pub docs_url: &'static str,
+    pub description: &'static str,
+}
+
+/// Recommended providers for the fake catalog (unused when real translation
+/// is enabled). Kept to mirror the real crate's API surface; the TEST-UI
+/// build without `translation` shows an empty recommendation list rather
+/// than the real providers.
+pub static RECOMMENDED: &[RecommendedInfo] = &[];
+
 /// The id of the primary fake provider; connected at TEST-UI boot so the
 /// translation bar shows a provider with models immediately.
 pub const FAKE_PROVIDER: &str = "fake-llm";

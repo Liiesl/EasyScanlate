@@ -2719,6 +2719,13 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.status = "Settings saved.".to_string();
             Task::none()
         }
+        Message::Ui(UiEvent::OpenUrl(url)) => {
+            if let Err(e) = open::that(&url) {
+                eprintln!("[app] failed to open {url}: {e}");
+                app.status = format!("Failed to open {url}: {e}");
+            }
+            Task::none()
+        }
         Message::TranslateFinished(jobs, result) => {
             app.translating = false;
             match result {
@@ -2766,8 +2773,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                             );
                         } else {
                             app.status = format!(
-                                "Translated {saved} line(s) into '{profile_name}'.",
-                                saved
+                                "Translated {saved} line(s) into '{profile_name}'."
                             );
                         }
                     }

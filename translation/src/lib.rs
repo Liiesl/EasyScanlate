@@ -210,6 +210,47 @@ pub static SUPPORTED_PROVIDERS: LazyLock<Vec<Provider>> = LazyLock::new(|| {
     ]
 });
 
+/// Metadata for a recommended provider shown in the Translation settings.
+/// Displayed between the Connected and Available sections to guide
+/// non-technical users. `docs_url` points to the provider's
+/// getting-started / API-key docs (temporary external URLs until the
+/// project's own docs replace them).
+#[derive(Debug, Clone, Copy)]
+pub struct RecommendedInfo {
+    /// Provider id as in [`SUPPORTED_PROVIDERS`] (`kilo`, `mistral`, ...).
+    pub id: &'static str,
+    /// URL to the provider's API-key / setup docs.
+    pub docs_url: &'static str,
+    /// Polished, full-length explanation shown under the provider name.
+    pub description: &'static str,
+}
+
+/// Recommended providers for new / non-technical users, in the order
+/// suggested in the issue. Kept as a plain slice so the UI can iterate
+/// it without allocating. The ids must exist in [`SUPPORTED_PROVIDERS`].
+pub static RECOMMENDED: &[RecommendedInfo] = &[
+    RecommendedInfo {
+        id: "kilo",
+        docs_url: "https://kilo.ai/docs/getting-started/setup-authentication#kilo-gateway-api-key",
+        description: "A gateway that aggregates many different models behind a single API. It offers free models that you can try without providing any credit card information, which makes it the easiest option for first-time testing.",
+    },
+    RecommendedInfo {
+        id: "mistral",
+        docs_url: "https://docs.mistral.ai/studio#getting-started-api",
+        description: "Offers a free tier, although you do need to provide a credit card to activate it. Its models are widely regarded as the least censored available — they were not heavily trained to refuse instructions — so they follow translation prompts reliably and are particularly well suited for scanlation.",
+    },
+    RecommendedInfo {
+        id: "opencode-go",
+        docs_url: "https://docs.mistral.ai/studio#getting-started-api",
+        description: "A subscription-based provider that offers the lowest cost per credit among the available options. It provides the best value if you translate frequently or work with larger projects.",
+    },
+    RecommendedInfo {
+        id: "openrouter",
+        docs_url: "https://developer.puter.com/tutorials/how-to-get-openrouter-api-key/",
+        description: "Provides access to the largest repository of models in one place. It does offer some free models, but you must add an initial balance to your account first before those free models become available.",
+    },
+];
+
 fn fallback_models(ids: &[&str]) -> Vec<Model> {
     ids.iter()
         .map(|id| Model {

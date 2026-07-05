@@ -21,3 +21,4 @@ scanlateit-model = { path = "../model" }
 scanlateit-settings = { path = "../settings" }
 scanlateit-translation = { path = "../translation", optional = true }
 tokio = { version = "1", features = ["rt", "time"] }
+open = "5"
