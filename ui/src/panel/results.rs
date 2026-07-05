@@ -239,18 +239,20 @@ fn image_results<'a, S: UiState + ?Sized>(
 }
 
 /// One entry of the merged model dropdown of the translation bar: the model
-/// id plus its provider's id and display name. The closed dropdown renders
-/// this as `{provider}:{model}`.
+/// wire `id` (sent to the API) plus its display `name` and provider display.
+/// The closed dropdown renders as `{provider}:{display name}`; selection still
+/// sends the `id`.
 #[derive(Debug, Clone, PartialEq)]
 struct ModelOption {
     provider_id: String,
     provider_name: String,
-    model: String,
+    model_id: String,
+    model_name: String,
 }
 
 impl ToString for ModelOption {
     fn to_string(&self) -> String {
-        format!("{}:{}", self.provider_name, self.model)
+        format!("{}:{}", self.provider_name, self.model_name)
     }
 }
 
@@ -323,23 +325,24 @@ fn translate_bar<'a, S: UiState + ?Sized>(
         let mut selected = None;
         for (provider_id, provider_name, models) in state.translate_model_groups() {
             entries.push(MenuItem::Label(provider_name.as_str()));
-            for model in models {
+            for (model_id, model_name) in models {
                 let option = ModelOption {
                     provider_id: provider_id.clone(),
                     provider_name: provider_name.clone(),
-                    model: model.clone(),
+                    model_id: model_id.clone(),
+                    model_name: model_name.clone(),
                 };
-                if provider_id.as_str() == sel_provider && model.as_str() == sel_model {
+                if provider_id.as_str() == sel_provider && model_id.as_str() == sel_model {
                     selected = Some(option.clone());
                 }
-                entries.push(MenuItem::Item(Item::new(option, model.as_str())));
+                entries.push(MenuItem::Item(Item::new(option, model_name.as_str())));
             }
         }
 
         row![
             advanced_dropdown(entries, selected, |option| UiEvent::TranslateModelSelect {
                 provider: option.provider_id.clone(),
-                model: option.model.clone(),
+                model: option.model_id.clone(),
             })
             .placeholder("Select a model…")
             .searchable(true)

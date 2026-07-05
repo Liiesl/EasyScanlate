@@ -485,7 +485,7 @@ impl UiState for App {
         &self.status
     }
 
-    fn translate_model_groups(&self) -> &[(String, String, Vec<String>)] {
+    fn translate_model_groups(&self) -> &[(String, String, Vec<(String, String)>)] {
         self.tx.model_groups()
     }
 
@@ -617,7 +617,7 @@ impl UiState for App {
         &self.manage_models_search
     }
 
-    fn all_model_groups(&self) -> Vec<(String, String, Vec<String>)> {
+    fn all_model_groups(&self) -> Vec<(String, String, Vec<(String, String)>)> {
         self.tx.all_model_groups()
     }
 }

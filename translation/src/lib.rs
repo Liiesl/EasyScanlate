@@ -86,15 +86,28 @@ pub const LANGUAGES: [&str; 13] = [
     "Vietnamese",
 ];
 
-/// One selectable translation model: its id as shown in the UI and whether
-/// it is free (input or output cost 0). `family` is the models.dev family
-/// (if any), used to seed the default hidden set (older family members
-/// hidden until the user enables them in Manage Models).
+/// One selectable translation model: its wire id (sent to the API) and its
+/// display name (shown in the UI), plus whether it is free (input or output
+/// cost 0). `family` is the models.dev family (if any), used to seed the
+/// default hidden set (older family members hidden until the user enables them
+/// in Manage Models). The request always uses `id`; the UI always shows `name`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Model {
     pub id: String,
+    pub name: String,
     pub free: bool,
     pub family: Option<String>,
+}
+
+impl Model {
+    /// Display name for the UI: `name` when present, otherwise `id`.
+    pub fn display_name(&self) -> &str {
+        if self.name.is_empty() {
+            &self.id
+        } else {
+            &self.name
+        }
+    }
 }
 
 /// One translation gateway: where to call, which environment variable holds
@@ -118,7 +131,8 @@ pub struct Provider {
 
 impl Provider {
     /// The model picker entries of this provider, respecting the free-only
-    /// filter; the offline fallback list when there are none.
+    /// filter; the offline fallback list when there are none. Returns the
+    /// wire `id`s; the UI maps them to `display_name` separately.
     pub fn selectable_models(&self, free_only: bool) -> Vec<String> {
         let mut ids: Vec<String> = self
             .models
@@ -130,6 +144,14 @@ impl Provider {
             ids = self.models.iter().map(|model| model.id.clone()).collect();
         }
         ids
+    }
+
+    /// Maps a wire `id` to its display name, if known for this provider.
+    pub fn model_display_name(&self, id: &str) -> Option<&str> {
+        self.models
+            .iter()
+            .find(|m| m.id == id)
+            .map(|m| m.display_name())
     }
 }
 
@@ -187,6 +209,7 @@ fn fallback_models(ids: &[&str]) -> Vec<Model> {
     ids.iter()
         .map(|id| Model {
             id: (*id).to_string(),
+            name: String::new(),
             free: false,
             family: None,
         })
@@ -322,6 +345,10 @@ struct ProviderListing {
 #[derive(Debug, Deserialize)]
 struct ModelInfo {
     #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
     status: Option<String>,
     #[serde(default)]
     family: Option<String>,
@@ -419,7 +446,7 @@ pub async fn fetch_local_models(base_url: &str, id: &str) -> Result<Vec<Model>, 
                         .data
                         .into_iter()
                         .filter(|m| !m.id.trim().is_empty())
-                        .map(|m| Model { id: m.id, free: false, family: None })
+                        .map(|m| Model { id: m.id.clone(), name: m.id, free: false, family: None })
                         .collect();
                     if !ids.is_empty() {
                         ids.sort_by(|a, b| a.id.cmp(&b.id));
@@ -453,7 +480,7 @@ pub async fn fetch_local_models(base_url: &str, id: &str) -> Result<Vec<Model>, 
                         .into_iter()
                         .map(|m| {
                             let name = if !m.name.trim().is_empty() { m.name } else { m.model };
-                            Model { id: name, free: false, family: None }
+                            Model { id: name.clone(), name, free: false, family: None }
                         })
                         .filter(|m| !m.id.trim().is_empty())
                         .collect();
@@ -599,6 +626,7 @@ fn custom_fallback_provider(id: &str) -> Provider {
             .iter()
             .map(|m| Model {
                 id: (*m).to_string(),
+                name: (*m).to_string(),
                 free: false,
                 family: None,
             })
@@ -646,7 +674,7 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
         // fetched provider already had (empty until fetch completes).
         if let Some(model) = connection.model.clone().filter(|m| !m.trim().is_empty()) {
             if provider.models.is_empty() {
-                provider.models = vec![Model { id: model, free: false, family: None }];
+                provider.models = vec![Model { id: model.clone(), name: model, free: false, family: None }];
             }
         }
         return provider;
@@ -658,7 +686,8 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
             .clone()
             .unwrap_or_else(|| provider.models.first().map(|m| m.id.clone()).unwrap_or_default());
         provider.models = vec![Model {
-            id: model,
+            id: model.clone(),
+            name: model,
             free: false,
             family: None,
         }];
@@ -678,8 +707,14 @@ pub fn usable_models(listing: &ProviderListing) -> Vec<Model> {
         if !outputs_text_only(info) {
             continue;
         }
+        let display = info
+            .name
+            .clone()
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| id.clone());
         out.push(Model {
             id: id.clone(),
+            name: display,
             free: is_free(info),
             family: info.family.clone(),
         });
@@ -721,8 +756,14 @@ fn select_models(listing: &ProviderListing) -> Vec<Model> {
             continue;
         }
         if is_free(info) {
+            let display = info
+                .name
+                .clone()
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| id.clone());
             ids.push(Model {
                 id: id.clone(),
+                name: display,
                 free: true,
                 family: info.family.clone(),
             });
@@ -740,10 +781,18 @@ fn select_models(listing: &ProviderListing) -> Vec<Model> {
     ids.extend(
         latest
             .into_values()
-            .map(|(id, info)| Model {
-                id: id.to_string(),
-                free: false,
-                family: info.family.clone(),
+            .map(|(id, info)| {
+                let display = info
+                    .name
+                    .clone()
+                    .filter(|n| !n.trim().is_empty())
+                    .unwrap_or_else(|| id.to_string());
+                Model {
+                    id: id.to_string(),
+                    name: display,
+                    free: false,
+                    family: info.family.clone(),
+                }
             }),
     );
     ids.sort_by(|a, b| a.id.cmp(&b.id));
@@ -1225,6 +1274,8 @@ mod tests {
                 (
                     "paid-v1".into(),
                     ModelInfo {
+                        id: None,
+                        name: None,
                         status: None,
                         family: Some("paid".into()),
                         release_date: Some("2025-01-01".into()),
@@ -1239,6 +1290,8 @@ mod tests {
                 (
                     "paid-v2".into(),
                     ModelInfo {
+                        id: None,
+                        name: None,
                         status: None,
                         family: Some("paid".into()),
                         release_date: Some("2025-06-01".into()),
@@ -1253,6 +1306,8 @@ mod tests {
                 (
                     "free-old".into(),
                     ModelInfo {
+                        id: None,
+                        name: None,
                         status: None,
                         family: Some("free".into()),
                         release_date: Some("2024-01-01".into()),
@@ -1267,6 +1322,8 @@ mod tests {
                 (
                     "free-new".into(),
                     ModelInfo {
+                        id: None,
+                        name: None,
                         status: None,
                         family: Some("free".into()),
                         release_date: Some("2025-01-01".into()),
@@ -1281,6 +1338,8 @@ mod tests {
                 (
                     "retired".into(),
                     ModelInfo {
+                        id: None,
+                        name: None,
                         status: Some("deprecated".into()),
                         family: Some("retired".into()),
                         release_date: Some("2025-01-01".into()),
@@ -1295,6 +1354,8 @@ mod tests {
                 (
                     "loner-v1".into(),
                     ModelInfo {
+                        id: None,
+                        name: None,
                         status: None,
                         family: None,
                         release_date: Some("2025-01-01".into()),
@@ -1309,6 +1370,8 @@ mod tests {
                 (
                     "loner-v2".into(),
                     ModelInfo {
+                        id: None,
+                        name: None,
                         status: None,
                         family: None,
                         release_date: Some("2025-07-01".into()),
@@ -1347,6 +1410,8 @@ mod tests {
     fn models_with_non_text_output_are_filtered_out() {
         fn info(output: &[&str]) -> ModelInfo {
             ModelInfo {
+                id: None,
+                name: None,
                 status: None,
                 family: None,
                 release_date: None,
@@ -1381,6 +1446,8 @@ mod tests {
             models: BTreeMap::from([(
                 "no-modalities".into(),
                 ModelInfo {
+                    id: None,
+                    name: None,
                     status: None,
                     family: None,
                     release_date: None,
@@ -1424,6 +1491,7 @@ mod tests {
             select_models(&listing),
             vec![Model {
                 id: "deepseek-v4-flash-free".to_string(),
+                name: "DeepSeek V4 Flash Free".to_string(),
                 free: true,
                 family: Some("deepseek-flash".to_string())
             }]
@@ -1521,8 +1589,8 @@ mod tests {
             kind: CompatKind::OpenAI,
             api_key_env: "TEST_API_KEY".to_string(),
             models: vec![
-                Model { id: "free-1".to_string(), free: true, family: None },
-                Model { id: "paid-1".to_string(), free: false, family: None },
+                Model { id: "free-1".to_string(), name: "Free 1".to_string(), free: true, family: None },
+                Model { id: "paid-1".to_string(), name: "Paid 1".to_string(), free: false, family: None },
             ],
         };
         assert_eq!(provider.selectable_models(true), vec!["free-1"]);

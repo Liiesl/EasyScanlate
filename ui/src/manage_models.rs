@@ -108,17 +108,18 @@ pub fn view<'a, S: UiState + ?Sized>(
         let mut provider_cols: Vec<Element<'_, UiEvent>> = Vec::new();
         for (provider_id, provider_name, models) in groups {
             // Filter models by search query (case-insensitive, space aliases -, /, ., _).
-            // Example: "meta spark" matches "meta/muse-spark-1.2".
-            let filtered: Vec<String> = models
+            // Match against both wire id and display name.
+            // Example: "meta spark" matches "meta/muse-spark-1.2" or its display.
+            let filtered: Vec<(String, String)> = models
                 .iter()
-                .filter(|m| model_matches(&query, m))
+                .filter(|(id, name)| model_matches(&query, id) || model_matches(&query, name))
                 .cloned()
                 .collect();
             if filtered.is_empty() {
                 continue;
             }
 
-            // Snapshot hidden set for this provider once per frame.
+            // Snapshot hidden set for this provider once per frame (keyed by id).
             let hidden_set = scanlateit_settings::get(|s| {
                 s.hidden_models
                     .get(&provider_id)
@@ -127,7 +128,7 @@ pub fn view<'a, S: UiState + ?Sized>(
             });
             let visible_cnt = filtered
                 .iter()
-                .filter(|m| !hidden_set.contains(*m))
+                .filter(|(id, _)| !hidden_set.contains(id))
                 .count();
             // Master toggler is ON if any filtered model is visible (per requirement).
             let master_on = visible_cnt > 0;
@@ -143,7 +144,8 @@ pub fn view<'a, S: UiState + ?Sized>(
                     format!("{visible_cnt}/{total}")
                 };
                 let pid = provider_id.clone();
-                let filtered_for_toggle = filtered.clone();
+                let filtered_ids: Vec<String> = filtered.iter().map(|(id, _)| id.clone()).collect();
+                let filtered_for_toggle = filtered_ids.clone();
                 let master_toggler: Element<'_, UiEvent> = toggler(master_on)
                     .size(scale::s(18.0))
                     .style(crate::toggler_style::style)
@@ -162,7 +164,7 @@ pub fn view<'a, S: UiState + ?Sized>(
                                     }
                                 }
                             } else {
-                                // Disable: hide all filtered models
+                                // Disable: hide all filtered models (by id)
                                 let entry = s.hidden_models.entry(pid).or_default();
                                 for m in models {
                                     entry.insert(m);
@@ -188,17 +190,17 @@ pub fn view<'a, S: UiState + ?Sized>(
             if !filtered.is_empty() {
                 rows.push(item_separator());
             }
-            for (idx, model) in filtered.iter().enumerate() {
+            for (idx, (model_id, model_name)) in filtered.iter().enumerate() {
                 let hidden = scanlateit_settings::get(|s| {
                     s.hidden_models
                         .get(&provider_id)
-                        .is_some_and(|set| set.contains(model))
+                        .is_some_and(|set| set.contains(model_id))
                 });
                 let visible = !hidden;
                 let pid = provider_id.clone();
-                let mid = model.clone();
+                let mid = model_id.clone();
                 let model_row: Element<'_, UiEvent> = row![
-                    text(model.clone()).size(scale::s(12.0)).width(FillLength),
+                    text(model_name.clone()).size(scale::s(12.0)).width(FillLength),
                     toggler(visible)
                         .size(scale::s(18.0))
                         .style(crate::toggler_style::style)

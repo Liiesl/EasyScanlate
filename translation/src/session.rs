@@ -33,7 +33,8 @@ pub struct Session {
     pub hidden_models: BTreeMap<String, BTreeSet<String>>,
     /// Cached output of [`Self::model_groups`]; rebuilt at the top of every
     /// [`Self::sync_models`] call so callers can borrow it for the frame.
-    groups: Vec<(String, String, Vec<String>)>,
+    /// Each inner pair is `(model id, display name)`.
+    groups: Vec<(String, String, Vec<(String, String)>)>,
 }
 
 impl Session {
@@ -99,6 +100,19 @@ impl Session {
             }
         }
         ids
+    }
+
+    fn visible_model_pairs(&self, provider: &Provider) -> Vec<(String, String)> {
+        let ids = self.visible_models(provider);
+        ids.into_iter()
+            .map(|id| {
+                let display = provider
+                    .model_display_name(&id)
+                    .unwrap_or(&id)
+                    .to_string();
+                (id, display)
+            })
+            .collect()
     }
 
     /// Rebuilds `models`/`selected_model` for the current provider. Also
@@ -172,20 +186,21 @@ impl Session {
     }
 
     /// Every connected provider's selectable models, in connected order:
-    /// `(provider id, display name, model ids)`. The model ids respect the
-    /// free-only filter and the Manage Models hidden set; providers without
-    /// selectable models are skipped. This is what the merged model dropdown
-    /// renders, grouped by provider.
+    /// `(provider id, display name, model pairs)`. Each pair is `(model id,
+    /// display name)`. The pairs respect the free-only filter and the Manage
+    /// Models hidden set; providers without selectable models are skipped. This
+    /// is what the merged model dropdown renders, grouped by provider. The
+    /// request still uses the `id`.
     ///
     /// Returns a borrow of the internal cache (refreshed by
     /// [`Self::sync_models`]) so view code can hold the `&str`s for a frame
     /// without cloning.
-    pub fn model_groups(&self) -> &[(String, String, Vec<String>)] {
+    pub fn model_groups(&self) -> &[(String, String, Vec<(String, String)>)] {
         &self.groups
     }
 
     /// Recomputes [`Self::model_groups`] from scratch.
-    fn compute_model_groups(&self) -> Vec<(String, String, Vec<String>)> {
+    fn compute_model_groups(&self) -> Vec<(String, String, Vec<(String, String)>)> {
         self.connected_ids
             .iter()
             .filter_map(|id| {
@@ -194,7 +209,7 @@ impl Session {
                         .get(id)
                         .map(|connection| provider_for_connection(id, connection))
                 })?;
-                let models = self.visible_models(&provider);
+                let models = self.visible_model_pairs(&provider);
                 (!models.is_empty())
                     .then(|| (id.clone(), provider_name(id), models))
             })
@@ -203,8 +218,9 @@ impl Session {
 
     /// All usable models per connected provider, without `free_only` or
     /// hidden filtering – deprecated already removed. Used by the Manage
-    /// Models overlay to list every toggleable model.
-    pub fn all_model_groups(&self) -> Vec<(String, String, Vec<String>)> {
+    /// Models overlay to list every toggleable model. Each inner pair is
+    /// `(model id, display name)`.
+    pub fn all_model_groups(&self) -> Vec<(String, String, Vec<(String, String)>)> {
         self.connected_ids
             .iter()
             .filter_map(|id| {
@@ -213,11 +229,14 @@ impl Session {
                         .get(id)
                         .map(|connection| provider_for_connection(id, connection))
                 })?;
-                let mut ids: Vec<String> =
-                    provider.models.iter().map(|m| m.id.clone()).collect();
-                ids.sort();
-                (!ids.is_empty())
-                    .then(|| (id.clone(), provider_name(id), ids))
+                let mut pairs: Vec<(String, String)> = provider
+                    .models
+                    .iter()
+                    .map(|m| (m.id.clone(), m.display_name().to_string()))
+                    .collect();
+                pairs.sort_by(|a, b| a.0.cmp(&b.0));
+                (!pairs.is_empty())
+                    .then(|| (id.clone(), provider_name(id), pairs))
             })
             .collect()
     }
@@ -462,8 +481,8 @@ mod tests {
             kind: super::super::CompatKind::OpenAI,
             api_key_env: "DEEPSEEK_API_KEY".to_string(),
             models: vec![
-                super::super::Model { id: "free-1".to_string(), free: true, family: None },
-                super::super::Model { id: "paid-1".to_string(), free: false, family: None },
+                super::super::Model { id: "free-1".to_string(), name: "Free 1".to_string(), free: true, family: None },
+                super::super::Model { id: "paid-1".to_string(), name: "Paid 1".to_string(), free: false, family: None },
             ],
         }
     }
@@ -586,12 +605,18 @@ mod tests {
                 (
                     "openai".to_string(),
                     "OpenAI".to_string(),
-                    vec!["gpt-4o-mini".to_string(), "gpt-5-nano".to_string()],
+                    vec![
+                        ("gpt-4o-mini".to_string(), "gpt-4o-mini".to_string()),
+                        ("gpt-5-nano".to_string(), "gpt-5-nano".to_string()),
+                    ],
                 ),
                 (
                     "deepseek".to_string(),
                     "DeepSeek".to_string(),
-                    vec!["deepseek-chat".to_string(), "deepseek-reasoner".to_string()],
+                    vec![
+                        ("deepseek-chat".to_string(), "deepseek-chat".to_string()),
+                        ("deepseek-reasoner".to_string(), "deepseek-reasoner".to_string()),
+                    ],
                 ),
             ]
         );
@@ -609,7 +634,10 @@ mod tests {
             vec![(
                 "deepseek".to_string(),
                 "DeepSeek".to_string(),
-                vec!["free-1".to_string(), "paid-1".to_string()],
+                vec![
+                    ("free-1".to_string(), "Free 1".to_string()),
+                    ("paid-1".to_string(), "Paid 1".to_string()),
+                ],
             )]
         );
         session.set_free_only(true);
@@ -618,7 +646,7 @@ mod tests {
             vec![(
                 "deepseek".to_string(),
                 "DeepSeek".to_string(),
-                vec!["free-1".to_string()],
+                vec![("free-1".to_string(), "Free 1".to_string())],
             )]
         );
     }
@@ -641,7 +669,7 @@ mod tests {
             vec![(
                 CUSTOM_OPENAI.to_string(),
                 "Custom (OpenAI-compatible)".to_string(),
-                vec!["llama-3.1-8b".to_string()],
+                vec![("llama-3.1-8b".to_string(), "llama-3.1-8b".to_string())],
             )]
         );
     }

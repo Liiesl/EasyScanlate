@@ -59,12 +59,23 @@ pub const LANGUAGES: [&str; 13] = [
     "Vietnamese",
 ];
 
-/// One selectable translation model.
+/// One selectable translation model: wire `id` and display `name`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Model {
     pub id: String,
+    pub name: String,
     pub free: bool,
     pub family: Option<String>,
+}
+
+impl Model {
+    pub fn display_name(&self) -> &str {
+        if self.name.is_empty() {
+            &self.id
+        } else {
+            &self.name
+        }
+    }
 }
 
 /// One translation gateway: where to call, which environment variable holds
@@ -81,7 +92,7 @@ pub struct Provider {
 
 impl Provider {
     /// The model picker entries of this provider, respecting the free-only
-    /// filter; the full list when filtering would drop everything.
+    /// filter; the full list when filtering would drop everything. Returns wire `id`s.
     pub fn selectable_models(&self, free_only: bool) -> Vec<String> {
         let mut ids: Vec<String> = self
             .models
@@ -93,6 +104,10 @@ impl Provider {
             ids = self.models.iter().map(|model| model.id.clone()).collect();
         }
         ids
+    }
+
+    pub fn model_display_name(&self, id: &str) -> Option<&str> {
+        self.models.iter().find(|m| m.id == id).map(|m| m.display_name())
     }
 }
 
@@ -143,10 +158,24 @@ fn entry(
 
 fn fallback_models(ids: &[&str]) -> Vec<Model> {
     ids.iter()
-        .map(|id| Model {
-            id: (*id).to_string(),
-            free: false,
-            family: None,
+        .map(|id| {
+            let display = match *id {
+                "fake-gpt-4o" => "Fake GPT-4o",
+                "fake-claude-sonnet" => "Fake Claude Sonnet",
+                "fake-deepseek-v4" => "Fake DeepSeek V4",
+                "fake-lite-mini" => "Fake Lite Mini",
+                "fake-lite-flash" => "Fake Lite Flash",
+                "fake-openai-custom" => "Fake OpenAI Custom",
+                "fake-deepseek-custom" => "Fake DeepSeek Custom",
+                "fake-claude-custom" => "Fake Claude Custom",
+                _ => *id,
+            };
+            Model {
+                id: (*id).to_string(),
+                name: display.to_string(),
+                free: false,
+                family: None,
+            }
         })
         .collect()
 }
@@ -343,7 +372,7 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
             .unwrap_or_else(|| provider.api.clone());
         if let Some(model) = connection.model.clone().filter(|m| !m.trim().is_empty()) {
             if provider.models.is_empty() {
-                provider.models = vec![Model { id: model, free: false, family: None }];
+                provider.models = vec![Model { id: model.clone(), name: model, free: false, family: None }];
             }
         }
         return provider;
@@ -355,7 +384,8 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
             .clone()
             .unwrap_or_else(|| provider.models.first().map(|m| m.id.clone()).unwrap_or_default());
         provider.models = vec![Model {
-            id: model,
+            id: model.clone(),
+            name: model,
             free: false,
             family: None,
         }];
@@ -411,7 +441,8 @@ pub struct Session {
     pub hidden_models: BTreeMap<String, BTreeSet<String>>,
     /// Cached output of [`Self::model_groups`]; rebuilt at the top of every
     /// [`Self::sync_models`] call so callers can borrow it for the frame.
-    groups: Vec<(String, String, Vec<String>)>,
+    /// Each inner pair is `(model id, display name)`.
+    groups: Vec<(String, String, Vec<(String, String)>)>,
 }
 
 impl Session {
@@ -471,6 +502,16 @@ impl Session {
             }
         }
         ids
+    }
+
+    fn visible_model_pairs(&self, provider: &Provider) -> Vec<(String, String)> {
+        let ids = self.visible_models(provider);
+        ids.into_iter()
+            .map(|id| {
+                let display = provider.model_display_name(&id).unwrap_or(&id).to_string();
+                (id, display)
+            })
+            .collect()
     }
 
     /// Rebuilds `models`/`selected_model` for the current provider. Also
@@ -541,19 +582,18 @@ impl Session {
     }
 
     /// Every connected provider's selectable models, in connected order:
-    /// `(provider id, display name, model ids)`. The model ids respect the
-    /// free-only filter and hidden set; providers without selectable models
-    /// are skipped. Mirrors the real module's session.
+    /// `(provider id, display name, model pairs)`. Each pair is `(model id,
+    /// display name)`. The pairs respect the free-only filter and hidden set.
     ///
     /// Returns a borrow of the internal cache (refreshed by
     /// [`Self::sync_models`]) so view code can hold the `&str`s for a frame
-    /// without cloning.
-    pub fn model_groups(&self) -> &[(String, String, Vec<String>)] {
+    /// without cloning. Request still uses `id`.
+    pub fn model_groups(&self) -> &[(String, String, Vec<(String, String)>)] {
         &self.groups
     }
 
     /// Recomputes [`Self::model_groups`] from scratch.
-    fn compute_model_groups(&self) -> Vec<(String, String, Vec<String>)> {
+    fn compute_model_groups(&self) -> Vec<(String, String, Vec<(String, String)>)> {
         self.connected_ids
             .iter()
             .filter_map(|id| {
@@ -562,14 +602,14 @@ impl Session {
                         .get(id)
                         .map(|connection| provider_for_connection(id, connection))
                 })?;
-                let models = self.visible_models(&provider);
+                let models = self.visible_model_pairs(&provider);
                 (!models.is_empty())
                     .then(|| (id.clone(), provider_name(id), models))
             })
             .collect()
     }
 
-    pub fn all_model_groups(&self) -> Vec<(String, String, Vec<String>)> {
+    pub fn all_model_groups(&self) -> Vec<(String, String, Vec<(String, String)>)> {
         self.connected_ids
             .iter()
             .filter_map(|id| {
@@ -578,10 +618,13 @@ impl Session {
                         .get(id)
                         .map(|connection| provider_for_connection(id, connection))
                 })?;
-                let mut ids: Vec<String> =
-                    provider.models.iter().map(|m| m.id.clone()).collect();
-                ids.sort();
-                (!ids.is_empty()).then(|| (id.clone(), provider_name(id), ids))
+                let mut pairs: Vec<(String, String)> = provider
+                    .models
+                    .iter()
+                    .map(|m| (m.id.clone(), m.display_name().to_string()))
+                    .collect();
+                pairs.sort_by(|a, b| a.0.cmp(&b.0));
+                (!pairs.is_empty()).then(|| (id.clone(), provider_name(id), pairs))
             })
             .collect()
     }
@@ -766,15 +809,18 @@ mod tests {
                     "fake-llm".to_string(),
                     "Fake LLM".to_string(),
                     vec![
-                        "fake-gpt-4o".to_string(),
-                        "fake-claude-sonnet".to_string(),
-                        "fake-deepseek-v4".to_string(),
+                        ("fake-gpt-4o".to_string(), "Fake GPT-4o".to_string()),
+                        ("fake-claude-sonnet".to_string(), "Fake Claude Sonnet".to_string()),
+                        ("fake-deepseek-v4".to_string(), "Fake DeepSeek V4".to_string()),
                     ],
                 ),
                 (
                     "fake-lite".to_string(),
                     "Fake Lite".to_string(),
-                    vec!["fake-lite-mini".to_string(), "fake-lite-flash".to_string()],
+                    vec![
+                        ("fake-lite-mini".to_string(), "Fake Lite Mini".to_string()),
+                        ("fake-lite-flash".to_string(), "Fake Lite Flash".to_string()),
+                    ],
                 ),
             ]
         );

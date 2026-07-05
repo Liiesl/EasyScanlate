@@ -15,14 +15,16 @@ pub trait UiState {
     fn translating(&self) -> bool;
     fn status(&self) -> &str;
     /// Every connected translation provider's selectable models, in connected
-    /// order: `(provider id, display name, model ids)`. The model ids already
-    /// respect the free-only filter. The merged model dropdown of the
-    /// translation bar groups these by provider. Borrows from `&self` (the
-    /// session's cache), so the result is valid for as long as the state
-    /// borrow — enough for a frame.
-    fn translate_model_groups(&self) -> &[(String, String, Vec<String>)];
+    /// order: `(provider id, display name, model pairs)`. Each pair is
+    /// `(model id, display name)`. The pairs already respect the free-only
+    /// filter. The merged model dropdown groups these by provider and shows
+    /// the display name while the request still uses the `id`. Borrows from
+    /// `&self` (the session's cache), so the result is valid for as long as
+    /// the state borrow — enough for a frame.
+    fn translate_model_groups(&self) -> &[(String, String, Vec<(String, String)>)];
     /// The currently selected `(provider id, model id)` of the merged model
-    /// dropdown; both are always one of `translate_model_groups`.
+    /// dropdown; both are always one of `translate_model_groups` (matched by
+    /// `id`; display is the `name`).
     fn translate_model_selection(&self) -> (String, String);
     fn translate_lang(&self) -> &str;
     /// The connect modal open over the settings modal, if any.
@@ -80,5 +82,7 @@ pub trait UiState {
     fn manage_models_search(&self) -> &str;
     /// Every connected provider's *all* toggleable models (deprecated already
     /// removed) grouped by provider – shown in the Manage Models overlay.
-    fn all_model_groups(&self) -> Vec<(String, String, Vec<String>)>;
+    /// Each inner pair is `(model id, display name)`; the hidden set is
+    /// still keyed by `id`.
+    fn all_model_groups(&self) -> Vec<(String, String, Vec<(String, String)>)>;
 }
