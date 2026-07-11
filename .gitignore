@@ -1,2 +1,6 @@
 /target
 /target-*
+/models/
+scanlateit.exe
+settings.json
+lineconfig.yaml

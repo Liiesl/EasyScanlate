@@ -6,9 +6,13 @@
 //! one shared inference session (CPU execution provider by design) and
 //! inpaints image regions one at a time; the Telea backend is stateless and
 //! rewrites masked pixels in place. Both take the same job: an image path, a
-//! rectangle and the text-box quads inside it; the box pixels are masked out
-//! and reconstructed, and each box comes back as its own RGBA crop an app
-//! layers over the original image without writing anything to disk.
+//! selected mask rectangle and the text-box quads inside it; the mask
+//! (the rectangle itself, or the quad union when quads are present) is
+//! reconstructed from surrounding context — `radius` pixels of context for
+//! Telea and [`LAMA_CONTEXT_PAD`] pixels of real context plus the existing
+//! mirror padding to `MODEL_EDGE` for LaMa — and each box comes back as
+//! its own RGBA crop an app layers over the original image without writing
+//! anything to disk.
 
 use std::fmt;
 use std::path::Path;
@@ -26,6 +30,11 @@ use scanlateit_settings::InpaintBackend;
 
 /// The fixed square input size of the LaMa model.
 pub const MODEL_EDGE: u32 = 512;
+
+/// Real image pixels of surrounding context added around the selected mask
+/// for the LaMa backend before the mirror padding to `MODEL_EDGE`.
+/// Telea's context pad is the `radius` setting itself.
+const LAMA_CONTEXT_PAD: f32 = 32.0;
 
 const MODEL_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../models");
 const MODEL_FILE: &str = "lama-manga.onnx";
@@ -92,11 +101,15 @@ impl Engine {
         self.radius
     }
 
-    /// Decodes `path` and inpaints the area `rect`, masking out the given
-    /// quads (or the whole area when there are none). The original file is
-    /// never modified; each returned patch is the RGBA crop of one mask quad
-    /// (`[x, y, w, h]` in image pixels), with the text reconstructed by the
-    /// engine's backend.
+    /// Decodes `path` and inpaints the selected mask `rect`, masking out the
+    /// given quads (or the whole `rect` when there are none) and sampling
+    /// from surrounding context. The surrounding context is the Telea
+    /// `radius` (`settings::inpaint_radius`) for the Telea backend and
+    /// [`LAMA_CONTEXT_PAD`] plus the existing mirror padding for LaMa.
+    /// The original file is never modified; each returned patch is the RGBA
+    /// crop of one mask quad (`[x, y, w, h]` in image pixels), with the
+    /// text reconstructed by the engine's backend. For an empty quad list
+    /// the single returned patch covers the (clamped) `rect` itself.
     pub fn run_blocking(
         &self,
         path: &str,
@@ -281,6 +294,43 @@ fn build_mask(width: u32, height: u32, quads: &[Quad], origin: [f32; 2]) -> Gray
     mask
 }
 
+/// Mask for the *expanded* crop: where `quads` are non-empty the mask is
+/// their union (as in [`build_mask`]); otherwise it is the original
+/// `rect` (the user's selected mask) white inside the expanded black
+/// context border.
+fn build_mask_expanded(
+    exp_w: u32,
+    exp_h: u32,
+    quads: &[Quad],
+    rect: [f32; 4],
+    exp_origin: [f32; 2],
+    image_width: u32,
+    image_height: u32,
+) -> GrayImage {
+    if !quads.is_empty() {
+        return build_mask(exp_w, exp_h, quads, exp_origin);
+    }
+    // Empty quad list: mask == original rect (the selection) inside the expanded crop.
+    let mut mask = GrayImage::from_pixel(exp_w, exp_h, image::Luma([0]));
+    let [rx, ry, rw, rh] = rect;
+    // Clamped original rect in image pixels.
+    let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image_width, image_height);
+    let dx = (ox as f32 - exp_origin[0]).round() as i64;
+    let dy = (oy as f32 - exp_origin[1]).round() as i64;
+    let x0 = dx.max(0) as u32;
+    let y0 = dy.max(0) as u32;
+    let x1 = (dx + ow as i64).clamp(0, exp_w as i64) as u32;
+    let y1 = (dy + oh as i64).clamp(0, exp_h as i64) as u32;
+    if x1 > x0 && y1 > y0 {
+        for y in y0..y1 {
+            for x in x0..x1 {
+                mask[(x, y)] = image::Luma([255]);
+            }
+        }
+    }
+    mask
+}
+
 /// Composes the model inputs: `image` as `[1, 3, 512, 512]` f32 RGB in
 /// 0..1 and `mask` as `[1, 1, 512, 512]` f32 (1 = inpaint, 0 = keep).
 fn compose_inputs(canvas: &RgbImage, mask: &GrayImage) -> (Array4<f32>, Array4<f32>) {
@@ -314,9 +364,23 @@ fn extract_window(
 ) -> RgbImage {
     let shape = [1usize, 3, MODEL_EDGE as usize, MODEL_EDGE as usize];
     let Ok(reshaped) = output.clone().into_shape_with_order(shape) else {
+        eprintln!(
+            "[inpaint::extract_window] shape mismatch expected {:?} got {:?} -> white {}x{}",
+            shape,
+            output.shape(),
+            crop_w,
+            crop_h
+        );
         return RgbImage::from_pixel(crop_w, crop_h, Rgb([255, 255, 255]));
     };
     let to_u8 = |v: f32| (v * 255.0).round().clamp(0.0, 255.0) as u8;
+    let will_white = crop_w as i64 != w || crop_h as i64 != h;
+    if will_white {
+        eprintln!(
+            "[inpaint::extract_window] crop {}x{} window w={} h={} src={},{} dst={},{} -> sides will stay WHITE (fitted initialized 255)",
+            crop_w, crop_h, w, h, src_x, src_y, dst_x, dst_y
+        );
+    }
     let mut fitted = RgbImage::from_pixel(crop_w, crop_h, Rgb([255, 255, 255]));
     for py in 0..h {
         for px in 0..w {
@@ -383,10 +447,10 @@ fn bbox_crops(patch: RgbaImage, origin: [f32; 2], quads: &[Quad]) -> Vec<(RgbaIm
 }
 
 /// Inpaints `rect` of `image` with the Telea algorithm from the [`inpaint`]
-/// crate: every pixel covered by the mask quads (or the whole `rect` when
-/// there are none) is rewritten in place from the surrounding pixels, so no
-/// model, canvas or windowing is needed. `radius` is the neighborhood size
-/// the interpolation samples. Returns the same per-mask-box crops as
+/// crate: the mask is `rect` itself when `quads` is empty, otherwise the
+/// union of `quads` inside `rect`; the algorithm samples from the
+/// surrounding context expanded by `radius` pixels around `rect`
+/// (clamped to the image). Returns the same per-mask-box crops as
 /// [`inpaint_crop`], with the alpha channel interpolated like every other
 /// channel (opaque manga pages keep alpha at 255).
 pub fn telea_inpaint_crop(
@@ -395,22 +459,65 @@ pub fn telea_inpaint_crop(
     quads: &[Quad],
     radius: i32,
 ) -> Result<Vec<(RgbaImage, [f32; 4])>, String> {
+    let radius = radius.max(1);
+    let pad = radius as f32;
     let [rx, ry, rw, rh] = rect;
-    let [x, y, crop_w, crop_h] =
-        crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
-    let origin = [x as f32, y as f32];
+    let [ex, ey, exp_w, exp_h] = crop_spec(
+        [rx - pad, ry - pad, rx + rw + pad, ry + rh + pad],
+        image.width(),
+        image.height(),
+    );
+    let exp_origin = [ex as f32, ey as f32];
 
-    let mask = build_mask(crop_w, crop_h, quads, origin);
-    let mut crop = image::imageops::crop_imm(image, x, y, crop_w, crop_h).to_image();
+    let mask = build_mask_expanded(exp_w, exp_h, quads, rect, exp_origin, image.width(), image.height());
+    eprintln!(
+        "[inpaint::telea] rect={:?} quads={} radius={} pad={} image={}x{} exp=[{},{},{},{}] mask_sum={}",
+        rect,
+        quads.len(),
+        radius,
+        pad,
+        image.width(),
+        image.height(),
+        ex,
+        ey,
+        exp_w,
+        exp_h,
+        mask.pixels().map(|p| p[0] as u32).sum::<u32>()
+    );
+    let mut crop = image::imageops::crop_imm(image, ex, ey, exp_w, exp_h).to_image();
     crop.telea_inpaint(&mask, radius)
         .map_err(|e| format!("Telea inpaint failed: {e}"))?;
-    Ok(bbox_crops(crop, origin, quads))
+    if quads.is_empty() {
+        // Return only the original masked rect, not the whole expanded context border.
+        let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
+        eprintln!(
+            "[inpaint::telea] quads empty -> returning sub-crop [{},{},{},{}] from exp [{},{},{},{}]",
+            ox, oy, ow, oh, ex, ey, exp_w, exp_h
+        );
+        let sub = image::imageops::crop_imm(
+            &crop,
+            (ox - ex) as u32,
+            (oy - ey) as u32,
+            ow,
+            oh,
+        )
+        .to_image();
+        return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32])]);
+    }
+    let out = bbox_crops(crop, exp_origin, quads);
+    eprintln!("[inpaint::telea] quads={} -> {} bbox crops", quads.len(), out.len());
+    Ok(out)
 }
 
 /// Inpaints `rect` of `image` with the given box quads masked out, where
-/// `rect` is `[x, y, w, h]` in image pixels. Returns one RGBA crop per mask
-/// box (or a single crop of the whole rect when `quads` is empty), with the
-/// alpha channel copied from the original pixels (transparency survives).
+/// `rect` is `[x, y, w, h]` in image pixels (the selected mask). The image
+/// crop is `rect` expanded by [`LAMA_CONTEXT_PAD`] pixels in every direction
+/// (clamped to the image) so the model sees real surrounding context; the
+/// remaining canvas area to `MODEL_EDGE` is still mirror-padded via
+/// `reflect_place_*` (the padding the LaMa model was trained with).
+/// Returns one RGBA crop per mask box (or a single crop of the whole `rect`
+/// when `quads` is empty), with the alpha channel copied from the original
+/// pixels (transparency survives).
 pub fn inpaint_crop(
     session: &mut Session,
     image: &RgbaImage,
@@ -418,34 +525,183 @@ pub fn inpaint_crop(
     quads: &[Quad],
 ) -> Result<Vec<(RgbaImage, [f32; 4])>, String> {
     let [rx, ry, rw, rh] = rect;
-    let [x, y, crop_w, crop_h] =
-        crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
-    let origin = [x as f32, y as f32];
+    let pad = LAMA_CONTEXT_PAD;
+    let [ex, ey, exp_w, exp_h] = crop_spec(
+        [rx - pad, ry - pad, rx + rw + pad, ry + rh + pad],
+        image.width(),
+        image.height(),
+    );
+    let exp_origin = [ex as f32, ey as f32];
 
-    let mask = build_mask(crop_w, crop_h, quads, origin);
-    let crop = image::imageops::crop_imm(image, x, y, crop_w, crop_h).to_image();
+    let mask = build_mask_expanded(exp_w, exp_h, quads, rect, exp_origin, image.width(), image.height());
+    eprintln!(
+        "[inpaint::lama] rect={:?} quads={} pad={} image={}x{} exp=[{},{},{},{}] exp_origin={:?}",
+        rect,
+        quads.len(),
+        pad,
+        image.width(),
+        image.height(),
+        ex,
+        ey,
+        exp_w,
+        exp_h,
+        exp_origin
+    );
+    let crop = image::imageops::crop_imm(image, ex, ey, exp_w, exp_h).to_image();
 
-    let (sx, sy, sw, sh, dx, dy) = view_window(crop_w, crop_h, quads, origin);
-    let region = image::DynamicImage::from(
-        image::imageops::crop_imm(&crop, sx as u32, sy as u32, sw as u32, sh as u32).to_image(),
-    )
-    .into_rgb8();
-    let mut canvas = RgbImage::new(MODEL_EDGE, MODEL_EDGE);
-    reflect_place_rgb(&mut canvas, &region, dx, dy);
-    let region_mask =
-        image::imageops::crop_imm(&mask, sx as u32, sy as u32, sw as u32, sh as u32).to_image();
-    let mut canvas_mask = GrayImage::new(MODEL_EDGE, MODEL_EDGE);
-    reflect_place_gray(&mut canvas_mask, &region_mask, dx, dy);
-
-    let (image, mask) = compose_inputs(&canvas, &canvas_mask);
-    let output = run_session(session, image, mask)?;
-    let rgb = extract_window(&output, crop_w, crop_h, sx, sy, sw, sh, dx, dy);
+    // If the expanded crop is larger than the model in either dimension we
+    // resize the whole crop (and mask) to 512x512, run the model, then resize
+    // the output back. This keeps the entire mask visible and avoids the
+    // white `extract_window` sides (`will_white`).
+    let needs_resize = exp_w > MODEL_EDGE || exp_h > MODEL_EDGE;
+    let (canvas, canvas_mask, sx, sy, sw, sh, dx, dy) = if needs_resize {
+        let rgb_crop = image::DynamicImage::ImageRgba8(crop.clone()).to_rgb8();
+        let resized_rgb = image::imageops::resize(
+            &rgb_crop,
+            MODEL_EDGE,
+            MODEL_EDGE,
+            image::imageops::FilterType::Lanczos3,
+        );
+        let resized_mask = image::imageops::resize(
+            &mask,
+            MODEL_EDGE,
+            MODEL_EDGE,
+            image::imageops::FilterType::Nearest,
+        );
+        eprintln!(
+            "[inpaint::lama] LARGE exp {}x{} > {} -> resize whole crop+mask to {}x{} (no window, no mirror)",
+            exp_w, exp_h, MODEL_EDGE, MODEL_EDGE, MODEL_EDGE
+        );
+        // sx..dx unused in resize path; set to cover whole canvas
+        (resized_rgb, resized_mask, 0, 0, MODEL_EDGE as i64, MODEL_EDGE as i64, 0, 0)
+    } else {
+        // Center the model window on the mask (quad union or original rect when empty).
+        let (sx, sy, sw, sh, dx, dy) = if quads.is_empty() {
+            // Empty quads: mask is the original rect, centered on its center in expanded-local coords.
+            let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
+            let center_x = (ox as f32 + ow as f32 / 2.0) - exp_origin[0];
+            let center_y = (oy as f32 + oh as f32 / 2.0) - exp_origin[1];
+            let (sx, sw, dx) = window_dim(exp_w as i64, center_x, MODEL_EDGE as i64);
+            let (sy, sh, dy) = window_dim(exp_h as i64, center_y, MODEL_EDGE as i64);
+            eprintln!(
+                "[inpaint::lama] empty quads window: ox,oy,ow,oh=[{},{},{},{}] center=({:.1},{:.1}) sx,sy,sw,sh,dx,dy={},{},{},{},{},{} exp={}x{} will_white_h={} will_white_w={}",
+                ox, oy, ow, oh, center_x, center_y, sx, sy, sw, sh, dx, dy, exp_w, exp_h, exp_h as i64 - sh, exp_w as i64 - sw
+            );
+            (sx, sy, sw, sh, dx, dy)
+        } else {
+            let win = view_window(exp_w, exp_h, quads, exp_origin);
+            eprintln!(
+                "[inpaint::lama] quads window: win={:?} exp={}x{} center={:?}",
+                win,
+                exp_w,
+                exp_h,
+                mask_center(exp_w, exp_h, quads, exp_origin)
+            );
+            win
+        };
+        let region = image::DynamicImage::from(
+            image::imageops::crop_imm(&crop, sx as u32, sy as u32, sw as u32, sh as u32).to_image(),
+        )
+        .into_rgb8();
+        let mut canvas = RgbImage::new(MODEL_EDGE, MODEL_EDGE);
+        reflect_place_rgb(&mut canvas, &region, dx, dy);
+        let region_mask =
+            image::imageops::crop_imm(&mask, sx as u32, sy as u32, sw as u32, sh as u32).to_image();
+        let mut canvas_mask = GrayImage::new(MODEL_EDGE, MODEL_EDGE);
+        reflect_place_gray(&mut canvas_mask, &region_mask, dx, dy);
+        eprintln!(
+            "[inpaint::lama] canvas={}x{} region {}x{} at {},{} -> canvas {}x{} mask placed at {},{}",
+            region.width(),
+            region.height(),
+            sw,
+            sh,
+            sx,
+            sy,
+            canvas.width(),
+            canvas.height(),
+            dx,
+            dy
+        );
+        (canvas, canvas_mask, sx, sy, sw, sh, dx, dy)
+    };
+    let (image_tensor, mask_tensor) = compose_inputs(&canvas, &canvas_mask);
+    let output = run_session(session, image_tensor, mask_tensor)?;
+    eprintln!("[inpaint::lama] inference done output shape={:?}", output.shape());
+    let rgb = if needs_resize {
+        // Output is 512x512 representing the whole exp area → resize back to exp size
+        let out_canvas = match output.clone().into_shape_with_order([1usize, 3, MODEL_EDGE as usize, MODEL_EDGE as usize]) {
+            Ok(reshaped) => {
+                let to_u8 = |v: f32| (v * 255.0).round().clamp(0.0, 255.0) as u8;
+                let mut img = RgbImage::new(MODEL_EDGE, MODEL_EDGE);
+                for y in 0..MODEL_EDGE {
+                    for x in 0..MODEL_EDGE {
+                        img[(x, y)] = Rgb([
+                            to_u8(reshaped[[0, 0, y as usize, x as usize]]),
+                            to_u8(reshaped[[0, 1, y as usize, x as usize]]),
+                            to_u8(reshaped[[0, 2, y as usize, x as usize]]),
+                        ]);
+                    }
+                }
+                img
+            }
+            Err(_) => {
+                eprintln!("[inpaint::lama] resize path shape mismatch -> white {}x{}", exp_w, exp_h);
+                RgbImage::from_pixel(MODEL_EDGE, MODEL_EDGE, Rgb([255, 255, 255]))
+            }
+        };
+        let resized_back = image::imageops::resize(
+            &out_canvas,
+            exp_w,
+            exp_h,
+            image::imageops::FilterType::Lanczos3,
+        );
+        eprintln!(
+            "[inpaint::lama] RESIZE back {}x{} -> {}x{} (no white)",
+            MODEL_EDGE, MODEL_EDGE, exp_w, exp_h
+        );
+        resized_back
+    } else {
+        let r = extract_window(&output, exp_w, exp_h, sx, sy, sw, sh, dx, dy);
+        eprintln!(
+            "[inpaint::lama] extract_window exp={}x{} sx,sy,sw,sh,dx,dy={},{},{},{},{},{} rgb={}x{} will_white={}",
+            exp_w,
+            exp_h,
+            sx,
+            sy,
+            sw,
+            sh,
+            dx,
+            dy,
+            r.width(),
+            r.height(),
+            (exp_w as i64 != sw || exp_h as i64 != sh)
+        );
+        r
+    };
 
     let mut patch: RgbaImage = image::DynamicImage::ImageRgb8(rgb).into_rgba8();
     for (px, src) in patch.pixels_mut().zip(crop.pixels()) {
         px[3] = src[3];
     }
-    Ok(bbox_crops(patch, origin, quads))
+    if quads.is_empty() {
+        let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
+        let sub = image::imageops::crop_imm(
+            &patch,
+            (ox - ex) as u32,
+            (oy - ey) as u32,
+            ow,
+            oh,
+        )
+        .to_image();
+        eprintln!(
+            "[inpaint::lama] empty quads -> returning sub [{},{},{},{}] from patch {}x{}",
+            ox, oy, ow, oh, patch.width(), patch.height()
+        );
+        return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32])]);
+    }
+    let out = bbox_crops(patch, exp_origin, quads);
+    eprintln!("[inpaint::lama] quads={} -> {} bbox crops", quads.len(), out.len());
+    Ok(out)
 }
 
 #[cfg(test)]
