@@ -328,12 +328,27 @@ where
             let (layout, _) = tile_layout(&self.tiles, content_w);
             let visible_top = state.offset;
             let visible_bottom = state.offset + visible_bounds.height;
+            let inpaint_selecting = if state.inpaint_mode() {
+                match state.interaction {
+                    Interaction::InpaintSelecting { index, .. } => Some(index),
+                    _ => None,
+                }
+            } else {
+                None
+            };
             let visible_tiles: Vec<usize> = self
                 .tiles
                 .iter()
                 .enumerate()
                 .filter_map(|(index, tile)| {
-                    let (y, _) = layout[index];
+                    let (y, height) = layout[index];
+                    let is_selecting = inpaint_selecting == Some(index);
+                    // Keep the selecting tile visible even when it has no overlays so the
+                    // inpaint marquee (rubber band) always has a frame to draw into.
+                    let tile_visible = y + height > visible_top && y < visible_bottom;
+                    if is_selecting && tile_visible {
+                        return Some(index);
+                    }
                     let scale = state.width / tile.source_width.max(1) as f32;
                     let has_visible_entry = tile.overlays.iter().any(|entry| {
                         let [min_x, min_y, max_x, max_y] = entry.bounds;

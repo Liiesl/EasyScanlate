@@ -7,6 +7,7 @@
 //! the language picker and the translate button).
 
 pub mod actions;
+pub mod inpaint;
 pub mod results;
 pub mod styling;
 
