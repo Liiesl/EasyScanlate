@@ -138,6 +138,18 @@ impl Engine {
         self.predict_entry(path, quad)
             .map(|pred| pred.to_entry_style(EntryStyle::default()))
     }
+
+    /// Like [`Self::classify_entry`] but also returns the raw [`StylePrediction`]
+    /// so the caller can route `BgType`-aware post-processing (auto-inpaint).
+    pub fn classify_entry_with_prediction(
+        &self,
+        path: &str,
+        quad: &Quad,
+    ) -> Result<(EntryStyle, StylePrediction), String> {
+        let pred = self.predict_entry(path, quad)?;
+        let style = pred.to_entry_style(EntryStyle::default());
+        Ok((style, pred))
+    }
 }
 
 /// Crops the axis-aligned bounding box of `quad` from `image`, clamped to the
@@ -303,6 +315,17 @@ impl StylePrediction {
                 style.bg_color = [0, 0, 0, 0];
             }
             BgType::Gradient => {}
+        }
+        style
+    }
+
+    /// Like [`Self::to_entry_style`] but for the **auto pipeline** the gradient
+    /// background is also made transparent so the subsequent bg-aware inpaint
+    /// can reconstruct it (Telea). Artwork is already transparent.
+    pub fn to_entry_style_for_auto(&self, base: EntryStyle) -> EntryStyle {
+        let mut style = self.to_entry_style(base);
+        if self.bg_type == BgType::Gradient {
+            style.bg_color = [0, 0, 0, 0];
         }
         style
     }

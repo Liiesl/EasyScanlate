@@ -16,7 +16,7 @@ use iced::widget::text_input;
 use iced::{Color, Element, Fill as FillLength, Length};
 
 #[cfg(feature = "inpaint")]
-use scanlateit_settings::InpaintBackend;
+use scanlateit_settings::{AutoInpaintModel, InpaintBackend};
 
 use crate::translation::{self, CUSTOM_ANTHROPIC, CUSTOM_OPENAI};
 
@@ -531,6 +531,119 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                         .text_size(scale::s(12.0))
                         .on_toggle(|v| set(move |s| s.auto_sfx_filter = v))
                         .into(),
+                );
+            }
+            // ── Auto inpaint (post-OCR bg-aware inpaint) ─────────────────
+            #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+            {
+                let (auto_inpaint, auto_model, auto_style) = scanlateit_settings::get(|s| {
+                    (s.auto_inpaint, s.auto_inpaint_model, s.auto_style_detect)
+                });
+                items.push(
+                    text(
+                        "After OCR: style-detect first (deferred), then inpaint \
+                         per bg type — Solid keeps its bg color, Gradient uses \
+                         Telea, Artwork uses LaMa. SFX filtering runs first to \
+                         skip SFX bubbles. All three toggles = full pipeline. \
+                         Mixed needs Auto-detect style; fallback is Telea on all."
+                    )
+                    .size(scale::s(11.0))
+                    .color(MUTED_FG)
+                    .into(),
+                );
+                items.push(
+                    checkbox(auto_inpaint)
+                        .label("Auto inpaint (bg-aware)")
+                        .text_size(scale::s(12.0))
+                        .on_toggle(move |v| set(move |s| s.auto_inpaint = v))
+                        .into(),
+                );
+                let all_models = [
+                    AutoInpaintModel::Telea,
+                    AutoInpaintModel::Lama,
+                    AutoInpaintModel::Mixed,
+                ];
+                let available: Vec<AutoInpaintModel> = if auto_style {
+                    all_models.to_vec()
+                } else {
+                    vec![AutoInpaintModel::Telea, AutoInpaintModel::Lama]
+                };
+                // Keep pick_list value consistent when Mixed is hidden
+                let pick_value = if auto_style || auto_model != AutoInpaintModel::Mixed {
+                    Some(auto_model)
+                } else {
+                    Some(AutoInpaintModel::Telea)
+                };
+                items.push(
+                    row![
+                        container(text("Auto inpaint model").size(scale::s(12.0)).color(MUTED_FG))
+                            .width(Length::Fixed(scale::s(150.0))),
+                        pick_list(available, pick_value, move |model| set(move |s| {
+                            s.auto_inpaint_model = model
+                        }))
+                        .padding(scale::s(4.0))
+                        .text_size(scale::s(12.0)),
+                        if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style {
+                            text("Mixed disabled — no style; falling back to Telea for all.")
+                                .size(scale::s(11.0))
+                                .color(Color::from_rgb8(240, 200, 80))
+                        } else {
+                            text("").size(scale::s(11.0)).color(MUTED_FG)
+                        },
+                    ]
+                    .spacing(scale::s(6.0))
+                    .align_y(iced::Alignment::Center)
+                    .into(),
+                );
+                if !auto_style && auto_model == AutoInpaintModel::Mixed {
+                    items.push(
+                        text("Pick Telea or Lama while Auto-detect style is off; Mixed will auto-fallback to Telea.")
+                            .size(scale::s(11.0))
+                            .color(Color::from_rgb8(240, 200, 80))
+                            .into(),
+                    );
+                }
+                items.push(
+                    text("Full pipeline (SFX → style deferred → bg-routed inpaint) runs once when OCR finishes if all three are on. Telea jobs run in parallel, LaMa sequentially to avoid CPU strain.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG)
+                        .into(),
+                );
+            }
+            #[cfg(all(feature = "inpaint", not(all(feature = "styling", feature = "segment"))))]
+            {
+                let (auto_inpaint, auto_model) = scanlateit_settings::get(|s| {
+                    (s.auto_inpaint, s.auto_inpaint_model)
+                });
+                items.push(
+                    text(
+                        "Auto inpaint needs both Styling and Segmentation features for the full bg-aware pipeline; fallback is Telea on all bboxes."
+                    )
+                    .size(scale::s(11.0))
+                    .color(MUTED_FG)
+                    .into(),
+                );
+                items.push(
+                    checkbox(auto_inpaint)
+                        .label("Auto inpaint (bg-aware)")
+                        .text_size(scale::s(12.0))
+                        .on_toggle(move |v| set(move |s| s.auto_inpaint = v))
+                        .into(),
+                );
+                items.push(
+                    row![
+                        container(text("Auto inpaint model").size(scale::s(12.0)).color(MUTED_FG))
+                            .width(Length::Fixed(scale::s(150.0))),
+                        pick_list(
+                            [AutoInpaintModel::Telea, AutoInpaintModel::Lama],
+                            Some(if auto_model == AutoInpaintModel::Mixed { AutoInpaintModel::Telea } else { auto_model }),
+                            move |model| set(move |s| s.auto_inpaint_model = model)
+                        )
+                        .padding(scale::s(4.0))
+                        .text_size(scale::s(12.0)),
+                    ]
+                    .spacing(scale::s(6.0))
+                    .into(),
                 );
             }
             #[cfg(feature = "ocr")]

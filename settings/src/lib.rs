@@ -64,6 +64,10 @@ fn default_ui_font_size() -> u32 {
     12
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// One stored translation connection: the API key plus (for custom
 /// endpoints) the base URL and the single model id. Persisted one entry per
 /// provider id. Owned here (the settings crate) so both the translation
@@ -99,6 +103,28 @@ impl fmt::Display for InpaintBackend {
     }
 }
 
+/// Which inpaint model the **auto** post-OCR pipeline uses. Distinct from
+/// [`InpaintBackend`] (manual tool) because `Mixed` is a bg-aware routing:
+/// `Solid`→no inpaint, `Gradient`→Telea, `Artwork`→LaMa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AutoInpaintModel {
+    Telea,
+    Lama,
+    #[default]
+    Mixed,
+}
+
+impl fmt::Display for AutoInpaintModel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Telea => "Telea",
+            Self::Lama => "LaMa",
+            Self::Mixed => "Mixed (bg-aware)",
+        })
+    }
+}
+
 /// The whole persisted app configuration. Every field is unconditional:
 /// this crate has no heavy dependencies, so subsystem features stay at the
 /// app/ui level while the config always knows all values.
@@ -113,7 +139,7 @@ pub struct Settings {
     pub last_provider: Option<String>,
     /// When enabled, OCR-detected entries are auto-classified by the ONNX
     /// styling model and their style set from the prediction.
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub auto_style_detect: bool,
     /// Number of parallel OCR detection sessions (one thread each) feeding
     /// the single recognition session. Kept as the raw input string so a
@@ -172,8 +198,15 @@ pub struct Settings {
     pub ui_font_size: u32,
     /// When enabled, OCR entries that overlap SFX outside balloons are
     /// auto-removed via the segmentation model (manga-mimic grid).
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub auto_sfx_filter: bool,
+    /// When enabled, gradient/artwork bubbles get transparent bg + inpaint
+    /// after style detection. Requires `auto_style_detect` for `Mixed`.
+    #[serde(default = "default_true")]
+    pub auto_inpaint: bool,
+    /// Which model the auto-inpaint step uses; `Mixed` routes by bg type.
+    #[serde(default)]
+    pub auto_inpaint_model: AutoInpaintModel,
     /// Stored translation connections, keyed by provider id (`openai`,
     /// `deepseek`, `custom-openai`, ...). A provider is "connected" when it
     /// has an entry here; disconnect removes the entry.
@@ -192,7 +225,7 @@ impl Default for Settings {
         Self {
             connections: BTreeMap::new(),
             last_provider: None,
-            auto_style_detect: false,
+            auto_style_detect: true,
             ocr_workers: default_ocr_workers(),
             ocr_text_score: default_ocr_text_score(),
             ocr_min_text_height: default_ocr_min_text_height(),
@@ -208,7 +241,9 @@ impl Default for Settings {
             aurora_is_dark: default_aurora_is_dark(),
             aurora_schema: default_aurora_schema(),
             ui_font_size: default_ui_font_size(),
-            auto_sfx_filter: false,
+            auto_sfx_filter: true,
+            auto_inpaint: true,
+            auto_inpaint_model: AutoInpaintModel::default(),
         }
     }
 }
@@ -299,6 +334,8 @@ mod tests {
             aurora_schema: 2,
             ui_font_size: 14,
             auto_sfx_filter: true,
+            auto_inpaint: true,
+            auto_inpaint_model: AutoInpaintModel::Mixed,
         };
         let text = toml::to_string(&settings).unwrap();
         let back: Settings = toml::from_str(&text).unwrap();
@@ -329,6 +366,8 @@ mod tests {
         assert_eq!(back.aurora_schema, 2);
         assert_eq!(back.ui_font_size, 14);
         assert!(back.auto_sfx_filter);
+        assert!(back.auto_inpaint);
+        assert_eq!(back.auto_inpaint_model, AutoInpaintModel::Mixed);
     }
 
     #[test]
@@ -336,7 +375,7 @@ mod tests {
         let back: Settings = toml::from_str("").unwrap();
         assert!(back.connections.is_empty());
         assert_eq!(back.last_provider, None);
-        assert!(!back.auto_style_detect);
+        assert!(back.auto_style_detect);
         assert_eq!(back.ocr_workers, "2");
         assert_eq!(back.ocr_text_score, "0.7");
         assert_eq!(back.ocr_min_text_height, "40");
@@ -352,7 +391,9 @@ mod tests {
         assert!(back.aurora_is_dark);
         assert_eq!(back.aurora_schema, 1);
         assert_eq!(back.ui_font_size, 12);
-        assert!(!back.auto_sfx_filter);
+        assert!(back.auto_sfx_filter);
+        assert!(back.auto_inpaint);
+        assert_eq!(back.auto_inpaint_model, AutoInpaintModel::Mixed);
     }
 
     #[test]

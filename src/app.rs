@@ -24,6 +24,8 @@ use scanlateit_model::{
 use scanlateit_settings::InpaintBackend;
 #[cfg(feature = "inpaint")]
 use scanlateit_model::InpaintPatch;
+#[cfg(feature = "inpaint")]
+use scanlateit_settings::AutoInpaintModel;
 #[cfg(feature = "ocr")]
 use scanlateit_ocr::{self as ocr, Engine, OcrCancellationToken, ParallelEngine};
 #[cfg(feature = "styling")]
@@ -94,6 +96,15 @@ pub enum StylingPaneKind {
     Layers,
 }
 
+#[cfg(feature = "inpaint")]
+#[derive(Debug, Clone)]
+struct AutoInpaintJob {
+    index: usize,
+    id: EntryId,
+    path: String,
+    quad: Quad,
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     /// Frame actions from the custom title bar.
@@ -122,6 +133,14 @@ pub enum Message {
     InpaintEngineReady(Result<InpaintEngine, String>),
     #[cfg(feature = "inpaint")]
     InpaintFinished(usize, Result<Vec<(image::RgbaImage, [f32; 4])>, String>),
+    #[cfg(feature = "inpaint")]
+    AutoInpaintEngineReady(InpaintBackend, Result<InpaintEngine, String>),
+    #[cfg(feature = "inpaint")]
+    AutoInpaintFinished(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4])>, String>),
+    #[cfg(feature = "inpaint")]
+    AutoInpaintLamaBatchFinished(Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4])>, String>)>),
+    #[cfg(all(feature = "styling", feature = "inpaint"))]
+    PipelineStyleDetected(usize, EntryId, Result<(EntryStyle, scanlateit_styling::StylePrediction), String>),
     #[cfg(feature = "styling")]
     StylingEngineReady(Result<StylingEngine, String>),
     #[cfg(feature = "styling")]
@@ -214,6 +233,23 @@ pub struct App {
     /// True while an SFX-filter run is in flight.
     #[cfg(feature = "segment")]
     segment_filtering: bool,
+    /// True while the full post-OCR pipeline (SFX → deferred style → bg-routed inpaint) is running.
+    #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+    pipeline_active: bool,
+    #[cfg(all(feature = "styling", feature = "inpaint"))]
+    pipeline_style_pending: usize,
+    #[cfg(all(feature = "styling", feature = "inpaint"))]
+    pipeline_style_results: Vec<(usize, EntryId, Result<(EntryStyle, scanlateit_styling::StylePrediction), String>, Quad, String)>,
+    #[cfg(feature = "inpaint")]
+    auto_inpaint_pending: usize,
+    #[cfg(feature = "inpaint")]
+    auto_telea_engine: Option<InpaintEngine>,
+    #[cfg(feature = "inpaint")]
+    auto_lama_engine: Option<InpaintEngine>,
+    #[cfg(feature = "inpaint")]
+    pending_auto_telea_jobs: Option<Vec<AutoInpaintJob>>,
+    #[cfg(feature = "inpaint")]
+    pending_auto_lama_jobs: Option<Vec<AutoInpaintJob>>,
     pub(crate) running: bool,
     pub(crate) font: Option<Font>,
     pub(crate) status: String,
@@ -371,6 +407,22 @@ impl App {
             segment_engine: None,
             #[cfg(feature = "segment")]
             segment_filtering: false,
+            #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+            pipeline_active: false,
+            #[cfg(all(feature = "styling", feature = "inpaint"))]
+            pipeline_style_pending: 0,
+            #[cfg(all(feature = "styling", feature = "inpaint"))]
+            pipeline_style_results: Vec::new(),
+            #[cfg(feature = "inpaint")]
+            auto_inpaint_pending: 0,
+            #[cfg(feature = "inpaint")]
+            auto_telea_engine: None,
+            #[cfg(feature = "inpaint")]
+            auto_lama_engine: None,
+            #[cfg(feature = "inpaint")]
+            pending_auto_telea_jobs: None,
+            #[cfg(feature = "inpaint")]
+            pending_auto_lama_jobs: None,
             running: false,
             font: None,
             status: "Idle - open images to begin.".to_string(),
@@ -1597,6 +1649,295 @@ fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
     Task::batch(tasks)
 }
 
+#[cfg(all(feature = "styling", feature = "inpaint"))]
+fn start_pipeline_style_deferred(app: &mut App) -> Task<Message> {
+    let engine_opt = app.styling.engine().cloned();
+    match engine_opt {
+        Some(engine) => start_pipeline_style_jobs(app, engine),
+        None => {
+            app.styling.mark_building();
+            #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+            {
+                app.pipeline_active = true;
+            }
+            app.status = "Loading the styling model...".to_string();
+            Task::perform(async move { StylingEngine::build() }, Message::StylingEngineReady)
+        }
+    }
+}
+
+#[cfg(all(feature = "styling", feature = "inpaint"))]
+fn start_pipeline_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
+    let styling = &app.styling;
+    let jobs: Vec<(usize, EntryId, String, Quad)> = app
+        .images
+        .iter()
+        .enumerate()
+        .flat_map(|(index, image)| {
+            image
+                .project
+                .ocr
+                .visible()
+                .filter(move |entry| !styling.is_done(index, entry.id))
+                .map(move |entry| {
+                    (
+                        index,
+                        entry.id,
+                        image.path.clone(),
+                        image.project.view_quad(entry),
+                    )
+                })
+        })
+        .collect();
+    if jobs.is_empty() {
+        #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+        {
+            if app.pipeline_active {
+                return dispatch_pipeline_inpaint_after_style(app, Vec::new());
+            }
+        }
+        return dispatch_pipeline_inpaint_after_style(app, Vec::new());
+    }
+    for (index, id, _, _) in &jobs {
+        app.styling.mark_done(*index, *id);
+    }
+    app.pipeline_style_pending = jobs.len();
+    app.pipeline_style_results = Vec::with_capacity(jobs.len());
+    #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+    {
+        app.pipeline_active = true;
+    }
+    app.status = format!("Classifying {} entries (deferred for bg-aware inpaint)...", jobs.len());
+    let tasks: Vec<Task<Message>> = jobs
+        .into_iter()
+        .map(|(index, id, path, quad)| {
+            let engine = engine.clone();
+            let quad_clone = quad;
+            Task::perform(
+                async move {
+                    let res = tokio::task::spawn_blocking(move || {
+                        engine.classify_entry_with_prediction(&path, &quad_clone)
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
+                    (index, id, res)
+                },
+                |(index, id, result)| Message::PipelineStyleDetected(index, id, result),
+            )
+        })
+        .collect();
+    Task::batch(tasks)
+}
+
+#[cfg(all(feature = "styling", feature = "inpaint"))]
+fn dispatch_pipeline_inpaint_after_style(
+    app: &mut App,
+    buffered: Vec<(usize, EntryId, Result<(EntryStyle, scanlateit_styling::StylePrediction), String>, Quad, String)>,
+) -> Task<Message> {
+    let results = if buffered.is_empty() && app.pipeline_style_results.is_empty() {
+        Vec::new()
+    } else if !buffered.is_empty() {
+        buffered
+    } else {
+        std::mem::take(&mut app.pipeline_style_results)
+    };
+    let mut telea_jobs: Vec<AutoInpaintJob> = Vec::new();
+    let mut lama_jobs: Vec<AutoInpaintJob> = Vec::new();
+    let effective_model = scanlateit_settings::get(|s| {
+        if !s.auto_style_detect && s.auto_inpaint_model == scanlateit_settings::AutoInpaintModel::Mixed {
+            scanlateit_settings::AutoInpaintModel::Telea
+        } else {
+            s.auto_inpaint_model
+        }
+    });
+    let has_inpaint = scanlateit_settings::get(|s| s.auto_inpaint);
+    if !has_inpaint {
+        app.pipeline_style_pending = 0;
+        #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+        {
+            app.pipeline_active = false;
+        }
+        for (index, id, result, quad, _path) in results {
+            if let Ok((_, pred)) = result {
+                let applied = pred.to_entry_style_for_auto(EntryStyle::default());
+                if let Some(image) = app.images.get_mut(index) {
+                    image.project.set_entry_style(id, applied);
+                    let _ = quad;
+                }
+            }
+        }
+        app.status = "Applied deferred styles (no auto-inpaint).".to_string();
+        return Task::none();
+    }
+    for (index, id, result, quad, path) in results {
+        let (_style, pred) = match result {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[pipeline] style failed for {index}:{id:?}: {e}");
+                continue;
+            }
+        };
+        let applied = pred.to_entry_style_for_auto(EntryStyle::default());
+        if let Some(image) = app.images.get_mut(index) {
+            image.project.set_entry_style(id, applied);
+        }
+        let need = match pred.bg_type {
+            scanlateit_styling::BgType::Solid => None,
+            scanlateit_styling::BgType::Gradient => Some(match effective_model {
+                scanlateit_settings::AutoInpaintModel::Mixed => InpaintBackend::Telea,
+                scanlateit_settings::AutoInpaintModel::Telea => InpaintBackend::Telea,
+                scanlateit_settings::AutoInpaintModel::Lama => InpaintBackend::Lama,
+            }),
+            scanlateit_styling::BgType::Artwork => Some(match effective_model {
+                scanlateit_settings::AutoInpaintModel::Mixed => InpaintBackend::Lama,
+                scanlateit_settings::AutoInpaintModel::Telea => InpaintBackend::Telea,
+                scanlateit_settings::AutoInpaintModel::Lama => InpaintBackend::Lama,
+            }),
+        };
+        if let Some(backend) = need {
+            let job = AutoInpaintJob { index, id, path: path.clone(), quad };
+            match backend {
+                InpaintBackend::Telea => telea_jobs.push(job),
+                InpaintBackend::Lama => lama_jobs.push(job),
+            }
+        }
+    }
+    app.pipeline_style_pending = 0;
+    let mut tasks: Vec<Task<Message>> = Vec::new();
+    if !telea_jobs.is_empty() {
+        tasks.push(dispatch_auto_telea_jobs(app, telea_jobs));
+    }
+    if !lama_jobs.is_empty() {
+        tasks.push(dispatch_auto_lama_jobs(app, lama_jobs));
+    }
+    if tasks.is_empty() {
+        #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+        {
+            app.pipeline_active = false;
+        }
+        app.status = "Pipeline done: styles applied (solid bg, no inpaint needed).".to_string();
+        return Task::none();
+    }
+    Task::batch(tasks)
+}
+
+#[cfg(feature = "inpaint")]
+fn dispatch_auto_telea_jobs(app: &mut App, jobs: Vec<AutoInpaintJob>) -> Task<Message> {
+    if jobs.is_empty() {
+        return Task::none();
+    }
+    let radius = scanlateit_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
+    let cached = app.auto_telea_engine.clone().filter(|e| e.radius() == radius);
+    if let Some(engine) = cached {
+        app.auto_inpaint_pending += jobs.len();
+        app.status = format!("Auto-inpaint (Telea) {} regions in parallel...", jobs.len());
+        let tasks: Vec<Task<Message>> = jobs
+            .into_iter()
+            .map(|job| {
+                let engine = engine.clone();
+                Task::perform(
+                    async move {
+                        let rect = {
+                            let [x0, y0, x1, y1] = job.quad.bounds();
+                            [x0, y0, x1 - x0, y1 - y0]
+                        };
+                        let res = tokio::task::spawn_blocking(move || {
+                            engine.run_blocking(&job.path, rect, &[job.quad])
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")));
+                        (job.index, job.id, res)
+                    },
+                    |(idx, id, res)| Message::AutoInpaintFinished(idx, id, res),
+                )
+            })
+            .collect();
+        Task::batch(tasks)
+    } else {
+        app.pending_auto_telea_jobs = Some(jobs);
+        app.status = "Loading Telea for auto-inpaint...".to_string();
+        Task::perform(
+            async move { InpaintEngine::build(InpaintBackend::Telea, radius) },
+            move |r| Message::AutoInpaintEngineReady(InpaintBackend::Telea, r),
+        )
+    }
+}
+
+#[cfg(feature = "inpaint")]
+fn dispatch_auto_lama_jobs(app: &mut App, jobs: Vec<AutoInpaintJob>) -> Task<Message> {
+    if jobs.is_empty() {
+        return Task::none();
+    }
+    let radius = scanlateit_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
+    let cached = app.auto_lama_engine.clone().filter(|e| e.radius() == radius);
+    if let Some(engine) = cached {
+        app.auto_inpaint_pending += jobs.len();
+        app.status = format!("Auto-inpaint (LaMa) {} regions sequentially...", jobs.len());
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    let mut out: Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4])>, String>)> = Vec::new();
+                    for job in jobs {
+                        let rect = {
+                            let [x0, y0, x1, y1] = job.quad.bounds();
+                            [x0, y0, x1 - x0, y1 - y0]
+                        };
+                        let r = engine.run_blocking(&job.path, rect, &[job.quad]);
+                        out.push((job.index, job.id, r));
+                    }
+                    out
+                })
+                .await
+                .unwrap_or_else(|e| vec![(0, EntryId(0), Err(format!("lama batch cancelled: {e}")))])
+            },
+            Message::AutoInpaintLamaBatchFinished,
+        )
+    } else {
+        app.pending_auto_lama_jobs = Some(jobs);
+        app.status = "Loading LaMa for auto-inpaint...".to_string();
+        Task::perform(
+            async move { InpaintEngine::build(InpaintBackend::Lama, radius) },
+            move |r| Message::AutoInpaintEngineReady(InpaintBackend::Lama, r),
+        )
+    }
+}
+
+#[cfg(feature = "inpaint")]
+fn dispatch_auto_inpaint_solo(app: &mut App, effective_model: scanlateit_settings::AutoInpaintModel) -> Task<Message> {
+    let jobs: Vec<AutoInpaintJob> = app
+        .images
+        .iter()
+        .enumerate()
+        .flat_map(|(index, image)| {
+            image
+                .project
+                .ocr
+                .visible()
+                .map(move |entry| AutoInpaintJob {
+                    index,
+                    id: entry.id,
+                    path: image.path.clone(),
+                    quad: image.project.view_quad(entry),
+                })
+        })
+        .collect();
+    if jobs.is_empty() {
+        return Task::none();
+    }
+    for job in &jobs {
+        if let Some(img) = app.images.get_mut(job.index) {
+            let mut style = img.project.entry_style(job.id);
+            style.bg_color = [0, 0, 0, 0];
+            img.project.set_entry_style(job.id, style);
+        }
+    }
+    match effective_model {
+        scanlateit_settings::AutoInpaintModel::Telea => dispatch_auto_telea_jobs(app, jobs),
+        scanlateit_settings::AutoInpaintModel::Lama => dispatch_auto_lama_jobs(app, jobs),
+        scanlateit_settings::AutoInpaintModel::Mixed => dispatch_auto_telea_jobs(app, jobs),
+    }
+}
+
 #[cfg(feature = "segment")]
 fn start_segment_filter(app: &mut App) -> Task<Message> {
     if app.images.is_empty() {
@@ -1977,7 +2318,28 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         #[cfg(feature = "styling")]
         Message::StylingEngineReady(result) => match result {
             Ok(engine) => {
-                if app.styling.set_engine(engine.clone()) {
+                let is_pipeline = {
+                    #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+                    { app.pipeline_active }
+                    #[cfg(not(all(feature = "styling", feature = "inpaint", feature = "segment")))]
+                    { false }
+                };
+                if is_pipeline {
+                    // Pipeline waiting for engine: start deferred jobs that include BgType
+                    #[cfg(all(feature = "styling", feature = "inpaint"))]
+                    {
+                        if app.styling.set_engine(engine.clone()) {
+                            start_pipeline_style_jobs(app, engine)
+                        } else {
+                            Task::none()
+                        }
+                    }
+                    #[cfg(not(all(feature = "styling", feature = "inpaint")))]
+                    {
+                        let _ = engine;
+                        Task::none()
+                    }
+                } else if app.styling.set_engine(engine.clone()) {
                     start_style_jobs(app, engine)
                 } else {
                     Task::none()
@@ -1986,6 +2348,10 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             Err(e) => {
                 app.styling.fail_build();
                 app.status = e;
+                #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+                {
+                    app.pipeline_active = false;
+                }
                 Task::none()
             }
         },
@@ -1995,6 +2361,135 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 image.project.set_entry_style(id, style);
                 app.styling.mark_done(index, id);
                 app.status = "Applied auto-detected text style.".to_string();
+            }
+            Task::none()
+        }
+        #[cfg(all(feature = "styling", feature = "inpaint"))]
+        Message::PipelineStyleDetected(index, id, result) => {
+            // Collect pipeline style results; quad/path needed for inpaint routing
+            let quad = app
+                .images
+                .get(index)
+                .and_then(|img| img.project.ocr.get(id).map(|e| img.project.view_quad(e)))
+                .unwrap_or(Quad { points: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]] });
+            let path = app.images.get(index).map(|img| img.path.clone()).unwrap_or_default();
+            app.pipeline_style_results.push((index, id, result, quad, path));
+            app.pipeline_style_pending = app.pipeline_style_pending.saturating_sub(1);
+            if app.pipeline_style_pending == 0 {
+                let buffered = std::mem::take(&mut app.pipeline_style_results);
+                return dispatch_pipeline_inpaint_after_style(app, buffered);
+            }
+            Task::none()
+        }
+        #[cfg(feature = "inpaint")]
+        Message::AutoInpaintEngineReady(backend, result) => match result {
+            Ok(engine) => {
+                match backend {
+                    InpaintBackend::Telea => {
+                        app.auto_telea_engine = Some(engine.clone());
+                        if let Some(jobs) = app.pending_auto_telea_jobs.take() {
+                            return dispatch_auto_telea_jobs(app, jobs);
+                        }
+                    }
+                    InpaintBackend::Lama => {
+                        app.auto_lama_engine = Some(engine.clone());
+                        if let Some(jobs) = app.pending_auto_lama_jobs.take() {
+                            return dispatch_auto_lama_jobs(app, jobs);
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Err(e) => {
+                match backend {
+                    InpaintBackend::Telea => { app.pending_auto_telea_jobs = None; }
+                    InpaintBackend::Lama => { app.pending_auto_lama_jobs = None; }
+                }
+                app.status = format!("Auto-inpaint engine failed: {e}");
+                #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+                {
+                    app.pipeline_active = false;
+                }
+                Task::none()
+            }
+        },
+        #[cfg(feature = "inpaint")]
+        Message::AutoInpaintFinished(index, id, result) => {
+            app.auto_inpaint_pending = app.auto_inpaint_pending.saturating_sub(1);
+            match result {
+                Ok(patches) => {
+                    let Some(image) = app.images.get_mut(index) else {
+                        return Task::none();
+                    };
+                    let expected = Some((index, id));
+                    let is_still_selected = app.selected == expected;
+                    let _ = is_still_selected;
+                    for (patch, bounds) in patches {
+                        let (width, height) = (patch.width(), patch.height());
+                        let layer = InpaintLayer {
+                            bounds,
+                            handle: Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())),
+                            width,
+                            height,
+                        };
+                        image.inpaint.push(layer);
+                        image.project.extras.inpaint_patches.push(InpaintPatch { bounds });
+                    }
+                    app.show_inpaint = true;
+                    if app.auto_inpaint_pending == 0 {
+                        #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+                        {
+                            app.pipeline_active = false;
+                        }
+                        app.status = format!("Auto-inpaint done. {}", app.status);
+                    } else {
+                        app.status = format!("Auto-inpaint: {} remaining. {}", app.auto_inpaint_pending, app.status);
+                    }
+                }
+                Err(e) => {
+                    app.status = format!("Auto-inpaint failed for {index}:{id:?}: {e}");
+                    if app.auto_inpaint_pending == 0 {
+                        #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+                        { app.pipeline_active = false; }
+                    }
+                }
+            }
+            Task::none()
+        }
+        #[cfg(feature = "inpaint")]
+        Message::AutoInpaintLamaBatchFinished(batch) => {
+            let mut tasks: Vec<Task<Message>> = Vec::new();
+            for (index, id, result) in batch {
+                app.auto_inpaint_pending = app.auto_inpaint_pending.saturating_sub(1);
+                match result {
+                    Ok(patches) => {
+                        if let Some(image) = app.images.get_mut(index) {
+                            for (patch, bounds) in patches {
+                                let (width, height) = (patch.width(), patch.height());
+                                let layer = InpaintLayer {
+                                    bounds,
+                                    handle: Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())),
+                                    width,
+                                    height,
+                                };
+                                image.inpaint.push(layer);
+                                image.project.extras.inpaint_patches.push(InpaintPatch { bounds });
+                            }
+                            app.show_inpaint = true;
+                        }
+                    }
+                    Err(e) => {
+                        app.status = format!("Auto-inpaint (LaMa) failed for {index}:{id:?}: {e}");
+                    }
+                }
+            }
+            if app.auto_inpaint_pending == 0 {
+                #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+                { app.pipeline_active = false; }
+                app.status = format!("Auto-inpaint (LaMa batch) done. {}", app.status);
+            }
+            if app.auto_inpaint_pending == 0 && tasks.is_empty() {
+                // nothing else
             }
             Task::none()
         }
@@ -2014,6 +2509,12 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         #[cfg(feature = "segment")]
         Message::SegmentFiltered(result) => {
             app.segment_filtering = false;
+            let is_pipeline = {
+                #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+                { app.pipeline_active }
+                #[cfg(not(all(feature = "styling", feature = "inpaint", feature = "segment")))]
+                { false }
+            };
             match result {
                 Ok(to_delete) => {
                     let n = to_delete.len();
@@ -2030,9 +2531,55 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     } else {
                         app.status = format!("SFX filter: no entries removed. {}", app.status);
                     }
+                    if is_pipeline {
+                        // Full pipeline: after SFX, continue to deferred style (which will route inpaint)
+                        let (need_style_inpaint, need_inpaint_solo) = scanlateit_settings::get(|s| {
+                            let need_style = s.auto_style_detect && s.auto_inpaint;
+                            let need_solo = s.auto_inpaint && !s.auto_style_detect;
+                            (need_style, need_solo)
+                        });
+                        if need_style_inpaint {
+                            #[cfg(all(feature = "styling", feature = "inpaint"))]
+                            {
+                                return start_pipeline_style_deferred(app);
+                            }
+                        } else if need_inpaint_solo {
+                            let eff = scanlateit_settings::get(|s| {
+                                if !s.auto_style_detect && s.auto_inpaint_model == scanlateit_settings::AutoInpaintModel::Mixed {
+                                    scanlateit_settings::AutoInpaintModel::Telea
+                                } else {
+                                    s.auto_inpaint_model
+                                }
+                            });
+                            #[cfg(feature = "inpaint")]
+                            {
+                                return dispatch_auto_inpaint_solo(app, eff);
+                            }
+                        } else {
+                            #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+                            {
+                                app.pipeline_active = false;
+                            }
+                            // If no further pipeline stage, but style alone was requested via full pipeline? (full pipeline includes style, so we go to style)
+                            // Check if full pipeline had style but no inpaint (sfx+style)
+                            let need_style_only = scanlateit_settings::get(|s| s.auto_style_detect && !s.auto_inpaint);
+                            if need_style_only {
+                                #[cfg(feature = "styling")]
+                                {
+                                    return classify_entries(app);
+                                }
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
                     app.status = format!("SFX filter failed: {e}");
+                    if is_pipeline {
+                        #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+                        {
+                            app.pipeline_active = false;
+                        }
+                    }
                 }
             }
             Task::none()
@@ -2152,14 +2699,80 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     }
                 }
             }
-            #[cfg_attr(not(any(feature = "styling", feature = "segment")), allow(unused_mut))]
+            #[cfg_attr(not(any(feature = "styling", feature = "segment", feature = "inpaint")), allow(unused_mut))]
             let mut tasks: Vec<Task<Message>> = Vec::new();
             if app.pending == 0 || app.ocr_cancelled {
                 finalize_run(app);
-                // After OCR is done, auto-filter SFX outside balloons via segmentation grid.
-                #[cfg(feature = "segment")]
-                if !app.ocr_cancelled && scanlateit_settings::get(|s| s.auto_sfx_filter) {
-                    tasks.push(start_segment_filter(app));
+                if !app.ocr_cancelled {
+                    let (do_sfx, do_style, do_inpaint, model) = scanlateit_settings::get(|s| {
+                        (s.auto_sfx_filter, s.auto_style_detect, s.auto_inpaint, s.auto_inpaint_model)
+                    });
+                    let effective_model = if !do_style && model == scanlateit_settings::AutoInpaintModel::Mixed {
+                        scanlateit_settings::AutoInpaintModel::Telea
+                    } else {
+                        model
+                    };
+                    // SFX always first when enabled to reduce downstream work (per requirement #2)
+                    if do_sfx {
+                        #[cfg(feature = "segment")]
+                        {
+                            let need_chain = do_style || do_inpaint;
+                            #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+                            {
+                                if need_chain {
+                                    app.pipeline_active = true;
+                                }
+                            }
+                            tasks.push(start_segment_filter(app));
+                            if !need_chain {
+                                // only SFX, no follow-up pipeline; but if style without inpaint and sfx, handler will chain via SegmentFiltered need_style_only
+                            } else if !(do_style && do_inpaint) && !do_style {
+                                // SFX + solo inpaint (style off) → chain handled in SegmentFiltered as need_inpaint_solo
+                                // Already pipeline_active, keep SFX as first step
+                            }
+                            // For full pipeline (SFX+style+inpaint) or SFX+style, further stages are chained in SegmentFiltered
+                        }
+                        #[cfg(not(feature = "segment"))]
+                        {
+                            // No segment feature, fall back to independent tasks
+                            #[cfg(feature = "styling")]
+                            if do_style && !do_inpaint {
+                                tasks.push(classify_entries(app));
+                            }
+                            #[cfg(feature = "inpaint")]
+                            if do_inpaint && !do_style {
+                                tasks.push(dispatch_auto_inpaint_solo(app, effective_model));
+                            }
+                            #[cfg(all(feature = "styling", feature = "inpaint"))]
+                            if do_style && do_inpaint {
+                                tasks.push(start_pipeline_style_deferred(app));
+                            }
+                        }
+                        // If we pushed SFX as pipeline starter, don't also push style/inpaint immediately
+                        // (they will be chained after SFX). Only push independent fallback when segment feature absent.
+                        #[cfg(feature = "segment")]
+                        {
+                            // When SFX is pipeline starter, skip direct style/inpaint pushes here
+                        }
+                    } else {
+                        // No SFX: directly handle style/inpaint
+                        #[cfg(all(feature = "styling", feature = "inpaint"))]
+                        if do_style && do_inpaint {
+                            tasks.push(start_pipeline_style_deferred(app));
+                        }
+                        #[cfg(feature = "styling")]
+                        if do_style && !do_inpaint {
+                            tasks.push(classify_entries(app));
+                        }
+                        #[cfg(feature = "inpaint")]
+                        if do_inpaint && !do_style {
+                            tasks.push(dispatch_auto_inpaint_solo(app, effective_model));
+                        }
+                        #[cfg(feature = "inpaint")]
+                        if do_inpaint && do_style && !do_sfx {
+                            // already handled above as deferred, avoid duplicate
+                        }
+                    }
                 }
             } else {
                 app.status = format!(
@@ -2168,12 +2781,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     app.ocr_runs,
                     app.ocr_total
                 );
-            }
-            // Classify newly appended entries (including those resolved across
-            // a run boundary) when auto-detect is enabled.
-            #[cfg(feature = "styling")]
-            if scanlateit_settings::get(|s| s.auto_style_detect) {
-                tasks.push(classify_entries(app));
             }
             if tasks.is_empty() {
                 Task::none()
