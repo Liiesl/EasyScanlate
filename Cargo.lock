@@ -4589,6 +4589,7 @@ dependencies = [
  "scanlateit-inpaint",
  "scanlateit-model",
  "scanlateit-ocr",
+ "scanlateit-segment",
  "scanlateit-settings",
  "scanlateit-styling",
  "scanlateit-translation",
@@ -4622,6 +4623,16 @@ version = "0.1.0"
 dependencies = [
  "image",
  "rapidocr-core",
+ "scanlateit-model",
+]
+
+[[package]]
+name = "scanlateit-segment"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "ndarray 0.17.2",
+ "ort",
  "scanlateit-model",
 ]
 
@@ -4666,6 +4677,7 @@ dependencies = [
  "neverliie-iced-widgets",
  "open",
  "scanlateit-model",
+ "scanlateit-segment",
  "scanlateit-settings",
  "scanlateit-translation",
  "tokio",

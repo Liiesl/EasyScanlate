@@ -11,6 +11,7 @@ translation = ["dep:scanlateit-translation"]
 ocr = []
 inpaint = []
 styling = []
+segment = ["dep:scanlateit-segment"]
 
 [dependencies]
 iced = { version = "0.14.0", path = "../iced", features = ["image", "canvas", "advanced", "tokio"] }
@@ -20,5 +21,6 @@ neverliie-iced-widgets = { path = "../NeverLiieIcedWidgets" }
 scanlateit-model = { path = "../model" }
 scanlateit-settings = { path = "../settings" }
 scanlateit-translation = { path = "../translation", optional = true }
+scanlateit-segment = { path = "../segment", optional = true }
 tokio = { version = "1", features = ["rt", "time"] }
 open = "5"

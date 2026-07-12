@@ -28,6 +28,8 @@ use scanlateit_model::InpaintPatch;
 use scanlateit_ocr::{self as ocr, Engine, OcrCancellationToken, ParallelEngine};
 #[cfg(feature = "styling")]
 use scanlateit_styling::{Engine as StylingEngine, JobTracker};
+#[cfg(feature = "segment")]
+use scanlateit_segment::Engine as SegmentEngine;
 use scanlateit_ui::scale;
 use scanlateit_ui::translation as translation;
 use scanlateit_ui::color::rgba_to_color;
@@ -58,6 +60,10 @@ const MAIN_AREA_DEFAULT_RATIO: f32 = 0.26;
 /// Default share of the styling panel vs the results panel inside the side pane.
 const STYLING_DEFAULT_RATIO: f32 = 0.36;
 
+/// Default share of the styling inspector vs the inpaint/layers list inside the styling column.
+/// ~70% top (taller), 30% bottom (shorter, not dramatic) – vertically stacked, resizable.
+const STYLING_TOP_RATIO: f32 = 0.70;
+
 /// Transparent gap shown between every top-level component (toolbar / main area / action / styling / results).
 const GAP: f32 = 12.0;
 
@@ -79,6 +85,13 @@ pub enum PaneKind {
 pub enum SidePaneKind {
     Styling,
     Results,
+}
+
+/// The two stacked panes inside the styling column: inspector on top (taller), inpaint/layers list at bottom.
+#[derive(Debug, Clone, Copy)]
+pub enum StylingPaneKind {
+    Inspector,
+    Layers,
 }
 
 #[derive(Debug, Clone)]
@@ -113,6 +126,10 @@ pub enum Message {
     StylingEngineReady(Result<StylingEngine, String>),
     #[cfg(feature = "styling")]
     StyleDetected(usize, EntryId, Result<EntryStyle, String>),
+    #[cfg(feature = "segment")]
+    SegmentEngineReady(Result<SegmentEngine, String>),
+    #[cfg(feature = "segment")]
+    SegmentFiltered(Result<Vec<(usize, EntryId)>, String>),
     FontLoaded,
     /// The boot-time enumeration of installed system fonts as
     /// `(family name, font file path)` pairs.
@@ -191,6 +208,12 @@ pub struct App {
     /// already classified (see [`JobTracker`]).
     #[cfg(feature = "styling")]
     styling: JobTracker,
+    /// Segmentation engine for SFX filtering (manga-mimic grid).
+    #[cfg(feature = "segment")]
+    segment_engine: Option<SegmentEngine>,
+    /// True while an SFX-filter run is in flight.
+    #[cfg(feature = "segment")]
+    segment_filtering: bool,
     pub(crate) running: bool,
     pub(crate) font: Option<Font>,
     pub(crate) status: String,
@@ -275,6 +298,8 @@ pub struct App {
     pub(crate) panes: pane_grid::State<PaneKind>,
     /// The draggable split between the styling panel and the translation/results panel.
     pub(crate) side_panes: pane_grid::State<SidePaneKind>,
+    /// The vertical split inside the styling column: inspector (top, taller) vs layers/inpaint list (bottom).
+    pub(crate) styling_panes: pane_grid::State<StylingPaneKind>,
     /// The custom window frame (title bar) – single-window via `install_latest`.
     pub frame: NativeFrame,
 }
@@ -342,6 +367,10 @@ impl App {
             viewer_scroll: 0.0,
             #[cfg(feature = "styling")]
             styling: JobTracker::new(),
+            #[cfg(feature = "segment")]
+            segment_engine: None,
+            #[cfg(feature = "segment")]
+            segment_filtering: false,
             running: false,
             font: None,
             status: "Idle - open images to begin.".to_string(),
@@ -394,6 +423,14 @@ impl App {
                     .split(pane_grid::Axis::Vertical, styling, SidePaneKind::Results)
                     .expect("side pane split must succeed");
                 panes.resize(split, STYLING_DEFAULT_RATIO);
+                panes
+            },
+            styling_panes: {
+                let (mut panes, inspector) = pane_grid::State::new(StylingPaneKind::Inspector);
+                let (_, split) = panes
+                    .split(pane_grid::Axis::Horizontal, inspector, StylingPaneKind::Layers)
+                    .expect("styling pane split must succeed");
+                panes.resize(split, STYLING_TOP_RATIO);
                 panes
             },
         }
@@ -1560,6 +1597,117 @@ fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
     Task::batch(tasks)
 }
 
+#[cfg(feature = "segment")]
+fn start_segment_filter(app: &mut App) -> Task<Message> {
+    if app.images.is_empty() {
+        return Task::none();
+    }
+    if !scanlateit_settings::get(|s| s.auto_sfx_filter) {
+        return Task::none();
+    }
+    match &app.segment_engine {
+        Some(engine) => {
+            let engine = engine.clone();
+            let dims: Vec<(u32, u32)> = app
+                .images
+                .iter()
+                .map(|img| (img.width as u32, img.height as u32))
+                .collect();
+            let paths: Vec<String> = app.images.iter().map(|img| img.path.clone()).collect();
+            // Snapshot OCR boxes per page (visible entries, view_quad bounds)
+            let ocr_boxes: Vec<Vec<([f32; 4], EntryId)>> = app
+                .images
+                .iter()
+                .map(|img| {
+                    img.project
+                        .ocr
+                        .visible()
+                        .map(|e| (img.project.view_quad(e).bounds(), e.id))
+                        .collect()
+                })
+                .collect();
+            app.segment_filtering = true;
+            app.status = "Filtering SFX via segmentation...".to_string();
+            Task::perform(
+                async move {
+                    let res = tokio::task::spawn_blocking(move || {
+                        run_segment_filter_blocking(&engine, &dims, &paths, &ocr_boxes)
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(format!("segment task cancelled: {e}")));
+                    res
+                },
+                Message::SegmentFiltered,
+            )
+        }
+        None => {
+            app.segment_filtering = true;
+            app.status = "Loading segmentation model...".to_string();
+            Task::perform(async move { SegmentEngine::build() }, Message::SegmentEngineReady)
+        }
+    }
+}
+
+#[cfg(feature = "segment")]
+fn run_segment_filter_blocking(
+    engine: &SegmentEngine,
+    dims: &[(u32, u32)],
+    paths: &[String],
+    ocr_boxes: &[Vec<([f32; 4], EntryId)>],
+) -> Result<Vec<(usize, EntryId)>, String> {
+    use scanlateit_segment::filter::{DetBox, sfx_filter_indexes};
+    use scanlateit_segment::grid::{build_grid_canvas, grid_det_to_page, plan_grids};
+    use scanlateit_segment::SegClass;
+    if dims.is_empty() {
+        return Ok(Vec::new());
+    }
+    let runs = plan_grids(dims);
+    // Load all images for grid building (same as OCR load_rgb)
+    let images: Vec<image::RgbImage> = paths
+        .iter()
+        .map(|p| scanlateit_ocr::load_rgb(p).unwrap_or_else(|| image::RgbImage::new(1, 1)))
+        .collect();
+    let mut to_delete: Vec<(usize, EntryId)> = Vec::new();
+    // For each grid run, build canvas and detect
+    for run in &runs {
+        let canvas = build_grid_canvas(&images, run);
+        let dets = engine.detect_canvas(&canvas).map_err(|e| format!("segment detect failed: {e}"))?;
+        // Map dets to per-page
+        let mut balloons_per_page: Vec<Vec<DetBox>> = vec![Vec::new(); dims.len()];
+        let mut sfx_per_page: Vec<Vec<DetBox>> = vec![Vec::new(); dims.len()];
+        for det in dets {
+            if let Some((page, bbox)) = grid_det_to_page(det.bbox, run, dims) {
+                let db = DetBox {
+                    bbox,
+                    confidence: det.confidence,
+                };
+                match det.class {
+                    SegClass::Balloon => balloons_per_page[page].push(db),
+                    SegClass::Onomatopoeia => sfx_per_page[page].push(db),
+                    _ => {}
+                }
+            }
+        }
+        // For each page touched by this run, run filter
+        let mut touched_pages: Vec<usize> = run.cols.iter().flat_map(|c| c.pages.clone()).collect();
+        touched_pages.sort_unstable();
+        touched_pages.dedup();
+        for page in touched_pages {
+            if page >= ocr_boxes.len() {
+                continue;
+            }
+            let entries = &ocr_boxes[page];
+            let bboxes: Vec<[f32; 4]> = entries.iter().map(|(bb, _)| *bb).collect();
+            let idxs = sfx_filter_indexes(&bboxes, &balloons_per_page[page], &sfx_per_page[page]);
+            for idx in idxs {
+                let (_, id) = entries[idx];
+                to_delete.push((page, id));
+            }
+        }
+    }
+    Ok(to_delete)
+}
+
 /// Appends per-page entries to their projects, updating `ocr_total`. The
 /// assembly itself (resolve, dedup, distribute) lives in [`ocr::assemble`].
 #[cfg(feature = "ocr")]
@@ -1842,6 +1990,45 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        #[cfg(feature = "segment")]
+        Message::SegmentEngineReady(result) => match result {
+            Ok(engine) => {
+                app.segment_engine = Some(engine.clone());
+                app.segment_filtering = false;
+                start_segment_filter(app)
+            }
+            Err(e) => {
+                app.segment_filtering = false;
+                app.status = e;
+                Task::none()
+            }
+        },
+        #[cfg(feature = "segment")]
+        Message::SegmentFiltered(result) => {
+            app.segment_filtering = false;
+            match result {
+                Ok(to_delete) => {
+                    let n = to_delete.len();
+                    for (idx, id) in to_delete {
+                        if let Some(img) = app.images.get_mut(idx) {
+                            img.project.delete_entry(id);
+                            if app.selected == Some((idx, id)) {
+                                app.selected = None;
+                            }
+                        }
+                    }
+                    if n > 0 {
+                        app.status = format!("SFX filter removed {n} entry(s). {}", app.status);
+                    } else {
+                        app.status = format!("SFX filter: no entries removed. {}", app.status);
+                    }
+                }
+                Err(e) => {
+                    app.status = format!("SFX filter failed: {e}");
+                }
+            }
+            Task::none()
+        }
         #[cfg(feature = "inpaint")]
         Message::InpaintFinished(index, result) => {
             app.inpainting = false;
@@ -1941,10 +2128,15 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     }
                 }
             }
-            #[cfg_attr(not(feature = "styling"), allow(unused_mut))]
+            #[cfg_attr(not(any(feature = "styling", feature = "segment")), allow(unused_mut))]
             let mut tasks: Vec<Task<Message>> = Vec::new();
             if app.pending == 0 || app.ocr_cancelled {
                 finalize_run(app);
+                // After OCR is done, auto-filter SFX outside balloons via segmentation grid.
+                #[cfg(feature = "segment")]
+                if !app.ocr_cancelled && scanlateit_settings::get(|s| s.auto_sfx_filter) {
+                    tasks.push(start_segment_filter(app));
+                }
             } else {
                 app.status = format!(
                     "OCR in progress: {} of {} run(s) done ({} line(s)).",
@@ -2669,6 +2861,10 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.side_panes.resize(resized.split, resized.ratio);
             Task::none()
         }
+        Message::Ui(UiEvent::StylingPaneResized(resized)) => {
+            app.styling_panes.resize(resized.split, resized.ratio);
+            Task::none()
+        }
         Message::Ui(UiEvent::SettingsOpen) => {
             app.settings_open = true;
             Task::none()
@@ -2878,17 +3074,57 @@ pub fn view(app: &App) -> Element<'_, Message> {
                     pane_grid::PaneGrid::new(&app.side_panes, |_, inner, _| {
                         pane_grid::Content::new(match inner {
                             SidePaneKind::Styling => {
-                                let el: Element<'_, UiEvent> = iced::widget::container(
-                                    panel::styling::view(app),
+                                // Vertical stack inside the styling column: inspector (top, taller) + layers/inpaint (bottom, shorter).
+                                // Each has its own card BG and the gap between them shows the aurora.
+                                let el: Element<'_, UiEvent> = pane_grid::PaneGrid::new(
+                                    &app.styling_panes,
+                                    |_, kind, _| {
+                                        let body: Element<'_, UiEvent> = match kind {
+                                            StylingPaneKind::Inspector => {
+                                                iced::widget::container(panel::styling::view(app))
+                                                    .padding(scale::s(10.0))
+                                                    .width(Length::Fill)
+                                                    .height(Length::Fill)
+                                                    .style(|_theme| {
+                                                        iced::widget::container::Style {
+                                                            background: Some(
+                                                                panel::PANEL_BG.into(),
+                                                            ),
+                                                            border: iced::Border::default()
+                                                                .rounded(scale::s(CARD_RADIUS)),
+                                                            ..Default::default()
+                                                        }
+                                                    })
+                                                    .into()
+                                            }
+                                            StylingPaneKind::Layers => {
+                                                iced::widget::container(
+                                                    panel::inpaint::view(app),
+                                                )
+                                                .padding(scale::s(10.0))
+                                                .width(Length::Fill)
+                                                .height(Length::Fill)
+                                                .style(|_theme| {
+                                                    iced::widget::container::Style {
+                                                        background: Some(
+                                                            panel::PANEL_BG.into(),
+                                                        ),
+                                                        border: iced::Border::default()
+                                                            .rounded(scale::s(CARD_RADIUS)),
+                                                        ..Default::default()
+                                                    }
+                                                })
+                                                .into()
+                                            }
+                                        };
+                                        pane_grid::Content::new(body)
+                                    },
                                 )
-                                .padding(scale::s(10.0))
+                                .spacing(scale::s(GAP))
+                                .min_size(scale::s(90.0))
+                                .on_resize(scale::s(GAP), UiEvent::StylingPaneResized)
                                 .width(Length::Fill)
                                 .height(Length::Fill)
-                                .style(|_theme| iced::widget::container::Style {
-                                    background: Some(panel::PANEL_BG.into()),
-                                    border: iced::Border::default().rounded(scale::s(CARD_RADIUS)),
-                                    ..Default::default()
-                                })
                                 .into();
                                 el
                             }

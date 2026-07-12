@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["model", "inpaint", "ocr", "styling", "translation", "ui", "settings", "NeverLiieIcedWidgets"]
+members = ["model", "inpaint", "ocr", "styling", "translation", "ui", "settings", "segment", "NeverLiieIcedWidgets"]
 resolver = "3"
 exclude = ["iced", "rapidocr-core", "NeverLiieIcedWidgets/examples"]
 
@@ -13,11 +13,12 @@ exclude = ["iced", "rapidocr-core", "NeverLiieIcedWidgets/examples"]
 # --features test-ui`) skips that crate entirely: no ort (ocr/inpaint/styling)
 # and no rig (translation) are compiled or linked. Disabled subsystems show a
 # "unavailable in this build" status instead of running.
-default = ["ocr", "inpaint", "styling", "translation"]
+default = ["ocr", "inpaint", "styling", "translation", "segment"]
 ocr = ["dep:scanlateit-ocr", "scanlateit-ui/ocr"]
 inpaint = ["dep:scanlateit-inpaint", "scanlateit-ui/inpaint"]
 styling = ["dep:scanlateit-styling", "scanlateit-ui/styling"]
 translation = ["dep:scanlateit-translation", "scanlateit-ui/translation"]
+segment = ["dep:scanlateit-segment", "scanlateit-ui/segment"]
 # Convenience aliases: UI-only iteration (fake white image + fake OCR entries
 # at boot, no ML backends), or exactly one real subsystem at a time.
 test-ui = []
@@ -25,6 +26,7 @@ test-ocr = ["ocr"]
 test-inpaint = ["inpaint"]
 test-styling = ["styling"]
 test-translation = ["translation"]
+test-segment = ["segment"]
 
 [dependencies]
 iced = { version = "0.14.0", path = "iced", features = ["image", "canvas", "advanced", "tokio"] }
@@ -38,6 +40,7 @@ scanlateit-inpaint = { path = "inpaint", optional = true }
 scanlateit-ocr = { path = "ocr", optional = true }
 scanlateit-styling = { path = "styling", optional = true }
 scanlateit-translation = { path = "translation", optional = true }
+scanlateit-segment = { path = "segment", optional = true }
 scanlateit-ui = { path = "ui", default-features = false }
 tokio = { version = "1", features = ["rt", "time"] }
 fontdb = "0.24"

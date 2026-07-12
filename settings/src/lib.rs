@@ -130,6 +130,10 @@ pub struct Settings {
     /// `OUTER_PADDING`, modal shell, viewer constants) stays fixed.
     #[serde(default = "default_ui_font_size")]
     pub ui_font_size: u32,
+    /// When enabled, OCR entries that overlap SFX outside balloons are
+    /// auto-removed via the segmentation model (manga-mimic grid).
+    #[serde(default)]
+    pub auto_sfx_filter: bool,
     /// Stored translation connections, keyed by provider id (`openai`,
     /// `deepseek`, `custom-openai`, ...). A provider is "connected" when it
     /// has an entry here; disconnect removes the entry.
@@ -159,6 +163,7 @@ impl Default for Settings {
             aurora_is_dark: default_aurora_is_dark(),
             aurora_schema: default_aurora_schema(),
             ui_font_size: default_ui_font_size(),
+            auto_sfx_filter: false,
         }
     }
 }
@@ -243,6 +248,7 @@ mod tests {
             aurora_is_dark: false,
             aurora_schema: 2,
             ui_font_size: 14,
+            auto_sfx_filter: true,
         };
         let text = toml::to_string(&settings).unwrap();
         let back: Settings = toml::from_str(&text).unwrap();
@@ -267,6 +273,7 @@ mod tests {
         assert!(!back.aurora_is_dark);
         assert_eq!(back.aurora_schema, 2);
         assert_eq!(back.ui_font_size, 14);
+        assert!(back.auto_sfx_filter);
     }
 
     #[test]
@@ -285,6 +292,7 @@ mod tests {
         assert!(back.aurora_is_dark);
         assert_eq!(back.aurora_schema, 1);
         assert_eq!(back.ui_font_size, 12);
+        assert!(!back.auto_sfx_filter);
     }
 
     #[test]

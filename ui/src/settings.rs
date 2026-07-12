@@ -513,6 +513,26 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                         .into(),
                 );
             }
+            #[cfg(feature = "segment")]
+            {
+                let auto = scanlateit_settings::get(|s| s.auto_sfx_filter);
+                items.push(
+                    text(
+                        "Remove SFX outside balloons via segmentation (manga-mimic grid, 1:6 col). \
+                         True SFX lives outside any balloon; SFX inside a balloon is a hallucination and ignored."
+                    )
+                    .size(scale::s(12.0))
+                    .color(MUTED_FG)
+                    .into(),
+                );
+                items.push(
+                    checkbox(auto)
+                        .label("Auto-filter SFX")
+                        .text_size(scale::s(12.0))
+                        .on_toggle(|v| set(move |s| s.auto_sfx_filter = v))
+                        .into(),
+                );
+            }
             #[cfg(feature = "ocr")]
             {
                 let workers = scanlateit_settings::get(|s| s.ocr_workers.clone());

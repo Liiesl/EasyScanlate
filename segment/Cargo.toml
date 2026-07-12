@@ -1,0 +1,10 @@
+[package]
+name = "scanlateit-segment"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+scanlateit-model = { path = "../model" }
+image = "0.25"
+ndarray = "0.17"
+ort = "2.0.0-rc.12"

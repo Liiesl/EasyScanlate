@@ -204,6 +204,8 @@ pub enum UiEvent {
     PanelResized(pane_grid::ResizeEvent),
     /// The user dragged the divider between the styling and the translation/results panels.
     SidePanelResized(pane_grid::ResizeEvent),
+    /// The user dragged the divider between the styling inspector and the inpaint/layers panel.
+    StylingPaneResized(pane_grid::ResizeEvent),
     /// Open the settings modal from the toolbar.
     SettingsOpen,
     /// Open the settings modal directly on the given tab (used by the
