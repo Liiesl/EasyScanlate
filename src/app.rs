@@ -1767,8 +1767,11 @@ fn finalize_run(app: &mut App) {
     app.running = false;
     app.cancel = None;
     // Drop the pipeline so its worker threads (and ONNX sessions) exit.
-    // The next OCR run builds a fresh one.
+    // The next OCR run builds a fresh one. Also drop the fallback engine so
+    // a changed OCR setting (min confidence, bbox height, merge, max side)
+    // is honored on the next run without requiring an app restart.
     app.pipeline = None;
+    app.engine = None;
     app.status = if app.ocr_cancelled {
         "OCR cancelled.".to_string()
     } else if app.ocr_failed > 0 {
@@ -1880,20 +1883,25 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             );
             let mut tasks: Vec<Task<Message>> = Vec::new();
             if app.pipeline.is_none() {
-                let workers =
-                    scanlateit_settings::get(|s| s.ocr_workers.parse::<usize>().unwrap_or(2))
-                        .max(1);
+                let (workers, cfg) = scanlateit_settings::get(|s| {
+                    let workers = s.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
+                    let cfg = ocr::config_from_strings(&s.ocr_text_score, &s.ocr_max_side_len);
+                    (workers, cfg)
+                });
                 app.status = format!(
                     "Loading the OCR engine ({workers} detection worker(s))..."
                 );
                 tasks.push(Task::perform(
-                    async move { ParallelEngine::build(workers) },
+                    async move { ParallelEngine::build_with_config(cfg, workers) },
                     Message::ParallelEngineReady,
                 ));
             }
             if app.engine.is_none() {
+                let cfg = scanlateit_settings::get(|s| {
+                    ocr::config_from_strings(&s.ocr_text_score, &s.ocr_max_side_len)
+                });
                 tasks.push(Task::perform(
-                    async move { Engine::build() },
+                    async move { Engine::build_with_config(cfg) },
                     Message::EngineReady,
                 ));
             }
@@ -2101,7 +2109,20 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                             .collect();
                         (quads, app.images[page].width as u32, offset)
                     });
-                    let run_result = ocr::assemble(
+                    let (merge_cfg, min_h, max_h) = scanlateit_settings::get(|s| {
+                        (
+                            ocr::MergeConfig::from_threshold_str(&s.ocr_merge_threshold),
+                            s.ocr_min_text_height
+                                .trim()
+                                .parse::<f32>()
+                                .unwrap_or(40.0),
+                            s.ocr_max_text_height
+                                .trim()
+                                .parse::<f32>()
+                                .unwrap_or(100.0),
+                        )
+                    });
+                    let run_result = ocr::assemble_with_config(
                         index,
                         width,
                         margin_top,
@@ -2110,6 +2131,9 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                         &app.ocr_dims,
                         app.held_boundary.take(),
                         prev,
+                        merge_cfg,
+                        min_h,
+                        max_h,
                     );
                     app.held_boundary = run_result.held;
                     commit_per_page(app, run_result.per_page);

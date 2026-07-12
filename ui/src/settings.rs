@@ -555,6 +555,118 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                         .color(MUTED_FG)
                         .into(),
                 );
+                // ── Configurable OCR thresholds ──────────────────────────
+                let (text_score, min_bbox_h, max_bbox_h, max_side, merge_thr) =
+                    scanlateit_settings::get(|s| {
+                        (
+                            s.ocr_text_score.clone(),
+                            s.ocr_min_text_height.clone(),
+                            s.ocr_max_text_height.clone(),
+                            s.ocr_max_side_len.clone(),
+                            s.ocr_merge_threshold.clone(),
+                        )
+                    });
+                items.push(
+                    text("OCR tuning — changes apply on the next OCR run.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG)
+                        .into(),
+                );
+                items.push(
+                    row![
+                        container(text("Min confidence").size(scale::s(12.0)).color(MUTED_FG))
+                            .width(Length::Fixed(scale::s(150.0))),
+                        text_input("0.7", &text_score)
+                            .on_input(|input| set(move |s| s.ocr_text_score = input.clone()))
+                            .padding(scale::s(4.0))
+                            .size(scale::s(12.0))
+                            .width(Length::Fixed(scale::s(64.0))),
+                    ]
+                    .spacing(scale::s(6.0))
+                    .into(),
+                );
+                items.push(
+                    text("Minimum recognition confidence 0.0–1.0 (text_score). Lower keeps more lines.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG)
+                        .into(),
+                );
+                items.push(
+                    row![
+                        container(text("Minimum Text Height").size(scale::s(12.0)).color(MUTED_FG))
+                            .width(Length::Fixed(scale::s(150.0))),
+                        text_input("40", &min_bbox_h)
+                            .on_input(|input| set(move |s| s.ocr_min_text_height = input.clone()))
+                            .padding(scale::s(4.0))
+                            .size(scale::s(12.0))
+                            .width(Length::Fixed(scale::s(64.0))),
+                    ]
+                    .spacing(scale::s(6.0))
+                    .into(),
+                );
+                items.push(
+                    text("Minimum Text (bbox) Height filter (px). Drops boxes shorter than this.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG)
+                        .into(),
+                );
+                items.push(
+                    row![
+                        container(text("Maximum Text Height").size(scale::s(12.0)).color(MUTED_FG))
+                            .width(Length::Fixed(scale::s(150.0))),
+                        text_input("100", &max_bbox_h)
+                            .on_input(|input| set(move |s| s.ocr_max_text_height = input.clone()))
+                            .padding(scale::s(4.0))
+                            .size(scale::s(12.0))
+                            .width(Length::Fixed(scale::s(64.0))),
+                    ]
+                    .spacing(scale::s(6.0))
+                    .into(),
+                );
+                items.push(
+                    text("Maximum Text (bbox) Height filter (px). Drops boxes taller than this.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG)
+                        .into(),
+                );
+                items.push(
+                    row![
+                        container(text("Merge Distance Threshold").size(scale::s(12.0)).color(MUTED_FG))
+                            .width(Length::Fixed(scale::s(150.0))),
+                        text_input("0.5", &merge_thr)
+                            .on_input(|input| set(move |s| s.ocr_merge_threshold = input.clone()))
+                            .padding(scale::s(4.0))
+                            .size(scale::s(12.0))
+                            .width(Length::Fixed(scale::s(64.0))),
+                    ]
+                    .spacing(scale::s(6.0))
+                    .into(),
+                );
+                items.push(
+                    text("Merge Distance Threshold — gap as ratio of height (0.0–2.0, 0.5 = 50% of height).")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG)
+                        .into(),
+                );
+                items.push(
+                    row![
+                        container(text("Max side len").size(scale::s(12.0)).color(MUTED_FG))
+                            .width(Length::Fixed(scale::s(150.0))),
+                        text_input("2000", &max_side)
+                            .on_input(|input| set(move |s| s.ocr_max_side_len = input.clone()))
+                            .padding(scale::s(4.0))
+                            .size(scale::s(12.0))
+                            .width(Length::Fixed(scale::s(64.0))),
+                    ]
+                    .spacing(scale::s(6.0))
+                    .into(),
+                );
+                items.push(
+                    text("Max side len — max longer side before resize (max_side_len, px). Larger keeps more detail but uses more RAM.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG)
+                        .into(),
+                );
             }
             #[cfg(feature = "inpaint")]
             {

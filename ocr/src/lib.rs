@@ -50,7 +50,15 @@ impl fmt::Debug for Engine {
 
 impl Engine {
     pub fn build() -> Result<Self, String> {
-        RapidOcr::new(config())
+        Self::build_with_config(config())
+    }
+
+    /// Builds the engine with an explicit [`RapidOcrConfig`]. Callers that
+    /// read OCR tunables from `scanlateit_settings` should construct the config
+    /// via [`config_with`] and pass it here so the engine reflects the user's
+    /// settings.
+    pub fn build_with_config(cfg: RapidOcrConfig) -> Result<Self, String> {
+        RapidOcr::new(cfg)
             .map(|ocr| Self(Arc::new(Mutex::new(ocr))))
             .map_err(|e| format!("Engine init failed: {e}"))
     }
@@ -118,7 +126,11 @@ impl ParallelEngine {
     /// thread per session. Each session uses a single ONNX Runtime intra-op
     /// thread, so the whole pipeline fits a modest CPU.
     pub fn build(workers: usize) -> Result<Self, String> {
-        let cfg = config();
+        Self::build_with_config(config(), workers)
+    }
+
+    /// Builds the parallel pipeline with an explicit [`RapidOcrConfig`].
+    pub fn build_with_config(cfg: RapidOcrConfig, workers: usize) -> Result<Self, String> {
         let inference = InferenceOptions {
             intra_threads: 1,
             inter_threads: 1,
@@ -168,17 +180,33 @@ impl ParallelEngine {
     }
 }
 
-fn config() -> RapidOcrConfig {
+pub fn config() -> RapidOcrConfig {
+    config_with(0.5, 2000)
+}
+
+/// Builds a [`RapidOcrConfig`] with the given tunables, clamped to valid
+/// ranges. `text_score` is min confidence (0..1), `max_side_len` is the
+/// "max side len (max longer side before resize)" knob. Other pipeline sizes
+/// stay at defaults (30).
+pub fn config_with(text_score: f32, max_side_len: u32) -> RapidOcrConfig {
     let model_dir = PathBuf::from(MODEL_DIR);
+    // Clamp to valid ranges; rapidocr_core::config::RapidOcrConfig::validate
+    // would reject 0, so we sanitize here.
+    let text_score = if text_score.is_finite() {
+        text_score.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
+    let max_side = max_side_len.max(1);
     RapidOcrConfig {
         pipeline: PipelineConfig::without_cls(),
         inference: InferenceOptions {
             intra_threads: 4,
             ..Default::default()
         },
-        text_score: 0.5,
+        text_score,
         min_side_len: 30,
-        max_side_len: 2000,
+        max_side_len: max_side,
         min_height: 30,
         width_height_ratio: 8.0,
         det: Some(DetConfig {
@@ -204,6 +232,14 @@ fn config() -> RapidOcrConfig {
     }
 }
 
+/// Parses OCR tunables from raw settings strings (surviving half-typing) and
+/// builds a [`RapidOcrConfig`] with fallbacks to defaults.
+pub fn config_from_strings(text_score_str: &str, max_side_str: &str) -> RapidOcrConfig {
+    let text_score = text_score_str.trim().parse::<f32>().unwrap_or(0.5);
+    let max_side = max_side_str.trim().parse::<u32>().unwrap_or(2000);
+    config_with(text_score, max_side)
+}
+
 /// Tuning for merging nearby OCR text boxes into one entry.
 ///
 /// Every margin is a ratio of the box's height, so the grouping is invariant
@@ -223,6 +259,61 @@ impl Default for MergeConfig {
             expand_x: 0.5,
             expand_y: 0.5,
         }
+    }
+}
+
+impl MergeConfig {
+    /// Builds a merge config from a single threshold ratio (0.0..2.0) applied
+    /// to both axes. Clamped to avoid degenerate or huge expansions.
+    pub fn from_threshold(threshold: f32) -> Self {
+        let t = if threshold.is_finite() {
+            threshold.clamp(0.0, 2.0)
+        } else {
+            0.5
+        };
+        Self {
+            expand_x: t,
+            expand_y: t,
+        }
+    }
+
+    /// Parses threshold from a settings string, falling back to 0.5.
+    pub fn from_threshold_str(s: &str) -> Self {
+        let t = s.trim().parse::<f32>().unwrap_or(0.5);
+        Self::from_threshold(t)
+    }
+}
+
+/// Filters OCR lines by bbox height (filter). `min_height` and `max_height`
+/// are in canvas pixels (bbox height = y1 - y0). Lines outside [min,max] are
+/// dropped. Use 0 and large (10000) to disable (ocr crate default).
+pub fn filter_by_bbox_height(lines: Vec<OcrLine>, min_height: f32, max_height: f32) -> Vec<OcrLine> {
+    let min_h = if min_height.is_finite() { min_height.max(0.0) } else { 0.0 };
+    let max_h = if max_height.is_finite() { max_height.max(0.0) } else { 10000.0 };
+    if min_h <= 0.0 && max_h >= 10000.0 {
+        return lines;
+    }
+    lines
+        .into_iter()
+        .filter(|line| {
+            let [_, y0, _, y1] = box_bounds(&line.bbox);
+            let h = (y1 - y0).max(0.0);
+            h >= min_h && h <= max_h
+        })
+        .collect()
+}
+
+/// Parses bbox height thresholds from settings strings, falling back to
+/// permissive defaults (0 and 10000) for ocr crate.
+/// App side defaults (0.7/40/100) are in `scanlateit_settings`.
+pub fn parse_bbox_heights(min_str: &str, max_str: &str) -> (f32, f32) {
+    let min_h = min_str.trim().parse::<f32>().unwrap_or(0.0);
+    let max_h = max_str.trim().parse::<f32>().unwrap_or(10000.0);
+    // If user swapped, correct.
+    if min_h > max_h && max_h > 0.0 {
+        (max_h, min_h)
+    } else {
+        (min_h, max_h)
     }
 }
 
@@ -572,11 +663,50 @@ pub fn assemble(
     held: Option<BoundaryState>,
     prev: Option<(Vec<Quad>, u32, u32)>,
 ) -> RunResult {
+    assemble_with_merge(
+        index, width, margin_top, lines, plans, dims, held, prev, MergeConfig::default(),
+    )
+}
+
+/// Like [`assemble`] but with an explicit [`MergeConfig`] (threshold) so the
+/// caller can honor the user's `ocr_merge_threshold` setting.
+pub fn assemble_with_merge(
+    index: usize,
+    width: u32,
+    margin_top: u32,
+    lines: Vec<OcrLine>,
+    plans: &[RunPlan],
+    dims: &[(u32, u32)],
+    held: Option<BoundaryState>,
+    prev: Option<(Vec<Quad>, u32, u32)>,
+    merge_cfg: MergeConfig,
+) -> RunResult {
+    assemble_with_config(
+        index, width, margin_top, lines, plans, dims, held, prev, merge_cfg, 0.0, 10000.0,
+    )
+}
+
+/// Like [`assemble_with_merge`] but also filters by bbox height. `min_bbox_height`
+/// and `max_bbox_height` are the Minimum/Maximum Text (bbox) Height filters.
+pub fn assemble_with_config(
+    index: usize,
+    width: u32,
+    margin_top: u32,
+    lines: Vec<OcrLine>,
+    plans: &[RunPlan],
+    dims: &[(u32, u32)],
+    held: Option<BoundaryState>,
+    prev: Option<(Vec<Quad>, u32, u32)>,
+    merge_cfg: MergeConfig,
+    min_bbox_height: f32,
+    max_bbox_height: f32,
+) -> RunResult {
     let run = plans[index];
     let run_dims: Vec<(usize, u32, u32)> = (run.page_start..=run.page_end)
         .map(|i| (i, dims[i].0, dims[i].1))
         .collect();
-    let merged = merge(lines, MergeConfig::default());
+    let filtered = filter_by_bbox_height(lines, min_bbox_height, max_bbox_height);
+    let merged = merge(filtered, merge_cfg);
     let (resolved, kept) = match &held {
         Some(state) => {
             let transformed = transform_candidates(

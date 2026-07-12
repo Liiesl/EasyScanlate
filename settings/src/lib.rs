@@ -40,6 +40,26 @@ fn default_ocr_workers() -> String {
     "2".to_string()
 }
 
+fn default_ocr_text_score() -> String {
+    "0.7".to_string()
+}
+
+fn default_ocr_min_text_height() -> String {
+    "40".to_string()
+}
+
+fn default_ocr_max_text_height() -> String {
+    "100".to_string()
+}
+
+fn default_ocr_max_side_len() -> String {
+    "2000".to_string()
+}
+
+fn default_ocr_merge_threshold() -> String {
+    "0.5".to_string()
+}
+
 fn default_ui_font_size() -> u32 {
     12
 }
@@ -101,6 +121,26 @@ pub struct Settings {
     /// starts.
     #[serde(default = "default_ocr_workers")]
     pub ocr_workers: String,
+    /// Minimum accepted recognition confidence (0.0..1.0). Raw string to survive
+    /// half-typing; parsed (fallback 0.5) when OCR starts.
+    #[serde(default = "default_ocr_text_score")]
+    pub ocr_text_score: String,
+    /// Minimum Text bbox height filter (px). Lines with bbox height < this are
+    /// dropped. Raw string; parsed (fallback 40).
+    #[serde(default = "default_ocr_min_text_height")]
+    pub ocr_min_text_height: String,
+    /// Maximum Text bbox height filter (px). Lines with bbox height > this are
+    /// dropped. Raw string; parsed (fallback 100).
+    #[serde(default = "default_ocr_max_text_height")]
+    pub ocr_max_text_height: String,
+    /// Maximum image side length before detection (max_side_len, longer side
+    /// before resize). Raw string; parsed (fallback 2000).
+    #[serde(default = "default_ocr_max_side_len")]
+    pub ocr_max_side_len: String,
+    /// Merge distance threshold as ratio of box height (0.0..2.0) applied to
+    /// both axes. Raw string; parsed (fallback 0.5).
+    #[serde(default = "default_ocr_merge_threshold")]
+    pub ocr_merge_threshold: String,
     /// When enabled, the translation model picker only lists free models.
     #[serde(default)]
     pub free_models_only: bool,
@@ -154,6 +194,11 @@ impl Default for Settings {
             last_provider: None,
             auto_style_detect: false,
             ocr_workers: default_ocr_workers(),
+            ocr_text_score: default_ocr_text_score(),
+            ocr_min_text_height: default_ocr_min_text_height(),
+            ocr_max_text_height: default_ocr_max_text_height(),
+            ocr_max_side_len: default_ocr_max_side_len(),
+            ocr_merge_threshold: default_ocr_merge_threshold(),
             free_models_only: false,
             hidden_models: BTreeMap::new(),
             inpaint_backend: InpaintBackend::default(),
@@ -236,6 +281,11 @@ mod tests {
             last_provider: Some("deepseek".to_string()),
             auto_style_detect: true,
             ocr_workers: "3".to_string(),
+            ocr_text_score: "0.7".to_string(),
+            ocr_min_text_height: "12".to_string(),
+            ocr_max_text_height: "500".to_string(),
+            ocr_max_side_len: "3000".to_string(),
+            ocr_merge_threshold: "0.8".to_string(),
             free_models_only: true,
             hidden_models: BTreeMap::from([(
                 "deepseek".to_string(),
@@ -264,6 +314,11 @@ mod tests {
         assert_eq!(back.last_provider.as_deref(), Some("deepseek"));
         assert!(back.auto_style_detect);
         assert_eq!(back.ocr_workers, "3");
+        assert_eq!(back.ocr_text_score, "0.7");
+        assert_eq!(back.ocr_min_text_height, "12");
+        assert_eq!(back.ocr_max_text_height, "500");
+        assert_eq!(back.ocr_max_side_len, "3000");
+        assert_eq!(back.ocr_merge_threshold, "0.8");
         assert!(back.free_models_only);
         assert!(back.hidden_models["deepseek"].contains("deepseek-reasoner"));
         assert_eq!(back.inpaint_backend, InpaintBackend::Lama);
@@ -283,6 +338,11 @@ mod tests {
         assert_eq!(back.last_provider, None);
         assert!(!back.auto_style_detect);
         assert_eq!(back.ocr_workers, "2");
+        assert_eq!(back.ocr_text_score, "0.7");
+        assert_eq!(back.ocr_min_text_height, "40");
+        assert_eq!(back.ocr_max_text_height, "100");
+        assert_eq!(back.ocr_max_side_len, "2000");
+        assert_eq!(back.ocr_merge_threshold, "0.5");
         assert!(!back.free_models_only);
         assert!(back.hidden_models.is_empty());
         assert_eq!(back.inpaint_backend, InpaintBackend::Telea);
