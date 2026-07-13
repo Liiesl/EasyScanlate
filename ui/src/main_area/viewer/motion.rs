@@ -3,6 +3,7 @@ use iced::{Point, Rectangle, Size};
 use scanlateit_model::{EntryId, Quad};
 
 use crate::main_area::geometry::order_quad;
+use crate::scale;
 
 use super::constants::{
     HANDLE_SIZE, MIN_BOX_EDGE, ROTATE_STEM, TOOLBAR_BTN_PAD, TOOLBAR_GAP, TOOLBAR_HEIGHT,
@@ -71,10 +72,11 @@ pub fn handle_anchors(quad: [[f32; 2]; 4]) -> [(ResizeHandle, Point); 8] {
 }
 
 pub fn handle_rect(anchor: Point) -> Rectangle {
-    let half = HANDLE_SIZE / 2.0;
+    let hs = scale::s(HANDLE_SIZE);
+    let half = hs / 2.0;
     Rectangle::new(
         Point::new(anchor.x - half, anchor.y - half),
-        Size::new(HANDLE_SIZE, HANDLE_SIZE),
+        Size::new(hs, hs),
     )
 }
 
@@ -87,6 +89,10 @@ pub fn quad_centroid(quad: [[f32; 2]; 4]) -> Point {
 
 pub fn top_decor_geometry(rect: Rectangle, quad: [[f32; 2]; 4], width: f32, viewport_top: f32, viewport_bottom: f32) -> TopDecor {
     let center = quad_centroid(quad);
+    let hs = scale::s(HANDLE_SIZE);
+    let rot_stem = scale::s(ROTATE_STEM);
+    let toolbar_gap = scale::s(TOOLBAR_GAP);
+    let toolbar_height = scale::s(TOOLBAR_HEIGHT);
     let outward = |a: [f32; 2], b: [f32; 2]| -> Point {
         let mid = Point::new((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0);
         let edge = [b[0] - a[0], b[1] - a[1]];
@@ -97,8 +103,8 @@ pub fn top_decor_geometry(rect: Rectangle, quad: [[f32; 2]; 4], width: f32, view
         }
         let len = (normal[0] * normal[0] + normal[1] * normal[1]).sqrt().max(f32::EPSILON);
         Point::new(
-            mid.x + normal[0] / len * ROTATE_STEM,
-            mid.y + normal[1] / len * ROTATE_STEM,
+            mid.x + normal[0] / len * rot_stem,
+            mid.y + normal[1] / len * rot_stem,
         )
     };
     let ordered = order_quad(quad);
@@ -112,7 +118,7 @@ pub fn top_decor_geometry(rect: Rectangle, quad: [[f32; 2]; 4], width: f32, view
     );
     let stem_up = outward(ordered[0], ordered[1]);
     let stem_down = outward(ordered[3], ordered[2]);
-    let flip = stem_up.y - HANDLE_SIZE / 2.0 < viewport_top && rect.y > viewport_top;
+    let flip = stem_up.y - hs / 2.0 < viewport_top && rect.y > viewport_top;
     let (stem_from, mut anchor) = if flip {
         (bottom_mid, stem_down)
     } else {
@@ -120,14 +126,14 @@ pub fn top_decor_geometry(rect: Rectangle, quad: [[f32; 2]; 4], width: f32, view
     };
     anchor.y = anchor
         .y
-        .clamp(viewport_top + HANDLE_SIZE / 2.0, viewport_bottom - HANDLE_SIZE / 2.0);
+        .clamp(viewport_top + hs / 2.0, viewport_bottom - hs / 2.0);
     let revert_width = button_width("Revert");
     let revert = Rectangle::new(
         Point::new(
-            (anchor.x + HANDLE_SIZE / 2.0 + TOOLBAR_GAP).clamp(0.0, (width - revert_width).max(0.0)),
-            anchor.y - TOOLBAR_HEIGHT / 2.0,
+            (anchor.x + hs / 2.0 + toolbar_gap).clamp(0.0, (width - revert_width).max(0.0)),
+            anchor.y - toolbar_height / 2.0,
         ),
-        Size::new(revert_width, TOOLBAR_HEIGHT),
+        Size::new(revert_width, toolbar_height),
     );
     TopDecor { anchor, stem_from, revert }
 }
@@ -162,7 +168,8 @@ pub fn toolbar_buttons() -> [(crate::event::ToolbarAction, &'static str); 2] {
 }
 
 pub fn button_width(label: &str) -> f32 {
-    label.chars().count() as f32 * 6.5 + TOOLBAR_BTN_PAD * 2.0
+    // 6.5px char advance at 12pt → scale with font size for Rename/Delete/Revert widths
+    label.chars().count() as f32 * scale::s(6.5) + scale::s(TOOLBAR_BTN_PAD) * 2.0
 }
 
 pub fn toolbar_width() -> f32 {
@@ -174,14 +181,16 @@ pub fn toolbar_width() -> f32 {
 
 pub fn toolbar_rect(rect: Rectangle, width: f32, flip_at: f32) -> Rectangle {
     let tw = toolbar_width();
+    let toolbar_gap = scale::s(TOOLBAR_GAP);
+    let toolbar_height = scale::s(TOOLBAR_HEIGHT);
     let x = (rect.x + rect.width / 2.0 - tw / 2.0).clamp(0.0, (width - tw).max(0.0));
-    let below = rect.y + rect.height + TOOLBAR_GAP;
-    let y = if below + TOOLBAR_HEIGHT <= flip_at {
+    let below = rect.y + rect.height + toolbar_gap;
+    let y = if below + toolbar_height <= flip_at {
         below
     } else {
-        (rect.y - TOOLBAR_HEIGHT - TOOLBAR_GAP).max(0.0)
+        (rect.y - toolbar_height - toolbar_gap).max(0.0)
     };
-    Rectangle::new(Point::new(x, y), Size::new(tw, TOOLBAR_HEIGHT))
+    Rectangle::new(Point::new(x, y), Size::new(tw, toolbar_height))
 }
 
 pub fn toolbar_button_rect(toolbar: Rectangle, action: crate::event::ToolbarAction) -> Rectangle {

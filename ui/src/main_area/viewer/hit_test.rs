@@ -3,6 +3,7 @@ use iced::{Point, Rectangle, Size};
 use scanlateit_model::EntryId;
 
 use crate::main_area::geometry::order_quad;
+use crate::scale;
 
 use super::interaction::{OverlayButton, TopDecorHit};
 use super::layout::tile_layout;
@@ -228,16 +229,17 @@ pub fn hit_toolbar(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) 
 
 pub fn overlay_button_rects(bounds: Rectangle) -> [Rectangle; 3] {
     use super::constants::{OVERLAY_BTN_GAP, OVERLAY_BTN_HEIGHT, OVERLAY_BTN_MARGIN, OVERLAY_BTN_WIDTH};
-    let total = OVERLAY_BTN_HEIGHT * 3.0 + OVERLAY_BTN_GAP * 2.0;
-    let top = (bounds.height - OVERLAY_BTN_MARGIN - total).max(0.0);
+    let w = scale::s(OVERLAY_BTN_WIDTH);
+    let h = scale::s(OVERLAY_BTN_HEIGHT);
+    let gap = scale::s(OVERLAY_BTN_GAP);
+    let margin = scale::s(OVERLAY_BTN_MARGIN);
+    let total = h * 3.0 + gap * 2.0;
+    let top = (bounds.height - margin - total).max(0.0);
     let mut rects = [Rectangle::new(Point::ORIGIN, Size::ZERO); 3];
     for (index, (_button, _)) in OverlayButton::column().iter().enumerate() {
         rects[index] = Rectangle::new(
-            Point::new(
-                OVERLAY_BTN_MARGIN,
-                top + index as f32 * (OVERLAY_BTN_HEIGHT + OVERLAY_BTN_GAP),
-            ),
-            Size::new(OVERLAY_BTN_WIDTH, OVERLAY_BTN_HEIGHT),
+            Point::new(margin, top + index as f32 * (h + gap)),
+            Size::new(w, h),
         );
     }
     rects

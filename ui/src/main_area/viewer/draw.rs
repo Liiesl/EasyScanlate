@@ -3,6 +3,7 @@ use iced::border::Radius;
 use iced::{Color, Font, Pixels, Point, Rectangle, Size};
 
 use crate::main_area::geometry::order_quad;
+use crate::scale;
 
 use super::constants::{
     FAILED_BG, FAILED_FG, HANDLE_BORDER, HANDLE_FILL, HANDLE_SIZE, INPAINT_FILL, INPAINT_STROKE,
@@ -70,20 +71,20 @@ where
 {
     if hovered {
         frame.fill(
-            &Path::rounded_rectangle(rect.position(), rect.size(), Radius::from(4.0)),
+            &Path::rounded_rectangle(rect.position(), rect.size(), Radius::from(scale::s(4.0))),
             Fill::from(TOOLBAR_HOVER_BG),
         );
     } else {
         frame.fill(
-            &Path::rounded_rectangle(rect.position(), rect.size(), Radius::from(4.0)),
+            &Path::rounded_rectangle(rect.position(), rect.size(), Radius::from(scale::s(4.0))),
             Fill::from(TOOLBAR_BG),
         );
     }
     frame.fill_text(Text {
         content: label.to_string(),
-        position: Point::new(rect.x, rect.y + (rect.height - 13.0).max(0.0) / 2.0),
+        position: Point::new(rect.x, rect.y + (rect.height - scale::s(13.0)).max(0.0) / 2.0),
         max_width: rect.width,
-        size: Pixels(11.0),
+        size: Pixels(scale::s(11.0)),
         color: TOOLBAR_FG,
         ..Text::default()
     });
@@ -120,11 +121,11 @@ where
 {
     frame.stroke(
         &Path::line(decor.stem_from, decor.anchor),
-        Stroke::default().with_color(HANDLE_BORDER).with_width(1.5),
+        Stroke::default().with_color(HANDLE_BORDER).with_width(scale::s(1.5)),
     );
-    let knob = Path::circle(decor.anchor, HANDLE_SIZE / 2.0);
+    let knob = Path::circle(decor.anchor, scale::s(HANDLE_SIZE) / 2.0);
     frame.fill(&knob, Fill::from(HANDLE_FILL));
-    frame.stroke(&knob, Stroke::default().with_color(HANDLE_BORDER).with_width(1.5));
+    frame.stroke(&knob, Stroke::default().with_color(HANDLE_BORDER).with_width(scale::s(1.5)));
     if show_revert {
         draw_action_button(frame, decor.revert, "Revert", hover);
     }
@@ -174,7 +175,7 @@ pub fn draw_selection_decorations<'a, F>(
             frame.fill_rectangle(handle.position(), handle.size(), Fill::from(HANDLE_FILL));
             frame.stroke(
                 &Path::rectangle(handle.position(), handle.size()),
-                Stroke::default().with_color(HANDLE_BORDER).with_width(1.0),
+                Stroke::default().with_color(HANDLE_BORDER).with_width(scale::s(1.0)),
             );
         }
         let decor = top_decor_geometry(rect, quad, frame.width(), flip_from, flip_at);
