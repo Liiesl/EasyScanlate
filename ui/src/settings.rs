@@ -828,7 +828,9 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                         .into(),
                 );
             }
-            column(items).spacing(scale::s(6.0)).into()
+            scrollable(column(items).spacing(scale::s(6.0)))
+                .height(Length::Fill)
+                .into()
         }
         SettingsTab::Translation => {
             // Single read for both connections and free-only flag to keep the
