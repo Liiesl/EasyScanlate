@@ -200,6 +200,11 @@ pub enum UiEvent {
     /// Run the ONNX style classifier on the selected entry and apply the
     /// result. Works regardless of the auto-detect setting.
     StyleAutoDetect,
+    /// Make the selected entry's background transparent and inpaint its
+    /// *current* view quad (not the original OCR quad) — the box's present
+    /// position/size after moves/resizes/rotations. Mirrors the auto pipeline's
+    /// use of `view_quad` for the `rect` + `quads` fed to the inpaint engine.
+    StyleInpaintBackground,
     /// The user dragged the divider between the main area and the side panel.
     PanelResized(pane_grid::ResizeEvent),
     /// The user dragged the divider between the styling and the translation/results panels.

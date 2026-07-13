@@ -414,7 +414,10 @@ fn stroke_section<'a, S: UiState + ?Sized>(
     .into()
 }
 
-/// The "Background & Corner" section: background color plus corner radius.
+/// The "Background & Corner" section: background color plus corner radius,
+/// with an "Inpaint Background" action that makes the bg transparent and
+/// inpaints the *current* view quad (not the original OCR quad) — i.e. the
+/// box's present position/size after any move/resize/rotate/distort.
 fn background_section<'a, S: UiState + ?Sized>(
     state: &'a S,
     selected: bool,
@@ -436,6 +439,31 @@ fn background_section<'a, S: UiState + ?Sized>(
             .width(Length::FillPortion(1)),
         ]
         .spacing(scale::s(8.0)),
+        button(text("Inpaint Background").size(scale::s(11.0)))
+            .width(FillLength)
+            .padding([scale::s(5.0), scale::s(8.0)])
+            .on_press_maybe(selected.then_some(UiEvent::StyleInpaintBackground))
+            .style(|_theme, status: Status| {
+                let hovered = matches!(status, Status::Hovered | Status::Pressed);
+                let disabled = matches!(status, Status::Disabled);
+                button::Style {
+                    background: Some(Background::Color(INPUT_BG)),
+                    border: Border {
+                        radius: scale::s(4.0).into(),
+                        width: scale::s(1.0),
+                        color: BORDER,
+                    },
+                    shadow: Shadow::default(),
+                    text_color: if disabled {
+                        MUTED_FG
+                    } else if hovered {
+                        TEXT_MAIN
+                    } else {
+                        MUTED_FG
+                    },
+                    ..button::Style::default()
+                }
+            }),
     ]
     .spacing(scale::s(8.0))
     .into()

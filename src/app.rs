@@ -3439,6 +3439,81 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        #[cfg(feature = "inpaint")]
+        Message::Ui(UiEvent::StyleInpaintBackground) => {
+            if app.inpainting || app.running || app.translating {
+                return Task::none();
+            }
+            let Some((index, id)) = app.selected else {
+                return Task::none();
+            };
+            if index >= app.images.len() {
+                return Task::none();
+            }
+            // Capture current view quad (not original OCR quad) and path before mut borrow.
+            let (path, quad) = {
+                let Some(image) = app.images.get(index) else {
+                    return Task::none();
+                };
+                let Some(entry) = image.project.ocr.get(id) else {
+                    return Task::none();
+                };
+                (image.path.clone(), image.project.view_quad(entry))
+            };
+            // 1) Make background transparent so the inpaint patch shows through.
+            app.style_working.bg_color = [0, 0, 0, 0];
+            if let Some(image) = app.images.get_mut(index) {
+                if image.project.ocr.get(id).is_some() {
+                    image.project.set_entry_style(id, app.style_working.clone());
+                }
+            }
+            let [x0, y0, x1, y1] = quad.bounds();
+            let rect = [x0, y0, x1 - x0, y1 - y0];
+            if rect[2] <= 0.0 || rect[3] <= 0.0 {
+                app.status = "Inpaint Background: selected box is degenerate.".to_string();
+                return Task::none();
+            }
+            let quads = vec![quad];
+            let (backend, radius) = scanlateit_settings::get(|s| {
+                (
+                    s.inpaint_backend,
+                    s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1),
+                )
+            });
+            let cached = app
+                .inpaint_engine
+                .clone()
+                .filter(|engine| engine.backend() == backend && engine.radius() == radius);
+            match cached {
+                Some(engine) => start_inpaint(app, engine, index, path, rect, quads),
+                None => {
+                    app.pending_inpaint = Some((index, path, rect, quads));
+                    app.status = match backend {
+                        InpaintBackend::Lama => "Loading the inpainting model...".to_string(),
+                        InpaintBackend::Telea => "Inpainting background...".to_string(),
+                    };
+                    Task::perform(
+                        async move { InpaintEngine::build(backend, radius) },
+                        Message::InpaintEngineReady,
+                    )
+                }
+            }
+        }
+        #[cfg(not(feature = "inpaint"))]
+        Message::Ui(UiEvent::StyleInpaintBackground) => {
+            let Some((index, id)) = app.selected else {
+                return Task::none();
+            };
+            app.style_working.bg_color = [0, 0, 0, 0];
+            if let Some(image) = app.images.get_mut(index) {
+                if image.project.ocr.get(id).is_some() {
+                    image.project.set_entry_style(id, app.style_working.clone());
+                }
+            }
+            app.status =
+                "Background made transparent (inpaint not available in this build).".to_string();
+            Task::none()
+        }
         Message::Ui(UiEvent::StylePresetApply(preset)) => {
             let Some((index, id)) = app.selected else { return Task::none() };
             let Some(preset_style) = app.presets.get(preset) else {
