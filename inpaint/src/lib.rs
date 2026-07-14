@@ -1,18 +1,20 @@
-//! CPU image inpainting with two interchangeable backends: the pure-Rust
+//! CPU image inpainting with three interchangeable backends: the pure-Rust
 //! Telea algorithm from the [`inpaint`] crate (the default: no model, no
-//! download) and the LaMa ONNX model (`lama-manga.onnx`).
+//! download), the LaMa ONNX model (`lama-manga.onnx`, fixed 512) and the
+//! AOT-GAN ONNX model (`inpainting_aot.onnx`, variable resolution up to
+//! 1024, pad=8 — faster + lower memory than LaMa).
 //!
-//! [`Engine`] owns the backend chosen at build time. The LaMa backend holds
+//! [`Engine`] owns the backend chosen at build time. The ONNX backends hold
 //! one shared inference session (CPU execution provider by design) and
-//! inpaints image regions one at a time; the Telea backend is stateless and
-//! rewrites masked pixels in place. Both take the same job: an image path, a
+//! inpaint image regions one at a time; the Telea backend is stateless and
+//! rewrites masked pixels in place. All take the same job: an image path, a
 //! selected mask rectangle and the text-box quads inside it; the mask
 //! (the rectangle itself, or the quad union when quads are present) is
 //! reconstructed from surrounding context — `radius` pixels of context for
-//! Telea and [`LAMA_CONTEXT_PAD`] pixels of real context plus the existing
-//! mirror padding to `MODEL_EDGE` for LaMa — and each box comes back as
-//! its own RGBA crop an app layers over the original image without writing
-//! anything to disk.
+//! Telea and [`LAMA_CONTEXT_PAD`] / [`AOT_CONTEXT_PAD`] pixels of real context
+//! plus the existing mirror padding (LaMa) or AOT's pad-to-multiple logic
+//! — and each box comes back as its own RGBA crop an app layers over the
+//! original image without writing anything to disk.
 
 use std::fmt;
 use std::path::Path;
@@ -36,18 +38,30 @@ pub const MODEL_EDGE: u32 = 512;
 /// Telea's context pad is the `radius` setting itself.
 const LAMA_CONTEXT_PAD: f32 = 32.0;
 
+/// Context pad for AOT backend (same real-pixel expansion as LaMa, but
+/// AOT uses variable resolution + pad-to-multiple instead of mirror padding).
+const AOT_CONTEXT_PAD: f32 = 32.0;
+
+/// AOT pad multiple (model was trained with stride 8).
+pub const AOT_PAD: u32 = 8;
+
+/// AOT max side for inference; larger crops are scaled down preserving aspect
+/// before padding (mirrors `aot_inference.py: potentially` max_size=1024).
+pub const AOT_MAX_SIZE: u32 = 1024;
+
 const MODEL_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../models");
-const MODEL_FILE: &str = "lama-manga.onnx";
+const MODEL_FILE: &str = "lama-manga_int8.onnx";
+const MODEL_FILE_AOT: &str = "inpainting_aot.onnx";
 
 /// Cloneable handle to the shared inpainting engine: either the stateless
-/// Telea backend or the LaMa session (one inference at a time, serialized
+/// Telea backend or an ONNX session (one inference at a time, serialized
 /// through the inner mutex).
 #[derive(Clone)]
 pub struct Engine {
     backend: InpaintBackend,
-    /// Telea's interpolation radius in pixels; ignored by the LaMa backend.
+    /// Telea's interpolation radius in pixels; ignored by the ONNX backends.
     radius: i32,
-    /// The shared LaMa session; `None` for the Telea backend.
+    /// The shared ONNX session; `None` for the Telea backend.
     session: Option<Arc<Mutex<Session>>>,
 }
 
@@ -62,7 +76,7 @@ impl fmt::Debug for Engine {
 
 impl Engine {
     /// Builds the engine for `backend`. The Telea backend is instant and
-    /// stateless; the LaMa backend loads its model with a CPU-only session.
+    /// stateless; the ONNX backends load their model with a CPU-only session.
     pub fn build(backend: InpaintBackend, radius: i32) -> Result<Self, String> {
         let session = match backend {
             InpaintBackend::Telea => None,
@@ -79,6 +93,22 @@ impl Engine {
                     .commit_from_file(&path)
                     .map_err(|e| {
                         format!("failed to load inpainting model {}: {e}", path.display())
+                    })?;
+                Some(Arc::new(Mutex::new(session)))
+            }
+            InpaintBackend::Aot => {
+                let path = Path::new(MODEL_DIR).join(MODEL_FILE_AOT);
+                let session = Session::builder()
+                    .map_err(|e| format!("ORT init failed: {e}"))?
+                    .with_optimization_level(GraphOptimizationLevel::Level3)
+                    .map_err(|e| format!("ORT init failed: {e}"))?
+                    .with_intra_threads(4)
+                    .map_err(|e| format!("ORT init failed: {e}"))?
+                    .with_execution_providers([ort::ep::CPU::default().build()])
+                    .map_err(|e| format!("ORT init failed: {e}"))?
+                    .commit_from_file(&path)
+                    .map_err(|e| {
+                        format!("failed to load AOT inpainting model {}: {e}. Place inpainting_aot.onnx (opset 18, inputs img [B,3,H,W] + mask [B,1,H,W]) from https://github.com/zyddnys/manga-image-translator or converted ONNX.", path.display())
                     })?;
                 Some(Arc::new(Mutex::new(session)))
             }
@@ -105,7 +135,8 @@ impl Engine {
     /// given quads (or the whole `rect` when there are none) and sampling
     /// from surrounding context. The surrounding context is the Telea
     /// `radius` (`settings::inpaint_radius`) for the Telea backend and
-    /// [`LAMA_CONTEXT_PAD`] plus the existing mirror padding for LaMa.
+    /// [`LAMA_CONTEXT_PAD`] / [`AOT_CONTEXT_PAD`] plus the existing padding
+    /// for the ONNX backends.
     /// The original file is never modified; each returned patch is the RGBA
     /// crop of one mask quad (`[x, y, w, h]` in image pixels), with the
     /// text reconstructed by the engine's backend. For an empty quad list
@@ -134,26 +165,84 @@ impl Engine {
                     .map_err(|e| format!("Inpaint engine lock poisoned: {e}"))?;
                 inpaint_crop(&mut session, &image, rect, quads)
             }
+            InpaintBackend::Aot => {
+                let mut session = self
+                    .session
+                    .as_ref()
+                    .ok_or("AOT engine has no session")?
+                    .lock()
+                    .map_err(|e| format!("Inpaint engine lock poisoned: {e}"))?;
+                aot_inpaint_crop(&mut session, &image, rect, quads)
+            }
         }
     }
 }
 
-/// Runs one LaMa inference on the `image` and `mask` inputs.
+/// Runs one LaMa inference on the single `input` [1,4,512,512] tensor
+/// (channels 0-2 = masked RGB 0-1 zeroed, channel 3 = mask 0/1).
+/// Weight-only INT8 model (`lama-manga_int8.onnx`, per-channel asymmetric UINT8
+/// + DequantizeLinear axis=0) keeps compute in FP32.
 fn run_session(
     session: &mut Session,
-    image: Array4<f32>,
-    mask: Array4<f32>,
+    input: Array4<f32>,
 ) -> Result<ArrayD<f32>, String> {
     let outputs = session
         .run(ort::inputs![
-            "image" => TensorRef::from_array_view(&image).map_err(|e| format!("{e}"))?,
-            "mask" => TensorRef::from_array_view(&mask).map_err(|e| format!("{e}"))?,
+            "input" => TensorRef::from_array_view(&input).map_err(|e| format!("{e}"))?,
         ])
         .map_err(|e| format!("Inpaint inference failed: {e}"))?;
     outputs[0]
         .try_extract_array::<f32>()
         .map_err(|e| format!("Inpaint output extract failed: {e}"))
         .map(|array| array.to_owned())
+}
+
+/// Runs one AOT inference; input names are `img` + `mask` with fallback
+/// to `image` + `mask` (both seen in exported variants).
+fn run_session_aot(
+    session: &mut Session,
+    img: Array4<f32>,
+    mask: Array4<f32>,
+) -> Result<ArrayD<f32>, String> {
+    // Prefer `img`/`mask` (canonical AOT export — aot_inference.py:180),
+    // fallback to `image`/`mask` (some re-exports).
+    // Each attempt is isolated in its own closure so the `SessionOutputs`
+    // borrow is dropped before the next `session.run` borrow (E0499).
+    let try_img: Result<ArrayD<f32>, String> = (|| {
+        let outputs = session
+            .run(ort::inputs![
+                "img" => TensorRef::from_array_view(&img).map_err(|e| format!("{e}"))?,
+                "mask" => TensorRef::from_array_view(&mask).map_err(|e| format!("{e}"))?,
+            ])
+            .map_err(|e| format!("{e}"))?;
+        outputs[0]
+            .try_extract_array::<f32>()
+            .map_err(|e| format!("{e}"))
+            .map(|a| a.to_owned())
+    })();
+    match try_img {
+        Ok(arr) => Ok(arr),
+        Err(e_img) => {
+            let try_image: Result<ArrayD<f32>, String> = (|| {
+                let outputs = session
+                    .run(ort::inputs![
+                        "image" => TensorRef::from_array_view(&img).map_err(|e| format!("{e}"))?,
+                        "mask" => TensorRef::from_array_view(&mask).map_err(|e| format!("{e}"))?,
+                    ])
+                    .map_err(|e| format!("{e}"))?;
+                outputs[0]
+                    .try_extract_array::<f32>()
+                    .map_err(|e| format!("{e}"))
+                    .map(|a| a.to_owned())
+            })();
+            match try_image {
+                Ok(arr) => Ok(arr),
+                Err(e_image) => Err(format!(
+                    "AOT inference failed (tried img/mask then image/mask): img/mask: {e_img}; image/mask: {e_image}"
+                )),
+            }
+        }
+    }
 }
 
 /// The clamped integer crop rect `[x, y, w, h]` for a float rect in image
@@ -331,20 +420,24 @@ fn build_mask_expanded(
     mask
 }
 
-/// Composes the model inputs: `image` as `[1, 3, 512, 512]` f32 RGB in
-/// 0..1 and `mask` as `[1, 1, 512, 512]` f32 (1 = inpaint, 0 = keep).
-fn compose_inputs(canvas: &RgbImage, mask: &GrayImage) -> (Array4<f32>, Array4<f32>) {
+/// Composes the single LaMa INT8 input `[1, 4, 512, 512]` f32:
+/// channels 0-2 = masked RGB `canvas * (1 - mask)` in 0-1, channel 3 = mask 0/1.
+/// The FP32 graph used to do `image*(1-mask)` internally (Sub+Mul+Concat);
+/// the 4ch INT8 graph expects the caller to pre-pack.
+fn compose_inputs(canvas: &RgbImage, mask: &GrayImage) -> Array4<f32> {
     debug_assert_eq!(canvas.dimensions(), (MODEL_EDGE, MODEL_EDGE));
     debug_assert_eq!(mask.dimensions(), (MODEL_EDGE, MODEL_EDGE));
-    let image = Array4::from_shape_fn(
-        (1, 3, MODEL_EDGE as usize, MODEL_EDGE as usize),
-        |(_, c, y, x)| canvas[(x as u32, y as u32)][c] as f32 / 255.0,
-    );
-    let mask = Array4::from_shape_fn(
-        (1, 1, MODEL_EDGE as usize, MODEL_EDGE as usize),
-        |(_, _, y, x)| mask[(x as u32, y as u32)][0] as f32 / 255.0,
-    );
-    (image, mask)
+    Array4::from_shape_fn(
+        (1, 4, MODEL_EDGE as usize, MODEL_EDGE as usize),
+        |(_, c, y, x)| {
+            let m = mask[(x as u32, y as u32)][0] as f32 / 255.0;
+            if c == 3 {
+                m
+            } else {
+                canvas[(x as u32, y as u32)][c] as f32 / 255.0 * (1.0 - m)
+            }
+        },
+    )
 }
 
 /// Reads the model output (`[1, 3, 512, 512]` in 0..1) back onto the area
@@ -624,8 +717,8 @@ pub fn inpaint_crop(
         );
         (canvas, canvas_mask, sx, sy, sw, sh, dx, dy)
     };
-    let (image_tensor, mask_tensor) = compose_inputs(&canvas, &canvas_mask);
-    let output = run_session(session, image_tensor, mask_tensor)?;
+    let input = compose_inputs(&canvas, &canvas_mask);
+    let output = run_session(session, input)?;
     eprintln!("[inpaint::lama] inference done output shape={:?}", output.shape());
     let rgb = if needs_resize {
         // Output is 512x512 representing the whole exp area → resize back to exp size
@@ -701,6 +794,174 @@ pub fn inpaint_crop(
     }
     let out = bbox_crops(patch, exp_origin, quads);
     eprintln!("[inpaint::lama] quads={} -> {} bbox crops", quads.len(), out.len());
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// AOT-GAN backend
+// ---------------------------------------------------------------------------
+
+fn next_multiple(v: u32, pad: u32) -> u32 {
+    if v % pad == 0 {
+        v
+    } else {
+        ((v + pad - 1) / pad) * pad
+    }
+}
+
+/// Inference dimensions for AOT: mirrors `aot_inference.py: potentially` `_next_multiple` + `max_size` logic.
+fn aot_infer_dims(w: u32, h: u32, pad: u32, max_size: Option<u32>) -> (u32, u32) {
+    if let Some(max) = max_size {
+        if w.max(h) > max {
+            let scale = max as f32 / w.max(h) as f32;
+            let mut nw = (w as f32 * scale).round() as u32;
+            let mut nh = (h as f32 * scale).round() as u32;
+            nw = next_multiple(nw.max(1), pad);
+            nh = next_multiple(nh.max(1), pad);
+            return (nw, nh);
+        }
+    }
+    (next_multiple(w, pad), next_multiple(h, pad))
+}
+
+/// Inpaints `rect` with the AOT-GAN ONNX model. Variable resolution:
+/// `exp` crop (rect + `AOT_CONTEXT_PAD`) is resized to `AOT_PAD`-aligned
+/// `AOT_MAX_SIZE`-capped dimensions for inference, normalized to `[-1,1]`,
+/// `img*=(1-mask)`, then blended back. No mirror padding.
+pub fn aot_inpaint_crop(
+    session: &mut Session,
+    image: &RgbaImage,
+    rect: [f32; 4],
+    quads: &[Quad],
+) -> Result<Vec<(RgbaImage, [f32; 4])>, String> {
+    let [rx, ry, rw, rh] = rect;
+    let pad = AOT_CONTEXT_PAD;
+    let [ex, ey, exp_w, exp_h] = crop_spec(
+        [rx - pad, ry - pad, rx + rw + pad, ry + rh + pad],
+        image.width(),
+        image.height(),
+    );
+    let exp_origin = [ex as f32, ey as f32];
+
+    let mask = build_mask_expanded(exp_w, exp_h, quads, rect, exp_origin, image.width(), image.height());
+    let crop = image::imageops::crop_imm(image, ex, ey, exp_w, exp_h).to_image();
+    eprintln!(
+        "[inpaint::aot] rect={:?} quads={} pad={} image={}x{} exp=[{},{},{},{}] exp_origin={:?}",
+        rect,
+        quads.len(),
+        pad,
+        image.width(),
+        image.height(),
+        ex,
+        ey,
+        exp_w,
+        exp_h,
+        exp_origin
+    );
+
+    // Early-out: empty mask (should not happen via build_mask_expanded, but guard)
+    let mask_sum: u32 = mask.pixels().map(|p| p[0] as u32).sum();
+    if mask_sum == 0 {
+        eprintln!("[inpaint::aot] empty mask -> returning original crop");
+        if quads.is_empty() {
+            let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
+            let sub = image::imageops::crop_imm(&crop, (ox - ex) as u32, (oy - ey) as u32, ow, oh).to_image();
+            return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32])]);
+        }
+        return Ok(bbox_crops(crop, exp_origin, quads));
+    }
+
+    // Decide inference size (pad=8, max=1024) — mirrors aot_inference.py:142
+    let (inf_w, inf_h) = aot_infer_dims(exp_w, exp_h, AOT_PAD, Some(AOT_MAX_SIZE));
+    let needs_resize = inf_w != exp_w || inf_h != exp_h;
+    eprintln!(
+        "[inpaint::aot] exp {}x{} -> inf {}x{} needs_resize={} pad={} max={}",
+        exp_w, exp_h, inf_w, inf_h, needs_resize, AOT_PAD, AOT_MAX_SIZE
+    );
+
+    let rgb_crop = image::DynamicImage::ImageRgba8(crop.clone()).to_rgb8();
+    let (inf_rgb, inf_mask) = if needs_resize {
+        let resized_rgb = image::imageops::resize(&rgb_crop, inf_w, inf_h, image::imageops::FilterType::Triangle);
+        let resized_mask = image::imageops::resize(&mask, inf_w, inf_h, image::imageops::FilterType::Nearest);
+        (resized_rgb, resized_mask)
+    } else {
+        (rgb_crop, mask.clone())
+    };
+
+    // Normalize to [-1,1] and mask*=(1-mask) exactly like aot_inference.py:165-169
+    // image: (rgb/127.5 -1) * (1-mask)
+    // mask: 0/1 via threshold 0.5
+    let h = inf_h as usize;
+    let w = inf_w as usize;
+    let mut img_arr = Array4::<f32>::zeros((1, 3, h, w));
+    let mut mask_arr = Array4::<f32>::zeros((1, 1, h, w));
+    for y in 0..h {
+        for x in 0..w {
+            let m = if inf_mask[(x as u32, y as u32)][0] > 127 { 1.0 } else { 0.0 };
+            mask_arr[[0, 0, y, x]] = m;
+            let px = inf_rgb[(x as u32, y as u32)];
+            let inv = 1.0 - m;
+            img_arr[[0, 0, y, x]] = (px[0] as f32 / 127.5 - 1.0) * inv;
+            img_arr[[0, 1, y, x]] = (px[1] as f32 / 127.5 - 1.0) * inv;
+            img_arr[[0, 2, y, x]] = (px[2] as f32 / 127.5 - 1.0) * inv;
+        }
+    }
+
+    let output = run_session_aot(session, img_arr, mask_arr)?;
+    eprintln!("[inpaint::aot] inference done output shape={:?}", output.shape());
+
+    // Output is [1,3,H,W] in [-1,1] — -> uint8 via (x+1)*127.5, clip
+    let shape = [1usize, 3, h, w];
+    let reshaped = output.clone().into_shape_with_order(shape).map_err(|e| {
+        format!("[inpaint::aot] shape mismatch expected {:?} got {:?}: {e}", shape, output.shape())
+    })?;
+    let to_u8 = |v: f32| ((v.clamp(-1.0, 1.0) + 1.0) * 127.5).round().clamp(0.0, 255.0) as u8;
+    let mut out_inf = RgbImage::new(inf_w, inf_h);
+    for y in 0..h {
+        for x in 0..w {
+            out_inf[(x as u32, y as u32)] = Rgb([
+                to_u8(reshaped[[0, 0, y, x]]),
+                to_u8(reshaped[[0, 1, y, x]]),
+                to_u8(reshaped[[0, 2, y, x]]),
+            ]);
+        }
+    }
+
+    let out_exp = if needs_resize {
+        image::imageops::resize(&out_inf, exp_w, exp_h, image::imageops::FilterType::Triangle)
+    } else {
+        out_inf
+    };
+
+    // Blend: ans = inpainted*mask + original*(1-mask) — but for full-exp we
+    // already have `mask` at exp resolution. Use original mask (not resized
+    // thresholded) for compositing to keep sharp edges; fallback to out_exp
+    // where mask==0 we keep original crop pixel.
+    // For simplicity, if mask is empty we already returned. Otherwise we
+    // composite: where mask white -> out_exp, else original crop rgb.
+    let mut blended = RgbImage::new(exp_w, exp_h);
+    for y in 0..exp_h {
+        for x in 0..exp_w {
+            let m = mask[(x, y)][0] > 127;
+            blended[(x, y)] = if m { out_exp[(x, y)] } else { image::DynamicImage::ImageRgba8(crop.clone()).to_rgb8()[(x, y)] };
+        }
+    }
+
+    let mut patch: RgbaImage = image::DynamicImage::ImageRgb8(blended).into_rgba8();
+    for (px, src) in patch.pixels_mut().zip(crop.pixels()) {
+        px[3] = src[3];
+    }
+    if quads.is_empty() {
+        let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
+        let sub = image::imageops::crop_imm(&patch, (ox - ex) as u32, (oy - ey) as u32, ow, oh).to_image();
+        eprintln!(
+            "[inpaint::aot] empty quads -> returning sub [{},{},{},{}] from patch {}x{}",
+            ox, oy, ow, oh, patch.width(), patch.height()
+        );
+        return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32])]);
+    }
+    let out = bbox_crops(patch, exp_origin, quads);
+    eprintln!("[inpaint::aot] quads={} -> {} bbox crops", quads.len(), out.len());
     Ok(out)
 }
 
@@ -893,19 +1154,23 @@ mod tests {
     }
 
     #[test]
-    fn compose_inputs_split_rgb_and_mask_into_two_tensors() {
+    fn compose_inputs_packs_4ch_masked_rgb_plus_mask() {
         let mut canvas = RgbImage::from_pixel(MODEL_EDGE, MODEL_EDGE, Rgb([0, 128, 255]));
         canvas[(7, 3)] = Rgb([255, 0, 0]);
         let mut mask = GrayImage::from_pixel(MODEL_EDGE, MODEL_EDGE, image::Luma([0]));
         mask[(7, 3)] = image::Luma([255]);
-        let (image, mask) = compose_inputs(&canvas, &mask);
-        assert_eq!(image.shape(), &[1, 3, MODEL_EDGE as usize, MODEL_EDGE as usize]);
-        assert_eq!(mask.shape(), &[1, 1, MODEL_EDGE as usize, MODEL_EDGE as usize]);
-        assert!((image[[0, 0, 3, 7]] - 1.0).abs() < 1e-6);
-        assert!(image[[0, 1, 3, 7]].abs() < 1e-6);
-        assert!(image[[0, 2, 3, 7]].abs() < 1e-6);
-        assert!((mask[[0, 0, 3, 7]] - 1.0).abs() < 1e-6);
-        assert!(mask[[0, 0, 0, 0]].abs() < 1e-6);
+        let input = compose_inputs(&canvas, &mask);
+        assert_eq!(input.shape(), &[1, 4, MODEL_EDGE as usize, MODEL_EDGE as usize]);
+        // masked pixel (7,3) has mask=1 -> rgb zeroed, mask channel 1
+        assert!(input[[0, 0, 3, 7]].abs() < 1e-6);
+        assert!(input[[0, 1, 3, 7]].abs() < 1e-6);
+        assert!(input[[0, 2, 3, 7]].abs() < 1e-6);
+        assert!((input[[0, 3, 3, 7]] - 1.0).abs() < 1e-6);
+        // unmasked pixel (0,0): canvas [0,128,255], mask 0 -> rgb preserved, mask 0
+        assert!(input[[0, 0, 0, 0]].abs() < 1e-6);
+        assert!((input[[0, 1, 0, 0]] - 128.0 / 255.0).abs() < 1e-6);
+        assert!((input[[0, 2, 0, 0]] - 1.0).abs() < 1e-6);
+        assert!(input[[0, 3, 0, 0]].abs() < 1e-6);
     }
 
     #[test]
@@ -989,5 +1254,25 @@ mod tests {
         assert_eq!(canvas[(2, 0)][0], 0, "the edge column repeats at the seam");
         assert_eq!(canvas[(0, 2)][0], 0);
         assert_eq!(canvas[(2, 2)][0], 255);
+    }
+
+    #[test]
+    fn aot_next_multiple_pads_to_8() {
+        assert_eq!(next_multiple(0, 8), 0);
+        assert_eq!(next_multiple(1, 8), 8);
+        assert_eq!(next_multiple(8, 8), 8);
+        assert_eq!(next_multiple(9, 8), 16);
+        assert_eq!(next_multiple(512, 8), 512);
+        assert_eq!(next_multiple(513, 8), 520);
+    }
+
+    #[test]
+    fn aot_infer_dims_respects_max_and_pad() {
+        assert_eq!(aot_infer_dims(100, 100, 8, Some(1024)), (104, 104));
+        assert_eq!(aot_infer_dims(512, 512, 8, Some(1024)), (512, 512));
+        assert_eq!(aot_infer_dims(2000, 1000, 8, Some(1024)), (1024, 512));
+        // 2000*0.512=1024 -> 1024 pad 8 => 1024, 1000*0.512=512 -> 512
+        assert_eq!(aot_infer_dims(2048, 2048, 8, Some(1024)), (1024, 1024));
+        assert_eq!(aot_infer_dims(100, 200, 8, None), (104, 200));
     }
 }

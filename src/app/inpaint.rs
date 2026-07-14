@@ -117,6 +117,45 @@ pub fn dispatch_auto_lama_jobs(app: &mut App, jobs: Vec<AutoInpaintJob>) -> Task
 }
 
 #[cfg(feature = "inpaint")]
+pub fn dispatch_auto_aot_jobs(app: &mut App, jobs: Vec<AutoInpaintJob>) -> Task<Message> {
+    if jobs.is_empty() {
+        return Task::none();
+    }
+    let radius = scanlateit_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
+    let cached = app.auto_aot_engine.clone().filter(|e| e.radius() == radius);
+    if let Some(engine) = cached {
+        app.auto_inpaint_pending += jobs.len();
+        app.status = format!("Auto-inpaint (AOT-GAN) {} regions sequentially...", jobs.len());
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    let mut out: Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4])>, String>)> = Vec::new();
+                    for job in jobs {
+                        let rect = {
+                            let [x0, y0, x1, y1] = job.quad.bounds();
+                            [x0, y0, x1 - x0, y1 - y0]
+                        };
+                        let r = engine.run_blocking(&job.path, rect, &[job.quad]);
+                        out.push((job.index, job.id, r));
+                    }
+                    out
+                })
+                .await
+                .unwrap_or_else(|e| vec![(0, EntryId(0), Err(format!("aot batch cancelled: {e}")))])
+            },
+            Message::AutoInpaintAotBatchFinished,
+        )
+    } else {
+        app.pending_auto_aot_jobs = Some(jobs);
+        app.status = "Loading AOT-GAN for auto-inpaint...".to_string();
+        Task::perform(
+            async move { InpaintEngine::build(InpaintBackend::Aot, radius) },
+            move |r| Message::AutoInpaintEngineReady(InpaintBackend::Aot, r),
+        )
+    }
+}
+
+#[cfg(feature = "inpaint")]
 pub fn dispatch_auto_inpaint_solo(app: &mut App, effective_model: scanlateit_settings::AutoInpaintModel) -> Task<Message> {
     let jobs: Vec<AutoInpaintJob> = app
         .images
@@ -148,6 +187,7 @@ pub fn dispatch_auto_inpaint_solo(app: &mut App, effective_model: scanlateit_set
     match effective_model {
         scanlateit_settings::AutoInpaintModel::Telea => dispatch_auto_telea_jobs(app, jobs),
         scanlateit_settings::AutoInpaintModel::Lama => dispatch_auto_lama_jobs(app, jobs),
+        scanlateit_settings::AutoInpaintModel::Aot => dispatch_auto_aot_jobs(app, jobs),
         scanlateit_settings::AutoInpaintModel::Mixed => dispatch_auto_telea_jobs(app, jobs),
     }
 }
@@ -189,6 +229,12 @@ pub fn handle_auto_engine_ready(app: &mut App, backend: InpaintBackend, result: 
                         return dispatch_auto_lama_jobs(app, jobs);
                     }
                 }
+                InpaintBackend::Aot => {
+                    app.auto_aot_engine = Some(engine.clone());
+                    if let Some(jobs) = app.pending_auto_aot_jobs.take() {
+                        return dispatch_auto_aot_jobs(app, jobs);
+                    }
+                }
             }
             Task::none()
         }
@@ -196,6 +242,7 @@ pub fn handle_auto_engine_ready(app: &mut App, backend: InpaintBackend, result: 
             match backend {
                 InpaintBackend::Telea => { app.pending_auto_telea_jobs = None; }
                 InpaintBackend::Lama => { app.pending_auto_lama_jobs = None; }
+                InpaintBackend::Aot => { app.pending_auto_aot_jobs = None; }
             }
             app.status = format!("Auto-inpaint engine failed: {e}");
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
@@ -210,6 +257,7 @@ pub fn handle_auto_engine_ready(app: &mut App, backend: InpaintBackend, result: 
 #[cfg(feature = "inpaint")]
 pub fn handle_auto_finished(app: &mut App, index: usize, id: EntryId, result: Result<Vec<(image::RgbaImage, [f32; 4])>, String>) -> Task<Message> {
     app.auto_inpaint_pending = app.auto_inpaint_pending.saturating_sub(1);
+    let pending = app.auto_inpaint_pending;
     match result {
         Ok(patches) => {
             let Some(image) = app.images.get_mut(index) else {
@@ -227,19 +275,19 @@ pub fn handle_auto_finished(app: &mut App, index: usize, id: EntryId, result: Re
                 image.project.extras.inpaint_patches.push(InpaintPatch { bounds });
             }
             app.show_inpaint = true;
-            if app.auto_inpaint_pending == 0 {
+            if pending == 0 {
                 #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
                 {
                     app.pipeline_active = false;
                 }
                 app.status = format!("Auto-inpaint done. {}", app.status);
             } else {
-                app.status = format!("Auto-inpaint: {} remaining. {}", app.auto_inpaint_pending, app.status);
+                app.status = format!("Auto-inpaint: {} remaining. {}", pending, app.status);
             }
         }
         Err(e) => {
             app.status = format!("Auto-inpaint failed for {index}:{id:?}: {e}");
-            if app.auto_inpaint_pending == 0 {
+            if pending == 0 {
                 #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
                 { app.pipeline_active = false; }
             }
@@ -278,6 +326,40 @@ pub fn handle_auto_lama_batch(app: &mut App, batch: Vec<(usize, EntryId, Result<
         #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
         { app.pipeline_active = false; }
         app.status = format!("Auto-inpaint (LaMa batch) done. {}", app.status);
+    }
+    Task::none()
+}
+
+#[cfg(feature = "inpaint")]
+pub fn handle_auto_aot_batch(app: &mut App, batch: Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4])>, String>)>) -> Task<Message> {
+    for (index, id, result) in batch {
+        app.auto_inpaint_pending = app.auto_inpaint_pending.saturating_sub(1);
+        match result {
+            Ok(patches) => {
+                if let Some(image) = app.images.get_mut(index) {
+                    for (patch, bounds) in patches {
+                        let (width, height) = (patch.width(), patch.height());
+                        let layer = InpaintLayer {
+                            bounds,
+                            handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())),
+                            width,
+                            height,
+                        };
+                        image.inpaint.push(layer);
+                        image.project.extras.inpaint_patches.push(InpaintPatch { bounds });
+                    }
+                    app.show_inpaint = true;
+                }
+            }
+            Err(e) => {
+                app.status = format!("Auto-inpaint (AOT) failed for {index}:{id:?}: {e}");
+            }
+        }
+    }
+    if app.auto_inpaint_pending == 0 {
+        #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+        { app.pipeline_active = false; }
+        app.status = format!("Auto-inpaint (AOT batch) done. {}", app.status);
     }
     Task::none()
 }
@@ -358,7 +440,8 @@ pub fn handle_inpaint_selection(app: &mut App, index: usize, rect: iced::Rectang
         None => {
             app.pending_inpaint = Some((index, path, rect_arr, quads));
             app.status = match backend {
-                InpaintBackend::Lama => "Loading the inpainting model...".to_string(),
+                InpaintBackend::Lama => "Loading LaMa model...".to_string(),
+                InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
                 InpaintBackend::Telea => "Inpainting...".to_string(),
             };
             Task::perform(
@@ -423,7 +506,8 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
         None => {
             app.pending_inpaint = Some((index, path, rect, quads));
             app.status = match backend {
-                InpaintBackend::Lama => "Loading the inpainting model...".to_string(),
+                InpaintBackend::Lama => "Loading LaMa model...".to_string(),
+                InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
                 InpaintBackend::Telea => "Inpainting background...".to_string(),
             };
             Task::perform(
@@ -561,7 +645,8 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
             None => {
                 app.pending_inpaint = Some((image_index, path, rect, quads));
                 app.status = match backend {
-                    scanlateit_settings::InpaintBackend::Lama => "Loading the inpainting model...".to_string(),
+                    scanlateit_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
+                    scanlateit_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
                     scanlateit_settings::InpaintBackend::Telea => "Inpainting...".to_string(),
                 };
                 return Task::perform(

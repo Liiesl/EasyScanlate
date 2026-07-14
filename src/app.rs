@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 #[cfg(all(feature = "test-ui", not(feature = "translation")))]
 use std::collections::BTreeMap;
 use std::sync::Arc;
-#[cfg(feature = "ocr")]
 use std::time::Duration;
 
 #[cfg(any(feature = "inpaint", feature = "test-ui"))]
@@ -26,7 +25,7 @@ use scanlateit_model::InpaintPatch;
 #[cfg(feature = "inpaint")]
 use scanlateit_settings::AutoInpaintModel;
 #[cfg(feature = "ocr")]
-use scanlateit_ocr::{self as ocr_engine, Engine, OcrCancellationToken, ParallelEngine};
+use scanlateit_ocr::{self as ocr_engine, OcrCancellationToken, ParallelEngine};
 #[cfg(feature = "styling")]
 use scanlateit_styling::{Engine as StylingEngine, JobTracker};
 #[cfg(feature = "segment")]
@@ -58,7 +57,6 @@ pub mod view;
 use layout::{PaneKind, SidePaneKind, StylingPaneKind};
 use layout::{IMAGE_FILTERS, MAIN_AREA_DEFAULT_RATIO, STYLING_DEFAULT_RATIO, STYLING_TOP_RATIO};
 
-#[cfg(feature = "inpaint")]
 #[derive(Debug, Clone)]
 pub(crate) struct AutoInpaintJob {
     pub index: usize,
@@ -74,8 +72,6 @@ pub enum Message {
     /// A widget-level event from the ui crate.
     Ui(UiEvent),
     ImagesPicked(Result<Vec<(String, u32, u32)>, String>),
-    #[cfg(feature = "ocr")]
-    EngineReady(Result<Engine, String>),
     #[cfg(feature = "ocr")]
     ParallelEngineReady(Result<ParallelEngine, String>),
     #[cfg(feature = "ocr")]
@@ -94,6 +90,8 @@ pub enum Message {
     AutoInpaintFinished(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4])>, String>),
     #[cfg(feature = "inpaint")]
     AutoInpaintLamaBatchFinished(Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4])>, String>)>),
+    #[cfg(feature = "inpaint")]
+    AutoInpaintAotBatchFinished(Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4])>, String>)>),
     #[cfg(all(feature = "styling", feature = "inpaint"))]
     PipelineStyleDetected(usize, EntryId, Result<(EntryStyle, scanlateit_styling::StylePrediction), String>),
     #[cfg(feature = "styling")]
@@ -129,8 +127,6 @@ impl From<UiEvent> for Message {
 /// model doesn't know about (engine handle, per-image canvas cache).
 pub struct App {
     pub(crate) images: Vec<LoadedImage>,
-    #[cfg(feature = "ocr")]
-    engine: Option<Engine>,
     #[cfg(feature = "ocr")]
     pipeline: Option<ParallelEngine>,
     #[cfg(feature = "ocr")]
@@ -168,9 +164,13 @@ pub struct App {
     #[cfg(feature = "inpaint")]
     auto_lama_engine: Option<InpaintEngine>,
     #[cfg(feature = "inpaint")]
+    auto_aot_engine: Option<InpaintEngine>,
+    #[cfg(feature = "inpaint")]
     pending_auto_telea_jobs: Option<Vec<AutoInpaintJob>>,
     #[cfg(feature = "inpaint")]
     pending_auto_lama_jobs: Option<Vec<AutoInpaintJob>>,
+    #[cfg(feature = "inpaint")]
+    pending_auto_aot_jobs: Option<Vec<AutoInpaintJob>>,
     pub(crate) running: bool,
     pub(crate) font: Option<Font>,
     pub(crate) status: String,
@@ -252,8 +252,6 @@ impl App {
             frame,
             images: Vec::new(),
             #[cfg(feature = "ocr")]
-            engine: None,
-            #[cfg(feature = "ocr")]
             pipeline: None,
             #[cfg(feature = "ocr")]
             cancel: None,
@@ -290,9 +288,13 @@ impl App {
             #[cfg(feature = "inpaint")]
             auto_lama_engine: None,
             #[cfg(feature = "inpaint")]
+            auto_aot_engine: None,
+            #[cfg(feature = "inpaint")]
             pending_auto_telea_jobs: None,
             #[cfg(feature = "inpaint")]
             pending_auto_lama_jobs: None,
+            #[cfg(feature = "inpaint")]
+            pending_auto_aot_jobs: None,
             running: false,
             font: None,
             status: "Idle - open images to begin.".to_string(),
@@ -365,7 +367,7 @@ pub fn boot(frame: NativeFrame) -> (App, Task<Message>) {
 }
 
 pub fn update(app: &mut App, message: Message) -> Task<Message> {
-    match message {
+    let task = match message {
         Message::Frame(action) => app.frame.update(action, Message::Frame),
         Message::FetchModels => translation::handle_fetch_models(app),
         Message::ModelsFetched(providers) => translation::handle_models_fetched(app, providers),
@@ -423,8 +425,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         },
         Message::Ui(UiEvent::StartOcr) => ocr::handle_start_ocr(app),
         #[cfg(feature = "ocr")]
-        Message::EngineReady(result) => ocr::handle_engine_ready(app, result),
-        #[cfg(feature = "ocr")]
         Message::ParallelEngineReady(result) => ocr::handle_parallel_ready(app, result),
         #[cfg(feature = "inpaint")]
         Message::InpaintEngineReady(result) => inpaint::handle_inpaint_engine_ready(app, result),
@@ -440,6 +440,8 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::AutoInpaintFinished(index, id, result) => inpaint::handle_auto_finished(app, index, id, result),
         #[cfg(feature = "inpaint")]
         Message::AutoInpaintLamaBatchFinished(batch) => inpaint::handle_auto_lama_batch(app, batch),
+        #[cfg(feature = "inpaint")]
+        Message::AutoInpaintAotBatchFinished(batch) => inpaint::handle_auto_aot_batch(app, batch),
         #[cfg(feature = "segment")]
         Message::SegmentEngineReady(result) => segment::handle_engine_ready(app, result),
         #[cfg(feature = "segment")]
@@ -644,7 +646,8 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::OpenUrl(url)) => settings::handle_open_url(app, url),
         Message::TranslateFinished(jobs, result) => translation::handle_translate_finished(app, jobs, result),
         Message::RetranslateFinished((index, entry_id), result) => translation::handle_retranslate_finished(app, index, entry_id, result),
-    }
+    };
+    task
 }
 
 pub fn subscription(app: &App) -> Subscription<Message> {
@@ -656,7 +659,7 @@ pub fn subscription(app: &App) -> Subscription<Message> {
             iced::time::every(Duration::from_millis(16)).map(|_| Message::OcrTick),
         ]);
     }
-    frame_sub
+    Subscription::batch([frame_sub])
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {

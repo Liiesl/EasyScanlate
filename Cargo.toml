@@ -45,12 +45,7 @@ scanlateit-ui = { path = "ui", default-features = false }
 tokio = { version = "1", features = ["rt", "time"] }
 fontdb = "0.24"
 open = "5"
-
-[profile.dev]
-# Required for sccache (.cargo/config.toml rustc-wrapper): incrementally
-# compiled units are never cached, so leaving this on would make every
-# compile a pass-through miss.
-incremental = false
+serde = { version = "1", features = ["derive"] }
 
 [profile.dev.package."*"]
 debug = "line-tables-only"

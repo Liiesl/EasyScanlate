@@ -561,12 +561,13 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                 let all_models = [
                     AutoInpaintModel::Telea,
                     AutoInpaintModel::Lama,
+                    AutoInpaintModel::Aot,
                     AutoInpaintModel::Mixed,
                 ];
                 let available: Vec<AutoInpaintModel> = if auto_style {
                     all_models.to_vec()
                 } else {
-                    vec![AutoInpaintModel::Telea, AutoInpaintModel::Lama]
+                    vec![AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot]
                 };
                 // Keep pick_list value consistent when Mixed is hidden
                 let pick_value = if auto_style || auto_model != AutoInpaintModel::Mixed {
@@ -597,14 +598,14 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                 );
                 if !auto_style && auto_model == AutoInpaintModel::Mixed {
                     items.push(
-                        text("Pick Telea or Lama while Auto-detect style is off; Mixed will auto-fallback to Telea.")
+                        text("Pick Telea, Lama or AOT while Auto-detect style is off; Mixed will auto-fallback to Telea.")
                             .size(scale::s(11.0))
                             .color(Color::from_rgb8(240, 200, 80))
                             .into(),
                     );
                 }
                 items.push(
-                    text("Full pipeline (SFX → style deferred → bg-routed inpaint) runs once when OCR finishes if all three are on. Telea jobs run in parallel, LaMa sequentially to avoid CPU strain.")
+                    text("Full pipeline (SFX → style deferred → bg-routed inpaint) runs once when OCR finishes if all three are on. Telea jobs run in parallel, LaMa/AOT sequentially to avoid CPU strain.")
                         .size(scale::s(11.0))
                         .color(MUTED_FG)
                         .into(),
@@ -635,7 +636,7 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                         container(text("Auto inpaint model").size(scale::s(12.0)).color(MUTED_FG))
                             .width(Length::Fixed(scale::s(150.0))),
                         pick_list(
-                            [AutoInpaintModel::Telea, AutoInpaintModel::Lama],
+                            [AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot],
                             Some(if auto_model == AutoInpaintModel::Mixed { AutoInpaintModel::Telea } else { auto_model }),
                             move |model| set(move |s| s.auto_inpaint_model = model)
                         )
@@ -790,7 +791,7 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                         container(text("Inpaint backend").size(scale::s(12.0)).color(MUTED_FG))
                             .width(Length::Fixed(scale::s(150.0))),
                         pick_list(
-                            [InpaintBackend::Telea, InpaintBackend::Lama],
+                            [InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot],
                             Some(backend),
                             |backend| set(move |s| s.inpaint_backend = backend),
                         )
@@ -802,7 +803,9 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                 );
                 items.push(
                     text("Telea (the `inpaint` crate) needs no model and is instant; \
-                          LaMa runs the ONNX model and handles complex backgrounds better.")
+                          LaMa is high-quality ONNX for complex backgrounds; \
+                          AOT-GAN (ONNX, inpainting_aot.onnx, pad 8, max 1024) is \
+                          2-4× faster + lower memory than LaMa.")
                         .size(scale::s(11.0))
                         .color(MUTED_FG)
                         .into(),
@@ -822,7 +825,7 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                 );
                 items.push(
                     text("How many pixels around the mask Telea samples; larger \
-                          smooths more but blurs. Ignored by LaMa.")
+                          smooths more but blurs. Ignored by LaMa and AOT-GAN.")
                         .size(scale::s(11.0))
                         .color(MUTED_FG)
                         .into(),

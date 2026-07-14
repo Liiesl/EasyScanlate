@@ -19,6 +19,7 @@ pub fn dispatch_pipeline_inpaint_after_style(
     };
     let mut telea_jobs: Vec<AutoInpaintJob> = Vec::new();
     let mut lama_jobs: Vec<AutoInpaintJob> = Vec::new();
+    let mut aot_jobs: Vec<AutoInpaintJob> = Vec::new();
     let effective_model = scanlateit_settings::get(|s| {
         if !s.auto_style_detect && s.auto_inpaint_model == scanlateit_settings::AutoInpaintModel::Mixed {
             scanlateit_settings::AutoInpaintModel::Telea
@@ -63,11 +64,13 @@ pub fn dispatch_pipeline_inpaint_after_style(
                 scanlateit_settings::AutoInpaintModel::Mixed => InpaintBackend::Telea,
                 scanlateit_settings::AutoInpaintModel::Telea => InpaintBackend::Telea,
                 scanlateit_settings::AutoInpaintModel::Lama => InpaintBackend::Lama,
+                scanlateit_settings::AutoInpaintModel::Aot => InpaintBackend::Aot,
             }),
             scanlateit_styling::BgType::Artwork => Some(match effective_model {
                 scanlateit_settings::AutoInpaintModel::Mixed => InpaintBackend::Lama,
                 scanlateit_settings::AutoInpaintModel::Telea => InpaintBackend::Telea,
                 scanlateit_settings::AutoInpaintModel::Lama => InpaintBackend::Lama,
+                scanlateit_settings::AutoInpaintModel::Aot => InpaintBackend::Aot,
             }),
         };
         if let Some(backend) = need {
@@ -75,6 +78,7 @@ pub fn dispatch_pipeline_inpaint_after_style(
             match backend {
                 InpaintBackend::Telea => telea_jobs.push(job),
                 InpaintBackend::Lama => lama_jobs.push(job),
+                InpaintBackend::Aot => aot_jobs.push(job),
             }
         }
     }
@@ -85,6 +89,9 @@ pub fn dispatch_pipeline_inpaint_after_style(
     }
     if !lama_jobs.is_empty() {
         tasks.push(super::inpaint::dispatch_auto_lama_jobs(app, lama_jobs));
+    }
+    if !aot_jobs.is_empty() {
+        tasks.push(super::inpaint::dispatch_auto_aot_jobs(app, aot_jobs));
     }
     if tasks.is_empty() {
         #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]

@@ -92,6 +92,9 @@ pub enum InpaintBackend {
     /// The LaMa ONNX model: better on complex backgrounds, needs the
     /// `lama-manga.onnx` file next to the executable.
     Lama,
+    /// AOT-GAN ONNX model: faster + lower memory than LaMa, variable
+    /// resolution up to 1024 with pad=8, CPU-only.
+    Aot,
 }
 
 impl fmt::Display for InpaintBackend {
@@ -99,18 +102,21 @@ impl fmt::Display for InpaintBackend {
         f.write_str(match self {
             Self::Telea => "Telea (inpaint crate)",
             Self::Lama => "LaMa (ONNX)",
+            Self::Aot => "AOT-GAN (ONNX)",
         })
     }
 }
 
 /// Which inpaint model the **auto** post-OCR pipeline uses. Distinct from
 /// [`InpaintBackend`] (manual tool) because `Mixed` is a bg-aware routing:
-/// `Solid`→no inpaint, `Gradient`→Telea, `Artwork`→LaMa.
+/// `Solid`→no inpaint, `Gradient`→Telea, `Artwork`→LaMa (Aot available
+/// as explicit choice; user requested to keep Lama in Mixed for now).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AutoInpaintModel {
     Telea,
     Lama,
+    Aot,
     #[default]
     Mixed,
 }
@@ -120,6 +126,7 @@ impl fmt::Display for AutoInpaintModel {
         f.write_str(match self {
             Self::Telea => "Telea",
             Self::Lama => "LaMa",
+            Self::Aot => "AOT-GAN",
             Self::Mixed => "Mixed (bg-aware)",
         })
     }

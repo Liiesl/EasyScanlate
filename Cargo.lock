@@ -4594,6 +4594,7 @@ dependencies = [
  "scanlateit-styling",
  "scanlateit-translation",
  "scanlateit-ui",
+ "serde",
  "tokio",
 ]
 
