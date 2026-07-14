@@ -112,13 +112,19 @@ impl Engine {
                 alt.display()
             ));
         };
+        // Keep ARNs calm: like OCR we disable memory pattern (dynamic 1280) and CPU arena —
+        // otherwise each 1280 canvas triggers mmap arena grow/shrink sawtooth (+500 residual).
         let session = Session::builder()
             .map_err(|e| format!("ORT init failed: {e}"))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| format!("ORT init failed: {e}"))?
             .with_intra_threads(2)
             .map_err(|e| format!("ORT init failed: {e}"))?
-            .with_execution_providers([ort::ep::CPU::default().build()])
+            .with_memory_pattern(false)
+            .map_err(|e| format!("ORT init failed: {e}"))?
+            .with_execution_providers([ort::ep::CPU::default()
+                .with_arena_allocator(false)
+                .build()])
             .map_err(|e| format!("ORT init failed: {e}"))?
             .commit_from_file(&path)
             .map_err(|e| format!("failed to load segmentation model {}: {e}", path.display()))?;
@@ -187,6 +193,7 @@ fn sigmoid(x: f32) -> f32 {
     }
 }
 
+
 /// Decode Koharu outputs. Pure translation of `grid_pages.py:50-102`.
 fn decode_koharu(
     outputs: &[ArrayD<f32>],
@@ -237,83 +244,79 @@ fn decode_koharu(
     // If len 3, same.
     let mut out = Vec::new();
     let conf_thres = 0.25f32;
-    // Iterate detections
+    // Collect candidates above threshold first for sorting/NMS.
+    struct RawDet {
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        conf: f32,
+        cls: usize,
+    }
+    let mut raws: Vec<RawDet> = Vec::with_capacity(num_det);
     for i in 0..num_det {
-        // Index in flattened det_data: need to account for batch=1 case where layout is [1,300,38] row-major => offset = i*38
-        // For shape [300,38] same.
         let base = i * det_dim;
         if base + 6 > det_data.len() {
             break;
         }
-        let x1 = det_data[base];
-        let y1 = det_data[base + 1];
-        let x2 = det_data[base + 2];
-        let y2 = det_data[base + 3];
         let conf = det_data[base + 4];
-        let cls_f = det_data[base + 5];
         if conf <= conf_thres {
             continue;
         }
-        let cls = cls_f as usize;
+        let cls = det_data[base + 5] as usize;
         if cls >= CLASSES.len() {
             continue;
         }
-        // Coeffs 32
-        let coeffs: Vec<f32> = if det_dim >= 38 {
-            det_data[base + 6..base + 38].to_vec()
-        } else {
-            vec![0.0; 32]
-        };
-        // Build mask_map = sigmoid(coeffs @ proto)
-        // proto_data layout: [32, ph, pw] contiguous channel-major
-        let mut mask_map = vec![0.0f32; (ph * pw) as usize];
-        for c in 0..32.min(coeffs.len()) {
-            let coeff = coeffs[c];
-            let offset = c * proto_chan_stride;
-            for p in 0..proto_chan_stride {
-                // proto_data may have batch dim; if shape len 4, data is batch 0 then channels, same.
-                mask_map[p] += coeff * proto_data.get(offset + p).copied().unwrap_or(0.0);
+        raws.push(RawDet {
+            x1: det_data[base],
+            y1: det_data[base + 1],
+            x2: det_data[base + 2],
+            y2: det_data[base + 3],
+            conf,
+            cls,
+        });
+    }
+    // Sort by confidence descending, keep topK to cap work.
+    raws.sort_by(|a, b| b.conf.partial_cmp(&a.conf).unwrap_or(std::cmp::Ordering::Equal));
+    const TOPK: usize = 100;
+    if raws.len() > TOPK {
+        raws.truncate(TOPK);
+    }
+    // Class-agnostic NMS IoU 0.5 to remove duplicates before bbox decode.
+    fn iou(a: &RawDet, b: &RawDet) -> f32 {
+        let w = (a.x2.min(b.x2) - a.x1.max(b.x1)).max(0.0);
+        let h = (a.y2.min(b.y2) - a.y1.max(b.y1)).max(0.0);
+        let inter = w * h;
+        let area_a = ((a.x2 - a.x1).max(0.0)) * ((a.y2 - a.y1).max(0.0));
+        let area_b = ((b.x2 - b.x1).max(0.0)) * ((b.y2 - b.y1).max(0.0));
+        if area_a + area_b - inter <= 0.0 { 0.0 } else { inter / (area_a + area_b - inter) }
+    }
+    const NMS_THRESH: f32 = 0.5;
+    let mut kept: Vec<RawDet> = Vec::with_capacity(raws.len());
+    'outer: for det in raws {
+        for k in &kept {
+            // Only suppress same class or high overlap across classes still suppresses duplicate SFX/balloon boxes
+            if iou(&det, k) > NMS_THRESH {
+                continue 'outer;
             }
         }
-        for v in &mut mask_map {
-            *v = sigmoid(*v);
-        }
-        // Crop mask to box in proto grid
-        let bx1 = (x1 * grid_w / IMG_SIZE as f32) as i32;
-        let by1 = (y1 * grid_h / IMG_SIZE as f32) as i32;
-        let bx2 = (x2 * grid_w / IMG_SIZE as f32) as i32;
-        let by2 = (y2 * grid_h / IMG_SIZE as f32) as i32;
-        let bx1c = bx1.max(0);
-        let by1c = by1.max(0);
-        let mut bw = (bx2 - bx1c).max(1);
-        let mut bh = (by2 - by1c).max(1);
-        if by1c >= ph || bx1c >= pw {
-            continue;
-        }
-        bh = bh.min(ph - by1c);
-        bw = bw.min(pw - bx1c);
-        if bh <= 0 || bw <= 0 {
-            continue;
-        }
-        // Extract crop (not used for box filter but for mask)
-        // For now we skip detailed mask resize; just store box.
+        kept.push(det);
+    }
+    // Box-only decode — mask branch deleted (was 400KiB * passes pure waste, mask: None never used by filter.rs).
+    // Proto/mask_map computation removed until filter actually needs masks.
+    let _ = (ph, pw, grid_h, grid_w, &proto_data, proto_chan_stride); // keep bindings for future mask feature
+    for det in kept {
+        let (x1, y1, x2, y2, conf, cls) = (det.x1, det.y1, det.x2, det.y2, det.conf, det.cls);
         let ox1 = (x1 - dx as f32) / r;
         let oy1 = (y1 - dy as f32) / r;
         let ox2 = (x2 - dx as f32) / r;
         let oy2 = (y2 - dy as f32) / r;
         let ox1c = (ox1.max(0.0)).round() as i32;
         let oy1c = (oy1.max(0.0)).round() as i32;
-        let ox2c = (ox2.min(orig_w as f32)).round() as i32;
-        let oy2c = (oy2.min(orig_h as f32)).round() as i32;
-        let _bw_o = ((ox2 - ox1).round() as i32).max(1);
-        let _bh_o = ((oy2 - oy1).round() as i32).max(1);
-        // We do not fully reconstruct mask_bin here for filter (box-only). Keep bbox.
         let bbox = [ox1, oy1, ox2, oy2];
-        // Filter degenerate
         if bbox[2] <= bbox[0] || bbox[3] <= bbox[1] {
             continue;
         }
-        // For mask, we could store cropped mask but not needed for box filter.
         out.push(SegDet {
             class: SegClass::from_id(cls),
             class_id: cls,
@@ -322,7 +325,6 @@ fn decode_koharu(
             mask: None,
             mask_origin: Some((ox1c, oy1c)),
         });
-        let _ = (ox2c, oy2c, bx1c, by1c, bw, bh); // silence unused
     }
     out
 }

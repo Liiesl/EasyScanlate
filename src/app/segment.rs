@@ -68,26 +68,29 @@ fn run_segment_filter_blocking(
     ocr_boxes: &[Vec<([f32; 4], EntryId)>],
 ) -> Result<Vec<(usize, EntryId)>, String> {
     use scanlateit_segment::filter::{DetBox, sfx_filter_indexes};
-    use scanlateit_segment::grid::{build_grid_canvas, grid_det_to_page, plan_grids};
+    use scanlateit_segment::grid::{build_grid_canvas_with_loader, grid_det_to_page, plan_grids};
     use scanlateit_segment::SegClass;
     if dims.is_empty() {
         return Ok(Vec::new());
     }
     let runs = plan_grids(dims);
-    #[cfg(feature = "ocr")]
-    let images: Vec<image::RgbImage> = paths
-        .iter()
-        .map(|p| scanlateit_ocr::load_rgb(p).unwrap_or_else(|| image::RgbImage::new(1, 1)))
-        .collect();
-    #[cfg(not(feature = "ocr"))]
-    let images: Vec<image::RgbImage> = paths
-        .iter()
-        .map(|p| image::open(p).map(|i| i.to_rgb8()).unwrap_or_else(|_| image::RgbImage::new(1, 1)))
-        .collect();
+    let mut loader = |page_idx: usize| -> image::RgbImage {
+        let path = match paths.get(page_idx) {
+            Some(p) => p,
+            None => return image::RgbImage::new(1, 1),
+        };
+        #[cfg(feature = "ocr")]
+        let img = scanlateit_ocr::load_rgb(path).unwrap_or_else(|| image::RgbImage::new(1, 1));
+        #[cfg(not(feature = "ocr"))]
+        let img = image::open(path).map(|i| i.to_rgb8()).unwrap_or_else(|_| image::RgbImage::new(1, 1));
+        img
+    };
     let mut to_delete: Vec<(usize, EntryId)> = Vec::new();
-    for run in &runs {
-        let canvas = build_grid_canvas(&images, run);
-        let dets = engine.detect_canvas(&canvas).map_err(|e| format!("segment detect failed: {e}"))?;
+    for run in runs.iter() {
+        let canvas = build_grid_canvas_with_loader(run, &mut loader);
+        let dets = engine
+            .detect_canvas(&canvas)
+            .map_err(|e| format!("segment detect failed: {e}"))?;
         let mut balloons_per_page: Vec<Vec<DetBox>> = vec![Vec::new(); dims.len()];
         let mut sfx_per_page: Vec<Vec<DetBox>> = vec![Vec::new(); dims.len()];
         for det in dets {
@@ -118,6 +121,7 @@ fn run_segment_filter_blocking(
                 to_delete.push((page, id));
             }
         }
+        drop(canvas);
     }
     Ok(to_delete)
 }
@@ -132,14 +136,17 @@ pub fn handle_engine_ready(app: &mut App, result: Result<SegmentEngine, String>)
         }
         Err(e) => {
             app.segment_filtering = false;
-            app.status = e;
+            app.status = e.clone();
             Task::none()
         }
     }
 }
 
 #[cfg(feature = "segment")]
-pub fn handle_filtered(app: &mut App, result: Result<Vec<(usize, EntryId)>, String>) -> Task<Message> {
+pub fn handle_filtered(
+    app: &mut App,
+    result: Result<Vec<(usize, EntryId)>, String>,
+) -> Task<Message> {
     app.segment_filtering = false;
     let is_pipeline = {
         #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]

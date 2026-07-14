@@ -234,43 +234,89 @@ pub fn plan_grids(dims: &[(u32, u32)]) -> Vec<GridRun> {
 /// packing columns left-to-right with `GAP_COL` and padding the result to
 /// `side x side` white.
 pub fn build_grid_canvas(images: &[image::RgbImage], run: &GridRun) -> image::RgbImage {
+    build_grid_canvas_with_loader(run, |idx| {
+        images
+            .get(idx)
+            .cloned()
+            .unwrap_or_else(|| image::RgbImage::new(1, 1))
+    })
+}
+
+/// Streaming variant: loads one page at a time, shrinks it immediately
+/// to its scaled piece and pastes directly into the downscaled column buffer.
+/// No huge `col_img` native stack is ever built. Peak is
+/// `1 page (full-res) + col_buf (new_w*1280) + canvas (side*side)` instead of
+/// `all pages + col_img huge + ...`. For 50 pages this drops ~500MB.
+///
+/// `loader` is called exactly once per page in `run`, in column→page order.
+/// It must return a `RgbImage` (1x1 fallback on failure). The canvas uses the
+/// same `scale`, centering `dx` and `y_pad` as [`build_grid_canvas`], so
+/// `grid_det_to_page` inversion stays correct.
+pub fn build_grid_canvas_with_loader<F>(run: &GridRun, mut loader: F) -> image::RgbImage
+where
+    F: FnMut(usize) -> image::RgbImage,
+{
     use image::{Rgb, RgbImage};
     let side = run.side;
     let mut canvas = RgbImage::from_pixel(side, side, Rgb([255, 255, 255]));
     for col in &run.cols {
-        // Build unscaled column image native size col_w x col_h
-        let mut col_img = RgbImage::from_pixel(col.col_w_native, col.col_h_native, Rgb([255, 255, 255]));
-        let mut y_off = 0u32;
+        // Small downscaled column buffer directly: new_w x 1280, white.
+        let mut col_buf = RgbImage::from_pixel(col.new_w, IMG_SIZE, Rgb([255, 255, 255]));
+        let mut y_cursor: u32 = 0;
+        let n_pages = col.pages.len() as u32;
         for (pi, &page_idx) in col.pages.iter().enumerate() {
-            let img = &images[page_idx];
-            let dx = (col.col_w_native - img.width()) / 2;
-            // Copy
-            for y in 0..img.height() {
-                for x in 0..img.width() {
-                    col_img.put_pixel(dx + x, y_off + y, *img.get_pixel(x, y));
+            let img = loader(page_idx);
+            let is_last = pi + 1 == col.pages.len();
+            // Same scale as original: 1280 / col_h_native
+            let scale = col.scale;
+            let scaled_w = ((img.width() as f32 * scale).round() as u32).max(1).min(col.new_w);
+            // Last page absorbs rounding remainder so sum == 1280
+            let mut scaled_h = ((img.height() as f32 * scale).round() as u32).max(1);
+            if is_last {
+                scaled_h = IMG_SIZE - y_cursor;
+            } else if y_cursor + scaled_h > IMG_SIZE {
+                scaled_h = IMG_SIZE - y_cursor - (n_pages - pi as u32 - 1);
+            }
+            if scaled_h == 0 {
+                drop(img);
+                continue;
+            }
+            // Center horizontally: (col_w_native - w)/2 * scale == (new_w - scaled_w)/2
+            let dx_scaled = col.new_w.saturating_sub(scaled_w) / 2;
+            // Shrink this one page directly.
+            let resized: RgbImage = image::imageops::resize(
+                &img,
+                scaled_w,
+                scaled_h,
+                image::imageops::FilterType::Triangle,
+            );
+            drop(img);
+            // Paste small piece into downscaled column buffer.
+            for y in 0..scaled_h {
+                for x in 0..scaled_w {
+                    // Bounds already guaranteed, but keep check
+                    if y_cursor + y < IMG_SIZE && dx_scaled + x < col.new_w {
+                        col_buf.put_pixel(dx_scaled + x, y_cursor + y, *resized.get_pixel(x, y));
+                    }
                 }
             }
-            y_off += img.height();
-            let _ = pi;
+            drop(resized);
+            y_cursor += scaled_h;
+            if y_cursor >= IMG_SIZE {
+                break;
+            }
         }
-        // Resize column to IMG_SIZE tall
-        let col_resized: RgbImage = image::imageops::resize(
-            &col_img,
-            col.new_w,
-            IMG_SIZE,
-            image::imageops::FilterType::Triangle,
-        );
-        // Blit into canvas
+        // Blit downscaled column into final square canvas at (x_off, y_pad).
         let y0 = run.y_pad;
         let x0 = col.x_off;
         for y in 0..IMG_SIZE {
             for x in 0..col.new_w {
-                // Clamp in case side is larger than container_w (should still fit)
                 if y0 + y < side && x0 + x < side {
-                    canvas.put_pixel(x0 + x, y0 + y, *col_resized.get_pixel(x, y));
+                    canvas.put_pixel(x0 + x, y0 + y, *col_buf.get_pixel(x, y));
                 }
             }
         }
+        drop(col_buf);
     }
     canvas
 }
