@@ -167,6 +167,13 @@ pub fn toolbar_buttons() -> [(crate::event::ToolbarAction, &'static str); 2] {
     ]
 }
 
+pub fn inpaint_toolbar_buttons() -> [(crate::event::InpaintToolbarAction, &'static str); 2] {
+    [
+        (crate::event::InpaintToolbarAction::Delete, "Delete"),
+        (crate::event::InpaintToolbarAction::Repaint, "Repaint"),
+    ]
+}
+
 pub fn button_width(label: &str) -> f32 {
     // 6.5px char advance at 12pt → scale with font size for Rename/Delete/Revert widths
     label.chars().count() as f32 * scale::s(6.5) + scale::s(TOOLBAR_BTN_PAD) * 2.0
@@ -174,6 +181,13 @@ pub fn button_width(label: &str) -> f32 {
 
 pub fn toolbar_width() -> f32 {
     toolbar_buttons()
+        .into_iter()
+        .map(|(_, label)| button_width(label))
+        .sum()
+}
+
+pub fn inpaint_toolbar_width() -> f32 {
+    inpaint_toolbar_buttons()
         .into_iter()
         .map(|(_, label)| button_width(label))
         .sum()
@@ -193,9 +207,38 @@ pub fn toolbar_rect(rect: Rectangle, width: f32, flip_at: f32) -> Rectangle {
     Rectangle::new(Point::new(x, y), Size::new(tw, toolbar_height))
 }
 
+pub fn inpaint_toolbar_rect(rect: Rectangle, width: f32, flip_at: f32) -> Rectangle {
+    let tw = inpaint_toolbar_width();
+    let toolbar_gap = scale::s(TOOLBAR_GAP);
+    let toolbar_height = scale::s(TOOLBAR_HEIGHT);
+    let x = (rect.x + rect.width / 2.0 - tw / 2.0).clamp(0.0, (width - tw).max(0.0));
+    let below = rect.y + rect.height + toolbar_gap;
+    let y = if below + toolbar_height <= flip_at {
+        below
+    } else {
+        (rect.y - toolbar_height - toolbar_gap).max(0.0)
+    };
+    Rectangle::new(Point::new(x, y), Size::new(tw, toolbar_height))
+}
+
 pub fn toolbar_button_rect(toolbar: Rectangle, action: crate::event::ToolbarAction) -> Rectangle {
     let mut x = toolbar.x;
     for (candidate, label) in toolbar_buttons() {
+        let width = button_width(label);
+        if candidate == action {
+            return Rectangle::new(Point::new(x, toolbar.y), Size::new(width, toolbar.height));
+        }
+        x += width;
+    }
+    Rectangle::new(toolbar.position(), Size::new(0.0, toolbar.height))
+}
+
+pub fn inpaint_toolbar_button_rect(
+    toolbar: Rectangle,
+    action: crate::event::InpaintToolbarAction,
+) -> Rectangle {
+    let mut x = toolbar.x;
+    for (candidate, label) in inpaint_toolbar_buttons() {
         let width = button_width(label);
         if candidate == action {
             return Rectangle::new(Point::new(x, toolbar.y), Size::new(width, toolbar.height));

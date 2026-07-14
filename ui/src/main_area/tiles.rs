@@ -4,13 +4,15 @@ use crate::main_area::viewer::TileSpec;
 use crate::state::UiState;
 
 /// Builds the tile specs of one viewer pane. `original` strips everything the compare pane must not show.
+/// While an inpaint patch is selected OCR overlays are hidden (temporarily) per user request.
 pub fn tiles<'a, S: UiState + ?Sized>(state: &'a S, original: bool) -> Vec<TileSpec<'a>> {
+    let hide_ocr = !original && state.selected_inpaint().is_some();
     state
         .images()
         .iter()
         .enumerate()
         .map(|(index, image)| {
-            let overlays: Vec<OverlayEntry<'a>> = if original {
+            let overlays: Vec<OverlayEntry<'a>> = if original || hide_ocr {
                 Vec::new()
             } else {
                 image

@@ -3,7 +3,7 @@ use iced::Point;
 
 use scanlateit_model::{EntryId, Quad};
 
-use crate::event::ToolbarAction;
+use crate::event::{InpaintToolbarAction, ToolbarAction};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverlayButton {
@@ -86,6 +86,11 @@ pub enum Interaction {
         index: usize,
         id: EntryId,
         action: ToolbarAction,
+    },
+    InpaintToolbarPressed {
+        index: usize,
+        patch: usize,
+        action: InpaintToolbarAction,
     },
     OverlayButtonPressed {
         button: OverlayButton,

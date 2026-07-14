@@ -7,7 +7,10 @@ use crate::scale;
 
 use super::interaction::{OverlayButton, TopDecorHit};
 use super::layout::tile_layout;
-use super::motion::{button_width, handle_anchors, handle_rect, toolbar_buttons, toolbar_rect, top_decor_geometry};
+use super::motion::{
+    button_width, handle_anchors, handle_rect, inpaint_toolbar_buttons, inpaint_toolbar_rect,
+    toolbar_buttons, toolbar_rect, top_decor_geometry,
+};
 use super::state::TileViewState;
 use super::TileSpec;
 
@@ -225,6 +228,84 @@ pub fn hit_toolbar(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) 
     let toolbar = toolbar_rect(rect, state.width, state.viewport_height);
     let id = tiles[index].overlays.iter().find(|e| e.selected)?.id;
     hit_toolbar_button(toolbar, local).map(|action| (index, id, action))
+}
+
+pub fn hit_inpaint_toolbar_button(
+    toolbar: Rectangle,
+    local: Point,
+) -> Option<crate::event::InpaintToolbarAction> {
+    if !toolbar.contains(local) {
+        return None;
+    }
+    let mut x = toolbar.x;
+    for (action, label) in inpaint_toolbar_buttons() {
+        let width = button_width(label);
+        if local.x < x + width {
+            return Some(action);
+        }
+        x += width;
+    }
+    None
+}
+
+pub fn hit_inpaint_toolbar(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    selected_inpaint: Option<(usize, usize)>,
+    local: Point,
+) -> Option<(usize, usize, crate::event::InpaintToolbarAction)> {
+    let (img_idx, patch_idx) = selected_inpaint?;
+    let tile = tiles.get(img_idx)?;
+    let layer = tile.inpaint.get(patch_idx)?;
+    let (layout, _) = tile_layout(tiles, state.width);
+    let (y, _) = layout.get(img_idx)?;
+    let scale = if tile.source_width > 0 {
+        state.width / tile.source_width as f32
+    } else {
+        0.0
+    };
+    if scale <= 0.0 {
+        return None;
+    }
+    let [x, yy, w, h] = layer.bounds;
+    let rect = Rectangle::new(
+        Point::new(x * scale, y + yy * scale - state.offset),
+        Size::new(w * scale, h * scale),
+    );
+    let toolbar = inpaint_toolbar_rect(rect, state.width, state.viewport_height);
+    hit_inpaint_toolbar_button(toolbar, local).map(|action| (img_idx, patch_idx, action))
+}
+
+pub fn inpaint_reveal_offset(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    index: usize,
+    bounds: [f32; 4],
+) -> Option<f32> {
+    let tile = tiles.get(index)?;
+    let (layout, _) = tile_layout(tiles, state.width);
+    let (y, _) = layout.get(index)?;
+    let scale = if tile.source_width > 0 {
+        state.width / tile.source_width as f32
+    } else {
+        0.0
+    };
+    if scale <= 0.0 {
+        return None;
+    }
+    let [_, min_y, _, h] = bounds;
+    let top = y + min_y * scale;
+    let bottom = top + h * scale;
+    let viewport = state.viewport_height;
+    if viewport <= 0.0 {
+        return None;
+    }
+    let max_offset = (state.content_height - viewport).max(0.0);
+    if top >= state.offset && bottom <= state.offset + viewport {
+        return None;
+    }
+    let target = (top - (viewport - (bottom - top)) / 2.0).clamp(0.0, max_offset);
+    (target != state.offset).then_some(target)
 }
 
 pub fn overlay_button_rects(bounds: Rectangle) -> [Rectangle; 3] {

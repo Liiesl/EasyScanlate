@@ -25,7 +25,7 @@ use iced::keyboard;
 use iced::touch::Event as TouchEvent;
 use iced::{Color, Element, Event, Font, Length, Pixels, Point, Rectangle, Size, Vector};
 
-use crate::event::ToolbarAction;
+use crate::event::{InpaintToolbarAction, ToolbarAction};
 use crate::main_area::decode::PageDecode;
 use crate::main_area::overlay::OverlayEntry;
 use scanlateit_model::{EntryId, Quad};
@@ -34,11 +34,15 @@ use self::constants::{
     DOUBLE_CLICK_DELAY, DRAG_THRESHOLD, HANDLE_SIZE, MIN_BOX_EDGE, MIN_INPAINT_EDGE,
     SCROLL_LINE_HEIGHT,
 };
-use self::draw::{draw_inpaint_marquee, draw_overlay_buttons, draw_placeholder, draw_scrollbar, draw_selection_decorations};
+use self::draw::{
+    draw_inpaint_decorations, draw_inpaint_marquee, draw_overlay_buttons, draw_placeholder,
+    draw_scrollbar, draw_selection_decorations,
+};
 use self::hit_test::{
-    editing_rect, entry_quad, entry_rect, hit_entry, hit_handle, hit_overlay_button, hit_tile,
-    hit_toolbar, hit_top_decor, local_point, overlay_button_rects, point_in_quad, reveal_offset,
-    selected_quad_view, selected_rect, tile_local_point,
+    editing_rect, entry_quad, entry_rect, hit_entry, hit_handle, hit_inpaint_toolbar,
+    hit_overlay_button, hit_tile, hit_toolbar, hit_top_decor, inpaint_reveal_offset, local_point,
+    overlay_button_rects, point_in_quad, reveal_offset, selected_quad_view, selected_rect,
+    tile_local_point,
 };
 use self::interaction::{Interaction, OverlayButton, ResizeHandle, TopDecorHit};
 use self::layout::{content_width, tile_layout};
@@ -46,7 +50,10 @@ use self::motion::{
     distort_quad, drag_grab, drag_quad, handle_anchors, handle_rect, quad_centroid, resize_quad,
     rotate_quad, toolbar_buttons,
 };
-use self::scroll::{publish_edit_rect, publish_offset, publish_visible, thumb_rect, track_rect, scroll_by, visible_range};
+use self::scroll::{
+    publish_edit_rect, publish_offset, publish_visible, thumb_rect, track_rect, scroll_by,
+    visible_range,
+};
 use self::state::TileViewState;
 
 /// The tile viewer widget. Scroll state lives in the widget tree and survives rebuilds.
@@ -62,6 +69,7 @@ pub struct TileView<
     P = fn() -> Message,
     Q = fn((usize, Rectangle)) -> Message,
     R = fn(f32) -> Message,
+    S = fn((usize, usize, InpaintToolbarAction)) -> Message,
 > where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -72,6 +80,7 @@ pub struct TileView<
     P: Fn() -> Message,
     Q: Fn((usize, Rectangle)) -> Message,
     R: Fn(f32) -> Message,
+    S: Fn((usize, usize, InpaintToolbarAction)) -> Message,
 {
     tiles: Vec<TileSpec<'a>>,
     font: Font,
@@ -92,9 +101,12 @@ pub struct TileView<
     reveal: Option<(usize, EntryId)>,
     on_scroll: Option<R>,
     scroll_to: Option<f32>,
+    selected_inpaint: Option<(usize, usize)>,
+    on_inpaint_toolbar: Option<S>,
+    inpaint_reveal: Option<(usize, usize)>,
 }
 
-impl<'a, Message, F, G, H, K, L, M, P, Q, R> TileView<'a, Message, F, G, H, K, L, M, P, Q, R>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R, S> TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -105,6 +117,7 @@ where
     P: Fn() -> Message,
     Q: Fn((usize, Rectangle)) -> Message,
     R: Fn(f32) -> Message,
+    S: Fn((usize, usize, InpaintToolbarAction)) -> Message,
 {
     pub fn new(tiles: Vec<TileSpec<'a>>, font: Font) -> Self {
         Self {
@@ -127,6 +140,9 @@ where
             reveal: None,
             on_scroll: None,
             scroll_to: None,
+            selected_inpaint: None,
+            on_inpaint_toolbar: None,
+            inpaint_reveal: None,
         }
     }
 
@@ -214,14 +230,29 @@ where
         self.reveal = reveal;
         self
     }
+
+    pub fn selected_inpaint(mut self, selected: Option<(usize, usize)>) -> Self {
+        self.selected_inpaint = selected;
+        self
+    }
+
+    pub fn inpaint_reveal(mut self, reveal: Option<(usize, usize)>) -> Self {
+        self.inpaint_reveal = reveal;
+        self
+    }
+
+    pub fn on_inpaint_toolbar(mut self, f: S) -> Self {
+        self.on_inpaint_toolbar = Some(f);
+        self
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Widget impl - delegates geometry/hit-testing/drawing to submodules
 // ---------------------------------------------------------------------------
 
-impl<'a, Message, F, G, H, K, L, M, P, Q, R, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for TileView<'a, Message, F, G, H, K, L, M, P, Q, R>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -232,6 +263,7 @@ where
     P: Fn() -> Message,
     Q: Fn((usize, Rectangle)) -> Message,
     R: Fn(f32) -> Message,
+    S: Fn((usize, usize, InpaintToolbarAction)) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
     fn size(&self) -> Size<Length> {
@@ -265,6 +297,19 @@ where
             if let Some((index, id)) = self.reveal {
                 if let Some(new_offset) = hit_test::reveal_offset(&self.tiles, state, index, id) {
                     state.offset = new_offset;
+                }
+            }
+        }
+        // Inpaint selection reveal (panel -> main area): bring its bbox into view.
+        if self.inpaint_reveal != state.last_inpaint_revealed {
+            state.last_inpaint_revealed = self.inpaint_reveal;
+            if let Some((index, patch_idx)) = self.inpaint_reveal {
+                if let Some(tile) = self.tiles.get(index) {
+                    if let Some(layer) = tile.inpaint.get(patch_idx) {
+                        if let Some(new_offset) = inpaint_reveal_offset(&self.tiles, state, index, layer.bounds) {
+                            state.offset = new_offset;
+                        }
+                    }
                 }
             }
         }
@@ -336,7 +381,7 @@ where
             } else {
                 None
             };
-            let visible_tiles: Vec<usize> = self
+            let mut visible_tiles: Vec<usize> = self
                 .tiles
                 .iter()
                 .enumerate()
@@ -361,6 +406,26 @@ where
                     has_visible_entry.then_some(index)
                 })
                 .collect();
+            // Inpaint selection must also drive a frame even while OCR overlays are hidden.
+            if let Some((img_idx, _)) = self.selected_inpaint {
+                if !visible_tiles.contains(&img_idx) {
+                    if let Some((y, height)) = layout.get(img_idx).copied() {
+                        if y + height > visible_top && y < visible_bottom {
+                            visible_tiles.push(img_idx);
+                        }
+                    }
+                }
+            }
+            // Ensure selecting marquee tile is visible even if overlays hidden (original does, but guard again)
+            if visible_tiles.is_empty() && inpaint_selecting.is_some() {
+                if let Some(idx) = inpaint_selecting {
+                    if let Some((y, height)) = layout.get(idx).copied() {
+                        if y + height > visible_top && y < visible_bottom {
+                            visible_tiles.push(idx);
+                        }
+                    }
+                }
+            }
             if !visible_tiles.is_empty() {
                 renderer.with_layer(local_bounds, |renderer| {
                     renderer.with_translation(Vector::new(0.0, -state.offset), |renderer| {
@@ -399,6 +464,17 @@ where
                                 flip_at,
                                 self.show_overlay_text,
                             );
+                            // Inpaint static highlight + floating toolbar (no handles), like result border.
+                            if self.show_inpaint {
+                                draw_inpaint_decorations(
+                                    &mut overlay_frame,
+                                    &self.tiles,
+                                    index,
+                                    self.selected_inpaint,
+                                    cursor_local,
+                                    flip_at,
+                                );
+                            }
                             if state.inpaint_mode() {
                                 if let Interaction::InpaintSelecting { index: selecting, start, current } = state.interaction {
                                     if selecting == index {
@@ -491,7 +567,29 @@ where
                             return;
                         }
                     }
-                    if self.editing.is_none() {
+                    // Inpaint selection has its own floating toolbar (no handles). It is drawn
+                    // like the result border but must not be movable/resizable.
+                    if self.selected_inpaint.is_some() {
+                        if self.show_inpaint {
+                            if let Some((idx, patch, action)) = hit_inpaint_toolbar(
+                                &self.tiles,
+                                state,
+                                self.selected_inpaint,
+                                local,
+                            ) {
+                                state.interaction = Interaction::InpaintToolbarPressed {
+                                    index: idx,
+                                    patch,
+                                    action,
+                                };
+                                shell.capture_event();
+                                return;
+                            }
+                        }
+                        // While an inpaint is selected OCR overlays are hidden and must not
+                        // be interactive (no drag/resize/rotate/toolbar). Fall through to
+                        // scrollbar / empty click handling only.
+                    } else if self.editing.is_none() {
                         if let Some((index, id, action)) = hit_toolbar(&self.tiles, state, local) {
                             state.interaction = Interaction::ToolbarPressed { index, id, action };
                             shell.capture_event();
@@ -616,6 +714,23 @@ where
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                if let Interaction::InpaintToolbarPressed { index, patch, action } = state.interaction {
+                    if let Some(position) = cursor.position_over(bounds) {
+                        let local = local_point(position, bounds);
+                        let still_hovered = hit_inpaint_toolbar(
+                            &self.tiles,
+                            state,
+                            self.selected_inpaint,
+                            local,
+                        ) == Some((index, patch, action));
+                        if still_hovered {
+                            if let Some(callback) = self.on_inpaint_toolbar.as_ref() {
+                                shell.publish(callback((index, patch, action)));
+                                shell.request_redraw();
+                            }
+                        }
+                    }
+                }
                 if let Interaction::ToolbarPressed { index, id, action } = state.interaction {
                     if let Some(position) = cursor.position_over(bounds) {
                         let local = local_point(position, bounds);
@@ -697,6 +812,7 @@ where
                         | Interaction::RotatePending { .. }
                         | Interaction::Rotating { .. }
                         | Interaction::ToolbarPressed { .. }
+                        | Interaction::InpaintToolbarPressed { .. }
                         | Interaction::OverlayButtonPressed { .. }
                         | Interaction::InpaintSelecting { .. }
                 ) {
@@ -841,7 +957,8 @@ where
                         shell.request_redraw();
                         shell.capture_event();
                     }
-                    Interaction::ToolbarPressed { .. } => {
+                    Interaction::ToolbarPressed { .. }
+                    | Interaction::InpaintToolbarPressed { .. } => {
                         shell.capture_event();
                     }
                     Interaction::OverlayButtonPressed { .. } => {
@@ -876,6 +993,7 @@ where
             | Interaction::RotatePending { .. }
             | Interaction::Rotating { .. }
             | Interaction::ToolbarPressed { .. }
+            | Interaction::InpaintToolbarPressed { .. }
             | Interaction::OverlayButtonPressed { .. }
             | Interaction::InpaintSelecting { .. } => mouse::Interaction::Grabbing,
             Interaction::None => {
@@ -886,6 +1004,18 @@ where
                         if hit_overlay_button(bounds, local).is_some() {
                             return mouse::Interaction::Pointer;
                         }
+                    }
+                    // Inpaint toolbar takes precedence and OCR handles are hidden while inpaint selected.
+                    if self.selected_inpaint.is_some() {
+                        if self.show_inpaint {
+                            if hit_inpaint_toolbar(&self.tiles, state, self.selected_inpaint, local).is_some() {
+                                return mouse::Interaction::Pointer;
+                            }
+                        }
+                        if self.show_scrollbar && (track_rect(bounds).contains(local) || thumb_rect(bounds, state).contains(local)) {
+                            return mouse::Interaction::Pointer;
+                        }
+                        return mouse::Interaction::None;
                     }
                     if self.editing.is_none() {
                         if hit_toolbar(&self.tiles, state, local).is_some() {
@@ -914,7 +1044,8 @@ where
     }
 }
 
-impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Q: 'a, R: 'a, Theme, Renderer> From<TileView<'a, Message, F, G, H, K, L, M, P, Q, R>> for Element<'a, Message, Theme, Renderer>
+impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Q: 'a, R: 'a, S: 'a, Theme, Renderer>
+    From<TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S>> for Element<'a, Message, Theme, Renderer>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -925,9 +1056,10 @@ where
     P: Fn() -> Message,
     Q: Fn((usize, Rectangle)) -> Message,
     R: Fn(f32) -> Message,
+    S: Fn((usize, usize, InpaintToolbarAction)) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
-    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P, Q, R>) -> Self {
+    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S>) -> Self {
         Self::new(view)
     }
 }

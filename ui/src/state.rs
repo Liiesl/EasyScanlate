@@ -30,6 +30,8 @@ pub trait UiState {
     /// The connect modal open over the settings modal, if any.
     fn connect_modal(&self) -> Option<&ConnectModal>;
     fn selected(&self) -> Option<(usize, EntryId)>;
+    /// The currently selected inpaint patch as `(image index, patch index within that image)`; `None` when no inpaint is selected.
+    fn selected_inpaint(&self) -> Option<(usize, usize)>;
     fn style_working(&self) -> &EntryStyle;
     fn style_text_color(&self) -> Color;
     fn style_stroke_color(&self) -> Color;

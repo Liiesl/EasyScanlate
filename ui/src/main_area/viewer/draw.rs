@@ -10,10 +10,11 @@ use super::constants::{
     PLACEHOLDER_BG, PLACEHOLDER_FG, SCROLLBAR_THUMB, SCROLLBAR_TRACK, TOOLBAR_BG, TOOLBAR_FG,
     TOOLBAR_HOVER_BG,
 };
-use super::hit_test::hit_toolbar_button;
+use super::hit_test::{hit_inpaint_toolbar_button, hit_toolbar_button};
 use super::interaction::Interaction;
 use super::motion::{
-    button_width, handle_anchors, handle_rect, toolbar_buttons, toolbar_rect, top_decor_geometry,
+    button_width, handle_anchors, handle_rect, inpaint_toolbar_button_rect, inpaint_toolbar_buttons,
+    inpaint_toolbar_rect, toolbar_buttons, toolbar_rect, top_decor_geometry,
 };
 use super::scroll::{thumb_rect, track_rect};
 use super::state::TileViewState;
@@ -186,5 +187,50 @@ pub fn draw_selection_decorations<'a, F>(
     let hover = cursor_local.and_then(|local| hit_toolbar_button(toolbar, local));
     for (action, _) in toolbar_buttons() {
         draw_toolbar_button(frame, toolbar, action, hover == Some(action));
+    }
+}
+
+/// Draws the static highlight around the selected inpaint patch on `tile_index`.
+/// No handles, no top decor, no drag. Only a border (like result selection)
+/// plus a floating Delete / Repaint toolbar below the bbox.
+pub fn draw_inpaint_decorations<'a, F>(
+    frame: &mut F,
+    tiles: &[TileSpec<'a>],
+    tile_index: usize,
+    selected_inpaint: Option<(usize, usize)>,
+    cursor_local: Option<Point>,
+    flip_at: f32,
+) where
+    F: geometry::frame::Backend,
+{
+    let Some((img_idx, patch_idx)) = selected_inpaint else {
+        return;
+    };
+    if img_idx != tile_index {
+        return;
+    }
+    let tile = &tiles[tile_index];
+    let Some(layer) = tile.inpaint.get(patch_idx) else {
+        return;
+    };
+    let scale = frame.width() / tile.source_width.max(1) as f32;
+    let [x, y, w, h] = layer.bounds;
+    let rect = Rectangle::new(
+        Point::new(x * scale, y * scale),
+        Size::new(w * scale, h * scale),
+    );
+    // Border highlight – same color as overlay selection.
+    frame.stroke(
+        &Path::rectangle(rect.position(), rect.size()),
+        Stroke::default()
+            .with_color(Color::from_rgba8(92, 190, 255, 1.0))
+            .with_width(scale::s(2.0)),
+    );
+    // Floating toolbar below (like OCR). No move/resize.
+    let toolbar = inpaint_toolbar_rect(rect, frame.width(), flip_at);
+    let hover = cursor_local.and_then(|local| hit_inpaint_toolbar_button(toolbar, local));
+    for (action, label) in inpaint_toolbar_buttons() {
+        let r = inpaint_toolbar_button_rect(toolbar, action);
+        draw_action_button(frame, r, label, hover == Some(action));
     }
 }

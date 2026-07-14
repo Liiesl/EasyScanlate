@@ -58,12 +58,15 @@ fn build_viewer<'a, S: UiState + ?Sized>(state: &'a S, tiles: Vec<TileSpec<'a>>,
             .on_entry_moved(UiEvent::EntryMoved)
             .on_toolbar_action(UiEvent::EntryToolbar)
             .on_inpaint_selection(UiEvent::InpaintSelection)
+            .on_inpaint_toolbar(UiEvent::InpaintToolbar)
             .inpaint_mode(state.inpaint_mode())
             .show_inpaint(state.show_inpaint())
             .show_overlay_text(state.show_overlay_text())
             .show_overlay_buttons(false)
             .editing(state.editing())
-            .reveal(state.selected());
+            .reveal(state.selected())
+            .selected_inpaint(state.selected_inpaint())
+            .inpaint_reveal(state.selected_inpaint());
     }
     viewer
 }

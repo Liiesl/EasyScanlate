@@ -1,12 +1,12 @@
 //! Photoshop-like layer list for inpaint patches (and future notes).
-//! Visual-only for now but reads the real model: `Project.extras.inpaint_patches`
-//! plus `LoadedImage.inpaint` layers. Grouped by image, each row shows an eye,
-//! a thumbnail/checker, label and dimensions. The whole panel is a separate
-//! card with its own `PANEL_BG` background, gap-separated from the styling card
-//! above and resizable via the parent `pane_grid` split.
+//! Reads `Project.extras.inpaint_patches` plus `LoadedImage.inpaint` layers.
+//! Clicking a row selects the patch: the main area highlights its bbox (like
+//! result selection) with a static border (no move/resize) and a floating
+//! Delete / Repaint toolbar. While an inpaint is selected OCR overlays are
+//! hidden. The row itself shows Delete / Repaint when selected.
 
 use iced::widget::image::{self, Handle};
-use iced::widget::{button, column, container, row, scrollable, space, text};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, space, text};
 use iced::{Border, Color, Element, Fill as FillLength, Length, Padding};
 
 use crate::event::UiEvent;
@@ -17,7 +17,6 @@ use crate::state::UiState;
 /// Background of a layer row – intentionally translucent like the outer
 /// `PANEL_BG` card so the aurora shows through in a satisfying stack:
 /// aurora → outer PANEL_BG (0.78) → inner list (0.32) → row (0.48).
-/// Previous 0.72 was too opaque and read as solid.
 const ROW_BG: Color = Color::from_rgba8(34, 36, 44, 0.48);
 const ROW_BG_DIMMED: Color = Color::from_rgba8(34, 36, 44, 0.26);
 const ROW_BORDER: Color = Color::from_rgba8(255, 255, 255, 0.10);
@@ -76,15 +75,17 @@ fn header_row<'a, S: UiState + ?Sized>(state: &'a S, total: usize) -> Element<'a
     .into()
 }
 
-/// One layer row: eye (visual only, reflects global show_inpaint), a 28px
-/// thumbnail that previews the *actual* inpaint crop (`Handle` when available),
-/// title and subtitle.
+/// One layer row: eye, 28px thumbnail, title/subtitle and, when selected,
+/// Delete / Repaint actions. The whole row is a click target that toggles
+/// inpaint selection (like the results list highlights its overlay).
 fn layer_row<'a>(
     image_name: &'a str,
+    image_index: usize,
     index_in_image: usize,
     bounds: [f32; 4],
     handle: Option<Handle>,
     global_visible: bool,
+    is_selected: bool,
 ) -> Element<'a, UiEvent> {
     let [x, y, w, h] = bounds;
     let title = format!("Inpaint  {}", index_in_image + 1);
@@ -92,8 +93,6 @@ fn layer_row<'a>(
 
     // Thumbnail: actual crop preview. When no handle is available (model-only
     // patch without runtime pixels) we fall back to a muted placeholder.
-    // The thumb itself is a 28px square with a thin border; the image is
-    // clipped with border_radius to match Photoshop's thumb.
     let thumb: Element<'a, UiEvent> = if let Some(hdl) = handle {
         // Dim the preview when the global inpaint layer is hidden, like PS eye off.
         let opacity = if global_visible { 1.0 } else { 0.45 };
@@ -142,40 +141,65 @@ fn layer_row<'a>(
         .width(Length::Fixed(scale::s(16.0)))
         .center();
 
-    let is_selected = false; // visual-only; future: per-layer selection
     let row_bg = if global_visible { ROW_BG } else { ROW_BG_DIMMED };
 
-    container(
+    // Right-side actions: only when selected, mirroring the results row's
+    // Delete / Retranslate but for inpaint: Delete / Repaint (exact rect).
+    let actions: Element<'a, UiEvent> = if is_selected {
         row![
-            eye,
-            thumb,
-            column![
-                text(title).size(scale::s(11.0)).color(Color::from_rgb8(230, 230, 230)),
-                text(subtitle).size(scale::s(10.0)).color(MUTED_FG),
-            ]
-            .spacing(scale::s(1.0))
-            .width(FillLength),
-            text("⋮").size(scale::s(12.0)).color(MUTED_FG),
+            button(text("Delete").size(scale::s(10.0)))
+                .padding([scale::s(2.0), scale::s(6.0)])
+                .on_press(UiEvent::InpaintDelete((image_index, index_in_image))),
+            button(text("Repaint").size(scale::s(10.0)))
+                .padding([scale::s(2.0), scale::s(6.0)])
+                .on_press(UiEvent::InpaintRepaint((image_index, index_in_image))),
         ]
-        .spacing(scale::s(8.0))
-        .align_y(iced::Alignment::Center),
-    )
-    .width(FillLength)
-    .padding(Padding {
-        top: scale::s(6.0),
-        right: scale::s(8.0),
-        bottom: scale::s(6.0),
-        left: scale::s(8.0),
-    })
-    .style(move |_theme| container::Style {
-        background: Some(if is_selected { SELECTED_BG } else { row_bg }.into()),
-        border: Border::default()
-            .width(scale::s(1.0))
-            .color(if is_selected { SELECTED_BORDER } else { ROW_BORDER })
-            .rounded(scale::s(6.0)),
-        ..container::Style::default()
-    })
-    .into()
+        .spacing(scale::s(4.0))
+        .into()
+    } else {
+        text("⋮").size(scale::s(12.0)).color(MUTED_FG).into()
+    };
+
+    let inner = row![
+        eye,
+        thumb,
+        column![
+            text(title).size(scale::s(11.0)).color(Color::from_rgb8(230, 230, 230)),
+            text(subtitle).size(scale::s(10.0)).color(MUTED_FG),
+        ]
+        .spacing(scale::s(1.0))
+        .width(FillLength),
+        actions,
+    ]
+    .spacing(scale::s(8.0))
+    .align_y(iced::Alignment::Center);
+
+    let styled = container(inner)
+        .width(FillLength)
+        .padding(Padding {
+            top: scale::s(6.0),
+            right: scale::s(8.0),
+            bottom: scale::s(6.0),
+            left: scale::s(8.0),
+        })
+        .style(move |_theme| container::Style {
+            background: Some(if is_selected { SELECTED_BG } else { row_bg }.into()),
+            border: Border::default()
+                .width(scale::s(1.0))
+                .color(if is_selected { SELECTED_BORDER } else { ROW_BORDER })
+                .rounded(scale::s(6.0)),
+            ..container::Style::default()
+        });
+
+    // Clicking the row selects the inpaint (like result item highlight on main
+    // area). Clicking the already-selected row deselects it. Buttons inside
+    // capture clicks before the outer mouse_area.
+    let target = if is_selected {
+        UiEvent::InpaintClicked(None)
+    } else {
+        UiEvent::InpaintClicked(Some((image_index, index_in_image)))
+    };
+    mouse_area(styled).on_press(target).into()
 }
 
 fn image_header<'a>(name: &'a str, count: usize) -> Element<'a, UiEvent> {
@@ -194,6 +218,7 @@ fn image_header<'a>(name: &'a str, count: usize) -> Element<'a, UiEvent> {
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let images = state.images();
     let global_visible = state.show_inpaint();
+    let selected_inpaint = state.selected_inpaint();
 
     // Aggregate patches per image. For a proper preview we need the GPU `Handle`
     // stored in `LoadedImage.inpaint` (the actual crop pixels). The model
@@ -202,7 +227,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let mut total = 0usize;
     let mut sections: Vec<Element<'_, UiEvent>> = Vec::new();
 
-    for img in images {
+    for (image_index, img) in images.iter().enumerate() {
         let name = file_name(&img.path);
 
         // Build (bounds, Option<Handle>) list per image.
@@ -228,7 +253,8 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         total += entries.len();
         sections.push(image_header(name, entries.len()));
         for (i, (bounds, handle)) in entries.into_iter().enumerate() {
-            sections.push(layer_row(name, i, bounds, handle, global_visible));
+            let is_selected = selected_inpaint == Some((image_index, i));
+            sections.push(layer_row(name, image_index, i, bounds, handle, global_visible, is_selected));
         }
     }
 
@@ -254,7 +280,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                     .size(scale::s(10.0))
                     .color(MUTED_FG),
                 container(
-                    text("Future: notes will appear here as layers.")
+                    text("Tip: click a layer to highlight its box on the image. Delete / Repaint appear when selected.")
                         .size(scale::s(10.0))
                         .color(Color::from_rgba8(130, 130, 140, 1.0))
                 )

@@ -6,6 +6,15 @@ use iced::{Color, Rectangle};
 
 use scanlateit_model::{EntryId, ProfileId, Quad, TextAlign, TextGradientDir};
 
+/// The actions offered by the floating inpaint toolbar under the selected patch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InpaintToolbarAction {
+    /// Remove the selected inpaint patch.
+    Delete,
+    /// Re-run inpainting on the exact same bounds.
+    Repaint,
+}
+
 /// The actions offered by the selection decorations around the selected
 /// overlay box in the main area.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,6 +156,14 @@ pub enum UiEvent {
     EntryMoved((usize, EntryId, Quad)),
     /// A button of the selection toolbar under the selected entry.
     EntryToolbar((usize, EntryId, ToolbarAction)),
+    /// The user clicked an inpaint layer row in the Layers panel. `None` deselects.
+    InpaintClicked(Option<(usize, usize)>),
+    /// Delete an inpaint patch: `(image index, patch index)`.
+    InpaintDelete((usize, usize)),
+    /// Re-run inpainting on the exact same bounds as `(image index, patch index)`.
+    InpaintRepaint((usize, usize)),
+    /// A button of the floating inpaint toolbar under the selected patch.
+    InpaintToolbar((usize, usize, InpaintToolbarAction)),
     /// Toggle inpainting mode from the panel: the next drag on the page
     /// selects the range to clean.
     Inpaint,

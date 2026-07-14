@@ -289,6 +289,8 @@ pub struct App {
     /// The currently selected overlay entry as `(image index, entry id)`;
     /// the style panel edits exactly this entry and nothing else.
     pub(crate) selected: Option<(usize, EntryId)>,
+    /// The currently selected inpaint patch as `(image index, patch index)`; hides OCR overlays while set.
+    pub(crate) selected_inpaint: Option<(usize, usize)>,
     /// The entry being edited inline as `(image index, entry id)`; `None`
     /// when no inline edit is active.
     pub(crate) editing: Option<(usize, EntryId)>,
@@ -447,6 +449,7 @@ impl App {
             manage_models_open: false,
             manage_models_search: String::new(),
             selected: None,
+            selected_inpaint: None,
             editing: None,
             editing_origin: EditOrigin::Overlay,
             edit_content: None,
@@ -547,6 +550,8 @@ fn seed_style_inputs(app: &mut App, style: EntryStyle) {
 /// moved the viewport without a `TilesVisible` event), schedules a full-res
 /// settle for that page.
 fn select_entry(app: &mut App, index: usize, id: EntryId) -> Task<Message> {
+    // Selecting an OCR entry deselects any inpaint (mutual exclusion, hide OCR rule reversed)
+    app.selected_inpaint = None;
     app.selected = Some((index, id));
     seed_style_inputs(app, app.images[index].project.entry_style(id));
     if app.scheduler.needs_settle(index, app.images.len()) {
@@ -592,6 +597,10 @@ impl UiState for App {
 
     fn selected(&self) -> Option<(usize, EntryId)> {
         self.selected
+    }
+
+    fn selected_inpaint(&self) -> Option<(usize, usize)> {
+        self.selected_inpaint
     }
 
     fn style_working(&self) -> &EntryStyle {
@@ -3101,6 +3110,10 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         }
         Message::Ui(UiEvent::EntryClicked(selection)) => {
             clear_editing(app);
+            // Inpaint selection hides OCR overlays; picking an entry must deselect inpaint.
+            if app.selected_inpaint.is_some() {
+                app.selected_inpaint = None;
+            }
             match selection {
                 Some((index, id))
                     if app
@@ -3117,10 +3130,156 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
         }
         Message::Ui(UiEvent::EntryDoubleClicked((index, id))) => {
+            // Deselect inpaint when starting text edit
+            if app.selected_inpaint.is_some() {
+                app.selected_inpaint = None;
+            }
             start_inline_edit(app, index, id, EditOrigin::Overlay)
         }
         Message::Ui(UiEvent::PanelEntryEdit((index, id))) => {
+            if app.selected_inpaint.is_some() {
+                app.selected_inpaint = None;
+            }
             start_inline_edit(app, index, id, EditOrigin::Panel)
+        }
+        Message::Ui(UiEvent::InpaintClicked(selection)) => {
+            clear_editing(app);
+            match selection {
+                Some((image_index, patch_idx)) => {
+                    let valid = app
+                        .images
+                        .get(image_index)
+                        .is_some_and(|img| patch_idx < img.inpaint.len() || patch_idx < img.project.extras.inpaint_patches.len());
+                    if !valid {
+                        app.status = "That inpaint layer no longer exists.".to_string();
+                        return Task::none();
+                    }
+                    // Mutual exclusion: selecting inpaint hides OCR overlays
+                    app.selected = None;
+                    app.selected_inpaint = Some((image_index, patch_idx));
+                    app.status = format!("Inpaint {patch_idx} selected – overlays hidden.");
+                    // Scroll tile into view via TileView's inpaint_reveal; also allow settle for decode
+                    if app.scheduler.needs_settle(image_index, app.images.len()) {
+                        return app.scheduler.schedule(image_index..image_index+1, Message::SettleElapsed);
+                    }
+                    Task::none()
+                }
+                None => {
+                    app.selected_inpaint = None;
+                    app.status = "Inpaint deselected – overlays shown.".to_string();
+                    Task::none()
+                }
+            }
+        }
+        Message::Ui(UiEvent::InpaintDelete((image_index, patch_idx))) => {
+            let Some(image) = app.images.get_mut(image_index) else {
+                return Task::none();
+            };
+            let len = image.inpaint.len().max(image.project.extras.inpaint_patches.len());
+            if patch_idx >= len {
+                return Task::none();
+            }
+            if patch_idx < image.inpaint.len() {
+                image.inpaint.remove(patch_idx);
+            }
+            if patch_idx < image.project.extras.inpaint_patches.len() {
+                image.project.extras.inpaint_patches.remove(patch_idx);
+            }
+            if app.selected_inpaint == Some((image_index, patch_idx)) {
+                app.selected_inpaint = None;
+            } else if let Some((sel_img, sel_patch)) = app.selected_inpaint {
+                if sel_img == image_index && sel_patch > patch_idx {
+                    app.selected_inpaint = Some((sel_img, sel_patch - 1));
+                }
+            }
+            app.status = "Deleted inpaint patch.".to_string();
+            Task::none()
+        }
+        Message::Ui(UiEvent::InpaintRepaint((image_index, patch_idx))) => {
+            if app.inpainting || app.running || app.translating {
+                return Task::none();
+            }
+            let (path, rect, quads) = {
+                let Some(image) = app.images.get(image_index) else {
+                    return Task::none();
+                };
+                let bounds = if patch_idx < image.inpaint.len() {
+                    image.inpaint[patch_idx].bounds
+                } else if patch_idx < image.project.extras.inpaint_patches.len() {
+                    image.project.extras.inpaint_patches[patch_idx].bounds
+                } else {
+                    return Task::none();
+                };
+                let rect = [bounds[0], bounds[1], bounds[2], bounds[3]];
+                // Keep exact rect, re-derive quads that intersect (same as manual inpaint)
+                let quads: Vec<scanlateit_model::Quad> = image
+                    .project
+                    .ocr
+                    .all()
+                    .map(|e| image.project.view_quad(e))
+                    .filter(|q| q.intersects_rect(rect))
+                    .collect();
+                (image.path.clone(), rect, quads)
+            };
+            // Delete old patch first so repaint replaces it (exact rect).
+            if let Some(image) = app.images.get_mut(image_index) {
+                if patch_idx < image.inpaint.len() {
+                    image.inpaint.remove(patch_idx);
+                }
+                if patch_idx < image.project.extras.inpaint_patches.len() {
+                    image.project.extras.inpaint_patches.remove(patch_idx);
+                }
+                if app.selected_inpaint == Some((image_index, patch_idx)) {
+                    app.selected_inpaint = None;
+                } else if let Some((sel_img, sel_patch)) = app.selected_inpaint {
+                    if sel_img == image_index && sel_patch > patch_idx {
+                        app.selected_inpaint = Some((sel_img, sel_patch - 1));
+                    }
+                }
+            }
+            #[cfg(feature = "inpaint")]
+            {
+                let (backend, radius) = scanlateit_settings::get(|s| {
+                    (
+                        s.inpaint_backend,
+                        s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1),
+                    )
+                });
+                let cached = app
+                    .inpaint_engine
+                    .clone()
+                    .filter(|engine| engine.backend() == backend && engine.radius() == radius);
+                match cached {
+                    Some(engine) => return start_inpaint(app, engine, image_index, path, rect, quads),
+                    None => {
+                        app.pending_inpaint = Some((image_index, path, rect, quads));
+                        app.status = match backend {
+                            scanlateit_settings::InpaintBackend::Lama => "Loading the inpainting model...".to_string(),
+                            scanlateit_settings::InpaintBackend::Telea => "Inpainting...".to_string(),
+                        };
+                        return Task::perform(
+                            async move { scanlateit_inpaint::Engine::build(backend, radius) },
+                            Message::InpaintEngineReady,
+                        );
+                    }
+                }
+            }
+            #[cfg(not(feature = "inpaint"))]
+            {
+                let _ = (path, rect, quads);
+                app.status = "Inpaint is not available in this build.".to_string();
+                Task::none()
+            }
+        }
+        Message::Ui(UiEvent::InpaintToolbar((image_index, patch_idx, action))) => {
+            match action {
+                scanlateit_ui::event::InpaintToolbarAction::Delete => {
+                    return update(app, Message::Ui(UiEvent::InpaintDelete((image_index, patch_idx))));
+                }
+                scanlateit_ui::event::InpaintToolbarAction::Repaint => {
+                    return update(app, Message::Ui(UiEvent::InpaintRepaint((image_index, patch_idx))));
+                }
+            }
         }
         Message::Ui(UiEvent::RetranslateEntry((index, entry_id))) => {
             if app.translating || app.running {
