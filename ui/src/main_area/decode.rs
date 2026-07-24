@@ -184,6 +184,11 @@ impl Scheduler {
         self.settled.as_ref()
     }
 
+    /// The pending visible range, if any.
+    pub fn pending_range(&self) -> Option<&Range<usize>> {
+        self.pending_settle.as_ref().map(|(_, r)| r)
+    }
+
     /// Whether `index` lies outside the settled window (needs a settle).
     pub fn needs_settle(&self, index: usize, _len: usize) -> bool {
         self.settled.as_ref().is_none_or(|range| !range.contains(&index))

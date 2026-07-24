@@ -1,12 +1,12 @@
 //! The whole planned run set driven to completion: windowed canvas
-//! submission, ordered result delivery, undecodable-page fallback. Iced-free:
-//! the app pumps `step()` and forwards the events to its message channel.
+//! submission, ordered result delivery. Iced-free: the app pumps `step()`
+//! and forwards the events to its message channel.
 
 use std::collections::{BTreeMap, VecDeque};
 
 use crate::{
-    Engine, OcrCancellationToken, OcrLine, ParallelEngine, RunPlan, RunResult, body_height,
-    bottom_margin_strip, load_rgb, stack_run, to_entries, top_margin_strip, STITCH_MARGIN_RATIO,
+    OcrCancellationToken, OcrLine, ParallelEngine, RunPlan, body_height, bottom_margin_strip,
+    load_rgb, stack_run, top_margin_strip, STITCH_MARGIN_RATIO,
 };
 
 /// One run's outcome as the UI must see it.
@@ -19,27 +19,21 @@ pub enum RunEvent {
         margin_top: u32,
         lines: Vec<OcrLine>,
     },
-    /// Fallback of the undecodable-page path: ready-to-commit per-page result.
-    Fallback { index: usize, result: RunResult },
 }
 
 /// What [`build_canvas`] produced for one run.
 pub(crate) enum BuiltCanvas {
     /// The stitched canvas plus its `(width, margin_top)` for submission.
     Ready(image::RgbImage, u32, u32),
-    /// The undecodable-page fallback result, ready to commit directly.
-    Fallback(RunResult),
 }
 
 /// Builds the stitched canvas of one run: its pages stacked at the first
 /// page's width with the margin strips of the neighboring content above and
-/// below (see [`crate::stack_run`]). When a page fails to decode, falls back
-/// to raw per-page OCR through the old engine and returns the ready-to-commit
-/// result instead (no canvas, no boundary candidates).
+/// below (see [`crate::stack_run`]). When a page fails to decode, returns
+/// an error — the caller counts it as a failed run (same loader as OCR, so
+/// a fallback engine would fail identically).
 pub(crate) fn build_canvas(
-    fallback: &Engine,
-    token: &OcrCancellationToken,
-    index: usize,
+    _index: usize,
     run: &RunPlan,
     paths: &[String],
     above_path: Option<&str>,
@@ -51,20 +45,7 @@ pub(crate) fn build_canvas(
         match load_rgb(path) {
             Some(image) => loaded.push(image),
             None => {
-                eprintln!(
-                    "[ocr-run {index}] undecodable page {path}: falling back to per-page OCR"
-                );
-                let mut out = Vec::with_capacity(paths.len());
-                for (offset, path) in paths.iter().enumerate() {
-                    match fallback.run_path_cancellable(path, token) {
-                        Ok(lines) => out.push((run.page_start + offset, to_entries(lines))),
-                        Err(e) => return Err(e),
-                    }
-                }
-                return Ok(BuiltCanvas::Fallback(RunResult {
-                    per_page: out,
-                    held: None,
-                }));
+                return Err(format!("undecodable page {path} (run {_index})"));
             }
         }
     }
@@ -89,8 +70,7 @@ pub(crate) fn build_canvas(
 /// Drives the planned run set with a bounded in-flight window (`workers + 1`).
 /// Dispatch stays parallel (`window` canvases in flight), but results are
 /// emitted strictly in index order `0,1,2…` so `dedup` and `held` chains see
-/// committed state. Fallback results are buffered locally instead of
-/// returning immediately, which previously broke order when `workers>1`.
+/// committed state.
 pub struct RunSession {
     plans: Vec<RunPlan>,
     dims: Vec<(u32, u32)>,
@@ -143,17 +123,18 @@ impl RunSession {
     pub fn step(
         &mut self,
         pipeline: &ParallelEngine,
-        fallback: &Engine,
         token: &OcrCancellationToken,
     ) -> Result<Option<RunEvent>, String> {
+        // Allow early cancellation check before building canvases
+        token
+            .checkpoint()
+            .map_err(|_| "cancelled".to_string())?;
         loop {
-            // Fill window in parallel — Fallback does not occupy a pipeline slot.
+            // Fill window in parallel
             if self.dispatched < self.total && self.in_flight < self.window {
                 let index = self.dispatched;
                 let run = &self.plans[index];
                 match build_canvas(
-                    fallback,
-                    token,
                     index,
                     run,
                     &self.paths[index],
@@ -167,11 +148,6 @@ impl RunSession {
                             .submit(index, canvas)
                             .map_err(|e| format!("OCR pipeline submit failed: {e}"))?;
                         self.in_flight += 1;
-                        self.dispatched += 1;
-                    }
-                    Ok(BuiltCanvas::Fallback(result)) => {
-                        self.buffered
-                            .insert(index, RunEvent::Fallback { index, result });
                         self.dispatched += 1;
                     }
                     Err(e) => return Err(e),

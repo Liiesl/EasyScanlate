@@ -10,7 +10,9 @@ use super::edit::seed_style_inputs;
 #[cfg(feature = "styling")]
 pub fn classify_entries(app: &mut App) -> Task<Message> {
     match app.styling.engine() {
-        Some(engine) => start_style_jobs(app, engine.clone()),
+        Some(engine) => {
+            start_style_jobs(app, engine.clone())
+        },
         None => {
             app.styling.mark_building();
             app.status = "Loading the styling model...".to_string();
@@ -72,7 +74,9 @@ fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
 pub fn start_pipeline_style_deferred(app: &mut App) -> Task<Message> {
     let engine_opt = app.styling.engine().cloned();
     match engine_opt {
-        Some(engine) => start_pipeline_style_jobs(app, engine),
+        Some(engine) => {
+            start_pipeline_style_jobs(app, engine)
+        },
         None => {
             app.styling.mark_building();
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
@@ -180,7 +184,7 @@ pub fn handle_styling_ready(app: &mut App, result: Result<StylingEngine, String>
         }
         Err(e) => {
             app.styling.fail_build();
-            app.status = e;
+            app.status = e.clone();
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
             {
                 app.pipeline_active = false;
@@ -192,10 +196,17 @@ pub fn handle_styling_ready(app: &mut App, result: Result<StylingEngine, String>
 
 #[cfg(feature = "styling")]
 pub fn handle_style_detected(app: &mut App, index: usize, id: EntryId, result: Result<EntryStyle, String>) -> Task<Message> {
-    if let (Some(image), Ok(style)) = (app.images.get_mut(index), result) {
-        image.project.set_entry_style(id, style);
-        app.styling.mark_done(index, id);
-        app.status = "Applied auto-detected text style.".to_string();
+    match result {
+        Ok(style) => {
+            if let Some(image) = app.images.get_mut(index) {
+                image.project.set_entry_style(id, style);
+                app.styling.mark_done(index, id);
+                app.status = "Applied auto-detected text style.".to_string();
+            }
+        }
+        Err(e) => {
+            app.status = format!("Style detect failed for {}:{:?}: {}", index, id, e);
+        }
     }
     Task::none()
 }

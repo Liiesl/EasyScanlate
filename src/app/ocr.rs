@@ -2,7 +2,7 @@ use iced::Task;
 use iced::futures::{SinkExt, StreamExt};
 use scanlateit_model::{NewEntry, Quad};
 #[cfg(feature = "ocr")]
-use scanlateit_ocr::{self as ocr, Engine, ParallelEngine};
+use scanlateit_ocr::{self as ocr, ParallelEngine};
 
 use super::{App, Message};
 
@@ -12,7 +12,6 @@ pub fn start_ocr_stream(app: &mut App) -> Task<Message> {
         .pipeline
         .clone()
         .expect("pipeline must be built before starting the stream");
-    let fallback = app.engine.clone().expect("engine must be built");
     let token = app
         .cancel
         .clone()
@@ -35,7 +34,7 @@ pub fn start_ocr_stream(app: &mut App) -> Task<Message> {
     let mut session = ocr::RunSession::new(runs, dims, paths, above_paths, below_paths, workers);
     Task::stream(
         iced::stream::try_channel(1, move |mut sender: iced::futures::channel::mpsc::Sender<Message>| async move {
-            while let Some(event) = session.step(&pipeline, &fallback, &token)? {
+            while let Some(event) = session.step(&pipeline, &token)? {
                 if sender
                     .send(Message::OcrStreamRun(Ok::<ocr::RunEvent, String>(event)))
                     .await
@@ -76,7 +75,7 @@ pub fn flush_held_boundary(app: &mut App) {
 
 #[cfg(feature = "ocr")]
 pub fn maybe_start_ocr(app: &mut App) -> Task<Message> {
-    if app.running && app.pipeline.is_some() && app.engine.is_some() {
+    if app.running && app.pipeline.is_some() {
         app.cancel = app
             .pipeline
             .as_ref()
@@ -98,7 +97,6 @@ pub fn finalize_run(app: &mut App) {
     app.running = false;
     app.cancel = None;
     app.pipeline = None;
-    app.engine = None;
     app.status = if app.ocr_cancelled {
         "OCR cancelled.".to_string()
     } else if app.ocr_failed > 0 {
@@ -141,7 +139,6 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
         run_count,
         app.images.len()
     );
-    let mut tasks: Vec<Task<Message>> = Vec::new();
     if app.pipeline.is_none() {
         let (workers, cfg) = scanlateit_settings::get(|s| {
             let workers = s.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
@@ -151,27 +148,12 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
         app.status = format!(
             "Loading the OCR engine ({workers} detection worker(s))..."
         );
-        tasks.push(Task::perform(
+        return Task::perform(
             async move { ParallelEngine::build_with_config(cfg, workers) },
             Message::ParallelEngineReady,
-        ));
+        );
     }
-    if app.engine.is_none() {
-        let cfg = scanlateit_settings::get(|s| {
-            ocr::config_from_strings(&s.ocr_text_score, &s.ocr_max_side_len)
-        });
-        tasks.push(Task::perform(
-            async move { Engine::build_with_config(cfg) },
-            Message::EngineReady,
-        ));
-    }
-    if app.pipeline.is_some() && app.engine.is_some() {
-        maybe_start_ocr(app)
-    } else if tasks.is_empty() {
-        Task::none()
-    } else {
-        Task::batch(tasks)
-    }
+    maybe_start_ocr(app)
 }
 
 #[cfg(not(feature = "ocr"))]
@@ -192,21 +174,6 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
     app.running = false;
     app.status = format!("Fake OCR done: {added} line(s) (no OCR engine in this build).");
     Task::none()
-}
-
-#[cfg(feature = "ocr")]
-pub fn handle_engine_ready(app: &mut App, result: Result<Engine, String>) -> Task<Message> {
-    match result {
-        Ok(engine) => {
-            app.engine = Some(engine.clone());
-            maybe_start_ocr(app)
-        }
-        Err(e) => {
-            app.running = false;
-            app.status = e;
-            Task::none()
-        }
-    }
 }
 
 #[cfg(feature = "ocr")]
@@ -289,14 +256,13 @@ pub fn handle_ocr_stream_run(app: &mut App, result: Result<ocr::RunEvent, String
             app.held_boundary = run_result.held;
             commit_per_page(app, run_result.per_page);
         }
-        Ok(ocr::RunEvent::Fallback { result, .. }) => {
-            flush_held_boundary(app);
-            commit_per_page(app, result.per_page);
-        }
         Err(e) => {
             app.ocr_failed += 1;
             if e == "cancelled" {
                 app.ocr_cancelled = true;
+            } else {
+                // Undecodable page or other error: flush any held boundary to not lose previous run's bottom-margin capture
+                flush_held_boundary(app);
             }
         }
     }
@@ -375,6 +341,8 @@ pub fn handle_ocr_stream_failed(app: &mut App, e: String) -> Task<Message> {
     app.ocr_failed += 1;
     if e == "cancelled" {
         app.ocr_cancelled = true;
+    } else {
+        flush_held_boundary(app);
     }
     if app.pending > 0 {
         app.pending = 0;
