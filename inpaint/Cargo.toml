@@ -1,13 +1,13 @@
 [package]
 name = "scanlateit-inpaint"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
-image = "0.25"
-imageproc = "0.25"
-inpaint = { version = "0.1", features = ["image"] }
-ndarray = "0.17"
-ort = "2.0.0-rc.12"
-scanlateit-model = { path = "../model" }
-scanlateit-settings = { path = "../settings" }
+image = { workspace = true }
+imageproc = { workspace = true }
+inpaint = { workspace = true }
+ndarray = { workspace = true }
+ort = { workspace = true }
+scanlateit-model = { workspace = true }
+scanlateit-settings = { workspace = true }

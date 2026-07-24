@@ -4,9 +4,51 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["model", "inpaint", "ocr", "styling", "translation", "ui", "settings", "segment", "NeverLiieIcedWidgets"]
+members = ["model", "inpaint", "ocr", "styling", "translation", "ui", "settings", "segment"]
 resolver = "3"
-exclude = ["iced", "rapidocr-core", "NeverLiieIcedWidgets/examples"]
+exclude = ["iced", "rapidocr-core", "NeverLiieIcedWidgets"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+# Shared external dependencies
+# NOTE: `iced` 0.14.0 is mirrored locally in `iced/` (excluded workspace, see
+# `iced/Cargo.toml:157 [workspace.package] version = "0.14.0"`). Keep this
+# version in sync with `iced/` and `NeverLiieIcedWidgets/Cargo.toml:7`.
+# AGENT: search `iced/` for iced source (core/widget/winit/etc.), not crates.io.
+iced = { version = "0.14.0", features = ["image", "canvas", "advanced", "tokio"] }
+image = "0.25"
+bytes = "1.6"
+rfd = "0.17"
+tokio = { version = "1", features = ["rt", "time"] }
+fontdb = "0.24"
+open = "5"
+serde = { version = "1", features = ["derive"] }
+lucide-icons = { version = "1", features = ["iced"] }
+ndarray = "0.17"
+ort = "2.0.0-rc.12"
+imageproc = "0.25"
+inpaint = { version = "0.1", features = ["image"] }
+serde_json = "1"
+reqwest = { version = "0.13", features = ["json"] }
+rig = { version = "0.41.0", default-features = false, features = ["agent", "derive", "reqwest"] }
+confy = "2"
+toml = "1"
+tempfile = "3"
+
+# Internal path dependencies
+scanlateit-model = { path = "model" }
+scanlateit-settings = { path = "settings" }
+scanlateit-inpaint = { path = "inpaint" }
+scanlateit-ocr = { path = "ocr" }
+scanlateit-styling = { path = "styling" }
+scanlateit-translation = { path = "translation" }
+scanlateit-segment = { path = "segment" }
+scanlateit-ui = { path = "ui", default-features = false }
+neverliie-iced-widgets = { path = "NeverLiieIcedWidgets" }
+rapidocr-core = { version = "0.2.2", default-features = false }
 
 [features]
 # Subsystem switches. Building without one (e.g. `--no-default-features
@@ -29,23 +71,27 @@ test-translation = ["translation"]
 test-segment = ["segment"]
 
 [dependencies]
-iced = { version = "0.14.0", path = "iced", features = ["image", "canvas", "advanced", "tokio"] }
-image = "0.25"
-bytes = "1.6"
-rfd = "0.17"
-neverliie-iced-widgets = { path = "NeverLiieIcedWidgets" }
-scanlateit-model = { path = "model" }
-scanlateit-settings = { path = "settings" }
-scanlateit-inpaint = { path = "inpaint", optional = true }
-scanlateit-ocr = { path = "ocr", optional = true }
-scanlateit-styling = { path = "styling", optional = true }
-scanlateit-translation = { path = "translation", optional = true }
-scanlateit-segment = { path = "segment", optional = true }
-scanlateit-ui = { path = "ui", default-features = false }
-tokio = { version = "1", features = ["rt", "time"] }
-fontdb = "0.24"
-open = "5"
-serde = { version = "1", features = ["derive"] }
+iced = { workspace = true }
+image = { workspace = true }
+bytes = { workspace = true }
+rfd = { workspace = true }
+neverliie-iced-widgets = { workspace = true }
+scanlateit-model = { workspace = true }
+scanlateit-settings = { workspace = true }
+scanlateit-inpaint = { workspace = true, optional = true }
+scanlateit-ocr = { workspace = true, optional = true }
+scanlateit-styling = { workspace = true, optional = true }
+scanlateit-translation = { workspace = true, optional = true }
+scanlateit-segment = { workspace = true, optional = true }
+scanlateit-ui = { workspace = true }
+tokio = { workspace = true }
+fontdb = { workspace = true }
+open = { workspace = true }
+serde = { workspace = true }
+lucide-icons = { workspace = true }
 
 [profile.dev.package."*"]
 debug = "line-tables-only"
+
+[patch.crates-io]
+rapidocr-core = { path = "rapidocr-rs/crates/rapidocr-core" }

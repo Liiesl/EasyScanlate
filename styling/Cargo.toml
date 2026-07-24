@@ -1,10 +1,10 @@
 [package]
 name = "scanlateit-styling"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
-image = "0.25"
-ndarray = "0.17"
-ort = "2.0.0-rc.12"
-scanlateit-model = { path = "../model" }
+image = { workspace = true }
+ndarray = { workspace = true }
+ort = { workspace = true }
+scanlateit-model = { workspace = true }
