@@ -209,6 +209,7 @@ pub struct App {
     pub(crate) style_picker: Option<StyleField>,
     pub(crate) style_stroke_width: String,
     pub(crate) style_bg_radius: String,
+    pub(crate) style_hex_overrides: HashMap<StyleField, String>,
     pub(crate) presets: StylePresets,
     pub(crate) panes: pane_grid::State<PaneKind>,
     pub(crate) side_panes: pane_grid::State<SidePaneKind>,
@@ -333,6 +334,7 @@ impl App {
             style_picker: None,
             style_stroke_width: style.stroke_width.to_string(),
             style_bg_radius: style.bg_radius.to_string(),
+            style_hex_overrides: HashMap::new(),
             presets: StylePresets::default_presets(),
             panes: {
                 let (mut panes, main) = pane_grid::State::new(PaneKind::MainArea);
@@ -616,6 +618,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::StyleColorOpen(field)) => styling::handle_color_open(app, field),
         Message::Ui(UiEvent::StyleColorCancel(field)) => styling::handle_color_cancel(app, field),
         Message::Ui(UiEvent::StyleColorSubmit(field, color)) => styling::handle_color_submit(app, field, color),
+        Message::Ui(UiEvent::StyleHexInput(field, text)) => styling::handle_hex_input(app, field, text),
         Message::Ui(UiEvent::StyleStrokeWidth(text)) => styling::handle_stroke_width(app, text),
         Message::Ui(UiEvent::StyleBgRadius(text)) => styling::handle_bg_radius(app, text),
         Message::Ui(UiEvent::StyleInpaintBackground) => inpaint::handle_style_inpaint_background(app),

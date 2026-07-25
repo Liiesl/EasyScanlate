@@ -104,6 +104,10 @@ impl UiState for App {
         self.style_working.gradient_dir
     }
 
+    fn style_hex_override(&self, field: StyleField) -> Option<&str> {
+        self.style_hex_overrides.get(&field).map(|s| s.as_str())
+    }
+
     fn editing(&self) -> Option<(usize, EntryId)> {
         self.editing
     }

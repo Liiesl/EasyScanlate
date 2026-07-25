@@ -127,17 +127,11 @@ fn fill_tabs<'a>(gradient: bool, selected: bool) -> Element<'a, UiEvent> {
     .into()
 }
 
-/// The uppercase hex value of `color`, or "None" for fully transparent
-/// colors (matching the mockup's background swatch).
+/// Re-export the canonical hex label from `crate::color` so the panel and
+/// preview stay in sync. Kept as a free function for brevity at call sites.
+#[allow(dead_code)]
 fn hex_label(color: Color) -> String {
-    let [r, g, b, a] = color.into_rgba8();
-    if a == 0 {
-        "None".to_string()
-    } else if a == 255 {
-        format!("#{r:02X}{g:02X}{b:02X}")
-    } else {
-        format!("#{r:02X}{g:02X}{b:02X}{a:02X}")
-    }
+    crate::color::hex_label(color)
 }
 
 /// A flat rectangle button filled with `color`; the underlay of the color
@@ -169,9 +163,12 @@ fn swatch_button(color: Color, on_open: Option<UiEvent>) -> Element<'static, UiE
         .into()
 }
 
-/// A color field for `field`: a swatch with its hex value, wrapped in an
-/// input-style box. The picker opens anchored to the bottom-right corner
-/// of the swatch (the click target) and applies on OK.
+/// A color field for `field`: a swatch with an always-visible, editable hex
+/// input, wrapped in an input-style box. The picker opens anchored to the
+/// bottom-right corner of the swatch; the hex `text_input` is live-applying:
+/// every valid edit (`#RGB`/`#RGBA`/`#RRGGBB`/`#RRGGBBAA` or `None`) updates
+/// the working style immediately. Intermediate invalid text is kept in a per-
+/// field buffer (`UiState::style_hex_override`) so typing does not snap back.
 fn color_field<'a, S: UiState + ?Sized>(
     state: &'a S,
     field: StyleField,
@@ -179,6 +176,13 @@ fn color_field<'a, S: UiState + ?Sized>(
 ) -> Element<'a, UiEvent> {
     let show_picker = state.style_picker_open() == Some(field);
     let on_open = state.selected().map(|_| UiEvent::StyleColorOpen(field));
+    let selected = state.selected().is_some();
+    let canonical = crate::color::hex_label(color);
+    // When the user is typing, show the buffer; otherwise show the canonical hex.
+    let hex_value = state
+        .style_hex_override(field)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| canonical.clone());
     field_wrap(
         row![
             ColorPicker::new(
@@ -192,10 +196,20 @@ fn color_field<'a, S: UiState + ?Sized>(
                 anchor: Anchor::BottomRight,
                 offset: Vector::new(0.0, 4.0),
             }),
-            text(hex_label(color))
+            text_input(&canonical, &hex_value)
+                .on_input_maybe(selected.then_some(move |s: String| UiEvent::StyleHexInput(field, s)))
+                .padding(scale::s(0.0))
                 .size(scale::s(11.0))
                 .font(Font::MONOSPACE)
-                .color(TEXT_MAIN),
+                .width(FillLength)
+                .style(|_theme, _status| text_input::Style {
+                    background: Background::Color(Color::TRANSPARENT),
+                    border: Border::default(),
+                    icon: MUTED_FG,
+                    placeholder: MUTED_FG,
+                    value: TEXT_MAIN,
+                    selection: ACCENT,
+                }),
         ]
         .spacing(scale::s(6.0))
         .align_y(iced::Alignment::Center)

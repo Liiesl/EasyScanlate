@@ -56,6 +56,9 @@ pub trait UiState {
     fn style_gradient_b(&self) -> Color;
     /// The working style's gradient direction.
     fn style_gradient_dir(&self) -> TextGradientDir;
+    /// The raw hex text buffer for `field`, if the user is currently typing
+    /// (valid or intermediate). `None` means show the canonical `hex_label`.
+    fn style_hex_override(&self, field: StyleField) -> Option<&str>;
     fn editing(&self) -> Option<(usize, EntryId)>;
     fn editing_origin(&self) -> EditOrigin;
     fn editing_rect(&self) -> Option<Rectangle>;

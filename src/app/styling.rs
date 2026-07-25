@@ -295,6 +295,9 @@ pub fn handle_color_cancel(app: &mut App, _field: StyleField) -> Task<Message> {
 
 pub fn handle_color_submit(app: &mut App, field: StyleField, color: iced::Color) -> Task<Message> {
     app.style_picker = None;
+    // Clear the hex text buffer for this field so the input shows the canonical
+    // hex from the picked color instead of stale typed text.
+    app.style_hex_overrides.remove(&field);
     let Some((index, id)) = app.selected else { return Task::none() };
     let rgba = color.into_rgba8();
     match field {
@@ -305,6 +308,38 @@ pub fn handle_color_submit(app: &mut App, field: StyleField, color: iced::Color)
         StyleField::GradientB => app.style_working.gradient_b = rgba,
     }
     app.images[index].project.set_entry_style(id, app.style_working.clone());
+    Task::none()
+}
+
+pub fn handle_hex_input(app: &mut App, field: StyleField, text: String) -> Task<Message> {
+    let Some((index, id)) = app.selected else { return Task::none() };
+    // Keep the raw buffer so intermediate invalid states don't snap back.
+    // Empty string clears the buffer to show the canonical value.
+    if text.is_empty() {
+        app.style_hex_overrides.remove(&field);
+        return Task::none();
+    }
+    app.style_hex_overrides.insert(field, text.clone());
+
+    // Live-apply only when the text is a valid hex (or "None").
+    let Some(color) = scanlateit_ui::color::parse_hex_color(&text) else {
+        // Invalid intermediate – keep buffer, don't update style.
+        return Task::none();
+    };
+    // Keep buffer to avoid snap-back while typing; cleared on selection
+    // change / picker / preset. `index`/`id` already validated above.
+    let rgba = color.into_rgba8();
+    match field {
+        StyleField::Text => app.style_working.text_color = rgba,
+        StyleField::Stroke => app.style_working.stroke_color = rgba,
+        StyleField::Background => app.style_working.bg_color = rgba,
+        StyleField::GradientA => app.style_working.gradient_a = rgba,
+        StyleField::GradientB => app.style_working.gradient_b = rgba,
+    }
+    app.images[index].project.set_entry_style(id, app.style_working.clone());
+    // Update buffer to canonical? Keep original to avoid jump; but if the
+    // parsed color's canonical label differs only in case, keep typed text.
+    // (No extra work needed.)
     Task::none()
 }
 

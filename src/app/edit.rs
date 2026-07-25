@@ -52,12 +52,14 @@ pub fn clear_editing(app: &mut App) {
 }
 
 /// Reseeds the style panel inputs from `style`, closing any open picker and
-/// keeping the raw number strings in sync with the resolved values.
+/// keeping the raw number strings in sync with the resolved values. Also
+/// clears any hex text buffers so the hex inputs show the canonical value.
 pub fn seed_style_inputs(app: &mut App, style: scanlateit_model::EntryStyle) {
     app.style_stroke_width = style.stroke_width.to_string();
     app.style_bg_radius = style.bg_radius.to_string();
     app.style_working = style;
     app.style_picker = None;
+    app.style_hex_overrides.clear();
 }
 
 /// Selects `(index, id)`: seeds the style inputs and, when the entry's page

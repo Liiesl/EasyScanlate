@@ -61,7 +61,7 @@ pub enum MainAreaMode {
 
 /// The color field a styling [`ColorPicker`] edits: the text color, the
 /// stroke (outline) color, or the background color of the selected entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StyleField {
     /// The entry's text color.
     Text,
@@ -190,6 +190,9 @@ pub enum UiEvent {
     StyleColorCancel(StyleField),
     /// The user confirmed a color for `field` in its color picker.
     StyleColorSubmit(StyleField, Color),
+    /// The user typed hex text for `field` in the styling panel; live-apply
+    /// when the string parses as a valid hex (or "None").
+    StyleHexInput(StyleField, String),
     StyleStrokeWidth(String),
     StyleBgRadius(String),
     /// The user picked an installed font family name for the selected entry.
