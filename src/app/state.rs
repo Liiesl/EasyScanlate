@@ -2,7 +2,7 @@ use iced::{Color, Font, Rectangle};
 use iced::widget::text_editor;
 use scanlateit_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
 use scanlateit_ui::color::rgba_to_color;
-use scanlateit_ui::event::{EditOrigin, MainAreaMode, SettingsTab, StyleField};
+use scanlateit_ui::event::{EditOrigin, MainAreaMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
 use scanlateit_ui::{ConnectModal, LoadedImage, UiState};
 
 use super::App;
@@ -166,5 +166,37 @@ impl UiState for App {
 
     fn all_model_groups(&self) -> Vec<(String, String, Vec<(String, String)>)> {
         self.tx.all_model_groups()
+    }
+
+    fn translation_panel_mode(&self) -> TranslationPanelMode {
+        self.translation_panel_mode
+    }
+
+    fn base_profile(&self) -> Option<scanlateit_model::ProfileId> {
+        if let Some(id) = self.translate_base {
+            if self.images.first().is_some_and(|img| img.project.profiles.iter().any(|p| p.id == id)) {
+                return Some(id);
+            }
+        }
+        self.images.first().map(|img| img.project.profiles.selected_id())
+    }
+
+    fn target_profile(&self) -> TargetProfileSelection {
+        // Resolve virtual placeholder that already exists as real profile to Existing
+        if let TargetProfileSelection::AutoPlaceholder(name) = &self.translate_target {
+            if let Some(img) = self.images.first() {
+                if let Some(id) = img.project.profiles.find_by_name(name) {
+                    let base = self.base_profile();
+                    if Some(id) != base {
+                        return TargetProfileSelection::Existing(id);
+                    }
+                }
+            }
+        }
+        self.translate_target.clone()
+    }
+
+    fn target_placeholder_name(&self) -> String {
+        format!("{}(auto)", self.translate_lang)
     }
 }

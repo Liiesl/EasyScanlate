@@ -1,13 +1,5 @@
-//! Right column: a pinned header (the "TRANSLATION" label and the profile
-//! dropdown), the tall scrollable OCR results list below it and the short
-//! translation controls (the merged model dropdown, the language picker and
-//! the translate button) at the bottom. The list shows one row per entry with
-//! two side-by-side inputs: the read-only original OCR text on the left and
-//! the selected profile's text on the right. The right side starts the same
-//! multi-line inline edit as the main area (fork on first keystroke, Enter =
-//! newline, Escape/Ctrl+Enter to commit); clicking a row selects the entry,
-//! highlighted with a border. The API key is configured in the settings
-//! modal, not here.
+//! Right column: header, dual profile pickers (translate mode), scrollable OCR results list and translation bar.
+//! In Edit mode the list shows one input per row (current profile's text, OCR fallback); in Translate mode two inputs (base vs target).
 
 use iced::advanced::widget::operation::{self as widget_op, Operation, Outcome, Scrollable};
 use iced::advanced::widget::{operate, Id as WidgetId};
@@ -16,14 +8,15 @@ use iced::widget::text_editor;
 use iced::widget::{
     button, column, container, mouse_area, pick_list, row, scrollable, space, text, Column, Id,
 };
-use iced::{keyboard, Background, Border, Color, Element, Fill as FillLength, Font, Padding,
+use iced::{keyboard, Background, Border, Color, Element, Fill as FillLength, Font, Length, Padding,
     Rectangle, Vector};
 use neverliie_iced_widgets::advanced_dropdown::{advanced_dropdown, Footer, Item, MenuItem};
 
-use crate::event::{EditOrigin, SettingsTab, ToolbarAction, UiEvent};
+use crate::event::{EditOrigin, SettingsTab, TargetProfileSelection, ToolbarAction, TranslationPanelMode, UiEvent};
 use crate::loaded::LoadedImage;
 use crate::panel::{MUTED_FG, PANEL_BG};
 use crate::scale;
+use crate::segmented::{segment, segmented_group};
 use crate::state::UiState;
 use crate::translation;
 use scanlateit_model::{EntryId, OcrEntry, ProfileId};
@@ -111,6 +104,7 @@ fn panel_editor<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     )
 }
 
+#[allow(dead_code)]
 /// The read-only original text of an entry, boxed like the other inputs.
 fn original_box(entry_text: &str, font: Font) -> Element<'_, UiEvent> {
     input_box(text(entry_text).size(scale::s(12.0)).font(font))
@@ -122,14 +116,9 @@ fn current_box(value: String, font: Font) -> Element<'static, UiEvent> {
     input_box(text(value).size(scale::s(12.0)).font(font))
 }
 
-/// One results row: the original OCR text on the left, the selected
-/// profile's text on the right, and the delete/retranslate buttons on the
-/// far right. Each box carries a small label above it: "kor" for the OCR
-/// source language, the selected profile's name for the right side.
-/// Clicking the left box selects the row; clicking the right box starts the
-/// inline edit for it. The row being edited from the panel swaps its right
-/// box for the live editor (and is not a click target, so the editor keeps
-/// the clicks). The selected row is outlined with a highlight border.
+/// One results row: behavior depends on TranslationPanelMode.
+/// Edit: single input (current profile's display_text, with panel edit).
+/// Translate: two inputs (base vs target), editing forbidden; clicks only select.
 fn entry_row<'a, S: UiState + ?Sized>(
     state: &'a S,
     index: usize,
@@ -137,34 +126,8 @@ fn entry_row<'a, S: UiState + ?Sized>(
 ) -> Element<'a, UiEvent> {
     let entry_id = entry.id;
     let selected = state.selected() == Some((index, entry_id));
-    let editing_here = state.editing() == Some((index, entry_id));
-    let editing_from_panel = editing_here && state.editing_origin() == EditOrigin::Panel;
     let font = state.font().unwrap_or(Font::DEFAULT);
-    let profile_name = state.images()[index].project.profiles.selected().name.clone();
-
-    let original = mouse_area(original_box(&entry.text, font)).on_press(UiEvent::EntryClicked(Some((
-        index,
-        entry_id,
-    ))));
-
-    let current: Element<'_, UiEvent> = if editing_from_panel {
-        panel_editor(state)
-    } else {
-        let shown = if editing_here {
-            // Editing via the main area: mirror the live buffer.
-            state
-                .edit_content()
-                .map(|content| content.text().to_string())
-                .unwrap_or_else(|| {
-                    state.images()[index].project.display_text(entry).to_string()
-                })
-        } else {
-            state.images()[index].project.display_text(entry).to_string()
-        };
-        mouse_area(current_box(shown, font))
-            .on_press(UiEvent::PanelEntryEdit((index, entry_id)))
-            .into()
-    };
+    let mode = state.translation_panel_mode();
 
     let mut buttons: Vec<Element<'_, UiEvent>> = vec![
         button(text("Delete").size(scale::s(10.0)))
@@ -184,42 +147,133 @@ fn entry_row<'a, S: UiState + ?Sized>(
             .into(),
     );
 
-    let row = container(
-        row![
-            column![text("kor").size(scale::s(10.0)).color(MUTED_FG), original]
-                .spacing(scale::s(2.0))
-                .width(FillLength),
-            column![text(profile_name).size(scale::s(10.0)).color(MUTED_FG), current]
-                .spacing(scale::s(2.0))
-                .width(FillLength),
-            column(buttons).spacing(scale::s(4.0)),
-        ]
-        .spacing(scale::s(ROW_SPACING))
-        .align_y(iced::Alignment::Center),
-    )
-    .id(panel_row_id(index, entry_id))
-    .width(FillLength)
-    .padding(Padding {
-        top: scale::s(ROW_PADDING.top),
-        right: scale::s(ROW_PADDING.right),
-        bottom: scale::s(ROW_PADDING.bottom),
-        left: scale::s(ROW_PADDING.left),
-    })
-    .style(move |_theme| container::Style {
-        background: Some(if selected { SELECTED_BG } else { PANEL_BG }.into()),
-        border: Border::default()
-            .width(0.0)
-            .rounded(scale::s(12.0)),
-        ..container::Style::default()
-    });
+    let content: Element<'_, UiEvent> = match mode {
+        TranslationPanelMode::Edit => {
+            let editing_here = state.editing() == Some((index, entry_id));
+            let editing_from_panel = editing_here && state.editing_origin() == EditOrigin::Panel;
+            let profile_name = state.images()[index].project.profiles.selected().name.clone();
+            let current: Element<'_, UiEvent> = if editing_from_panel {
+                panel_editor(state)
+            } else {
+                let shown = if editing_here {
+                    state
+                        .edit_content()
+                        .map(|content| content.text().to_string())
+                        .unwrap_or_else(|| {
+                            state.images()[index].project.display_text(entry).to_string()
+                        })
+                } else {
+                    state.images()[index].project.display_text(entry).to_string()
+                };
+                mouse_area(current_box(shown, font))
+                    .on_press(UiEvent::PanelEntryEdit((index, entry_id)))
+                    .into()
+            };
+            let row_inner = container(
+                row![
+                    column![text(profile_name).size(scale::s(10.0)).color(MUTED_FG), current]
+                        .spacing(scale::s(2.0))
+                        .width(FillLength),
+                    column(buttons).spacing(scale::s(4.0)),
+                ]
+                .spacing(scale::s(ROW_SPACING))
+                .align_y(iced::Alignment::Center),
+            )
+            .id(panel_row_id(index, entry_id))
+            .width(FillLength)
+            .padding(Padding {
+                top: scale::s(ROW_PADDING.top),
+                right: scale::s(ROW_PADDING.right),
+                bottom: scale::s(ROW_PADDING.bottom),
+                left: scale::s(ROW_PADDING.left),
+            })
+            .style(move |_theme| container::Style {
+                background: Some(if selected { SELECTED_BG } else { PANEL_BG }.into()),
+                border: Border::default()
+                    .width(0.0)
+                    .rounded(scale::s(12.0)),
+                ..container::Style::default()
+            });
+            if editing_from_panel {
+                row_inner.into()
+            } else {
+                mouse_area(row_inner).on_press(UiEvent::EntryClicked(Some((index, entry_id)))).into()
+            }
+        }
+        TranslationPanelMode::Translate => {
+            // Resolve base and target display strings per image
+            let base_id = state.base_profile();
+            let target_sel = state.target_profile();
+            let image = &state.images()[index];
+            // base text
+            let base_text: String = if let Some(pid) = base_id {
+                if let Some(p) = image.project.profiles.iter().find(|p| p.id == pid) {
+                    p.translation_of(entry_id).unwrap_or(&entry.text).to_string()
+                } else {
+                    entry.text.clone()
+                }
+            } else {
+                entry.text.clone()
+            };
+            let base_name: String = if let Some(pid) = base_id {
+                image.project.profiles.iter().find(|p| p.id == pid).map(|p| p.name.clone()).unwrap_or_else(|| "—".to_string())
+            } else {
+                "—".to_string()
+            };
+            // target text
+            let (target_text, target_name) = match &target_sel {
+                TargetProfileSelection::Existing(pid) => {
+                    let name = image.project.profiles.iter().find(|p| p.id == *pid).map(|p| p.name.clone()).unwrap_or_else(|| "—".to_string());
+                    let txt = image.project.profiles.iter().find(|p| p.id == *pid).and_then(|p| p.translation_of(entry_id)).unwrap_or("").to_string();
+                    (txt, name)
+                }
+                TargetProfileSelection::AutoPlaceholder(name) => {
+                    // If placeholder already exists as real profile, show its content (state getter usually converts, but per-image fallback)
+                    if let Some(id) = image.project.profiles.find_by_name(name) {
+                        let txt = image.project.profiles.iter().find(|p| p.id == id).and_then(|p| p.translation_of(entry_id)).unwrap_or("").to_string();
+                        let real_name = image.project.profiles.iter().find(|p| p.id == id).map(|p| p.name.clone()).unwrap_or_else(|| name.clone());
+                        (txt, real_name)
+                    } else {
+                        (String::new(), name.clone())
+                    }
+                }
+            };
+            let left = input_box(text(base_text).size(scale::s(12.0)).font(font));
+            let right = input_box(text(target_text).size(scale::s(12.0)).font(font));
+            // In translate mode editing is forbidden: whole row is just selection
+            let row_inner = container(
+                row![
+                    column![text(base_name).size(scale::s(10.0)).color(MUTED_FG), left]
+                        .spacing(scale::s(2.0))
+                        .width(FillLength),
+                    column![text(target_name).size(scale::s(10.0)).color(MUTED_FG), right]
+                        .spacing(scale::s(2.0))
+                        .width(FillLength),
+                    column(buttons).spacing(scale::s(4.0)),
+                ]
+                .spacing(scale::s(ROW_SPACING))
+                .align_y(iced::Alignment::Center),
+            )
+            .id(panel_row_id(index, entry_id))
+            .width(FillLength)
+            .padding(Padding {
+                top: scale::s(ROW_PADDING.top),
+                right: scale::s(ROW_PADDING.right),
+                bottom: scale::s(ROW_PADDING.bottom),
+                left: scale::s(ROW_PADDING.left),
+            })
+            .style(move |_theme| container::Style {
+                background: Some(if selected { SELECTED_BG } else { PANEL_BG }.into()),
+                border: Border::default()
+                    .width(0.0)
+                    .rounded(scale::s(12.0)),
+                ..container::Style::default()
+            });
+            mouse_area(row_inner).on_press(UiEvent::EntryClicked(Some((index, entry_id)))).into()
+        }
+    };
 
-    // While the row itself is the active panel editor, clicks must reach the
-    // editor, not the row.
-    if editing_from_panel {
-        row.into()
-    } else {
-        mouse_area(row).on_press(UiEvent::EntryClicked(Some((index, entry_id)))).into()
-    }
+    content
 }
 
 /// All OCR entry rows of one image in the results list. Images without
@@ -271,39 +325,145 @@ impl ToString for ProfileOption {
     }
 }
 
-/// The pinned header of the results column: the "TRANSLATION" label on the
-/// left and the profile dropdown on the right. The dropdown lists every
-/// profile of the first image's project (all projects share the same
-/// profiles) with a "+ New Profile" footer row that creates a fresh one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TargetPickOption {
+    sel: TargetProfileSelection,
+    label: String,
+}
+
+impl ToString for TargetPickOption {
+    fn to_string(&self) -> String {
+        self.label.clone()
+    }
+}
+
+/// Segmented switcher for the translation panel (Edit | Translate), styled like main_area mode switcher.
+fn translation_mode_switcher<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
+    let mode = state.translation_panel_mode();
+    let pill = segmented_group(vec![
+        segment(
+            mode == TranslationPanelMode::Edit,
+            "Edit",
+            Some(UiEvent::TranslationPanelMode(TranslationPanelMode::Edit)),
+            Font::DEFAULT,
+        ),
+        segment(
+            mode == TranslationPanelMode::Translate,
+            "Translate",
+            Some(UiEvent::TranslationPanelMode(TranslationPanelMode::Translate)),
+            Font::DEFAULT,
+        ),
+    ]);
+    container(pill)
+        .width(Length::Fixed(scale::s(150.0)))
+        .into()
+}
+
+/// The pinned header of the results column: "TRANSLATION" label, optional profile dropdown (edit only) and the mode switcher on the right.
 fn profile_header<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
-    let mut entries: Vec<MenuItem<'a, ProfileOption, UiEvent, iced::Theme, iced::Renderer>> =
-        Vec::new();
-    let mut selected = None;
-    if let Some(project) = state.images().first().map(|i| &i.project) {
-        for profile in project.profiles.iter() {
-            let option = ProfileOption {
-                id: profile.id,
-                name: profile.name.clone(),
-            };
-            if profile.id == project.profiles.selected_id() {
-                selected = Some(option.clone());
+    let mode = state.translation_panel_mode();
+    let switcher = translation_mode_switcher(state);
+    if mode == TranslationPanelMode::Edit {
+        let mut entries: Vec<MenuItem<'a, ProfileOption, UiEvent, iced::Theme, iced::Renderer>> =
+            Vec::new();
+        let mut selected = None;
+        if let Some(project) = state.images().first().map(|i| &i.project) {
+            for profile in project.profiles.iter() {
+                let option = ProfileOption {
+                    id: profile.id,
+                    name: profile.name.clone(),
+                };
+                if profile.id == project.profiles.selected_id() {
+                    selected = Some(option.clone());
+                }
+                entries.push(MenuItem::Item(Item::new(option, profile.name.clone())));
             }
-            entries.push(MenuItem::Item(Item::new(option, profile.name.clone())));
+        }
+        row![
+            text("TRANSLATION").size(scale::s(11.0)).color(MUTED_FG),
+            space::horizontal(),
+            text("profile").size(scale::s(11.0)).color(MUTED_FG),
+            advanced_dropdown(entries, selected, |option| UiEvent::ProfileSelect(option.id))
+                .placeholder("Profile…")
+                .text_size(scale::s(12.0))
+                .width(scale::s(150.0))
+                .footer(Footer::new("+ New Profile", UiEvent::ProfileCreate)),
+            switcher,
+        ]
+        .spacing(scale::s(6.0))
+        .align_y(iced::Alignment::Center)
+        .width(FillLength)
+        .into()
+    } else {
+        row![
+            text("TRANSLATION").size(scale::s(11.0)).color(MUTED_FG),
+            space::horizontal(),
+            switcher,
+        ]
+        .spacing(scale::s(6.0))
+        .align_y(iced::Alignment::Center)
+        .width(FillLength)
+        .into()
+    }
+}
+
+/// Two pick_lists for translate mode: base (left) and target (right). Normal pick_list (not advanced_dropdown).
+fn translate_profile_pickers<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
+    if state.images().is_empty() {
+        return space::horizontal().into();
+    }
+    let base = state.base_profile();
+    let target_sel = state.target_profile();
+    let placeholder_name = state.target_placeholder_name();
+    // Build base options: all profiles
+    let profiles: Vec<(ProfileId, String)> = state.images()[0]
+        .project
+        .profiles
+        .iter()
+        .map(|p| (p.id, p.name.clone()))
+        .collect();
+    let base_options: Vec<ProfileOption> = profiles
+        .iter()
+        .map(|(id, name)| ProfileOption { id: *id, name: name.clone() })
+        .collect();
+    let base_selected = base.and_then(|bid| base_options.iter().find(|o| o.id == bid).cloned());
+
+    // Target options: all profiles except base + optional placeholder
+    let placeholder_exists = profiles.iter().any(|(_, n)| n == &placeholder_name);
+    let mut target_options: Vec<TargetPickOption> = Vec::new();
+    for (id, name) in &profiles {
+        if Some(*id) == base {
+            continue;
+        }
+        target_options.push(TargetPickOption { sel: TargetProfileSelection::Existing(*id), label: name.clone() });
+    }
+    // Add placeholder if not already present as a real profile
+    if !placeholder_exists {
+        // ensure placeholder not equal to base name (already filtered base, but also name compare)
+        let base_name = base.and_then(|bid| profiles.iter().find(|(id,_)| *id==bid).map(|(_, n)| n.clone()));
+        if base_name.as_deref() != Some(&placeholder_name) {
+            target_options.push(TargetPickOption { sel: TargetProfileSelection::AutoPlaceholder(placeholder_name.clone()), label: placeholder_name.clone() });
         }
     }
+    // If placeholder exists, it is already in target_options as Existing; no virtual needed.
+
+    let target_selected_label = match &target_sel {
+        TargetProfileSelection::Existing(id) => profiles.iter().find(|(pid,_)| pid==id).map(|(_,n)| n.clone()),
+        TargetProfileSelection::AutoPlaceholder(name) => Some(name.clone()),
+    };
+    let target_selected = target_selected_label.and_then(|lbl| target_options.iter().find(|o| o.label==lbl).cloned());
 
     row![
-        text("TRANSLATION").size(scale::s(11.0)).color(MUTED_FG),
-        space::horizontal(),
-        text("profile").size(scale::s(11.0)).color(MUTED_FG),
-        advanced_dropdown(entries, selected, |option| UiEvent::ProfileSelect(option.id))
-            .placeholder("Profile…")
-            .text_size(scale::s(12.0))
-            .width(scale::s(150.0))
-            .footer(Footer::new("+ New Profile", UiEvent::ProfileCreate)),
+        column![
+            text("Base").size(scale::s(10.0)).color(MUTED_FG),
+            pick_list(base_options, base_selected, |o| UiEvent::BaseProfileSelect(o.id)).text_size(scale::s(12.0)).placeholder("Base…")
+        ].spacing(scale::s(2.0)).width(FillLength),
+        column![
+            text("Target").size(scale::s(10.0)).color(MUTED_FG),
+            pick_list(target_options, target_selected, |o| UiEvent::TargetProfileSelect(o.sel.clone())).text_size(scale::s(12.0)).placeholder("Target…")
+        ].spacing(scale::s(2.0)).width(FillLength),
     ]
-    .spacing(scale::s(6.0))
-    .align_y(iced::Alignment::Center)
+    .spacing(scale::s(8.0))
     .width(FillLength)
     .into()
 }
@@ -392,6 +552,7 @@ fn translate_bar<'a, S: UiState + ?Sized>(
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let total_results: usize = state.images().iter().map(|i| i.project.ocr.visible_count()).sum();
     let has_entries = total_results > 0;
+    let mode = state.translation_panel_mode();
 
     let mut results_list: Vec<Element<'_, UiEvent>> = Vec::new();
     for (index, image) in state.images().iter().enumerate() {
@@ -406,19 +567,35 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         );
     }
 
-    let bar = translate_bar(state, has_entries);
+    let pickers: Option<Element<'_, UiEvent>> = if mode == TranslationPanelMode::Translate {
+        Some(translate_profile_pickers(state))
+    } else {
+        None
+    };
 
-    column![
-        profile_header(state),
+    let bar: Option<Element<'_, UiEvent>> = if mode == TranslationPanelMode::Translate {
+        Some(translate_bar(state, has_entries))
+    } else {
+        None
+    };
+
+    let mut col = column![profile_header(state)];
+    if let Some(p) = pickers {
+        col = col.push(p);
+    }
+    col = col.push(
         scrollable(Column::with_children(results_list).spacing(scale::s(8.0)))
             .id(PANEL_LIST_ID)
             .height(FillLength)
             .width(FillLength),
-        bar,
-    ]
-    .spacing(scale::s(8.0))
-    .height(FillLength)
-    .into()
+    );
+    if let Some(b) = bar {
+        col = col.push(b);
+    }
+
+    col.spacing(scale::s(8.0))
+        .height(FillLength)
+        .into()
 }
 
 /// Widget operation: finds the results panel's scrollable and the row

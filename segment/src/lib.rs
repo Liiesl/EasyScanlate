@@ -1,6 +1,6 @@
 //! Segmentation (panel / balloon / SFX) inference for manga-mimic grids.
 //!
-//! Wraps `koharu-yolo26s-1280.onnx` (classes: frame, dialogue_text, balloon,
+//! Wraps `yolo26s-seg.onnx` @1024 square (classes: frame, dialogue_text, balloon,
 //! onomatopoeia_text). After OCR finishes the app builds ratio-based grid
 //! canvases via [`grid::plan_grids`], runs this engine on each canvas, maps
 //! detections back to native page coords, then filters SFX OCR hallucinations
@@ -26,7 +26,7 @@ pub const IMG_SIZE: u32 = grid::IMG_SIZE;
 pub const CLASSES: &[&str] = &["frame", "dialogue_text", "balloon", "onomatopoeia_text"];
 
 const MODEL_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../models");
-const MODEL_FILE_KOHARU: &str = "koharu-yolo26s-1280.onnx";
+const MODEL_FILE_KOHARU: &str = "yolo26s-seg.onnx";
 const MODEL_FILE_FALLBACK: &str = "best.onnx";
 
 /// One segmentation detection in canvas space (square `side x side` after grid
@@ -112,8 +112,8 @@ impl Engine {
                 alt.display()
             ));
         };
-        // Keep ARNs calm: like OCR we disable memory pattern (dynamic 1280) and CPU arena —
-        // otherwise each 1280 canvas triggers mmap arena grow/shrink sawtooth (+500 residual).
+        // Keep ARNs calm: like OCR we disable memory pattern (dynamic 1024) and CPU arena —
+        // otherwise each 1024 canvas triggers mmap arena grow/shrink sawtooth (+500 residual).
         let session = Session::builder()
             .map_err(|e| format!("ORT init failed: {e}"))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
@@ -343,19 +343,23 @@ mod tests {
     #[test]
     fn letterbox_is_centered() {
         let img = RgbImage::from_pixel(800, 1200, image::Rgb([10, 20, 30]));
-        let (canvas, r, dx, dy) = letterbox(&img, 1280);
-        assert_eq!(canvas.dimensions(), (1280, 1280));
-        // r = min(1280/800=1.6, 1280/1200=1.066) =1.066
-        assert!((r - 1.0666).abs() < 0.01);
+        let (canvas, r, dx, dy) = letterbox(&img, IMG_SIZE);
+        assert_eq!(canvas.dimensions(), (IMG_SIZE, IMG_SIZE));
+        // r = min(IMG_SIZE/800, IMG_SIZE/1200) = IMG_SIZE/1200
+        let expected_r = IMG_SIZE as f32 / 1200.0;
+        assert!((r - expected_r).abs() < 0.01);
         assert!(dx > 0);
-        assert_eq!(dy, 0); // because height scales to 1280, width to 853, dx = (1280-853)/2≈213
-        assert!(dx > 200 && dx < 220);
+        assert_eq!(dy, 0); // because height scales to IMG_SIZE, width to scaled_w, dx = (IMG_SIZE-scaled_w)/2
+        // scaled_w = 800*expected_r rounded
+        let expected_nw = (800 as f32 * expected_r).round() as u32;
+        let expected_dx = ((IMG_SIZE - expected_nw) / 2) as i32;
+        assert!((dx - expected_dx).abs() <= 1);
     }
 
     #[test]
     fn decode_empty_outputs_returns_empty() {
         let empty: Vec<ArrayD<f32>> = vec![];
-        let dets = decode_koharu(&empty, 1.0, 0, 0, 1280, 1280);
+        let dets = decode_koharu(&empty, 1.0, 0, 0, IMG_SIZE, IMG_SIZE);
         assert!(dets.is_empty());
     }
 }

@@ -4,8 +4,9 @@ use iced::{Color, Font, Rectangle};
 use scanlateit_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
 
 use crate::connect::ConnectModal;
-use crate::event::{EditOrigin, MainAreaMode, SettingsTab, StyleField};
+use crate::event::{EditOrigin, MainAreaMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
 use crate::loaded::LoadedImage;
+use scanlateit_model::ProfileId;
 
 /// Read-only view of the app state that the widgets render from. Implemented
 /// by the app for its own state type; the ui crate never depends on the app.
@@ -90,4 +91,13 @@ pub trait UiState {
     /// Each inner pair is `(model id, display name)`; the hidden set is
     /// still keyed by `id`.
     fn all_model_groups(&self) -> Vec<(String, String, Vec<(String, String)>)>;
+    /// The mode of the translation/results panel (Edit vs Translate).
+    fn translation_panel_mode(&self) -> TranslationPanelMode;
+    /// The base profile for translate-mode left column (None when no images).
+    fn base_profile(&self) -> Option<ProfileId>;
+    /// The target profile for translate-mode right column. When `AutoPlaceholder`
+    /// the profile may not exist yet and the right inputs are blank.
+    fn target_profile(&self) -> TargetProfileSelection;
+    /// Placeholder name for the current language in translate mode: `"{Lang}(auto)"`.
+    fn target_placeholder_name(&self) -> String;
 }

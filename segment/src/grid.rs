@@ -1,6 +1,6 @@
 //! Ratio-based manga-mimic grid building.
 //!
-//! The segmentation model (`koharu-yolo26s-1280`) was trained on manga chapters:
+//! The segmentation model (`yolo26s-seg` @1024) was trained on manga chapters:
 //! a tall vertical stack of thin pages mimicking a chapter. To match that
 //! distribution at inference we pack pages into columns where the combined
 //! height/width ratio never exceeds 1:6 vertical. If the next page would push
@@ -10,14 +10,14 @@
 //! themself is above 1:6 vertical then its okay") — no split.
 //!
 //! After columns are formed we pack them left-to-right into square canvases
-//! (height = 1280, gaps 32 after resize, no inter-image gap), padding white
+//! (height = 1024, gaps 32 after resize, no inter-image gap), padding white
 //! to square exactly like `grid_pages.py`.
 //!
 //! All coordinates invert perfectly via the recorded `scale`, `dx`, paddings
 //! and per-page `y_off` offsets.
 
 /// Inference height the model expects.
-pub const IMG_SIZE: u32 = 1280;
+pub const IMG_SIZE: u32 = 1024;
 /// White gap between columns, calculated AFTER column resize (canvas-relative).
 pub const GAP_COL: u32 = 32;
 /// No gap between images inside the same column.
@@ -34,7 +34,7 @@ pub struct ColMeta {
     pub col_w_native: u32,
     /// `sum(height)` among pages in this column (native pixels).
     pub col_h_native: u32,
-    /// Width of the column after scaling its height to `IMG_SIZE` (`col_w * 1280 / col_h`).
+    /// Width of the column after scaling its height to `IMG_SIZE` (`col_w * 1024 / col_h`).
     pub new_w: u32,
     /// Horizontal offset of this column inside the container (before square padding).
     pub x_off: u32,
@@ -51,7 +51,7 @@ pub struct GridRun {
     pub cols: Vec<ColMeta>,
     /// Sum of column widths plus gaps (before square padding).
     pub container_w: u32,
-    /// Always `IMG_SIZE` (all columns are 1280 tall).
+    /// Always `IMG_SIZE` (all columns are 1024 tall).
     pub container_h: u32,
     /// Side of the square canvas `max(container_w, container_h)`.
     pub side: u32,
@@ -230,7 +230,7 @@ pub fn plan_grids(dims: &[(u32, u32)]) -> Vec<GridRun> {
 ///
 /// `images` is the full slice of loaded `RgbImage`s indexed by page. Each
 /// column is built by stacking its pages vertically centered horizontally
-/// (white background, no gap), resizing the column to `1280` tall, then
+/// (white background, no gap), resizing the column to `IMG_SIZE` tall, then
 /// packing columns left-to-right with `GAP_COL` and padding the result to
 /// `side x side` white.
 pub fn build_grid_canvas(images: &[image::RgbImage], run: &GridRun) -> image::RgbImage {
@@ -245,7 +245,7 @@ pub fn build_grid_canvas(images: &[image::RgbImage], run: &GridRun) -> image::Rg
 /// Streaming variant: loads one page at a time, shrinks it immediately
 /// to its scaled piece and pastes directly into the downscaled column buffer.
 /// No huge `col_img` native stack is ever built. Peak is
-/// `1 page (full-res) + col_buf (new_w*1280) + canvas (side*side)` instead of
+/// `1 page (full-res) + col_buf (new_w*IMG_SIZE) + canvas (side*side)` instead of
 /// `all pages + col_img huge + ...`. For 50 pages this drops ~500MB.
 ///
 /// `loader` is called exactly once per page in `run`, in column→page order.
@@ -260,17 +260,17 @@ where
     let side = run.side;
     let mut canvas = RgbImage::from_pixel(side, side, Rgb([255, 255, 255]));
     for col in &run.cols {
-        // Small downscaled column buffer directly: new_w x 1280, white.
+        // Small downscaled column buffer directly: new_w x IMG_SIZE, white.
         let mut col_buf = RgbImage::from_pixel(col.new_w, IMG_SIZE, Rgb([255, 255, 255]));
         let mut y_cursor: u32 = 0;
         let n_pages = col.pages.len() as u32;
         for (pi, &page_idx) in col.pages.iter().enumerate() {
             let img = loader(page_idx);
             let is_last = pi + 1 == col.pages.len();
-            // Same scale as original: 1280 / col_h_native
+            // Same scale as original: IMG_SIZE / col_h_native
             let scale = col.scale;
             let scaled_w = ((img.width() as f32 * scale).round() as u32).max(1).min(col.new_w);
-            // Last page absorbs rounding remainder so sum == 1280
+            // Last page absorbs rounding remainder so sum == IMG_SIZE
             let mut scaled_h = ((img.height() as f32 * scale).round() as u32).max(1);
             if is_last {
                 scaled_h = IMG_SIZE - y_cursor;
@@ -352,7 +352,7 @@ pub fn grid_det_to_page(
             continue;
         }
         // Map center to unscaled column space
-        let y_in_col_scaled = cy; // 0..1280
+        let y_in_col_scaled = cy; // 0..IMG_SIZE
         let y_unscaled = y_in_col_scaled / col.scale;
 
         // Find page inside column via y_offsets (native)
@@ -483,24 +483,27 @@ mod tests {
 
     #[test]
     fn plan_grids_packs_cols_to_square() {
-        // 4 pages each 800x1200 -> partition gives one col with 4 pages (ratio 6) -> new_w = 800*1280/4800=213
-        // container_w 213 <1280 so one run with 1 col, side=1280
+        // 4 pages each 800x1200 -> partition gives one col with 4 pages (ratio 6) -> new_w = 800*IMG_SIZE/4800
+        // container_w < IMG_SIZE so one run with 1 col, side=IMG_SIZE
         let dims = dims(&[(800, 1200); 4]);
         let runs = plan_grids(&dims);
+        let expected_w = ((800 as f32 * IMG_SIZE as f32 / 4800.0).round() as u32).max(1);
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].cols.len(), 1);
-        assert_eq!(runs[0].side, 1280);
+        assert_eq!(runs[0].side, IMG_SIZE);
+        assert_eq!(runs[0].container_w, expected_w);
     }
 
     #[test]
     fn plan_grids_multiple_cols_one_run() {
         // 8 pages each 800x1200 -> partition: each col holds 4 pages => 2 cols.
-        // Each new_w 213, container_w = 213+32+213=458 <1280 -> still 1 run with 2 cols
+        // Each new_w = 800*IMG_SIZE/4800, container_w = new_w+32+new_w < IMG_SIZE -> still 1 run with 2 cols
         let dims = dims(&[(800, 1200); 8]);
         let runs = plan_grids(&dims);
+        let expected_w = ((800 as f32 * IMG_SIZE as f32 / 4800.0).round() as u32).max(1);
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].cols.len(), 2);
-        assert_eq!(runs[0].container_w, 213 + 32 + 213);
+        assert_eq!(runs[0].container_w, expected_w + 32 + expected_w);
     }
 
     #[test]
@@ -516,7 +519,7 @@ mod tests {
         // Simulate a detection box at known page coords: page box (100,200)-(300,400)
         // Forward mapping: compute where it would appear on canvas
         let col = &run.cols[0];
-        let scale = col.scale; // 1280/1200=1.0666
+        let scale = col.scale; // IMG_SIZE/1200
         let dx_center = 0.0; // col_w == page w
         let y_pad = run.y_pad as f32;
         // Map page -> canvas: x_canvas = (x_page + dx)*scale + x_off, y_canvas = (y_page + y_off)*scale + y_pad
@@ -547,7 +550,7 @@ mod tests {
         let runs = plan_grids(&dims);
         assert_eq!(runs.len(), 1);
         let run = &runs[0];
-        // Two pages stacked: col_h 2000, scale 0.64, new_w 512
+        // Two pages stacked: col_h 2000, scale IMG_SIZE/2000, new_w 800*scale
         let col = &run.cols[0];
         assert_eq!(col.pages, vec![0, 1]);
         assert_eq!(col.y_offsets, vec![0, 1000]);
@@ -590,7 +593,7 @@ mod tests {
         let run = &runs[0];
         let col = &run.cols[0];
         assert_eq!(col.col_w_native, 1000);
-        let scale = col.scale; // 1280/2000=0.64
+        let scale = col.scale; // IMG_SIZE/2000
         let x_off = col.x_off as f32;
         let y_pad = run.y_pad as f32;
         // Page0 centered dx = (1000-800)/2=100
@@ -610,12 +613,12 @@ mod tests {
 
     #[test]
     fn pack_wide_cols_creates_second_run() {
-        // Need many cols to exceed 1.2*1280=1536
-        // Each col 800x1200 -> new_w 853? Wait 800*1280/1200=853
+        // Need many cols to exceed 1.2*IMG_SIZE
+        // Each col 800x1200 -> new_w = 800*IMG_SIZE/1200
         // Actually 800x1200 single per col if we force single per col by having ratio >? No, with 800x1200 ratio 1.5, max 6 would pack 4 per col, so to get many cols we need small pages
         // Create 20 pages 800x500 (0.625) -> each col would pack up to 9 (9*500=4500/800=5.6)
         // So ~2 cols for 20 pages, still not wide enough.
-        // Instead craft skinny tallish pages that make new_w large: e.g., 1200x800 (0.66) single per col new_w=1200*1280/800=1920 already >1536 -> would be single run but wide
+        // Instead craft skinny tallish pages that make new_w large: e.g., 1200x800 (0.66) single per col new_w=1200*IMG_SIZE/800 already >1.2*IMG_SIZE -> would be single run but wide
         let dims = dims(&[(1200, 800), (1200, 800), (1200, 800)]);
         let runs = plan_grids(&dims);
         // Each page ratio 0.66 <=6, but combined 2 pages: col_w 1200 sum 1600 =>1.33 still fits, so actually would pack together

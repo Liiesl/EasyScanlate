@@ -33,7 +33,7 @@ use scanlateit_segment::Engine as SegmentEngine;
 use scanlateit_ui::translation as ui_translation;
 use scanlateit_ui::main_area::decode::{DecodedPage, PageDecode, Scheduler, Tier};
 use scanlateit_ui::{
-    event::{EditOrigin, MainAreaMode, SettingsTab, StyleField, ToolbarAction, UiEvent},
+    event::{EditOrigin, MainAreaMode, SettingsTab, StyleField, TargetProfileSelection, ToolbarAction, TranslationPanelMode, UiEvent},
     ConnectModal, LoadedImage,
 };
 
@@ -189,6 +189,9 @@ pub struct App {
     pub(crate) translating: bool,
     pub(crate) tx: ui_translation::Session,
     pub(crate) translate_lang: String,
+    pub(crate) translation_panel_mode: TranslationPanelMode,
+    pub(crate) translate_base: Option<scanlateit_model::ProfileId>,
+    pub(crate) translate_target: TargetProfileSelection,
     pub(crate) connect_modal: Option<ConnectModal>,
     pub(crate) settings_open: bool,
     pub(crate) settings_tab: SettingsTab,
@@ -314,6 +317,12 @@ impl App {
             translating: false,
             tx: ui_translation::Session::default(),
             translate_lang: ui_translation::LANGUAGES[0].to_string(),
+            translation_panel_mode: TranslationPanelMode::Edit,
+            translate_base: None,
+            translate_target: TargetProfileSelection::AutoPlaceholder(format!(
+                "{}(auto)",
+                ui_translation::LANGUAGES[0]
+            )),
             connect_modal: None,
             settings_open: false,
             settings_tab: SettingsTab::General,
@@ -506,6 +515,132 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             app.status = format!("Profile: {name} (created)");
             Task::none()
         }
+        Message::Ui(UiEvent::TranslationPanelMode(mode)) => {
+            // Initialize base/target when first entering Translate
+            if mode == TranslationPanelMode::Translate && app.translation_panel_mode != TranslationPanelMode::Translate {
+                if app.translate_base.is_none() {
+                    if let Some(img) = app.images.first() {
+                        app.translate_base = Some(img.project.profiles.selected_id());
+                    }
+                }
+                // Ensure target placeholder reflects current lang if it is AutoPlaceholder
+                if let TargetProfileSelection::AutoPlaceholder(_) = app.translate_target.clone() {
+                    app.translate_target = TargetProfileSelection::AutoPlaceholder(format!("{}(auto)", app.translate_lang));
+                }
+                // If placeholder already exists as a profile, convert to Existing so equality checks work
+                if let TargetProfileSelection::AutoPlaceholder(name) = app.translate_target.clone() {
+                    if let Some(img) = app.images.first() {
+                        if let Some(id) = img.project.profiles.find_by_name(&name) {
+                            // Don't select base itself; keep placeholder blank if it would equal base
+                            let base = app.translate_base.or_else(|| Some(img.project.profiles.selected_id()));
+                            if Some(id) != base {
+                                app.translate_target = TargetProfileSelection::Existing(id);
+                            }
+                        }
+                    }
+                }
+                // Prevent base == target (target placeholder may equal base name)
+                if let (Some(base), TargetProfileSelection::Existing(tid)) = (app.translate_base, app.translate_target.clone()) {
+                    if base == tid {
+                        // keep target as placeholder instead
+                        app.translate_target = TargetProfileSelection::AutoPlaceholder(format!("{}(auto)", app.translate_lang));
+                    }
+                }
+            }
+            app.translation_panel_mode = mode;
+            app.status = match mode {
+                TranslationPanelMode::Edit => "Edit mode: single profile.".to_string(),
+                TranslationPanelMode::Translate => "Translate mode: base → target.".to_string(),
+            };
+            // Clear panel editing when switching modes
+            if app.editing.is_some() && app.editing_origin == EditOrigin::Panel {
+                crate::app::edit::clear_editing(app);
+            }
+            Task::none()
+        }
+        Message::Ui(UiEvent::BaseProfileSelect(id)) => {
+            if app.images.is_empty() {
+                return Task::none();
+            }
+            // validate id exists
+            let exists = app.images[0].project.profiles.iter().any(|p| p.id == id);
+            if !exists {
+                return Task::none();
+            }
+            // prevent base == target (when target is Existing)
+            if let TargetProfileSelection::Existing(tid) = app.translate_target.clone() {
+                if tid == id {
+                    app.status = "Base and target must differ.".to_string();
+                    return Task::none();
+                }
+            }
+            // also prevent base name == placeholder name when target is AutoPlaceholder
+            if let TargetProfileSelection::AutoPlaceholder(name) = app.translate_target.clone() {
+                if let Some(img) = app.images.first() {
+                    if let Some(bprof) = img.project.profiles.iter().find(|p| p.id == id) {
+                        if bprof.name == name {
+                            app.status = "Base and target must differ.".to_string();
+                            return Task::none();
+                        }
+                    }
+                }
+            }
+            app.translate_base = Some(id);
+            let name = app.images[0].project.profiles.iter().find(|p| p.id == id).map(|p| p.name.clone()).unwrap_or_default();
+            app.status = format!("Base: {name}");
+            Task::none()
+        }
+        Message::Ui(UiEvent::TargetProfileSelect(sel)) => {
+            if app.images.is_empty() {
+                return Task::none();
+            }
+            // validate and prevent == base
+            let base = app.translate_base.or_else(|| app.images.first().map(|i| i.project.profiles.selected_id()));
+            match &sel {
+                TargetProfileSelection::Existing(id) => {
+                    if Some(*id) == base {
+                        app.status = "Base and target must differ.".to_string();
+                        return Task::none();
+                    }
+                    let exists = app.images[0].project.profiles.iter().any(|p| p.id == *id);
+                    if !exists {
+                        return Task::none();
+                    }
+                }
+                TargetProfileSelection::AutoPlaceholder(name) => {
+                    if let Some(b) = base {
+                        if let Some(bprof) = app.images[0].project.profiles.iter().find(|p| p.id == b) {
+                            if &bprof.name == name {
+                                app.status = "Base and target must differ.".to_string();
+                                return Task::none();
+                            }
+                        }
+                    }
+                }
+            }
+            // If AutoPlaceholder actually already exists, convert to Existing
+            let resolved = match sel.clone() {
+                TargetProfileSelection::AutoPlaceholder(name) => {
+                    if let Some(id) = app.images[0].project.profiles.find_by_name(&name) {
+                        if Some(id) != base {
+                            TargetProfileSelection::Existing(id)
+                        } else {
+                            TargetProfileSelection::AutoPlaceholder(name)
+                        }
+                    } else {
+                        TargetProfileSelection::AutoPlaceholder(name)
+                    }
+                }
+                other => other,
+            };
+            app.translate_target = resolved.clone();
+            let label = match resolved {
+                TargetProfileSelection::Existing(id) => app.images[0].project.profiles.iter().find(|p| p.id == id).map(|p| p.name.clone()).unwrap_or_default(),
+                TargetProfileSelection::AutoPlaceholder(n) => n,
+            };
+            app.status = format!("Target: {label}");
+            Task::none()
+        }
         Message::Ui(UiEvent::TilesVisible(range)) => app
             .scheduler
             .schedule(range, Message::SettleElapsed),
@@ -546,7 +681,26 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::Translate) => translation::handle_translate(app),
         Message::Ui(UiEvent::TranslateModelSelect { provider, model }) => translation::handle_model_select(app, provider, model),
         Message::Ui(UiEvent::TranslateLang(lang)) => {
-            app.translate_lang = lang;
+            app.translate_lang = lang.clone();
+            // Keep placeholder in sync when target is AutoPlaceholder
+            if let TargetProfileSelection::AutoPlaceholder(_) = app.translate_target.clone() {
+                let new_name = format!("{lang}(auto)");
+                // If that name already exists as a profile (and !== base), convert to Existing
+                if let Some(img) = app.images.first() {
+                    if let Some(id) = img.project.profiles.find_by_name(&new_name) {
+                        let base = app.translate_base.or_else(|| Some(img.project.profiles.selected_id()));
+                        if Some(id) != base {
+                            app.translate_target = TargetProfileSelection::Existing(id);
+                        } else {
+                            app.translate_target = TargetProfileSelection::AutoPlaceholder(new_name);
+                        }
+                    } else {
+                        app.translate_target = TargetProfileSelection::AutoPlaceholder(new_name);
+                    }
+                } else {
+                    app.translate_target = TargetProfileSelection::AutoPlaceholder(new_name);
+                }
+            }
             Task::none()
         }
         Message::Ui(UiEvent::TranslateConnect(provider_id)) => translation::handle_connect(app, provider_id),

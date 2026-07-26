@@ -59,6 +59,25 @@ pub enum MainAreaMode {
     Compare,
 }
 
+/// The mode of the translation/results panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TranslationPanelMode {
+    /// Single input per row (current profile's text), no original, no translate bar.
+    #[default]
+    Edit,
+    /// Two inputs per row (base vs target profile), translate bar visible.
+    Translate,
+}
+
+/// The virtual vs real target profile choice in translate mode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TargetProfileSelection {
+    /// An existing profile by id.
+    Existing(ProfileId),
+    /// Placeholder `"{Lang}(auto)"` for the current `translate_lang`; not yet created.
+    AutoPlaceholder(String),
+}
+
 /// The color field a styling [`ColorPicker`] edits: the text color, the
 /// stroke (outline) color, or the background color of the selected entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -109,6 +128,12 @@ pub enum UiEvent {
     /// The user pressed the "+ New Profile" row of the profile dropdown:
     /// create and select a fresh profile in every project.
     ProfileCreate,
+    /// The user toggled the translation panel between Edit and Translate.
+    TranslationPanelMode(TranslationPanelMode),
+    /// The user picked the base profile for translate mode.
+    BaseProfileSelect(ProfileId),
+    /// The user picked the target profile for translate mode (existing or auto placeholder).
+    TargetProfileSelect(TargetProfileSelection),
     TilesVisible(Range<usize>),
     /// The user finished a scrollbar drag or touch pan: the viewport will
     /// not move again until a new input, so the app can settle immediately

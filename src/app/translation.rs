@@ -39,6 +39,31 @@ pub fn handle_models_fetched(app: &mut App, providers: HashMap<String, translati
     Task::none()
 }
 
+fn capitalized_profile_name(lang: &str) -> String {
+    format!("{lang}(auto)")
+}
+
+fn resolve_base_id(app: &App) -> Option<scanlateit_model::ProfileId> {
+    if let Some(id) = app.translate_base {
+        if app.images.first().is_some_and(|img| img.project.profiles.iter().any(|p| p.id == id)) {
+            return Some(id);
+        }
+    }
+    app.images.first().map(|img| img.project.profiles.selected_id())
+}
+
+fn resolve_target_name(app: &App) -> String {
+    use scanlateit_ui::event::TargetProfileSelection;
+    match &app.translate_target {
+        TargetProfileSelection::Existing(id) => {
+            app.images.first()
+                .and_then(|img| img.project.profiles.iter().find(|p| &p.id == id).map(|p| p.name.clone()))
+                .unwrap_or_else(|| capitalized_profile_name(&app.translate_lang))
+        }
+        TargetProfileSelection::AutoPlaceholder(name) => name.clone(),
+    }
+}
+
 pub fn handle_translate(app: &mut App) -> Task<Message> {
     if app.translating || app.running {
         return Task::none();
@@ -47,22 +72,43 @@ pub fn handle_translate(app: &mut App) -> Task<Message> {
         app.status = "Connect a translation service in Settings first.".to_string();
         return Task::none();
     }
+    // Ensure base/target initialized when entering translate without prior selection
+    if app.translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate && app.images.first().is_some() {
+        if app.translate_base.is_none() {
+            app.translate_base = app.images.first().map(|img| img.project.profiles.selected_id());
+        }
+        if let scanlateit_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.translate_target.clone() {
+            if name != capitalized_profile_name(&app.translate_lang) {
+                // keep as is; lang change handler already syncs
+            }
+        }
+    }
     let jobs: Vec<(usize, EntryId, String, String)> = app
         .images
         .iter()
         .enumerate()
         .flat_map(|(index, image)| {
             let filename = translation::file_tag(&image.path);
+            let is_translate_mode = app.translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate;
+            let base_id = if is_translate_mode { resolve_base_id(app) } else { None };
             image
                 .project
                 .ocr
                 .visible()
                 .map(move |entry| {
+                    let text = if let Some(pid) = base_id {
+                        image.project.profiles.iter().find(|p| p.id == pid)
+                            .and_then(|p| p.translation_of(entry.id))
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| entry.text.clone())
+                    } else {
+                        entry.text.clone()
+                    };
                     (
                         index,
                         entry.id,
                         filename.clone(),
-                        entry.text.clone(),
+                        text,
                     )
                 })
         })
@@ -115,7 +161,12 @@ pub fn handle_translate_finished(
     app.translating = false;
     match result {
         Ok(translations) => {
-            let profile_name = translation::profile_name(&app.translate_lang);
+            let is_translate_mode = app.translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate;
+            let profile_name = if is_translate_mode {
+                resolve_target_name(app)
+            } else {
+                capitalized_profile_name(&app.translate_lang)
+            };
             if translations.len() != jobs.len() {
                 let mut saved = 0usize;
                 for ((image_index, entry_id, _path, _text), translation) in
@@ -161,6 +212,27 @@ pub fn handle_translate_finished(
                     );
                 }
             }
+            // In Translate mode, ensure all images have the target profile and update selection from AutoPlaceholder to Existing
+            if is_translate_mode {
+                // Ensure other images have the profile (store_translation already created for those with jobs; but images without jobs also need it if placeholder)
+                for img in &mut app.images {
+                    if img.project.profiles.find_by_name(&profile_name).is_none() {
+                        img.project.profiles.add(profile_name.clone());
+                    }
+                }
+                if let scanlateit_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.translate_target.clone() {
+                    if name == profile_name {
+                        if let Some(img) = app.images.first() {
+                            if let Some(id) = img.project.profiles.find_by_name(&name) {
+                                let base = resolve_base_id(app);
+                                if Some(id) != base {
+                                    app.translate_target = scanlateit_ui::event::TargetProfileSelection::Existing(id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         Err(e) => {
             app.status = e;
@@ -184,6 +256,57 @@ pub fn handle_retranslate_finished(
                 if quoted {
                     text = text[1..text.len() - 1].to_string();
                 }
+            }
+            // Translate mode: write into target profile (base -> target)
+            if app.translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate {
+                let target_name = resolve_target_name(app);
+                let base_id = resolve_base_id(app);
+                // Validate base != target (should have been guarded)
+                // Determine if text equals what base already shows? Use OCR fallback comparison for clearing?
+                // For target, compare against entry's OCR text for None semantics (same as before)
+                let Some(image) = app.images.get_mut(index) else {
+                    app.status = "Retranslated, but that image is gone.".to_string();
+                    return Task::none();
+                };
+                let equals_original = image
+                    .project
+                    .ocr
+                    .get(entry_id)
+                    .is_some_and(|entry| entry.text == text);
+                let stored = if equals_original { None } else { Some(text) };
+                // Ensure target profile exists for all images (create if placeholder not there)
+                // First handle this image
+                let _target_id = image.project.store_translation(&target_name, entry_id, stored.clone());
+                // Ensure other images also have the target profile (so pickers stay consistent)
+                let tname = target_name.clone();
+                for (i, img) in app.images.iter_mut().enumerate() {
+                    if i == index { continue; }
+                    // Ensure profile exists; reuse id if already there
+                    if img.project.profiles.find_by_name(&tname).is_none() {
+                        let nid = img.project.profiles.add(tname.clone());
+                        // If we already created for first image, next images get same numeric id? But ids are per-project distinct; that's okay.
+                        let _ = nid;
+                    }
+                    if let Some(pid) = img.project.profiles.find_by_name(&tname) {
+                        // Only set for that entry if this image also has that entry id? Each image has separate OCR entries; entry ids are globally unique per NewEntry but we store per image; retranslate only affects one image's entry.
+                        // So only the selected image's entry matters; other images just ensure profile exists (already done). No translation to set.
+                        let _ = pid;
+                    }
+                }
+                // Update target selection to Existing if it was placeholder
+                if let scanlateit_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.translate_target.clone() {
+                    if name == target_name {
+                        if let Some(img) = app.images.first() {
+                            if let Some(id) = img.project.profiles.find_by_name(&name) {
+                                if Some(id) != base_id {
+                                    app.translate_target = scanlateit_ui::event::TargetProfileSelection::Existing(id);
+                                }
+                            }
+                        }
+                    }
+                }
+                app.status = format!("Retranslated 1 line into '{target_name}'.");
+                return Task::none();
             }
             let Some(image) = app.images.get_mut(index) else {
                 app.status = "Retranslated, but that image is gone.".to_string();
@@ -230,17 +353,42 @@ pub fn handle_retranslate_entry(app: &mut App, index: usize, entry_id: EntryId) 
             return Task::none();
         }
         let filename = translation::file_tag(&image.path);
-        let context_items: Vec<translation::TranslateItem> = image
-            .project
-            .ocr
-            .visible()
-            .map(|e| translation::TranslateItem {
-                filename: filename.clone(),
-                id: e.id.0,
-                text: e.text.clone(),
-            })
-            .collect();
-        (entry.text.clone(), filename, context_items)
+        // In Translate mode, base profile's text is the source, with context from base as well
+        let (text, context_items) = if app.translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate {
+            let base_id = resolve_base_id(app);
+            let txt = base_id
+                .and_then(|pid| image.project.profiles.iter().find(|p| p.id == pid))
+                .and_then(|p| p.translation_of(entry_id))
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| entry.text.clone());
+            let ctx: Vec<translation::TranslateItem> = image
+                .project
+                .ocr
+                .visible()
+                .map(|e| {
+                    let t = base_id
+                        .and_then(|pid| image.project.profiles.iter().find(|p| p.id == pid))
+                        .and_then(|p| p.translation_of(e.id))
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| e.text.clone());
+                    translation::TranslateItem { filename: filename.clone(), id: e.id.0, text: t }
+                })
+                .collect();
+            (txt, ctx)
+        } else {
+            let ctx: Vec<translation::TranslateItem> = image
+                .project
+                .ocr
+                .visible()
+                .map(|e| translation::TranslateItem {
+                    filename: filename.clone(),
+                    id: e.id.0,
+                    text: e.text.clone(),
+                })
+                .collect();
+            (entry.text.clone(), ctx)
+        };
+        (text, filename, context_items)
     };
     let target = app.translate_lang.clone();
     let (provider, api_key) = match app.tx.selected_provider() {

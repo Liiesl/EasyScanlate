@@ -111,6 +111,10 @@ pub fn handle_entry_double_clicked(app: &mut App, pair: (usize, EntryId)) -> Tas
 }
 
 pub fn handle_panel_entry_edit(app: &mut App, pair: (usize, EntryId)) -> Task<Message> {
+    if app.translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate {
+        // Editing via panel is forbidden in Translate mode: treat as selection.
+        return handle_entry_clicked(app, Some(pair));
+    }
     if app.selected_inpaint.is_some() {
         app.selected_inpaint = None;
     }
@@ -164,18 +168,39 @@ pub fn handle_edit_action(app: &mut App, action: text_editor::Action) -> Task<Me
     };
     if !app.editing_dirty {
         app.editing_dirty = true;
-        let project = &mut app.images[index].project;
-        if let Some(name) = project.profiles.fork_for_edit() {
+        // Fork the edited image's profile and propagate the new profile to all images
+        let forked_name = {
+            let project = &mut app.images[index].project;
+            project.profiles.fork_for_edit()
+        };
+        if let Some(name) = forked_name {
+            for (i, img) in app.images.iter_mut().enumerate() {
+                if i == index {
+                    continue;
+                }
+                if let Some(existing) = img.project.profiles.find_by_name(&name) {
+                    img.project.profiles.select(existing);
+                } else {
+                    let nid = img.project.profiles.add(name.clone());
+                    img.project.profiles.select(nid);
+                }
+            }
+            // Keep translate base in sync when it was the original profile
+            // (so base can be the forked profile if needed)
             app.status = format!(
                 "Edit forked into '{name}': the OCR text stays untouched."
             );
         }
     }
     let project = &mut app.images[index].project;
+    let target_text = text.clone();
     project
         .profiles
         .selected_mut()
-        .set_translation(id, Some(text));
+        .set_translation(id, Some(target_text.clone()));
+    // Propagate the same translation to the forked profile of other images if they were synced
+    // (other images don't have this entry id, but keep profiles in sync for consistency;
+    // only the edited image's entry matters)
     Task::none()
 }
 
