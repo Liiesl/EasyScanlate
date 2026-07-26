@@ -21,7 +21,7 @@ const ROW_BG: Color = Color::from_rgba8(34, 36, 44, 0.48);
 const ROW_BG_DIMMED: Color = Color::from_rgba8(34, 36, 44, 0.26);
 const ROW_BORDER: Color = Color::from_rgba8(255, 255, 255, 0.10);
 const SELECTED_BORDER: Color = Color::from_rgba8(92, 190, 255, 0.9);
-const SELECTED_BG: Color = Color::from_rgba8(92, 190, 255, 0.08);
+const SELECTED_BG: Color = Color::from_rgba8(52, 58, 76, 0.70);
 /// Inner scrollable inset – even more transparent than the row so the
 /// row floats over it and the aurora layers clearly.
 const INNER_BG: Color = Color::from_rgba8(34, 36, 44, 0.24);
@@ -185,8 +185,7 @@ fn layer_row<'a>(
         .style(move |_theme| container::Style {
             background: Some(if is_selected { SELECTED_BG } else { row_bg }.into()),
             border: Border::default()
-                .width(scale::s(1.0))
-                .color(if is_selected { SELECTED_BORDER } else { ROW_BORDER })
+                .width(0.0)
                 .rounded(scale::s(6.0)),
             ..container::Style::default()
         });

@@ -59,8 +59,9 @@ const BOX_BG: Color = Color::from_rgb8(28, 30, 38);
 const ROW_BORDER: Color = Color::from_rgba8(255, 255, 255, 0.14);
 /// Border of the selected row, matching the overlay's selection handles.
 const SELECTED_BORDER: Color = Color::from_rgba8(92, 190, 255, 1.0);
-/// Faint fill behind a selected row.
-const SELECTED_BG: Color = Color::from_rgba8(92, 190, 255, 0.08);
+/// Highlight behind a selected row — slightly lighter and more opaque than `PANEL_BG`
+/// so selection is obvious without a border.
+const SELECTED_BG: Color = Color::from_rgba8(52, 58, 76, 0.90);
 
 /// The one input-like box: shaded, rounded, one side of a results row.
 fn input_box<'a>(content: impl Into<Element<'a, UiEvent>>) -> Element<'a, UiEvent> {
@@ -205,10 +206,9 @@ fn entry_row<'a, S: UiState + ?Sized>(
         left: scale::s(ROW_PADDING.left),
     })
     .style(move |_theme| container::Style {
-        background: Some(PANEL_BG.into()),
+        background: Some(if selected { SELECTED_BG } else { PANEL_BG }.into()),
         border: Border::default()
-            .width(scale::s(1.0))
-            .color(if selected { SELECTED_BORDER } else { ROW_BORDER })
+            .width(0.0)
             .rounded(scale::s(12.0)),
         ..container::Style::default()
     });
