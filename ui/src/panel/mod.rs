@@ -12,7 +12,7 @@ pub mod results;
 pub mod styling;
 
 use iced::widget::{column, container, row};
-use iced::{Color, Element, Fill as FillLength, Length};
+use iced::{Background, Border, Color, Element, Fill as FillLength, Length, Shadow};
 
 use crate::event::UiEvent;
 use crate::scale;
@@ -29,6 +29,36 @@ pub const RESULTS_COL_PORTS: u16 = 9;
 
 pub fn file_name(path: &str) -> &str {
     path.rsplit(['\\', '/']).next().unwrap_or(path)
+}
+
+/// Shared button style: background matches the panel, with distinct
+/// fills for `Hovered` / `Pressed` / `Disabled` so interaction is visible.
+pub fn button_style(
+    _theme: &iced::Theme,
+    status: iced::widget::button::Status,
+) -> iced::widget::button::Style {
+    use iced::widget::button::Status;
+    let bg = match status {
+        Status::Active => PANEL_BG,
+        Status::Hovered => Color::from_rgba8(46, 48, 62, 0.90),
+        Status::Pressed => Color::from_rgba8(55, 57, 72, 0.95),
+        Status::Disabled => Color::from_rgba8(34, 36, 44, 0.40),
+    };
+    let txt = match status {
+        Status::Disabled => crate::segmented::MUTED_FG,
+        _ => crate::segmented::TEXT_MAIN,
+    };
+    iced::widget::button::Style {
+        background: Some(Background::Color(bg)),
+        border: Border {
+            radius: crate::scale::s(4.0).into(),
+            width: 0.0,
+            color: Color::TRANSPARENT,
+        },
+        shadow: Shadow::default(),
+        text_color: txt,
+        ..iced::widget::button::Style::default()
+    }
 }
 
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {

@@ -12,6 +12,7 @@ pub mod loaded;
 pub mod main_area;
 pub mod manage_models;
 pub mod panel;
+pub mod icon;
 pub mod scale;
 pub mod segmented;
 pub mod settings;

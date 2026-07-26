@@ -4,6 +4,7 @@ use iced::{Color, Font, Pixels, Point, Rectangle, Size};
 
 use crate::main_area::geometry::order_quad;
 use crate::scale;
+use lucide_icons::Icon;
 
 use super::constants::{
     FAILED_BG, FAILED_FG, HANDLE_BORDER, HANDLE_FILL, HANDLE_SIZE, INPAINT_FILL, INPAINT_STROKE,
@@ -66,7 +67,7 @@ where
     );
 }
 
-pub fn draw_action_button<F>(frame: &mut F, rect: Rectangle, label: &str, hovered: bool)
+pub fn draw_action_button<F>(frame: &mut F, rect: Rectangle, icon: Icon, hovered: bool)
 where
     F: geometry::frame::Backend,
 {
@@ -81,11 +82,94 @@ where
             Fill::from(TOOLBAR_BG),
         );
     }
+    let glyph = char::from(icon).to_string();
+    let sz = scale::s(12.0);
+    // Center icon in button rect
+    let x = rect.x + (rect.width - sz * 0.6).max(0.0) / 2.0;
+    let y = rect.y + (rect.height - sz).max(0.0) / 2.0;
+    frame.fill_text(Text {
+        content: glyph,
+        position: Point::new(x, y),
+        max_width: rect.width,
+        size: Pixels(sz),
+        color: TOOLBAR_FG,
+        font: Font::with_name("lucide"),
+        ..Text::default()
+    });
+}
+
+pub fn draw_circle_button<F>(frame: &mut F, rect: Rectangle, icon: Icon, hovered: bool)
+where
+    F: geometry::frame::Backend,
+{
+    let center = Point::new(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+    let radius = rect.width.min(rect.height) / 2.0;
+    let circle = Path::circle(center, radius);
+    if hovered {
+        frame.fill(&circle, Fill::from(TOOLBAR_HOVER_BG));
+    } else {
+        frame.fill(&circle, Fill::from(TOOLBAR_BG));
+    }
+    let glyph = char::from(icon).to_string();
+    let sz = scale::s(14.0);
+    let x = center.x - sz * 0.3;
+    let y = center.y - sz * 0.5;
+    frame.fill_text(Text {
+        content: glyph,
+        position: Point::new(x, y),
+        max_width: rect.width,
+        size: Pixels(sz),
+        color: TOOLBAR_FG,
+        font: Font::with_name("lucide"),
+        ..Text::default()
+    });
+}
+
+pub fn draw_save_button<F>(frame: &mut F, rect: Rectangle, hovered: bool)
+where
+    F: geometry::frame::Backend,
+{
+    if hovered {
+        frame.fill(
+            &Path::rounded_rectangle(rect.position(), rect.size(), Radius::from(scale::s(8.0))),
+            Fill::from(TOOLBAR_HOVER_BG),
+        );
+    } else {
+        frame.fill(
+            &Path::rounded_rectangle(rect.position(), rect.size(), Radius::from(scale::s(8.0))),
+            Fill::from(TOOLBAR_BG),
+        );
+    }
+    let icon = Icon::Download;
+    let glyph = char::from(icon).to_string();
+    let icon_sz = scale::s(14.0);
+    let text_sz = scale::s(12.0);
+    let label = "Save";
+    // Rough layout: icon + gap + label centered
+    let gap = scale::s(6.0);
+    // Estimate widths: icon ~0.6*size, label ~ text_sz*0.6*len
+    let label_w = text_sz * 0.6 * label.len() as f32;
+    let icon_w = icon_sz * 0.6;
+    let total_w = icon_w + gap + label_w;
+    let start_x = rect.x + (rect.width - total_w) / 2.0;
+    let icon_x = start_x;
+    let icon_y = rect.y + (rect.height - icon_sz) / 2.0;
+    let text_x = icon_x + icon_w + gap;
+    let text_y = rect.y + (rect.height - text_sz) / 2.0;
+    frame.fill_text(Text {
+        content: glyph,
+        position: Point::new(icon_x, icon_y),
+        max_width: rect.width,
+        size: Pixels(icon_sz),
+        color: TOOLBAR_FG,
+        font: Font::with_name("lucide"),
+        ..Text::default()
+    });
     frame.fill_text(Text {
         content: label.to_string(),
-        position: Point::new(rect.x, rect.y + (rect.height - scale::s(13.0)).max(0.0) / 2.0),
+        position: Point::new(text_x, text_y),
         max_width: rect.width,
-        size: Pixels(scale::s(11.0)),
+        size: Pixels(text_sz),
         color: TOOLBAR_FG,
         ..Text::default()
     });
@@ -96,23 +180,30 @@ where
     F: geometry::frame::Backend,
 {
     let rect = super::motion::toolbar_button_rect(toolbar, action);
-    let label = toolbar_buttons()
+    let icon = toolbar_buttons()
         .into_iter()
         .find(|(candidate, _)| *candidate == action)
-        .map(|(_, label)| label)
-        .unwrap_or("");
-    draw_action_button(frame, rect, label, hovered);
+        .map(|(_, icon)| icon)
+        .unwrap_or(Icon::Pencil);
+    draw_action_button(frame, rect, icon, hovered);
 }
 
 pub fn draw_overlay_buttons<F>(frame: &mut F, bounds: Rectangle, hovered: Option<super::interaction::OverlayButton>)
 where
     F: geometry::frame::Backend,
 {
-    for (rect, (button, label)) in super::hit_test::overlay_button_rects(bounds)
+    for (rect, (button, icon)) in super::hit_test::overlay_button_rects(bounds)
         .into_iter()
         .zip(super::interaction::OverlayButton::column())
     {
-        draw_action_button(frame, rect, label, hovered == Some(button));
+        match button {
+            super::interaction::OverlayButton::GoTop | super::interaction::OverlayButton::GoBottom => {
+                draw_circle_button(frame, rect, icon, hovered == Some(button));
+            }
+            super::interaction::OverlayButton::Save => {
+                draw_save_button(frame, rect, hovered == Some(button));
+            }
+        }
     }
 }
 
@@ -128,7 +219,7 @@ where
     frame.fill(&knob, Fill::from(HANDLE_FILL));
     frame.stroke(&knob, Stroke::default().with_color(HANDLE_BORDER).with_width(scale::s(1.5)));
     if show_revert {
-        draw_action_button(frame, decor.revert, "Revert", hover);
+        draw_action_button(frame, decor.revert, Icon::Undo2, hover);
     }
 }
 
@@ -229,8 +320,8 @@ pub fn draw_inpaint_decorations<'a, F>(
     // Floating toolbar below (like OCR). No move/resize.
     let toolbar = inpaint_toolbar_rect(rect, frame.width(), flip_at);
     let hover = cursor_local.and_then(|local| hit_inpaint_toolbar_button(toolbar, local));
-    for (action, label) in inpaint_toolbar_buttons() {
+    for (action, icon) in inpaint_toolbar_buttons() {
         let r = inpaint_toolbar_button_rect(toolbar, action);
-        draw_action_button(frame, r, label, hover == Some(action));
+        draw_action_button(frame, r, icon, hover == Some(action));
     }
 }

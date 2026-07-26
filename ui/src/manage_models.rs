@@ -6,9 +6,10 @@
 
 use iced::widget::{
     button, center, column, container, mouse_area, opaque, row, rule, scrollable, space, stack,
-    text, text_input, toggler,
+    text, text_input, toggler, tooltip,
 };
 use iced::{Color, Element, Fill as FillLength, Length};
+use lucide_icons::Icon;
 
 use crate::event::{SettingEdit, UiEvent};
 use crate::panel::PANEL_BG;
@@ -71,7 +72,14 @@ pub fn view<'a, S: UiState + ?Sized>(
     let header = row![
         text("Manage Models").size(scale::s(16.0)),
         space::horizontal(),
-        button(text("✕")).padding(scale::s(2.0)).on_press(UiEvent::ManageModelsClose),
+        tooltip(
+            button(crate::icon::lucide(Icon::X).size(scale::s(14.0)).center())
+                .padding(scale::s(4.0))
+                .style(crate::panel::button_style)
+            .on_press(UiEvent::ManageModelsClose),
+            container(text("Close").size(scale::s(11.0))).padding(scale::s(6.0)).style(container::rounded_box),
+            tooltip::Position::Top
+        ).gap(scale::s(4.0)),
     ];
 
     let description = column![
@@ -264,13 +272,23 @@ pub fn view<'a, S: UiState + ?Sized>(
     };
 
     let footer = row![
-        button(text("Reset all").size(scale::s(11.0)))
-            .padding([scale::s(4.0), scale::s(10.0)])
+        tooltip(
+            button(crate::icon::lucide(Icon::RotateCcw).size(scale::s(14.0)).center())
+                .padding(scale::s(6.0))
+                .style(crate::panel::button_style)
             .on_press(UiEvent::SettingEdit(SettingEdit::HiddenModelsResetAll)),
+            container(text("Reset hidden models").size(scale::s(11.0))).padding(scale::s(6.0)).style(container::rounded_box),
+            tooltip::Position::Top
+        ).gap(scale::s(4.0)),
         space::horizontal(),
-        button(text("Close").size(scale::s(11.0)))
-            .padding([scale::s(4.0), scale::s(10.0)])
+        tooltip(
+            button(crate::icon::lucide(Icon::X).size(scale::s(14.0)).center())
+                .padding(scale::s(6.0))
+                .style(crate::panel::button_style)
             .on_press(UiEvent::ManageModelsClose),
+            container(text("Close").size(scale::s(11.0))).padding(scale::s(6.0)).style(container::rounded_box),
+            tooltip::Position::Top
+        ).gap(scale::s(4.0)),
     ]
     .spacing(scale::s(6.0))
     .align_y(iced::Alignment::Center);

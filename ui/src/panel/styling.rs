@@ -21,7 +21,7 @@ use iced::font::Weight;
 use iced::widget::button::Status;
 use iced::widget::image::{self, Handle};
 use iced::widget::{
-    button, column, container, pick_list, row, rule, scrollable, space::Space, text, text_input,
+    button, column, container, pick_list, row, rule, scrollable, space::Space, text, text_input, tooltip,
 };
 use iced::{
     Background, Border, Color, Element, Fill as FillLength, Font, Length, Padding, Shadow, Vector,
@@ -36,9 +36,10 @@ use scanlateit_model::{EntryStyle, TextAlign, TextGradientDir};
 
 use crate::event::{StyleField, UiEvent};
 use crate::main_area::overlay::styled_font;
-use crate::segmented::{segment, segmented_group, ACCENT, BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
+use crate::segmented::{segment, segment_icon, segmented_group, ACCENT, BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
 use crate::scale;
 use crate::state::UiState;
+use lucide_icons::Icon;
 
 const SWATCH_SIDE: f32 = 16.0;
 const HINT: &str = "Select a text entry in the image to style it.";
@@ -102,12 +103,18 @@ fn tab<'a>(label: &'a str, active: bool, on_press: Option<UiEvent>) -> Element<'
             .padding([scale::s(5.0), scale::s(0.0)])
             .on_press_maybe(on_press)
             .style(move |_theme, status: Status| {
-                let hovered = matches!(status, Status::Hovered | Status::Pressed);
+                let bg = match status {
+                    Status::Disabled => Color::from_rgba8(34, 36, 44, 0.40),
+                    Status::Hovered => Color::from_rgba8(46, 48, 62, 0.90),
+                    Status::Pressed => Color::from_rgba8(55, 57, 72, 0.95),
+                    Status::Active => crate::panel::PANEL_BG,
+                };
+                let txt = if active { TEXT_MAIN } else { MUTED_FG };
                 button::Style {
-                    background: None,
+                    background: Some(Background::Color(bg)),
                     border: Border::default(),
                     shadow: Shadow::default(),
-                    text_color: if active || hovered { TEXT_MAIN } else { MUTED_FG },
+                    text_color: txt,
                     ..button::Style::default()
                 }
             }),
@@ -142,7 +149,8 @@ fn swatch_button(color: Color, on_open: Option<UiEvent>) -> Element<'static, UiE
         .width(scale::s(SWATCH_SIDE))
         .height(scale::s(SWATCH_SIDE))
         .padding(Padding::ZERO)
-        .on_press_maybe(on_open)
+        .style(crate::panel::button_style)
+            .on_press_maybe(on_open)
         .style(move |_theme, status: Status| {
             let border_color = if matches!(status, Status::Hovered | Status::Pressed) {
                 Color::from_rgb8(230, 230, 230)
@@ -223,15 +231,15 @@ fn color_field<'a, S: UiState + ?Sized>(
     )
 }
 
-/// A number input with a muted glyph prefix, wrapped in an input-style box.
+/// A number input with a muted icon prefix, wrapped in an input-style box.
 fn number_field<'a>(
-    prefix: &'a str,
+    icon: Icon,
     value: &'a str,
     on_input: Option<fn(String) -> UiEvent>,
 ) -> Element<'a, UiEvent> {
     field_wrap(
         row![
-            text(prefix).size(scale::s(12.0)).color(MUTED_FG),
+            crate::icon::lucide(icon).size(scale::s(12.0)).color(MUTED_FG),
             text_input("0", value)
                 .on_input_maybe(on_input)
                 .padding(scale::s(0.0))
@@ -258,39 +266,41 @@ fn number_field<'a>(
     )
 }
 
+fn tip(label: &str) -> container::Container<'_, UiEvent> {
+    container(text(label).size(scale::s(11.0)))
+        .padding(scale::s(6.0))
+        .style(container::rounded_box)
+}
+
 /// The panel header: title, auto-detect action and the reset button
 /// (visual only — it has no event wired up).
 fn header_row<'a>(selected: bool) -> Element<'a, UiEvent> {
+    let auto_btn = button(
+        row![
+            crate::icon::lucide(Icon::Sparkles).size(scale::s(14.0)).center(),
+            text("Auto Detect").size(scale::s(11.0))
+        ]
+        .spacing(scale::s(4.0))
+        .align_y(iced::Alignment::Center),
+    )
+    .style(crate::panel::button_style)
+    .on_press_maybe(selected.then_some(UiEvent::StyleAutoDetect))
+    .padding(scale::s(6.0));
+    let auto: Element<'_, UiEvent> = tooltip(auto_btn, tip("Auto detect style"), tooltip::Position::Top)
+        .gap(scale::s(4.0))
+        .into();
+    let reset_btn = button(crate::icon::lucide(Icon::RotateCcw).size(scale::s(14.0)).center())
+        .style(crate::panel::button_style)
+        .on_press_maybe(None::<UiEvent>)
+        .padding(scale::s(6.0));
+    let reset: Element<'_, UiEvent> = tooltip(reset_btn, tip("Reset style"), tooltip::Position::Top)
+        .gap(scale::s(4.0))
+        .into();
     row![
         text("Typography").size(scale::s(12.0)).color(MUTED_FG),
         Space::new().width(FillLength),
-        button(text("Auto-detect").size(scale::s(11.0)))
-            .on_press_maybe(selected.then_some(UiEvent::StyleAutoDetect))
-            .padding([scale::s(4.0), scale::s(8.0)])
-            .style(|_theme, status: Status| {
-                let hovered = matches!(status, Status::Hovered | Status::Pressed);
-                button::Style {
-                    background: Some(Background::Color(INPUT_BG)),
-                    border: Border {
-                        radius: scale::s(4.0).into(),
-                        width: scale::s(1.0),
-                        color: BORDER,
-                    },
-                    shadow: Shadow::default(),
-                    text_color: if hovered { TEXT_MAIN } else { MUTED_FG },
-                    ..button::Style::default()
-                }
-            }),
-        button(text("↺").size(scale::s(13.0)))
-            .on_press_maybe(None::<UiEvent>)
-            .padding([scale::s(4.0), scale::s(6.0)])
-            .style(|_theme, _status| button::Style {
-                background: None,
-                border: Border::default(),
-                shadow: Shadow::default(),
-                text_color: MUTED_FG,
-                ..button::Style::default()
-            }),
+        auto,
+        reset,
     ]
     .align_y(iced::Alignment::Center)
     .spacing(scale::s(6.0))
@@ -321,44 +331,32 @@ fn format_align_row<'a>(
     style: &EntryStyle,
     selected: bool,
 ) -> Element<'a, UiEvent> {
-    let bold = Font {
-        weight: Weight::Bold,
-        ..Font::DEFAULT
-    };
-    let italic = Font {
-        style: iced::font::Style::Italic,
-        ..Font::DEFAULT
-    };
     row![
         container(segmented_group(vec![
-            segment(style.bold, "B", selected.then_some(UiEvent::StyleBold(!style.bold)), bold),
-            segment(style.italic, "I", selected.then_some(UiEvent::StyleItalic(!style.italic)), italic),
+            segment_icon(style.bold, Icon::Bold, selected.then_some(UiEvent::StyleBold(!style.bold))),
+            segment_icon(style.italic, Icon::Italic, selected.then_some(UiEvent::StyleItalic(!style.italic))),
         ]))
         .width(Length::FillPortion(1)),
         container(segmented_group(vec![
-            segment(
+            segment_icon(
                 style.text_align == TextAlign::Left,
-                "L",
+                Icon::AlignLeft,
                 selected.then_some(UiEvent::StyleTextAlign(TextAlign::Left)),
-                Font::DEFAULT,
             ),
-            segment(
+            segment_icon(
                 style.text_align == TextAlign::Center,
-                "C",
+                Icon::AlignCenter,
                 selected.then_some(UiEvent::StyleTextAlign(TextAlign::Center)),
-                Font::DEFAULT,
             ),
-            segment(
+            segment_icon(
                 style.text_align == TextAlign::Right,
-                "R",
+                Icon::AlignRight,
                 selected.then_some(UiEvent::StyleTextAlign(TextAlign::Right)),
-                Font::DEFAULT,
             ),
-            segment(
+            segment_icon(
                 style.text_align == TextAlign::Circular,
-                "◎",
+                Icon::Ellipse,
                 selected.then_some(UiEvent::StyleTextAlign(TextAlign::Circular)),
-                Font::DEFAULT,
             ),
         ]))
         .width(Length::FillPortion(2)),
@@ -416,7 +414,7 @@ fn stroke_section<'a, S: UiState + ?Sized>(
             ))
             .width(Length::FillPortion(2)),
             container(number_field(
-                "─",
+                Icon::Minus,
                 state.style_stroke_width(),
                 selected.then_some(UiEvent::StyleStrokeWidth),
             ))
@@ -446,38 +444,30 @@ fn background_section<'a, S: UiState + ?Sized>(
             ))
             .width(Length::FillPortion(2)),
             container(number_field(
-                "▣",
+                Icon::SquareRoundCorner,
                 state.style_bg_radius(),
                 selected.then_some(UiEvent::StyleBgRadius),
             ))
             .width(Length::FillPortion(1)),
         ]
         .spacing(scale::s(8.0)),
-        button(text("Inpaint Background").size(scale::s(11.0)))
+        tooltip(
+            button(
+                row![
+                    crate::icon::lucide(Icon::Eraser).size(scale::s(14.0)).center(),
+                    text("Inpaint Background").size(scale::s(11.0))
+                ]
+                .spacing(scale::s(4.0))
+                .align_y(iced::Alignment::Center),
+            )
             .width(FillLength)
-            .padding([scale::s(5.0), scale::s(8.0)])
-            .on_press_maybe(selected.then_some(UiEvent::StyleInpaintBackground))
-            .style(|_theme, status: Status| {
-                let hovered = matches!(status, Status::Hovered | Status::Pressed);
-                let disabled = matches!(status, Status::Disabled);
-                button::Style {
-                    background: Some(Background::Color(INPUT_BG)),
-                    border: Border {
-                        radius: scale::s(4.0).into(),
-                        width: scale::s(1.0),
-                        color: BORDER,
-                    },
-                    shadow: Shadow::default(),
-                    text_color: if disabled {
-                        MUTED_FG
-                    } else if hovered {
-                        TEXT_MAIN
-                    } else {
-                        MUTED_FG
-                    },
-                    ..button::Style::default()
-                }
-            }),
+            .padding(scale::s(6.0))
+            .style(crate::panel::button_style)
+            .on_press_maybe(selected.then_some(UiEvent::StyleInpaintBackground)),
+            tip("Inpaint background"),
+            tooltip::Position::Top,
+        )
+        .gap(scale::s(4.0)),
     ]
     .spacing(scale::s(8.0))
     .into()
@@ -521,7 +511,8 @@ fn square_tile<'a>(
         .width(FillLength)
         .height(FillLength)
         .padding(Padding::ZERO)
-        .on_press_maybe(on_press)
+        .style(crate::panel::button_style)
+            .on_press_maybe(on_press)
         .style(move |_theme, status: Status| {
             let border_color = if matches!(status, Status::Hovered | Status::Pressed) {
                 Color::from_rgb8(230, 230, 230)
@@ -571,7 +562,7 @@ fn preset_square<'a>(style: EntryStyle, on_press: Option<UiEvent>) -> Element<'a
 fn add_square<'a>(on_press: Option<UiEvent>) -> Element<'a, UiEvent> {
     square_tile(
         Space::new().into(),
-        text("+")
+        crate::icon::lucide(Icon::Plus)
             .size(PRESET_SIDE * 0.5)
             .color(MUTED_FG)
             .width(FillLength)
@@ -583,7 +574,7 @@ fn add_square<'a>(on_press: Option<UiEvent>) -> Element<'a, UiEvent> {
     )
 }
 
-/// An empty preset slot: checkerboard underlay and a muted dot, inert to
+/// An empty preset slot: checkerboard underlay and a muted ellipse, inert to
 /// clicks but right-clickable to fill it via the context menu.
 fn empty_square<'a>() -> Element<'a, UiEvent> {
     square_tile(
@@ -592,7 +583,7 @@ fn empty_square<'a>() -> Element<'a, UiEvent> {
             .height(FillLength)
             .border_radius(PRESET_RADIUS)
             .into(),
-        text("·")
+        crate::icon::lucide(Icon::Ellipse)
             .size(PRESET_SIDE * 0.3)
             .color(MUTED_FG)
             .width(FillLength)

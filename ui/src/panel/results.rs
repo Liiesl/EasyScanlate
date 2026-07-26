@@ -6,7 +6,7 @@ use iced::advanced::widget::{operate, Id as WidgetId};
 use iced::widget::operation::AbsoluteOffset;
 use iced::widget::text_editor;
 use iced::widget::{
-    button, column, container, mouse_area, pick_list, row, scrollable, space, text, Column, Id,
+    button, column, container, mouse_area, pick_list, row, scrollable, space, text, tooltip, Column, Id,
 };
 use iced::{keyboard, Background, Border, Color, Element, Fill as FillLength, Font, Length, Padding,
     Rectangle, Vector};
@@ -16,9 +16,10 @@ use crate::event::{EditOrigin, SettingsTab, TargetProfileSelection, ToolbarActio
 use crate::loaded::LoadedImage;
 use crate::panel::{MUTED_FG, PANEL_BG};
 use crate::scale;
-use crate::segmented::{segment, segmented_group};
+use crate::segmented::{segment_icon, segmented_group};
 use crate::state::UiState;
 use crate::translation;
+use lucide_icons::Icon;
 use scanlateit_model::{EntryId, OcrEntry, ProfileId};
 
 /// Widget id of the multi-line editor shown in a row while the entry is
@@ -116,6 +117,12 @@ fn current_box(value: String, font: Font) -> Element<'static, UiEvent> {
     input_box(text(value).size(scale::s(12.0)).font(font))
 }
 
+fn tip_label(label: &str) -> container::Container<'_, UiEvent> {
+    container(text(label).size(scale::s(11.0)))
+        .padding(scale::s(6.0))
+        .style(container::rounded_box)
+}
+
 /// One results row: behavior depends on TranslationPanelMode.
 /// Edit: single input (current profile's display_text, with panel edit).
 /// Translate: two inputs (base vs target), editing forbidden; clicks only select.
@@ -129,23 +136,28 @@ fn entry_row<'a, S: UiState + ?Sized>(
     let font = state.font().unwrap_or(Font::DEFAULT);
     let mode = state.translation_panel_mode();
 
-    let mut buttons: Vec<Element<'_, UiEvent>> = vec![
-        button(text("Delete").size(scale::s(10.0)))
-            .padding([scale::s(2.0), scale::s(6.0)])
-            .on_press(UiEvent::EntryToolbar((index, entry_id, ToolbarAction::Delete)))
-            .into(),
-    ];
-    buttons.push(
-        button(text("Retranslate").size(scale::s(10.0)))
-            .padding([scale::s(2.0), scale::s(6.0)])
-            .on_press_maybe(
-                (!state.translating()
-                    && !state.running()
-                    && !scanlateit_settings::get(|s| s.connections.is_empty()))
-                .then_some(UiEvent::RetranslateEntry((index, entry_id))),
-            )
-            .into(),
-    );
+    let delete_btn = button(crate::icon::lucide(Icon::Trash2).size(scale::s(12.0)).center())
+        .padding(scale::s(4.0))
+        .style(crate::panel::button_style)
+        .on_press(UiEvent::EntryToolbar((index, entry_id, ToolbarAction::Delete)));
+    let delete_tip: Element<'_, UiEvent> =
+        tooltip(delete_btn, tip_label("Delete entry"), tooltip::Position::Top)
+            .gap(scale::s(4.0))
+            .into();
+    let retranslate_btn = button(crate::icon::lucide(Icon::RefreshCw).size(scale::s(12.0)).center())
+        .padding(scale::s(4.0))
+        .style(crate::panel::button_style)
+        .on_press_maybe(
+            (!state.translating()
+                && !state.running()
+                && !scanlateit_settings::get(|s| s.connections.is_empty()))
+            .then_some(UiEvent::RetranslateEntry((index, entry_id))),
+        );
+    let retranslate_tip: Element<'_, UiEvent> =
+        tooltip(retranslate_btn, tip_label("Retranslate"), tooltip::Position::Top)
+            .gap(scale::s(4.0))
+            .into();
+    let mut buttons: Vec<Element<'_, UiEvent>> = vec![retranslate_tip, delete_tip];
 
     let content: Element<'_, UiEvent> = match mode {
         TranslationPanelMode::Edit => {
@@ -174,7 +186,7 @@ fn entry_row<'a, S: UiState + ?Sized>(
                     column![text(profile_name).size(scale::s(10.0)).color(MUTED_FG), current]
                         .spacing(scale::s(2.0))
                         .width(FillLength),
-                    column(buttons).spacing(scale::s(4.0)),
+                    row(buttons).spacing(scale::s(4.0)),
                 ]
                 .spacing(scale::s(ROW_SPACING))
                 .align_y(iced::Alignment::Center),
@@ -249,7 +261,7 @@ fn entry_row<'a, S: UiState + ?Sized>(
                     column![text(target_name).size(scale::s(10.0)).color(MUTED_FG), right]
                         .spacing(scale::s(2.0))
                         .width(FillLength),
-                    column(buttons).spacing(scale::s(4.0)),
+                    row(buttons).spacing(scale::s(4.0)),
                 ]
                 .spacing(scale::s(ROW_SPACING))
                 .align_y(iced::Alignment::Center),
@@ -341,17 +353,15 @@ impl ToString for TargetPickOption {
 fn translation_mode_switcher<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let mode = state.translation_panel_mode();
     let pill = segmented_group(vec![
-        segment(
+        segment_icon(
             mode == TranslationPanelMode::Edit,
-            "Edit",
+            Icon::Pencil,
             Some(UiEvent::TranslationPanelMode(TranslationPanelMode::Edit)),
-            Font::DEFAULT,
         ),
-        segment(
+        segment_icon(
             mode == TranslationPanelMode::Translate,
-            "Translate",
+            Icon::Languages,
             Some(UiEvent::TranslationPanelMode(TranslationPanelMode::Translate)),
-            Font::DEFAULT,
         ),
     ]);
     container(pill)
@@ -499,6 +509,17 @@ fn translate_bar<'a, S: UiState + ?Sized>(
             }
         }
 
+        let translate_btn = button(crate::icon::lucide(Icon::Send).size(scale::s(14.0)).center())
+            .padding(scale::s(6.0))
+            .style(crate::panel::button_style)
+            .on_press_maybe(
+                (has_entries && !state.translating() && !state.running())
+                    .then_some(UiEvent::Translate)
+            );
+        let translate: Element<'_, UiEvent> =
+            tooltip(translate_btn, tip_label("Translate"), tooltip::Position::Top)
+                .gap(scale::s(4.0))
+                .into();
         row![
             advanced_dropdown(entries, selected, |option| UiEvent::TranslateModelSelect {
                 provider: option.provider_id.clone(),
@@ -517,21 +538,24 @@ fn translate_bar<'a, S: UiState + ?Sized>(
                 |l| UiEvent::TranslateLang(l.to_string()),
             )
             .text_size(scale::s(12.0)),
-            button("Translate").on_press_maybe(
-                (has_entries && !state.translating() && !state.running())
-                    .then_some(UiEvent::Translate)
-            ),
+            translate,
         ]
         .spacing(scale::s(6.0))
         .align_y(iced::Alignment::Center)
         .into()
     } else {
+        let not_connected_btn = button(crate::icon::lucide(Icon::Settings).size(scale::s(14.0)).center())
+            .padding(scale::s(6.0))
+            .style(crate::panel::button_style)
+            .on_press(UiEvent::SettingsOpenTab(SettingsTab::Translation));
+        let not_connected: Element<'_, UiEvent> =
+            tooltip(not_connected_btn, tip_label("Open translation settings"), tooltip::Position::Top)
+                .gap(scale::s(4.0))
+                .into();
         row![
             text("Translation service: Not connected").size(scale::s(12.0)),
             space::horizontal(),
-            button(text("Configure…").size(scale::s(11.0)))
-                .padding([scale::s(2.0), scale::s(6.0)])
-                .on_press(UiEvent::SettingsOpenTab(SettingsTab::Translation)),
+            not_connected,
         ]
         .spacing(scale::s(6.0))
         .align_y(iced::Alignment::Center)

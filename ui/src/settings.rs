@@ -52,25 +52,9 @@ fn tab_button<'a, S: UiState + ?Sized>(
     )
     .width(Length::Fill)
     .padding(scale::s(6.0))
-    .on_press(UiEvent::SettingsTab(tab))
-    .style(move |_theme, status| button::Style {
-        background: Some(if selected {
-            Color {
-                a: 0.35,
-                ..ACCENT
-            }
-        } else if status == button::Status::Hovered {
-            Color {
-                a: 0.15,
-                ..Color::WHITE
-            }
-        } else {
-            Color::TRANSPARENT
-        }.into()),
-        border: iced::Border::default().rounded(scale::s(4.0)),
-        text_color: if selected { Color::WHITE } else { MUTED_FG },
-        ..button::Style::default()
-    })
+    .style(crate::panel::button_style)
+            .on_press(UiEvent::SettingsTab(tab))
+    .style(crate::panel::button_style)
     .into()
 }
 
@@ -136,9 +120,11 @@ fn provider_row_with_connection<'a>(
     let button = match connected {
         Some(_) => button(text("Disconnect").size(scale::s(11.0)))
             .padding([scale::s(3.0), scale::s(8.0)])
+            .style(crate::panel::button_style)
             .on_press(UiEvent::TranslateDisconnect(provider.id.clone())),
         None => button(text("Connect").size(scale::s(11.0)))
             .padding([scale::s(3.0), scale::s(8.0)])
+            .style(crate::panel::button_style)
             .on_press(UiEvent::TranslateConnect(provider.id.clone())),
     };
     row![
@@ -178,9 +164,11 @@ fn custom_row_with_connection<'a>(
     let button = match connected {
         Some(_) => button(text("Disconnect").size(scale::s(11.0)))
             .padding([scale::s(3.0), scale::s(8.0)])
+            .style(crate::panel::button_style)
             .on_press(UiEvent::TranslateDisconnect(id.to_string())),
         None => button(text("Connect…").size(scale::s(11.0)))
             .padding([scale::s(3.0), scale::s(8.0)])
+            .style(crate::panel::button_style)
             .on_press(UiEvent::TranslateConnect(id.to_string())),
     };
     row![
@@ -227,11 +215,13 @@ fn recommended_row<'a>(
 
     let docs_button = button(text("Docs").size(scale::s(11.0)))
         .padding([scale::s(3.0), scale::s(8.0)])
-        .on_press(UiEvent::OpenUrl(info.docs_url.to_string()));
+        .style(crate::panel::button_style)
+            .on_press(UiEvent::OpenUrl(info.docs_url.to_string()));
 
     let connect_button = button(text("Connect").size(scale::s(11.0)))
         .padding([scale::s(3.0), scale::s(8.0)])
-        .on_press(UiEvent::TranslateConnect(provider.id.clone()));
+        .style(crate::panel::button_style)
+            .on_press(UiEvent::TranslateConnect(provider.id.clone()));
 
     row![
         column![
@@ -293,7 +283,8 @@ fn appearance_tab() -> Element<'static, UiEvent> {
         .width(Length::Fixed(scale::s(30.0)))
         .height(Length::Fixed(scale::s(30.0)))
         .padding(0)
-        .on_press_maybe(
+        .style(crate::panel::button_style)
+            .on_press_maybe(
             (count > 1).then(|| UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(count - 1))),
         )
         .style(|_theme: &iced::Theme, status| {
@@ -314,7 +305,8 @@ fn appearance_tab() -> Element<'static, UiEvent> {
         .width(Length::Fixed(scale::s(30.0)))
         .height(Length::Fixed(scale::s(30.0)))
         .padding(0)
-        .on_press_maybe(
+        .style(crate::panel::button_style)
+            .on_press_maybe(
             (count < 5).then(|| UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(count + 1))),
         )
         .style(|_theme: &iced::Theme, status| {
@@ -335,7 +327,8 @@ fn appearance_tab() -> Element<'static, UiEvent> {
         .width(Length::Fixed(scale::s(30.0)))
         .height(Length::Fixed(scale::s(30.0)))
         .padding(0)
-        .on_press_maybe(
+        .style(crate::panel::button_style)
+            .on_press_maybe(
             (count > 1).then(|| {
                 UiEvent::SettingEdit(SettingEdit::AuroraSchema(
                     schema.index().wrapping_add(1) % 4,
@@ -426,7 +419,8 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                     .width(Length::Fixed(scale::s(30.0)))
                     .height(Length::Fixed(scale::s(30.0)))
                     .padding(0)
-                    .on_press_maybe((clamped > scale::MIN_FONT_SIZE).then_some(UiEvent::SettingEdit(SettingEdit::UiFontSize(clamped - 1))))
+                    .style(crate::panel::button_style)
+            .on_press_maybe((clamped > scale::MIN_FONT_SIZE).then_some(UiEvent::SettingEdit(SettingEdit::UiFontSize(clamped - 1))))
                     .style(|_theme: &iced::Theme, status| {
                         let bg = if status == iced::widget::button::Status::Hovered {
                             Color::from_rgba8(255, 255, 255, 0.30)
@@ -445,7 +439,8 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                     .width(Length::Fixed(scale::s(30.0)))
                     .height(Length::Fixed(scale::s(30.0)))
                     .padding(0)
-                    .on_press_maybe((clamped < scale::MAX_FONT_SIZE).then_some(UiEvent::SettingEdit(SettingEdit::UiFontSize(clamped + 1))))
+                    .style(crate::panel::button_style)
+            .on_press_maybe((clamped < scale::MAX_FONT_SIZE).then_some(UiEvent::SettingEdit(SettingEdit::UiFontSize(clamped + 1))))
                     .style(|_theme: &iced::Theme, status| {
                         let bg = if status == iced::widget::button::Status::Hovered {
                             Color::from_rgba8(255, 255, 255, 0.30)
@@ -1035,7 +1030,8 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                     .width(FillLength),
                     button(text("Manage models…").size(scale::s(11.0)))
                         .padding([scale::s(3.0), scale::s(8.0)])
-                        .on_press(UiEvent::ManageModelsOpen),
+                        .style(crate::panel::button_style)
+            .on_press(UiEvent::ManageModelsOpen),
                 ]
                 .spacing(scale::s(6.0))
                 .align_y(iced::Alignment::Center)

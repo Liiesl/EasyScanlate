@@ -4,6 +4,7 @@ use iced::Point;
 use scanlateit_model::{EntryId, Quad};
 
 use crate::event::{InpaintToolbarAction, ToolbarAction};
+use lucide_icons::Icon;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverlayButton {
@@ -13,12 +14,20 @@ pub enum OverlayButton {
 }
 
 impl OverlayButton {
-    pub fn column() -> [(OverlayButton, &'static str); 3] {
+    pub fn column() -> [(OverlayButton, Icon); 3] {
         [
-            (OverlayButton::GoTop, "Top"),
-            (OverlayButton::Save, "Save"),
-            (OverlayButton::GoBottom, "Bottom"),
+            (OverlayButton::GoTop, Icon::ArrowUp),
+            (OverlayButton::Save, Icon::Download),
+            (OverlayButton::GoBottom, Icon::ArrowDown),
         ]
+    }
+
+    pub fn icon(self) -> Icon {
+        match self {
+            OverlayButton::GoTop => Icon::ArrowUp,
+            OverlayButton::Save => Icon::Download,
+            OverlayButton::GoBottom => Icon::ArrowDown,
+        }
     }
 }
 

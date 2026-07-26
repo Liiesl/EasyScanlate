@@ -1,5 +1,6 @@
 use iced::{Point, Rectangle, Size};
 
+use lucide_icons::Icon;
 use scanlateit_model::{EntryId, Quad};
 
 use crate::main_area::geometry::order_quad;
@@ -127,7 +128,7 @@ pub fn top_decor_geometry(rect: Rectangle, quad: [[f32; 2]; 4], width: f32, view
     anchor.y = anchor
         .y
         .clamp(viewport_top + hs / 2.0, viewport_bottom - hs / 2.0);
-    let revert_width = button_width("Revert");
+    let revert_width = button_width(Icon::Undo2);
     let revert = Rectangle::new(
         Point::new(
             (anchor.x + hs / 2.0 + toolbar_gap).clamp(0.0, (width - revert_width).max(0.0)),
@@ -160,37 +161,31 @@ pub fn rotate_quad(quad: Quad, center_img: [f32; 2], center_view: Point, press: 
     quad.rotate(center_img, delta_angle(center_view, press, local, snap))
 }
 
-pub fn toolbar_buttons() -> [(crate::event::ToolbarAction, &'static str); 2] {
+pub fn toolbar_buttons() -> [(crate::event::ToolbarAction, Icon); 2] {
     [
-        (crate::event::ToolbarAction::Rename, "Rename"),
-        (crate::event::ToolbarAction::Delete, "Delete"),
+        (crate::event::ToolbarAction::Rename, Icon::Pencil),
+        (crate::event::ToolbarAction::Delete, Icon::Trash2),
     ]
 }
 
-pub fn inpaint_toolbar_buttons() -> [(crate::event::InpaintToolbarAction, &'static str); 2] {
+pub fn inpaint_toolbar_buttons() -> [(crate::event::InpaintToolbarAction, Icon); 2] {
     [
-        (crate::event::InpaintToolbarAction::Delete, "Delete"),
-        (crate::event::InpaintToolbarAction::Repaint, "Repaint"),
+        (crate::event::InpaintToolbarAction::Delete, Icon::Trash2),
+        (crate::event::InpaintToolbarAction::Repaint, Icon::RefreshCw),
     ]
 }
 
-pub fn button_width(label: &str) -> f32 {
-    // 6.5px char advance at 12pt → scale with font size for Rename/Delete/Revert widths
-    label.chars().count() as f32 * scale::s(6.5) + scale::s(TOOLBAR_BTN_PAD) * 2.0
+pub fn button_width(_icon: Icon) -> f32 {
+    // Icon-only toolbar: fixed square button sized to toolbar height plus padding
+    scale::s(TOOLBAR_HEIGHT + 6.0)
 }
 
 pub fn toolbar_width() -> f32 {
-    toolbar_buttons()
-        .into_iter()
-        .map(|(_, label)| button_width(label))
-        .sum()
+    toolbar_buttons().len() as f32 * button_width(Icon::Pencil)
 }
 
 pub fn inpaint_toolbar_width() -> f32 {
-    inpaint_toolbar_buttons()
-        .into_iter()
-        .map(|(_, label)| button_width(label))
-        .sum()
+    inpaint_toolbar_buttons().len() as f32 * button_width(Icon::Trash2)
 }
 
 pub fn toolbar_rect(rect: Rectangle, width: f32, flip_at: f32) -> Rectangle {
@@ -223,8 +218,8 @@ pub fn inpaint_toolbar_rect(rect: Rectangle, width: f32, flip_at: f32) -> Rectan
 
 pub fn toolbar_button_rect(toolbar: Rectangle, action: crate::event::ToolbarAction) -> Rectangle {
     let mut x = toolbar.x;
-    for (candidate, label) in toolbar_buttons() {
-        let width = button_width(label);
+    for (candidate, icon) in toolbar_buttons() {
+        let width = button_width(icon);
         if candidate == action {
             return Rectangle::new(Point::new(x, toolbar.y), Size::new(width, toolbar.height));
         }
@@ -238,8 +233,8 @@ pub fn inpaint_toolbar_button_rect(
     action: crate::event::InpaintToolbarAction,
 ) -> Rectangle {
     let mut x = toolbar.x;
-    for (candidate, label) in inpaint_toolbar_buttons() {
-        let width = button_width(label);
+    for (candidate, icon) in inpaint_toolbar_buttons() {
+        let width = button_width(icon);
         if candidate == action {
             return Rectangle::new(Point::new(x, toolbar.y), Size::new(width, toolbar.height));
         }

@@ -1,6 +1,7 @@
 mod app;
 
 use iced::Size;
+use lucide_icons::LUCIDE_FONT_BYTES;
 use neverliie_iced_widgets::title_bar::{NativeFrame, NativeFrameConfig};
 
 fn main() -> iced::Result {
@@ -34,6 +35,7 @@ fn main() -> iced::Result {
         app::view,
     )
     .window(settings)
+    .font(LUCIDE_FONT_BYTES)
     .title("Scanlateit")
     .theme(|app: &app::App| app.theme())
     .subscription(app::subscription)

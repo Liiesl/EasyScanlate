@@ -4,6 +4,7 @@
 use iced::widget::button::Status;
 use iced::widget::{button, container, row, text};
 use iced::{Background, Border, Color, Element, Fill as FillLength, Font, Shadow};
+use lucide_icons::Icon;
 
 use crate::event::UiEvent;
 use crate::scale;
@@ -35,18 +36,55 @@ pub fn segment<'a>(
         .padding([scale::s(8.0), scale::s(0.0)])
         .on_press_maybe(on_press)
         .style(move |_theme, status: Status| {
-            let hovered = matches!(status, Status::Hovered | Status::Pressed);
+            let bg = match status {
+                Status::Disabled => Color::from_rgba8(34, 36, 44, 0.40),
+                Status::Hovered => Color::from_rgba8(46, 48, 62, 0.90),
+                Status::Pressed => Color::from_rgba8(55, 57, 72, 0.95),
+                Status::Active => crate::panel::PANEL_BG,
+            };
+            let txt = match status {
+                Status::Disabled => MUTED_FG,
+                _ if active => ACCENT,
+                _ => TEXT_MAIN,
+            };
             button::Style {
-                background: (active || hovered).then_some(Background::Color(INPUT_HOVER)),
+                background: Some(Background::Color(bg)),
                 border: Border::default(),
                 shadow: Shadow::default(),
-                text_color: if active {
-                    ACCENT
-                } else if hovered {
-                    TEXT_MAIN
-                } else {
-                    MUTED_FG
-                },
+                text_color: txt,
+                ..button::Style::default()
+            }
+        })
+        .into()
+}
+
+/// One cell of a segmented control with a Lucide icon.
+pub fn segment_icon<'a>(
+    active: bool,
+    icon: Icon,
+    on_press: Option<UiEvent>,
+) -> Element<'a, UiEvent> {
+    button(crate::icon::lucide(icon).size(scale::s(14.0)).width(FillLength).center())
+        .width(FillLength)
+        .padding([scale::s(8.0), scale::s(0.0)])
+        .on_press_maybe(on_press)
+        .style(move |_theme, status: Status| {
+            let bg = match status {
+                Status::Disabled => Color::from_rgba8(34, 36, 44, 0.40),
+                Status::Hovered => Color::from_rgba8(46, 48, 62, 0.90),
+                Status::Pressed => Color::from_rgba8(55, 57, 72, 0.95),
+                Status::Active => crate::panel::PANEL_BG,
+            };
+            let txt = match status {
+                Status::Disabled => MUTED_FG,
+                _ if active => ACCENT,
+                _ => TEXT_MAIN,
+            };
+            button::Style {
+                background: Some(Background::Color(bg)),
+                border: Border::default(),
+                shadow: Shadow::default(),
+                text_color: txt,
                 ..button::Style::default()
             }
         })

@@ -309,20 +309,30 @@ pub fn inpaint_reveal_offset(
 }
 
 pub fn overlay_button_rects(bounds: Rectangle) -> [Rectangle; 3] {
-    use super::constants::{OVERLAY_BTN_GAP, OVERLAY_BTN_HEIGHT, OVERLAY_BTN_MARGIN, OVERLAY_BTN_WIDTH};
-    let w = scale::s(OVERLAY_BTN_WIDTH);
-    let h = scale::s(OVERLAY_BTN_HEIGHT);
+    use super::constants::{
+        OVERLAY_BTN_GAP, OVERLAY_BTN_MARGIN, OVERLAY_CIRCLE_DIAMETER, OVERLAY_SAVE_HEIGHT,
+        OVERLAY_SAVE_WIDTH,
+    };
+    let circle = scale::s(OVERLAY_CIRCLE_DIAMETER);
+    let save_w = scale::s(OVERLAY_SAVE_WIDTH);
+    let save_h = scale::s(OVERLAY_SAVE_HEIGHT);
     let gap = scale::s(OVERLAY_BTN_GAP);
     let margin = scale::s(OVERLAY_BTN_MARGIN);
-    let total = h * 3.0 + gap * 2.0;
+    let total = circle * 2.0 + save_h + gap * 2.0;
     let top = (bounds.height - margin - total).max(0.0);
     let mut rects = [Rectangle::new(Point::ORIGIN, Size::ZERO); 3];
-    for (index, (_button, _)) in OverlayButton::column().iter().enumerate() {
-        rects[index] = Rectangle::new(
-            Point::new(margin, top + index as f32 * (h + gap)),
-            Size::new(w, h),
-        );
-    }
+    // GoTop circle
+    rects[0] = Rectangle::new(Point::new(margin, top), Size::new(circle, circle));
+    // Save rectangle (centered relative to circle if wider)
+    rects[1] = Rectangle::new(
+        Point::new(margin, top + circle + gap),
+        Size::new(save_w, save_h),
+    );
+    // GoBottom circle
+    rects[2] = Rectangle::new(
+        Point::new(margin, top + circle + gap + save_h + gap),
+        Size::new(circle, circle),
+    );
     rects
 }
 
@@ -330,5 +340,17 @@ pub fn hit_overlay_button(bounds: Rectangle, local: Point) -> Option<OverlayButt
     overlay_button_rects(bounds)
         .into_iter()
         .zip(OverlayButton::column())
-        .find_map(|(rect, (button, _))| rect.contains(local).then_some(button))
+        .find_map(|(rect, (button, _))| {
+            let inside = match button {
+                OverlayButton::GoTop | OverlayButton::GoBottom => {
+                    let center = Point::new(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+                    let r = rect.width.min(rect.height) / 2.0;
+                    let dx = local.x - center.x;
+                    let dy = local.y - center.y;
+                    dx * dx + dy * dy <= r * r
+                }
+                OverlayButton::Save => rect.contains(local),
+            };
+            inside.then_some(button)
+        })
 }

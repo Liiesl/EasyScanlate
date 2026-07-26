@@ -25,17 +25,21 @@ pub const MIN_INPAINT_EDGE: f32 = 4.0;
 pub const TOOLBAR_HEIGHT: f32 = 22.0;
 pub const TOOLBAR_GAP: f32 = 5.0;
 pub const TOOLBAR_BTN_PAD: f32 = 10.0;
-pub const TOOLBAR_BG: Color = Color::from_rgba8(28, 30, 38, 0.96);
-pub const TOOLBAR_HOVER_BG: Color = Color::from_rgba8(58, 62, 76, 1.0);
+pub const TOOLBAR_BG: Color = Color::from_rgba8(34, 36, 44, 0.78);
+pub const TOOLBAR_HOVER_BG: Color = Color::from_rgba8(46, 48, 62, 0.90);
 pub const TOOLBAR_FG: Color = Color::from_rgba8(215, 220, 235, 1.0);
 pub const HANDLE_FILL: Color = Color::WHITE;
 pub const HANDLE_BORDER: Color = Color::from_rgba8(92, 190, 255, 1.0);
 
 /// Geometry of the quick-action overlay buttons pinned to the viewer's bottom-left corner.
+/// Top/Bottom are circles, Save is a rectangle with icon + label.
 pub const OVERLAY_BTN_WIDTH: f32 = 56.0;
 pub const OVERLAY_BTN_HEIGHT: f32 = 24.0;
-pub const OVERLAY_BTN_GAP: f32 = 6.0;
-pub const OVERLAY_BTN_MARGIN: f32 = 10.0;
+pub const OVERLAY_CIRCLE_DIAMETER: f32 = 36.0;
+pub const OVERLAY_SAVE_WIDTH: f32 = 84.0;
+pub const OVERLAY_SAVE_HEIGHT: f32 = 32.0;
+pub const OVERLAY_BTN_GAP: f32 = 8.0;
+pub const OVERLAY_BTN_MARGIN: f32 = 12.0;
 
 /// Length of the stem connecting the rotation knob to the box.
 pub const ROTATE_STEM: f32 = 16.0;

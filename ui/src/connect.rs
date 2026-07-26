@@ -5,13 +5,14 @@
 //! the connection on submit.
 
 use iced::widget::{
-    button, center, column, container, mouse_area, opaque, row, space, stack, text, text_input,
+    button, center, column, container, mouse_area, opaque, row, space, stack, text, text_input, tooltip,
 };
 use iced::{Color, Element, Fill as FillLength, Length};
+use lucide_icons::Icon;
 
 use crate::event::UiEvent;
-use crate::scale;
 use crate::panel::PANEL_BG;
+use crate::scale;
 use crate::state::UiState;
 
 const MODAL_WIDTH: f32 = 360.0;
@@ -115,19 +116,34 @@ pub fn view<'a, S: UiState + ?Sized>(
             row![
                 text(title).size(scale::s(16.0)),
                 space::horizontal(),
-                button(text("✕"))
-                    .padding(scale::s(2.0))
-                    .on_press(UiEvent::ConnectModalCancel),
+                tooltip(
+                    button(crate::icon::lucide(Icon::X).size(scale::s(14.0)).center())
+                        .padding(scale::s(4.0))
+                        .style(crate::panel::button_style)
+            .on_press(UiEvent::ConnectModalCancel),
+                    container(text("Close").size(scale::s(11.0))).padding(scale::s(6.0)).style(container::rounded_box),
+                    tooltip::Position::Top
+                ).gap(scale::s(4.0)),
             ],
             column(fields).spacing(scale::s(4.0)).height(FillLength),
             row![
                 space::horizontal(),
-                button(text("Cancel"))
-                    .padding([scale::s(4.0), scale::s(10.0)])
-                    .on_press(UiEvent::ConnectModalCancel),
-                button(text("Connect"))
-                    .padding([scale::s(4.0), scale::s(10.0)])
-                    .on_press(UiEvent::ConnectModalSubmit),
+                tooltip(
+                    button(crate::icon::lucide(Icon::X).size(scale::s(14.0)).center())
+                        .padding(scale::s(6.0))
+                        .style(crate::panel::button_style)
+            .on_press(UiEvent::ConnectModalCancel),
+                    container(text("Cancel").size(scale::s(11.0))).padding(scale::s(6.0)).style(container::rounded_box),
+                    tooltip::Position::Top
+                ).gap(scale::s(4.0)),
+                tooltip(
+                    button(crate::icon::lucide(Icon::Plug).size(scale::s(14.0)).center())
+                        .padding(scale::s(6.0))
+                        .style(crate::panel::button_style)
+            .on_press(UiEvent::ConnectModalSubmit),
+                    container(text("Connect").size(scale::s(11.0))).padding(scale::s(6.0)).style(container::rounded_box),
+                    tooltip::Position::Top
+                ).gap(scale::s(4.0)),
             ]
             .spacing(scale::s(6.0)),
         ]

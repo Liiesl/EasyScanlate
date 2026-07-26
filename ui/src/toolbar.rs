@@ -2,71 +2,103 @@
 //! column of tool buttons (inpainting toggle, settings). Unlike the
 //! side panel, it lives outside the pane grid and is never resizable.
 
-use iced::widget::text::Wrapping;
-use iced::widget::{button, column, container, text};
+use iced::widget::{button, column, container, tooltip, text};
 use iced::{Element, Length};
+use lucide_icons::Icon;
 
 use crate::event::UiEvent;
 use crate::scale;
 use crate::state::UiState;
 
 /// Fixed width of the toolbar, in pixels.
-pub const TOOLBAR_WIDTH: f32 = 76.0;
+pub const TOOLBAR_WIDTH: f32 = 52.0;
+
+fn tip<'a>(label: &'a str) -> container::Container<'a, UiEvent> {
+    container(text(label).size(scale::s(11.0)))
+        .padding(scale::s(6.0))
+        .style(container::rounded_box)
+}
 
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let can_toggle = !state.images().is_empty();
+    let btn_size = scale::s(36.0);
 
-    let toggle_text = button(
-        text(if state.show_overlay_text() {
-            "Hide Text"
+    let toggle_text_btn = button(
+        crate::icon::lucide(if state.show_overlay_text() {
+            Icon::EyeOff
         } else {
-            "Show Text"
+            Icon::Eye
         })
-        .size(scale::s(13.0))
-        .wrapping(Wrapping::Word),
+        .size(scale::s(16.0))
+        .center(),
     )
-    .width(Length::Fill)
-    .padding(scale::s(4.0))
+    .width(Length::Fixed(btn_size))
+    .height(Length::Fixed(btn_size))
+    .padding(scale::s(0.0))
+    .style(crate::panel::button_style)
     .on_press_maybe(can_toggle.then_some(UiEvent::ToggleOverlayText));
+    let toggle_text: Element<'_, UiEvent> =
+        tooltip(toggle_text_btn, tip("Toggle text overlay"), tooltip::Position::Right)
+            .gap(scale::s(4.0))
+            .into();
 
-    let toggle_inpaint = button(
-        text(if state.show_inpaint() {
-            "Hide Inpaint"
+    let toggle_inpaint_btn = button(
+        crate::icon::lucide(if state.show_inpaint() {
+            Icon::EyeOff
         } else {
-            "Show Inpaint"
+            Icon::Eye
         })
-        .size(scale::s(13.0))
-        .wrapping(Wrapping::Word),
+        .size(scale::s(16.0))
+        .center(),
     )
-    .width(Length::Fill)
-    .padding(scale::s(4.0))
+    .width(Length::Fixed(btn_size))
+    .height(Length::Fixed(btn_size))
+    .padding(scale::s(0.0))
+    .style(crate::panel::button_style)
     .on_press_maybe(can_toggle.then_some(UiEvent::ToggleInpaintLayer));
+    let toggle_inpaint: Element<'_, UiEvent> =
+        tooltip(toggle_inpaint_btn, tip("Toggle inpaint layer"), tooltip::Position::Right)
+            .gap(scale::s(4.0))
+            .into();
 
     let inpaint_active = state.inpaint_mode();
-    let inpaint = button(
-        text(if inpaint_active {
-            "Cancel Inpaint"
+    let inpaint_btn = button(
+        crate::icon::lucide(if inpaint_active {
+            Icon::X
         } else {
-            "Inpaint"
+            Icon::Brush
         })
-        .size(scale::s(13.0))
-        .wrapping(Wrapping::Word),
+        .size(scale::s(16.0))
+        .center(),
     )
-    .width(Length::Fill)
-    .padding(scale::s(4.0))
+    .width(Length::Fixed(btn_size))
+    .height(Length::Fixed(btn_size))
+    .padding(scale::s(0.0))
+    .style(crate::panel::button_style)
     .on_press_maybe(
         (!state.images().is_empty() && !state.running() && !state.translating())
             .then_some(UiEvent::Inpaint),
     );
+    let inpaint: Element<'_, UiEvent> =
+        tooltip(inpaint_btn, tip(if inpaint_active { "Exit inpaint" } else { "Inpaint" }), tooltip::Position::Right)
+            .gap(scale::s(4.0))
+            .into();
 
-    let settings = button(text("Settings").size(scale::s(13.0)).wrapping(Wrapping::Word))
-        .width(Length::Fill)
-        .padding(scale::s(4.0))
+    let settings_btn = button(crate::icon::lucide(Icon::Settings).size(scale::s(16.0)).center())
+        .width(Length::Fixed(btn_size))
+        .height(Length::Fixed(btn_size))
+        .padding(scale::s(0.0))
+        .style(crate::panel::button_style)
         .on_press(UiEvent::SettingsOpen);
+    let settings: Element<'_, UiEvent> =
+        tooltip(settings_btn, tip("Settings"), tooltip::Position::Right)
+            .gap(scale::s(4.0))
+            .into();
 
     container(column![toggle_text, toggle_inpaint, inpaint, settings]
         .spacing(scale::s(6.0))
-        .padding(scale::s(8.0)))
+        .padding(scale::s(4.0))
+        .align_x(iced::Alignment::Center))
         .width(Length::Fixed(scale::s(TOOLBAR_WIDTH)))
         .height(Length::Fill)
         .style(|_theme| container::Style {

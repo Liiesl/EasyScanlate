@@ -6,8 +6,9 @@
 //! hidden. The row itself shows Delete / Repaint when selected.
 
 use iced::widget::image::{self, Handle};
-use iced::widget::{button, column, container, mouse_area, row, scrollable, space, text};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, space, text, tooltip};
 use iced::{Border, Color, Element, Fill as FillLength, Length, Padding};
+use lucide_icons::Icon;
 
 use crate::event::UiEvent;
 use crate::panel::{MUTED_FG, PANEL_BG};
@@ -50,25 +51,28 @@ fn header_row<'a, S: UiState + ?Sized>(state: &'a S, total: usize) -> Element<'a
             ..container::Style::default()
         }),
         space::horizontal(),
-        button(
-            text(if state.show_inpaint() { "👁" } else { "🚫" }).size(scale::s(12.0))
-        )
-        .padding([scale::s(2.0), scale::s(6.0)])
-        .on_press(UiEvent::ToggleInpaintLayer)
-        .style(|_theme, status| {
-            use iced::widget::button::Status;
-            let hovered = matches!(status, Status::Hovered | Status::Pressed);
-            button::Style {
-                background: Some(Color::from_rgb8(42, 44, 54).into()),
-                border: Border::default().rounded(scale::s(4.0)),
-                text_color: if hovered {
-                    Color::WHITE
+        {
+            let btn = button(
+                crate::icon::lucide(if state.show_inpaint() {
+                    Icon::Eye
                 } else {
-                    MUTED_FG
-                },
-                ..button::Style::default()
-            }
-        }),
+                    Icon::EyeOff
+                })
+                .size(scale::s(14.0))
+                .center(),
+            )
+            .padding(scale::s(4.0))
+            .style(crate::panel::button_style)
+            .on_press(UiEvent::ToggleInpaintLayer);
+            tooltip(
+                btn,
+                container(text(if state.show_inpaint() { "Hide inpaint layer" } else { "Show inpaint layer" }).size(scale::s(11.0)))
+                    .padding(scale::s(6.0))
+                    .style(container::rounded_box),
+                tooltip::Position::Top,
+            )
+            .gap(scale::s(4.0))
+        },
     ]
     .spacing(scale::s(6.0))
     .align_y(iced::Alignment::Center)
@@ -135,11 +139,16 @@ fn layer_row<'a>(
             .into()
     };
 
-    let eye = text(if global_visible { "👁" } else { "·" })
-        .size(scale::s(11.0))
-        .color(if global_visible { MUTED_FG } else { Color::from_rgba8(120, 120, 120, 0.9) })
-        .width(Length::Fixed(scale::s(16.0)))
-        .center();
+    let eye: Element<'_, UiEvent> = crate::icon::lucide(if global_visible {
+        Icon::Eye
+    } else {
+        Icon::EyeOff
+    })
+    .size(scale::s(12.0))
+    .color(if global_visible { MUTED_FG } else { Color::from_rgba8(120, 120, 120, 0.9) })
+    .width(Length::Fixed(scale::s(16.0)))
+    .center()
+    .into();
 
     let row_bg = if global_visible { ROW_BG } else { ROW_BG_DIMMED };
 
@@ -147,17 +156,36 @@ fn layer_row<'a>(
     // Delete / Retranslate but for inpaint: Delete / Repaint (exact rect).
     let actions: Element<'a, UiEvent> = if is_selected {
         row![
-            button(text("Delete").size(scale::s(10.0)))
-                .padding([scale::s(2.0), scale::s(6.0)])
-                .on_press(UiEvent::InpaintDelete((image_index, index_in_image))),
-            button(text("Repaint").size(scale::s(10.0)))
-                .padding([scale::s(2.0), scale::s(6.0)])
-                .on_press(UiEvent::InpaintRepaint((image_index, index_in_image))),
+            tooltip(
+                button(crate::icon::lucide(Icon::Trash2).size(scale::s(12.0)).center())
+                    .padding(scale::s(4.0))
+                    .style(crate::panel::button_style)
+                    .on_press(UiEvent::InpaintDelete((image_index, index_in_image))),
+                container(text("Delete patch").size(scale::s(11.0)))
+                    .padding(scale::s(6.0))
+                    .style(container::rounded_box),
+                tooltip::Position::Top
+            )
+            .gap(scale::s(4.0)),
+            tooltip(
+                button(crate::icon::lucide(Icon::RefreshCw).size(scale::s(12.0)).center())
+                    .padding(scale::s(4.0))
+                    .style(crate::panel::button_style)
+                    .on_press(UiEvent::InpaintRepaint((image_index, index_in_image))),
+                container(text("Repaint").size(scale::s(11.0)))
+                    .padding(scale::s(6.0))
+                    .style(container::rounded_box),
+                tooltip::Position::Top
+            )
+            .gap(scale::s(4.0)),
         ]
         .spacing(scale::s(4.0))
         .into()
     } else {
-        text("⋮").size(scale::s(12.0)).color(MUTED_FG).into()
+        crate::icon::lucide(Icon::EllipsisVertical)
+            .size(scale::s(14.0))
+            .color(MUTED_FG)
+            .into()
     };
 
     let inner = row![
