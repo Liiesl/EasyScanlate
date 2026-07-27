@@ -15,6 +15,22 @@ pub const MAIN_AREA_DEFAULT_RATIO: f32 = 0.26;
 /// Default share of the styling panel vs the results panel inside the side pane.
 pub const STYLING_DEFAULT_RATIO: f32 = 0.36;
 
+/// Minimum width of the styling column (left) in the side panel — fixed pixels, not font-scaled.
+pub const STYLING_MIN_WIDTH: f32 = 260.0;
+
+/// Minimum width of the results column (right) in the side panel — fixed pixels, not font-scaled.
+/// Larger than styling because Translate mode shows two text boxes side-by-side.
+#[allow(dead_code)]
+pub const RESULTS_MIN_WIDTH: f32 = 320.0;
+
+/// Minimum width of the whole side panel — fixed pixels, distinct from main area.
+/// Must fit both styling + results + gap.
+#[allow(dead_code)]
+pub const PANEL_MIN_WIDTH: f32 = STYLING_MIN_WIDTH + RESULTS_MIN_WIDTH + GAP; // 592
+
+/// Minimum width of the main area — fixed pixels, different from panel.
+pub const MAIN_AREA_MIN_WIDTH: f32 = 160.0;
+
 /// Default share of the styling inspector vs the inpaint/layers list inside the styling column.
 /// ~70% top (taller), 30% bottom (shorter, not dramatic) – vertically stacked, resizable.
 pub const STYLING_TOP_RATIO: f32 = 0.70;

@@ -4,7 +4,7 @@ use scanlateit_ui::event::UiEvent;
 use scanlateit_ui::{main_area, panel, scale, toolbar};
 use scanlateit_ui::settings as settings_modal;
 
-use super::layout::{CARD_RADIUS, GAP, OUTER_PADDING};
+use super::layout::{CARD_RADIUS, GAP, MAIN_AREA_MIN_WIDTH, OUTER_PADDING, STYLING_MIN_WIDTH};
 use super::chrome::title_icon_handle;
 use super::{App, Message};
 
@@ -98,7 +98,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
                         })
                     })
                     .spacing(scale::s(GAP))
-                    .min_size(scale::s(120.0))
+                    .min_size(STYLING_MIN_WIDTH) // fixed, distinct from RESULTS_MIN_WIDTH (enforced via resize clamp)
                     .on_resize(scale::s(GAP), UiEvent::SidePanelResized)
                     .width(Length::Fill)
                     .height(Length::Fill)
@@ -115,7 +115,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         })
     })
     .spacing(scale::s(GAP))
-    .min_size(scale::s(160.0))
+    .min_size(MAIN_AREA_MIN_WIDTH) // fixed, distinct from PANEL_MIN_WIDTH (592) enforced via resize clamp
     .on_resize(scale::s(GAP), UiEvent::PanelResized)
     .width(Length::Fill)
     .height(Length::Fill)

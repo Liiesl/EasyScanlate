@@ -806,11 +806,19 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::StylePresetMenuDismiss) => Task::none(),
         Message::Ui(UiEvent::StyleAutoDetect) => styling::handle_auto_detect(app),
         Message::Ui(UiEvent::PanelResized(resized)) => {
-            app.panes.resize(resized.split, resized.ratio);
+            // Distinct mins: main 160 vs panel 592 (STYLING+RESULTS+GAP), pane_grid has single min_size (=160)
+            // so clamp ratio to prevent panel collapsing to ~100px as in screenshot.
+            // At default 1400px window panel 592 needs ratio <= 0.58, main 160 needs ratio >= 0.12
+            let ratio = resized.ratio.clamp(0.15, 0.58);
+            app.panes.resize(resized.split, ratio);
             Task::none()
         }
         Message::Ui(UiEvent::SidePanelResized(resized)) => {
-            app.side_panes.resize(resized.split, resized.ratio);
+            // Distinct mins: styling 260 vs results 320, pane_grid single min (=260)
+            // clamp to keep both above their mins when panel at its min 592 (ratio 0.439-0.459)
+            // but allow wider range at larger panel widths; narrow fixed clamp prevents extreme collapse
+            let ratio = resized.ratio.clamp(0.38, 0.55);
+            app.side_panes.resize(resized.split, ratio);
             Task::none()
         }
         Message::Ui(UiEvent::StylingPaneResized(resized)) => {
