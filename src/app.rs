@@ -339,7 +339,12 @@ impl App {
             style_working: style.clone(),
             system_fonts: HashMap::new(),
             installed_fonts: Vec::new(),
-            loaded_fonts: HashSet::new(),
+            // Bundled fonts are embedded via `include_bytes!` in `main.rs`, so
+            // mark them as already loaded to avoid a redundant `font::load` in `handle_font`.
+            loaded_fonts: HashSet::from([
+                scanlateit_model::ANIME_ACE_FAMILY.to_string(),
+                scanlateit_model::AUGIE_FAMILY.to_string(),
+            ]),
             style_picker: None,
             style_stroke_width: style.stroke_width.to_string(),
             style_bg_radius: style.bg_radius.to_string(),
@@ -482,8 +487,24 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::SystemFonts(fonts) => {
             app.system_fonts = fonts.into_iter().collect();
             let mut names: Vec<String> = app.system_fonts.keys().cloned().collect();
+            // Always offer bundled families in the picker, even when not
+            // installed system-wide (they are embedded in the binary). When
+            // installed, `fontdb` already provided the name — dedup case-insensitively
+            // to handle `augie` vs `Augie` variations.
+            for bundled in scanlateit_model::BUNDLED_FONTS {
+                if !names.iter().any(|n| n.eq_ignore_ascii_case(bundled)) {
+                    names.push(bundled.to_string());
+                }
+            }
             names.sort();
             names.dedup();
+            // `dedup` is case-sensitive, so a second pass for `augie` casing
+            // duplicates (keeps first occurrence, which is the system spelling).
+            {
+                let mut seen_lower = std::collections::HashSet::new();
+                names.retain(|n| seen_lower.insert(n.to_ascii_lowercase()));
+            }
+            names.sort();
             app.installed_fonts = names;
             Task::none()
         }

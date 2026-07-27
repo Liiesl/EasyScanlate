@@ -22,4 +22,7 @@ pub use extras::{Extras, InpaintPatch};
 pub use ocr_result::OcrResult;
 pub use profile::{ProfileId, Profiles};
 pub use project::Project;
-pub use style::{EntryStyle, StylePresets, TextAlign, TextGradientDir, INITIAL_PRESET_SLOTS};
+pub use style::{
+    EntryStyle, StylePresets, TextAlign, TextGradientDir, ANIME_ACE_FAMILY, AUGIE_FAMILY,
+    BUNDLED_FONTS, DEFAULT_FONT_FAMILY, INITIAL_PRESET_SLOTS,
+};

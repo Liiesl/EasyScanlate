@@ -36,6 +36,12 @@ fn main() -> iced::Result {
     )
     .window(settings)
     .font(LUCIDE_FONT_BYTES)
+    // Bundled text fonts: Anime Ace (regular + bold + italic) as default, and Augie.
+    // Embedded at compile time — no system install or `assets/fonts/` at runtime needed.
+    .font(include_bytes!("../assets/fonts/animeace.ttf"))
+    .font(include_bytes!("../assets/fonts/anime-ace.bold.ttf"))
+    .font(include_bytes!("../assets/fonts/anime-ace.italic.ttf"))
+    .font(include_bytes!("../assets/fonts/augie.ttf"))
     .title("Scanlateit")
     .theme(|app: &app::App| app.theme())
     .subscription(app::subscription)

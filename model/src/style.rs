@@ -82,6 +82,16 @@ impl TextGradientDir {
     }
 }
 
+/// Bundled font families shipped with the app (embedded at compile time via
+/// `include_bytes!` in the binary — no system install required, see
+/// `src/main.rs` and `src/app.rs` merging).
+pub const ANIME_ACE_FAMILY: &str = "Anime Ace";
+pub const AUGIE_FAMILY: &str = "augie";
+/// The default font family for new entries/presets. Always bundled.
+pub const DEFAULT_FONT_FAMILY: &str = ANIME_ACE_FAMILY;
+/// All families that are bundled in the binary (no install needed).
+pub const BUNDLED_FONTS: &[&str] = &[ANIME_ACE_FAMILY, AUGIE_FAMILY];
+
 /// Per-entry rendering style for the text overlay and future image export.
 ///
 /// Stored as a delta inside a [`Profile`]; `Default` is the fallback when the
@@ -130,7 +140,7 @@ impl Default for EntryStyle {
             stroke_width: 0.0,
             bg_color: [255, 255, 255, 255],
             bg_radius: 0.0,
-            font_family: None,
+            font_family: Some(DEFAULT_FONT_FAMILY.to_string()),
             text_align: TextAlign::Circular,
             text_gradient: false,
             gradient_a: [0, 0, 0, 255],
@@ -244,9 +254,18 @@ mod tests {
         assert_eq!(style.stroke_color, [0, 0, 0, 255]);
         assert_eq!(style.stroke_width, 0.0);
         assert_eq!(style.bg_radius, 0.0);
-        assert_eq!(style.font_family, None);
+        assert_eq!(style.font_family.as_deref(), Some(DEFAULT_FONT_FAMILY));
         assert_eq!(style.text_align, TextAlign::Circular);
         assert!(!style.text_gradient);
+    }
+
+    #[test]
+    fn bundled_fonts_default_to_anime_ace() {
+        assert_eq!(DEFAULT_FONT_FAMILY, ANIME_ACE_FAMILY);
+        assert!(BUNDLED_FONTS.contains(&ANIME_ACE_FAMILY));
+        assert!(BUNDLED_FONTS.contains(&AUGIE_FAMILY));
+        let style = EntryStyle::default();
+        assert_eq!(style.font_family.as_deref(), Some(ANIME_ACE_FAMILY));
     }
 
     #[test]

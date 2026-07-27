@@ -248,6 +248,17 @@ pub fn handle_font(app: &mut App, name: String) -> Task<Message> {
     let Some((index, id)) = app.selected else { return Task::none() };
     app.style_working.font_family = Some(name.clone());
     app.images[index].project.set_entry_style(id, app.style_working.clone());
+    // Bundled fonts are already embedded in the binary via `include_bytes!`
+    // in `main.rs` — no `font::load` needed. System-installed duplicates are
+    // already in the fontdb scan. Only load non-bundled families on demand.
+    let is_bundled = scanlateit_model::BUNDLED_FONTS
+        .iter()
+        .any(|f| f.eq_ignore_ascii_case(&name));
+    if is_bundled {
+        // Ensure it's marked loaded even if picker injected it without a system path.
+        app.loaded_fonts.insert(name);
+        return Task::none();
+    }
     if !app.loaded_fonts.contains(&name) {
         app.loaded_fonts.insert(name.clone());
         let Some(path) = app.system_fonts.get(&name).cloned() else {
