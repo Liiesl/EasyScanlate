@@ -73,6 +73,53 @@ pub fn publish_offset<'a, Message, R>(
     }
 }
 
+/// Normalized center anchor: fraction of `content_height` that sits at the
+/// viewport's vertical center. `0.0` = top, `1.0` = bottom, stable across a
+/// `content_width` change (resize / `View↔Compare` halves the width).
+pub fn anchor_from_state(state: &TileViewState) -> f32 {
+    if state.content_height <= f32::EPSILON || state.content_height <= state.viewport_height {
+        return 0.0;
+    }
+    ((state.offset + state.viewport_height * 0.5) / state.content_height).clamp(0.0, 1.0)
+}
+
+/// Inverse of [`anchor_from_state`]: content-pixel `offset` that puts `anchor`
+/// at the viewport center for the given geometry.
+pub fn offset_from_anchor(anchor: f32, content_height: f32, viewport_height: f32) -> f32 {
+    if content_height <= viewport_height || content_height <= f32::EPSILON {
+        return 0.0;
+    }
+    let clamped = anchor.clamp(0.0, 1.0);
+    (clamped * content_height - viewport_height * 0.5)
+        .clamp(0.0, (content_height - viewport_height).max(0.0))
+}
+
+/// Publishes the normalized center anchor through `on_scroll` whenever it
+/// changes (epsilon `1e-4` to hide float quantization). Also mirrors the
+/// absolute offset into `last_published_offset` for legacy reads. The app
+/// stores this anchor as `viewer_scroll` so a geometry change can restore the
+/// same *centered* row instead of the same absolute offset.
+pub fn publish_anchor<'a, Message, R>(
+    shell: &mut Shell<'_, Message>,
+    state: &mut TileViewState,
+    on_scroll: &Option<R>,
+) where
+    R: Fn(f32) -> Message,
+{
+    let anchor = anchor_from_state(state);
+    let should_publish = match state.last_published_anchor {
+        None => true,
+        Some(prev) => (prev - anchor).abs() > 1e-4,
+    };
+    if should_publish {
+        state.last_published_anchor = Some(anchor);
+        state.last_published_offset = Some(state.offset);
+        if let Some(callback) = on_scroll.as_ref() {
+            shell.publish(callback(anchor));
+        }
+    }
+}
+
 pub fn publish_edit_rect<'a, Message, K>(
     shell: &mut Shell<'_, Message>,
     tiles: &[TileSpec<'a>],

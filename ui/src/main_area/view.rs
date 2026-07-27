@@ -36,6 +36,9 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
 }
 
 /// Builds one `TileView` pane. `original` renders a pure raster pane in Compare mode.
+/// `viewer_scroll` is the normalized center anchor `0..1`, so both Compare
+/// panes and a later `View` restore the same centered row after a width /
+/// viewport change instead of the same absolute pixel offset.
 fn build_viewer<'a, S: UiState + ?Sized>(state: &'a S, tiles: Vec<TileSpec<'a>>, original: bool) -> TileView<'a, UiEvent> {
     let mut viewer: TileView<'a, UiEvent> = TileView::new(tiles, state.font().unwrap_or(Font::DEFAULT));
     viewer = viewer

@@ -144,6 +144,8 @@ pub struct App {
     pub(crate) show_overlay_text: bool,
     pub(crate) show_inpaint: bool,
     pub(crate) view_mode: MainAreaMode,
+    /// Normalized center anchor `0..1` (`(offset+viewport/2)/content_height`);
+    /// mirrored across Compare panes and stable across resize / `View↔Compare`.
     pub(crate) viewer_scroll: f32,
     #[cfg(feature = "styling")]
     styling: JobTracker,
@@ -774,8 +776,8 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             };
             Task::none()
         }
-        Message::Ui(UiEvent::ViewerScroll(offset)) => {
-            app.viewer_scroll = offset;
+        Message::Ui(UiEvent::ViewerScroll(anchor)) => {
+            app.viewer_scroll = anchor.clamp(0.0, 1.0);
             Task::none()
         }
         Message::Ui(UiEvent::EntryToolbar((index, id, action))) => edit::handle_entry_toolbar(app, index, id, action),

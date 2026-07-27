@@ -51,8 +51,8 @@ use self::motion::{
     rotate_quad, toolbar_buttons,
 };
 use self::scroll::{
-    publish_edit_rect, publish_offset, publish_visible, thumb_rect, track_rect, scroll_by,
-    visible_range,
+    anchor_from_state, offset_from_anchor, publish_anchor, publish_edit_rect, publish_visible,
+    scroll_by, thumb_rect, track_rect,
 };
 use self::state::TileViewState;
 
@@ -100,6 +100,9 @@ pub struct TileView<
     show_scrollbar: bool,
     reveal: Option<(usize, EntryId)>,
     on_scroll: Option<R>,
+    /// Normalized center anchor `0..1` (`(offset+viewport/2)/content_height`);
+    /// the app's `viewer_scroll`. Stable across width/viewport changes
+    /// (resize, `View↔Compare`).
     scroll_to: Option<f32>,
     selected_inpaint: Option<(usize, usize)>,
     on_inpaint_toolbar: Option<S>,
@@ -186,8 +189,12 @@ where
         self
     }
 
-    pub fn scroll_to(mut self, offset: f32) -> Self {
-        self.scroll_to = Some(offset);
+    /// Requests that the viewport be scrolled so that this normalized center
+    /// anchor (`0..1`) sits at the viewport's vertical center on next
+    /// `layout`. Idempotent; the app feeds `viewer_scroll` (center anchor)
+    /// here to keep `View↔Compare` and resizes visually stable.
+    pub fn scroll_to(mut self, anchor: f32) -> Self {
+        self.scroll_to = Some(anchor);
         self
     }
 
@@ -280,16 +287,34 @@ where
 
     fn layout(&mut self, tree: &mut Tree, _renderer: &Renderer, limits: &iced_layout::Limits) -> iced_layout::Node {
         let width = limits.max().width;
+        let new_viewport = limits.max().height;
         let state = tree.state.downcast_mut::<TileViewState>();
-        state.width = content_width(width);
+        // Visual anchor before geometry is overwritten: center fraction, so a
+        // resize or View↔Compare width change keeps the same row centered
+        // instead of the same absolute offset.
+        let old_anchor = if state.content_height > f32::EPSILON && state.viewport_height > 0.0 {
+            anchor_from_state(state)
+        } else {
+            state.last_published_anchor.unwrap_or(0.0)
+        };
+        let new_width = content_width(width);
+        let (_, new_content_height) = tile_layout(&self.tiles, new_width);
+        let size_changed = (new_width - state.width).abs() > f32::EPSILON
+            || (new_viewport - state.viewport_height).abs() > f32::EPSILON
+            || (new_content_height - state.content_height).abs() > f32::EPSILON;
+        state.width = new_width;
         state.inpaint_mode = self.inpaint_mode;
-        let (_, content_height) = tile_layout(&self.tiles, state.width);
-        state.content_height = content_height;
-        if let Some(target) = self.scroll_to {
-            let max_offset = (content_height - state.viewport_height).max(0.0);
-            let clamped = target.clamp(0.0, max_offset);
-            if (clamped - state.offset).abs() > f32::EPSILON {
-                state.offset = clamped;
+        state.content_height = new_content_height;
+        state.viewport_height = new_viewport;
+        if let Some(anchor) = self.scroll_to {
+            let new_offset = offset_from_anchor(anchor, new_content_height, new_viewport);
+            if (new_offset - state.offset).abs() > f32::EPSILON {
+                state.offset = new_offset;
+            }
+        } else if size_changed {
+            let new_offset = offset_from_anchor(old_anchor, new_content_height, new_viewport);
+            if (new_offset - state.offset).abs() > f32::EPSILON {
+                state.offset = new_offset;
             }
         }
         if self.reveal != state.last_revealed {
@@ -313,8 +338,11 @@ where
                 }
             }
         }
-        if state.viewport_height > 0.0 {
-            state.offset = state.offset.min((content_height - state.viewport_height).max(0.0));
+        if new_viewport > 0.0 {
+            state.offset = state
+                .offset
+                .min((new_content_height - new_viewport).max(0.0))
+                .max(0.0);
         }
         iced_layout::Node::new(Size::new(width, limits.max().height))
     }
@@ -976,7 +1004,7 @@ where
             _ => {}
         }
         publish_edit_rect(shell, &self.tiles, state, self.editing, &self.on_edit_rect);
-        publish_offset(shell, state, &self.on_scroll);
+        publish_anchor(shell, state, &self.on_scroll);
     }
 
     fn mouse_interaction(&self, tree: &Tree, layout: Layout<'_>, cursor: mouse::Cursor, _viewport: &Rectangle, _renderer: &Renderer) -> mouse::Interaction {

@@ -28,8 +28,14 @@ pub struct TileViewState {
     pub last_revealed: Option<(usize, EntryId)>,
     /// The last inpaint reveal consumed in `layout()`.
     pub last_inpaint_revealed: Option<(usize, usize)>,
-    /// The last scroll offset published through `on_scroll`.
+    /// The last scroll offset published through `on_scroll` (legacy, kept for
+    /// exact-equality fallback; new code uses `last_published_anchor`).
     pub last_published_offset: Option<f32>,
+    /// The last normalized center anchor published through `on_scroll`:
+    /// `(offset + viewport/2)/content_height` clamped 0..1. Mirrored by the app
+    /// as `viewer_scroll` so a resize or `View↔Compare` width change restores
+    /// the same centered row instead of the same absolute pixel offset.
+    pub last_published_anchor: Option<f32>,
 }
 
 impl TileViewState {
@@ -54,6 +60,7 @@ impl Default for TileViewState {
             last_revealed: None,
             last_inpaint_revealed: None,
             last_published_offset: None,
+            last_published_anchor: None,
         }
     }
 }

@@ -75,8 +75,11 @@ pub trait UiState {
     /// The display mode of the main area (single column or side-by-side
     /// comparison).
     fn view_mode(&self) -> MainAreaMode;
-    /// The latest scroll offset published by a main-area viewer, in content
-    /// pixels; in Compare mode the panes mirror each other through it.
+    /// The latest scroll *center anchor* published by a main-area viewer:
+    /// `(offset + viewport/2)/content_height` in `0..1`. In Compare mode the
+    /// panes mirror each other through it, and on resize / `View↔Compare`
+    /// the same centered row stays visible instead of the same absolute
+    /// offset.
     fn viewer_scroll(&self) -> f32;
     /// True while the settings modal is open.
     fn settings_open(&self) -> bool;

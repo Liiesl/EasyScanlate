@@ -198,8 +198,11 @@ pub enum UiEvent {
     ToggleInpaintLayer,
     /// The user clicked a main-area mode button (View or Compare).
     MainAreaMode(MainAreaMode),
-    /// A main-area viewer's scroll offset changed; the app mirrors it into
-    /// the peer pane in Compare mode.
+    /// A main-area viewer's scroll changed; payload is the normalized center
+    /// anchor `(offset + viewport/2)/content_height` in `0..1`. The app mirrors
+    /// it into the peer pane in Compare mode and restores it on resize /
+    /// `View↔Compare` so the same row stays centered instead of the same
+    /// absolute pixel offset.
     ViewerScroll(f32),
     /// The user finished dragging an inpainting range on `index`'s tile;
     /// `Rectangle` is `(x, y, w, h)` in image pixels.
