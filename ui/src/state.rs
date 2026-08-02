@@ -85,6 +85,8 @@ pub trait UiState {
     fn settings_open(&self) -> bool;
     /// The settings tab currently shown in the modal.
     fn settings_tab(&self) -> SettingsTab;
+    /// Current filter text of the settings sidebar search field.
+    fn settings_search(&self) -> &str;
     /// Whether the Manage Models overlay is open (over the settings modal).
     fn manage_models_open(&self) -> bool;
     /// Current filter text of the Manage Models search field.

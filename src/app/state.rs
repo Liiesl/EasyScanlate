@@ -156,6 +156,10 @@ impl UiState for App {
         self.settings_tab
     }
 
+    fn settings_search(&self) -> &str {
+        &self.settings_search
+    }
+
     fn manage_models_open(&self) -> bool {
         self.manage_models_open
     }

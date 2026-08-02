@@ -17,11 +17,17 @@ pub fn handle_settings_close(app: &mut App) -> Task<Message> {
     app.settings_open = false;
     app.manage_models_open = false;
     app.connect_modal = None;
+    app.settings_search.clear();
     Task::none()
 }
 
 pub fn handle_settings_tab(app: &mut App, tab: scanlateit_ui::event::SettingsTab) -> Task<Message> {
     app.settings_tab = tab;
+    Task::none()
+}
+
+pub fn handle_settings_search(app: &mut App, query: String) -> Task<Message> {
+    app.settings_search = query;
     Task::none()
 }
 

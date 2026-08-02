@@ -31,10 +31,14 @@ pub enum ToolbarAction {
 /// The tabs shown inside the settings modal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsTab {
-    /// General tunables (OCR workers, inpaint backend, ...).
+    /// General tunables.
     General,
-    /// Aurora background appearance (color, blobs, schema, light/dark).
+    /// Aurora background appearance (color, blobs, schema, light/dark) + font size.
     Appearance,
+    /// OCR engine tuning.
+    Ocr,
+    /// Inpaint (manual + auto) tuning.
+    Inpaint,
     /// Machine-translation settings (API key).
     Translation,
 }
@@ -268,6 +272,8 @@ pub enum UiEvent {
     SettingsClose,
     /// Switch the visible settings tab.
     SettingsTab(SettingsTab),
+    /// The user typed in the settings sidebar search field.
+    SettingsSearch(String),
     /// Some setting was changed: the ui crate already wrote it into the
     /// shared settings store; the app re-syncs its runtime mirrors from
     /// there. This is the single message for every settings edit.

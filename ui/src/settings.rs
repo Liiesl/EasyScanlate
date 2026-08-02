@@ -14,6 +14,7 @@ use iced::widget::{
 use iced::widget::pick_list;
 use iced::widget::text_input;
 use iced::{Color, Element, Fill as FillLength, Length};
+use lucide_icons::Icon;
 
 #[cfg(feature = "inpaint")]
 use scanlateit_settings::{AutoInpaintModel, InpaintBackend};
@@ -27,9 +28,11 @@ use crate::scale;
 use crate::segmented::{segment, segmented_group};
 use crate::state::UiState;
 
-const TAB_WIDTH: f32 = 140.0;
+const TAB_WIDTH: f32 = 170.0;
 const ACCENT: Color = Color::from_rgb8(92, 190, 255);
 const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);
+const CARD_BG: Color = Color::from_rgba8(255, 255, 255, 0.06);
+const CARD_BORDER: Color = Color::from_rgba8(255, 255, 255, 0.08);
 
 /// Writes one change into the shared settings store (write-through) and
 /// returns the single announcement event for the app.
@@ -38,24 +41,122 @@ fn set(f: impl FnOnce(&mut scanlateit_settings::Settings)) -> UiEvent {
     UiEvent::SettingsChanged
 }
 
-/// One tab button of the vertical tab list; the active tab is highlighted.
+// ---------------------------------------------------------------------------
+// search helpers — sidebar filters current tab's fields
+// ---------------------------------------------------------------------------
+
+fn normalize_for_search(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(c, '-' | '/' | '.' | '_' | ',') {
+            out.push(' ');
+        } else {
+            out.push(c);
+        }
+    }
+    out.to_lowercase()
+}
+
+fn matches_query(query: &str, haystack: &str) -> bool {
+    let q = query.trim();
+    if q.is_empty() {
+        return true;
+    }
+    let q_norm = normalize_for_search(q);
+    let h_norm = normalize_for_search(haystack);
+    q_norm.split_whitespace().all(|tok| h_norm.contains(tok))
+}
+
+fn matches_any(query: &str, keywords: &[&str]) -> bool {
+    if query.trim().is_empty() {
+        return true;
+    }
+    let joined = keywords.join(" ");
+    matches_query(query, &joined)
+}
+
+// ---------------------------------------------------------------------------
+// shared card / separator styles
+// ---------------------------------------------------------------------------
+
+fn card_style() -> container::Style {
+    container::Style {
+        background: Some(CARD_BG.into()),
+        border: iced::Border::default()
+            .rounded(scale::s(8.0))
+            .color(CARD_BORDER)
+            .width(scale::s(1.0)),
+        ..Default::default()
+    }
+}
+
+fn card_header<'a>(icon: Icon, title: &'a str, subtitle: Option<&'a str>) -> Element<'a, UiEvent> {
+    let subtitle_el: Element<'a, UiEvent> = if let Some(sub) = subtitle {
+        text(sub).size(scale::s(11.0)).color(MUTED_FG).into()
+    } else {
+        space::vertical().height(Length::Fixed(0.0)).into()
+    };
+    row![
+        crate::icon::lucide(icon)
+            .size(scale::s(14.0))
+            .color(ACCENT),
+        column![
+            text(title).size(scale::s(13.0)).color(Color::WHITE),
+            subtitle_el,
+        ]
+        .spacing(scale::s(1.0))
+        .width(FillLength),
+    ]
+    .spacing(scale::s(8.0))
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+/// One tab button of the vertical tab list; the active tab is highlighted
+/// with a left accent bar + subtle fill and an icon.
 fn tab_button<'a, S: UiState + ?Sized>(
     state: &'a S,
     tab: SettingsTab,
+    icon: Icon,
     label: &'a str,
 ) -> Element<'a, UiEvent> {
     let selected = state.settings_tab() == tab;
-    button(
-        text(label)
-            .size(scale::s(13.0))
-            .color(if selected { Color::WHITE } else { MUTED_FG }),
-    )
-    .width(Length::Fill)
-    .padding(scale::s(6.0))
-    .style(crate::panel::button_style)
-            .on_press(UiEvent::SettingsTab(tab))
-    .style(crate::panel::button_style)
-    .into()
+    let icon_el = crate::icon::lucide(icon)
+        .size(scale::s(14.0))
+        .color(if selected { ACCENT } else { MUTED_FG });
+    let label_el = text(label)
+        .size(scale::s(13.0))
+        .color(if selected { Color::WHITE } else { MUTED_FG });
+    // left accent bar 3px
+    let accent = container(space::horizontal().width(Length::Fixed(scale::s(3.0))).height(Length::Fixed(scale::s(18.0))))
+        .style(move |_| container::Style {
+            background: Some(if selected { ACCENT.into() } else { Color::TRANSPARENT.into() }),
+            border: iced::Border::default().rounded(scale::s(2.0)),
+            ..Default::default()
+        });
+    let btn_content = row![accent, icon_el, label_el]
+        .spacing(scale::s(7.0))
+        .align_y(iced::Alignment::Center);
+    button(btn_content)
+        .width(Length::Fill)
+        .padding([scale::s(7.0), scale::s(8.0)])
+        .style(move |_theme, status| {
+            let bg = if selected {
+                Color::from_rgba8(255, 255, 255, 0.09)
+            } else if status == iced::widget::button::Status::Hovered {
+                Color::from_rgba8(255, 255, 255, 0.06)
+            } else {
+                Color::TRANSPARENT
+            };
+            iced::widget::button::Style {
+                background: Some(bg.into()),
+                border: iced::Border::default().rounded(scale::s(6.0)),
+                text_color: if selected { Color::WHITE } else { MUTED_FG },
+                ..Default::default()
+            }
+        })
+        .on_press(UiEvent::SettingsTab(tab))
+        .into()
 }
 
 /// The last four characters of a key, for the "connected" status display.
@@ -83,7 +184,7 @@ fn item_separator<'a>() -> Element<'a, UiEvent> {
 fn section_separator<'a>() -> Element<'a, UiEvent> {
     rule::horizontal(1)
         .style(|_theme| rule::Style {
-            color: Color::from_rgba8(255, 255, 255, 0.14),
+            color: Color::from_rgba8(255, 255, 255, 0.10),
             radius: 0.0.into(),
             fill_mode: rule::FillMode::Full,
             snap: true,
@@ -127,7 +228,14 @@ fn provider_row_with_connection<'a>(
             .style(crate::panel::button_style)
             .on_press(UiEvent::TranslateConnect(provider.id.clone())),
     };
+    let dot_color = if status.starts_with("Connected") { ACCENT } else { MUTED_FG };
     row![
+        container(space::horizontal().width(Length::Fixed(scale::s(6.0))).height(Length::Fixed(scale::s(6.0))))
+            .style(move |_| container::Style {
+                background: Some(dot_color.into()),
+                border: iced::Border::default().rounded(scale::s(3.0)),
+                ..Default::default()
+            }),
         column![
             text(&provider.name).size(scale::s(12.0)),
             text(status).size(scale::s(11.0)).color(MUTED_FG),
@@ -136,9 +244,9 @@ fn provider_row_with_connection<'a>(
         .width(FillLength),
         button,
     ]
-    .spacing(scale::s(6.0))
+    .spacing(scale::s(8.0))
     .align_y(iced::Alignment::Center)
-    .padding([scale::s(4.0), 0.0])
+    .padding([scale::s(5.0), 0.0])
     .into()
 }
 
@@ -161,6 +269,7 @@ fn custom_row_with_connection<'a>(
         .as_ref()
         .map(|connection| format!("Connected · {}", mask_key(&connection.api_key)))
         .unwrap_or_else(|| "Not connected".to_string());
+    let dot_color = if status.starts_with("Connected") { ACCENT } else { MUTED_FG };
     let button = match connected {
         Some(_) => button(text("Disconnect").size(scale::s(11.0)))
             .padding([scale::s(3.0), scale::s(8.0)])
@@ -172,6 +281,12 @@ fn custom_row_with_connection<'a>(
             .on_press(UiEvent::TranslateConnect(id.to_string())),
     };
     row![
+        container(space::horizontal().width(Length::Fixed(scale::s(6.0))).height(Length::Fixed(scale::s(6.0))))
+            .style(move |_| container::Style {
+                background: Some(dot_color.into()),
+                border: iced::Border::default().rounded(scale::s(3.0)),
+                ..Default::default()
+            }),
         column![
             text(label).size(scale::s(12.0)),
             text(status).size(scale::s(11.0)).color(MUTED_FG),
@@ -180,9 +295,9 @@ fn custom_row_with_connection<'a>(
         .width(FillLength),
         button,
     ]
-    .spacing(scale::s(6.0))
+    .spacing(scale::s(8.0))
     .align_y(iced::Alignment::Center)
-    .padding([scale::s(4.0), 0.0])
+    .padding([scale::s(5.0), 0.0])
     .into()
 }
 
@@ -241,816 +356,1224 @@ fn recommended_row<'a>(
     ]
     .spacing(scale::s(6.0))
     .align_y(iced::Alignment::Center)
-    .padding([scale::s(4.0), 0.0])
+    .padding([scale::s(5.0), 0.0])
     .into()
 }
 
-/// Appearance tab — port of `ManhwaOCR/app/ui/components/background_settings.AuroraEditorPanel`.
-/// Reads and writes the aurora theme directly in the settings store.
-fn appearance_tab() -> Element<'static, UiEvent> {
+// ---------------------------------------------------------------------------
+// small field helpers
+// ---------------------------------------------------------------------------
+
+fn stepper_button<'a>(enabled: bool, label: &'a str, msg: Option<UiEvent>) -> Element<'a, UiEvent> {
+    button(text(label).size(scale::s(14.0)).width(FillLength).center())
+        .width(Length::Fixed(scale::s(30.0)))
+        .height(Length::Fixed(scale::s(30.0)))
+        .padding(0)
+        .on_press_maybe(if enabled { msg } else { None })
+        .style(move |_theme: &iced::Theme, status| {
+            let bg = if !enabled {
+                Color::from_rgba8(255, 255, 255, 0.06)
+            } else if status == iced::widget::button::Status::Hovered {
+                Color::from_rgba8(255, 255, 255, 0.30)
+            } else {
+                Color::from_rgba8(255, 255, 255, 0.15)
+            };
+            iced::widget::button::Style {
+                background: Some(bg.into()),
+                border: iced::Border::default().rounded(scale::s(15.0)),
+                text_color: if enabled { Color::WHITE } else { MUTED_FG },
+                ..Default::default()
+            }
+        })
+        .into()
+}
+
+fn field_row<'a>(label: &'a str, control: Element<'a, UiEvent>) -> Element<'a, UiEvent> {
+    row![
+        container(text(label).size(scale::s(12.0)).color(Color::WHITE))
+            .width(Length::Fixed(scale::s(160.0))),
+        control,
+    ]
+    .spacing(scale::s(8.0))
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+fn helper_text<'a>(s: &'a str) -> Element<'a, UiEvent> {
+    text(s).size(scale::s(11.0)).color(MUTED_FG).into()
+}
+
+fn warning_text<'a>(s: String) -> Element<'a, UiEvent> {
+    text(s).size(scale::s(11.0)).color(Color::from_rgb8(240, 200, 80)).into()
+}
+
+// ---------------------------------------------------------------------------
+// Appearance tab — port of ManhwaOCR's AuroraEditorPanel, now card-grouped
+// ---------------------------------------------------------------------------
+
+fn appearance_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     let cfg = crate::background::AuroraConfig::from_store();
     let is_dark = cfg.is_dark;
     let count = cfg.blob_count;
     let schema = cfg.schema;
     let hex = cfg.to_hex();
 
-    // Mode toggle (Light | Dark) — mirrors ManhwaOCR's two-button toggle.
-    let mode_row = segmented_group(vec![
-        segment(
-            !is_dark,
-            "Light",
-            Some(UiEvent::SettingEdit(SettingEdit::AuroraDarkMode(false))),
-            iced::Font::DEFAULT,
-        ),
-        segment(
-            is_dark,
-            "Dark",
-            Some(UiEvent::SettingEdit(SettingEdit::AuroraDarkMode(true))),
-            iced::Font::DEFAULT,
-        ),
-    ]);
+    let q = query;
+    let show_theme = matches_any(q, &["appearance", "theme", "mode", "light", "dark", "aurora", "background"]);
+    let show_palette = matches_any(q, &["appearance", "palette", "color", "primary", "wheel", "hex", "aurora", "background"]);
+    let show_density = matches_any(q, &["appearance", "density", "blob", "count", "schema", "vibrant", "analogous", "contrast", "neon", "solid"]);
+    let show_font = matches_any(q, &["appearance", "interface", "font", "size", "scale", "ui"]);
 
-    // Wheel
-    let wheel = AuroraWheel::new(cfg.clone()).view();
+    if !q.trim().is_empty() && !show_theme && !show_palette && !show_density && !show_font {
+        return Vec::new();
+    }
 
-    // Count + schema row — mirrors background_settings.py: minus / "Solid" or "n | Schema" / plus / ⟳
-    let count_label = if count == 1 {
-        "Solid".to_string()
-    } else {
-        format!("{} | {}", count, schema.label())
-    };
-    let dec_btn: Element<'_, UiEvent> = button(text("−").size(scale::s(14.0)).width(FillLength).center())
-        .width(Length::Fixed(scale::s(30.0)))
-        .height(Length::Fixed(scale::s(30.0)))
-        .padding(0)
-        .style(crate::panel::button_style)
-            .on_press_maybe(
-            (count > 1).then(|| UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(count - 1))),
-        )
-        .style(|_theme: &iced::Theme, status| {
-            let bg = if status == iced::widget::button::Status::Hovered {
-                Color::from_rgba8(255, 255, 255, 0.30)
-            } else {
-                Color::from_rgba8(255, 255, 255, 0.15)
-            };
-            iced::widget::button::Style {
-                background: Some(bg.into()),
-                border: iced::Border::default().rounded(scale::s(15.0)),
-                text_color: Color::WHITE,
-                ..Default::default()
-            }
-        })
-        .into();
-    let inc_btn: Element<'_, UiEvent> = button(text("+").size(scale::s(14.0)).width(FillLength).center())
-        .width(Length::Fixed(scale::s(30.0)))
-        .height(Length::Fixed(scale::s(30.0)))
-        .padding(0)
-        .style(crate::panel::button_style)
-            .on_press_maybe(
-            (count < 5).then(|| UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(count + 1))),
-        )
-        .style(|_theme: &iced::Theme, status| {
-            let bg = if status == iced::widget::button::Status::Hovered {
-                Color::from_rgba8(255, 255, 255, 0.30)
-            } else {
-                Color::from_rgba8(255, 255, 255, 0.15)
-            };
-            iced::widget::button::Style {
-                background: Some(bg.into()),
-                border: iced::Border::default().rounded(scale::s(15.0)),
-                text_color: Color::WHITE,
-                ..Default::default()
-            }
-        })
-        .into();
-    let schema_btn: Element<'_, UiEvent> = button(text("⟳").size(scale::s(16.0)).width(FillLength).center())
-        .width(Length::Fixed(scale::s(30.0)))
-        .height(Length::Fixed(scale::s(30.0)))
-        .padding(0)
-        .style(crate::panel::button_style)
-            .on_press_maybe(
-            (count > 1).then(|| {
-                UiEvent::SettingEdit(SettingEdit::AuroraSchema(
-                    schema.index().wrapping_add(1) % 4,
-                ))
-            }),
-        )
-        .style(|_theme: &iced::Theme, status| {
-            let bg = if status == iced::widget::button::Status::Hovered {
-                Color::from_rgba8(255, 255, 255, 0.30)
-            } else {
-                Color::from_rgba8(255, 255, 255, 0.15)
-            };
-            iced::widget::button::Style {
-                background: Some(bg.into()),
-                border: iced::Border::default().rounded(scale::s(15.0)),
-                text_color: Color::WHITE,
-                ..Default::default()
-            }
-        })
-        .into();
-
-    let count_row: Element<'_, UiEvent> = row![dec_btn, container(text(count_label).size(scale::s(12.0)).color(Color::WHITE).width(FillLength).center()).width(Length::Fixed(scale::s(80.0))), inc_btn, space::horizontal(), schema_btn]
+    let mut outer: Vec<Element<'static, UiEvent>> = Vec::new();
+    if show_font {
+        let raw = scanlateit_settings::get(|s| s.ui_font_size);
+        let font_str = raw.to_string();
+        let clamped = scale::clamp_font_size(raw);
+        let dec = stepper_button(clamped > scale::MIN_FONT_SIZE, "−", Some(UiEvent::SettingEdit(SettingEdit::UiFontSize(clamped - 1))));
+        let inc = stepper_button(clamped < scale::MAX_FONT_SIZE, "+", Some(UiEvent::SettingEdit(SettingEdit::UiFontSize(clamped + 1))));
+        let control: Element<'static, UiEvent> = row![
+            dec,
+            text_input("12", &font_str)
+                .on_input(move |input| {
+                    if let Ok(v) = input.trim().parse::<u32>() {
+                        set(move |s| s.ui_font_size = v)
+                    } else if input.trim().is_empty() {
+                        UiEvent::SettingsChanged
+                    } else {
+                        UiEvent::SettingsChanged
+                    }
+                })
+                .padding(scale::s(4.0))
+                .size(scale::s(12.0))
+                .width(Length::Fixed(scale::s(64.0))),
+            inc,
+        ]
         .spacing(scale::s(6.0))
         .align_y(iced::Alignment::Center)
         .into();
+        let font_section = column![
+            row![
+                crate::icon::lucide(Icon::Type).size(scale::s(14.0)).color(ACCENT),
+                text("UI Font Size").size(scale::s(13.0)).color(Color::WHITE),
+            ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
+            row![
+                container(text("Size").size(scale::s(11.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(90.0))),
+                control,
+            ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
+            text(format!("{}–{} — scales padding, spacing and radii. Chrome stays fixed.", scale::MIN_FONT_SIZE, scale::MAX_FONT_SIZE)).size(scale::s(10.0)).color(MUTED_FG),
+        ].spacing(scale::s(6.0));
+        outer.push(
+            container(font_section)
+                .width(FillLength)
+                .padding(scale::s(10.0))
+                .style(|_| card_style())
+                .into()
+        );
+    }
 
-    let hex_row: Element<'_, UiEvent> = row![
-        container(text("Hex").size(scale::s(12.0)).color(MUTED_FG)).width(Length::Fixed(scale::s(40.0))),
-        iced::widget::text_input(&hex, &hex)
-            .on_input(|input| {
-                // Only valid hex reaches the store; invalid input keeps the
-                // previous color (the field snaps back on the next frame).
-                if crate::background::AuroraConfig::from_hex(&input).is_some() {
-                    set(move |s| s.aurora_color = input.clone())
-                } else {
-                    UiEvent::SettingsChanged
-                }
-            })
-            .padding(scale::s(4.0))
-            .size(scale::s(12.0))
-            .width(Length::Fixed(scale::s(100.0))),
-        text(hex.clone()).size(scale::s(11.0)).color(MUTED_FG),
-    ]
-    .spacing(scale::s(6.0))
-    .align_y(iced::Alignment::Center)
-    .into();
-
-    let inner: Element<'_, UiEvent> = column![
-        text("Appearance").size(scale::s(14.0)),
-        text("Animated aurora background — primary color, blobs, light/dark and color-theory schema (Vibrant / Analogous / Contrast / Neon). Mirrors ManhwaOCR's Background Editor.")
-            .size(scale::s(11.0))
-            .color(MUTED_FG),
-        mode_row,
-        container(text("Primary Color").size(scale::s(13.0)).color(Color::WHITE).width(FillLength).center()).padding(scale::s(4.0)),
-        container(wheel).center_x(FillLength),
-        hex_row,
-        count_row,
-        text(if count == 1 { "Solid — single color, no blobs." } else { "Blobs blend with radial gradients at card corners/edges; schema shifts hue." })
-            .size(scale::s(11.0))
-            .color(MUTED_FG),
-    ]
-    .spacing(scale::s(10.0))
-    .into();
-
-    // Wrap in a translucent card like ManhwaOCR's AuroraEditorPanel (rgba 20,20,20,220 + border)
-    container(scrollable(inner).height(Length::Fill))
-        .padding(scale::s(8.0))
-        .style(|_theme| container::Style {
-            background: Some(Color::from_rgba8(20, 20, 20, 0.86).into()),
-            border: iced::Border::default().rounded(scale::s(12.0)).color(Color::from_rgba8(255, 255, 255, 0.15)).width(scale::s(1.0)),
-            ..Default::default()
-        })
-        .into()
+    const AURORA_WIDTH: f32 = 260.0;
+    let show_aurora_any = show_theme || show_palette || show_density;
+    if show_aurora_any {
+        let mut inner: Vec<Element<'static, UiEvent>> = Vec::new();
+        if show_theme {
+            let mode_row = segmented_group(vec![
+                segment(!is_dark, "Light", Some(UiEvent::SettingEdit(SettingEdit::AuroraDarkMode(false))), iced::Font::DEFAULT),
+                segment(is_dark, "Dark", Some(UiEvent::SettingEdit(SettingEdit::AuroraDarkMode(true))), iced::Font::DEFAULT),
+            ]);
+            inner.push(mode_row.into());
+            if show_palette || show_density {
+                inner.push(space::vertical().height(Length::Fixed(scale::s(8.0))).into());
+            }
+        }
+        if show_palette {
+            inner.push(container(text("Primary Color").size(scale::s(12.0)).color(Color::WHITE).width(FillLength).center()).padding(scale::s(2.0)).into());
+            let wheel = AuroraWheel::new(cfg.clone()).view();
+            inner.push(container(wheel).center_x(FillLength).into());
+            let hex_owned = hex.clone();
+            let hex_row: Element<'static, UiEvent> = row![
+                container(text("Hex").size(scale::s(11.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(36.0))),
+                text_input(&hex, &hex_owned)
+                    .on_input(|input| {
+                        if crate::background::AuroraConfig::from_hex(&input).is_some() {
+                            set(move |s| s.aurora_color = input.clone())
+                        } else { UiEvent::SettingsChanged }
+                    })
+                    .padding(scale::s(4.0))
+                    .size(scale::s(11.0))
+                    .width(Length::Fixed(scale::s(100.0))),
+                text(hex.clone()).size(scale::s(10.0)).color(MUTED_FG),
+            ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center).into();
+            inner.push(container(hex_row).center_x(FillLength).into());
+            if show_density {
+                inner.push(space::vertical().height(Length::Fixed(scale::s(8.0))).into());
+            }
+        }
+        if show_density {
+            let count_label = if count == 1 { "Solid".to_string() } else { format!("{} | {}", count, schema.label()) };
+            let dec_btn = stepper_button(count > 1, "−", Some(UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(count - 1))));
+            let inc_btn = stepper_button(count < 5, "+", Some(UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(count + 1))));
+            let schema_btn: Element<'static, UiEvent> = button(text("⟳").size(scale::s(16.0)).width(FillLength).center())
+                .width(Length::Fixed(scale::s(30.0))).height(Length::Fixed(scale::s(30.0))).padding(0)
+                .on_press_maybe((count > 1).then(|| UiEvent::SettingEdit(SettingEdit::AuroraSchema(schema.index().wrapping_add(1) % 4))))
+                .style(|_theme: &iced::Theme, status| {
+                    let bg = if status == iced::widget::button::Status::Hovered { Color::from_rgba8(255,255,255,0.30) } else { Color::from_rgba8(255,255,255,0.15) };
+                    iced::widget::button::Style{ background: Some(bg.into()), border: iced::Border::default().rounded(scale::s(15.0)), text_color: Color::WHITE, ..Default::default() }
+                }).into();
+            let count_row: Element<'static, UiEvent> = row![
+                dec_btn,
+                container(text(count_label).size(scale::s(11.0)).color(Color::WHITE).width(FillLength).center()).width(Length::Fixed(scale::s(80.0))),
+                inc_btn,
+                space::horizontal(),
+                schema_btn
+            ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center).into();
+            inner.push(container(count_row).center_x(FillLength).into());
+            inner.push(container(text(if count == 1 { "Solid — single color, no blobs." } else { "Blobs blend with radial gradients; schema shifts hue." }).size(scale::s(10.0)).color(MUTED_FG).width(FillLength).center()).into());
+        }
+        let aurora_card = container(column(inner).spacing(scale::s(12.0)).align_x(iced::Alignment::Center))
+            .width(Length::Fixed(scale::s(AURORA_WIDTH)))
+            .padding(scale::s(14.0))
+            .style(|_| container::Style{
+                background: Some(Color::from_rgba8(20,20,20,0.86).into()),
+                border: iced::Border::default().rounded(scale::s(20.0)).color(Color::from_rgba8(255,255,255,0.10)).width(scale::s(1.0)),
+                ..Default::default()
+            });
+        let section = column![
+            card_header(Icon::Palette, "Aurora Background", Some("Animated aurora — ManhwaOCR style")),
+            container(aurora_card).width(FillLength).center_x(FillLength),
+        ].spacing(scale::s(10.0));
+        outer.push(container(section).width(FillLength).padding(scale::s(10.0)).style(|_| card_style()).into());
+    }
+    outer
 }
 
-/// The field area of the currently selected tab.
-fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
-    match state.settings_tab() {
-        SettingsTab::General => {
-            #[cfg_attr(not(any(feature = "styling", feature = "ocr")), allow(unused_mut))]
-            let mut items: Vec<Element<'_, UiEvent>> = vec![text("General").size(scale::s(14.0)).into()];
-            // ── UI font size: VS Code-style integer with stepper + free text input ──
-            {
-                let raw = scanlateit_settings::get(|s| s.ui_font_size);
-                let font_str = raw.to_string();
-                let clamped = scale::clamp_font_size(raw);
-                let dec: Element<'_, UiEvent> = button(text("−").size(scale::s(14.0)).width(FillLength).center())
-                    .width(Length::Fixed(scale::s(30.0)))
-                    .height(Length::Fixed(scale::s(30.0)))
-                    .padding(0)
-                    .style(crate::panel::button_style)
-            .on_press_maybe((clamped > scale::MIN_FONT_SIZE).then_some(UiEvent::SettingEdit(SettingEdit::UiFontSize(clamped - 1))))
-                    .style(|_theme: &iced::Theme, status| {
-                        let bg = if status == iced::widget::button::Status::Hovered {
-                            Color::from_rgba8(255, 255, 255, 0.30)
-                        } else {
-                            Color::from_rgba8(255, 255, 255, 0.15)
-                        };
-                        iced::widget::button::Style {
-                            background: Some(bg.into()),
-                            border: iced::Border::default().rounded(scale::s(15.0)),
-                            text_color: Color::WHITE,
-                            ..Default::default()
-                        }
-                    })
-                    .into();
-                let inc: Element<'_, UiEvent> = button(text("+").size(scale::s(14.0)).width(FillLength).center())
-                    .width(Length::Fixed(scale::s(30.0)))
-                    .height(Length::Fixed(scale::s(30.0)))
-                    .padding(0)
-                    .style(crate::panel::button_style)
-            .on_press_maybe((clamped < scale::MAX_FONT_SIZE).then_some(UiEvent::SettingEdit(SettingEdit::UiFontSize(clamped + 1))))
-                    .style(|_theme: &iced::Theme, status| {
-                        let bg = if status == iced::widget::button::Status::Hovered {
-                            Color::from_rgba8(255, 255, 255, 0.30)
-                        } else {
-                            Color::from_rgba8(255, 255, 255, 0.15)
-                        };
-                        iced::widget::button::Style {
-                            background: Some(bg.into()),
-                            border: iced::Border::default().rounded(scale::s(15.0)),
-                            text_color: Color::WHITE,
-                            ..Default::default()
-                        }
-                    })
-                    .into();
-                items.push(
-                    row![
-                        container(text("UI font size").size(scale::s(12.0)).color(MUTED_FG))
-                            .width(Length::Fixed(scale::s(150.0))),
-                        dec,
-                        text_input("12", &font_str)
-                            .on_input(move |input| {
-                                if let Ok(v) = input.trim().parse::<u32>() {
-                                    set(move |s| s.ui_font_size = v)
-                                } else if input.trim().is_empty() {
-                                    // keep previous while empty / half-typed; snap back next frame
-                                    UiEvent::SettingsChanged
-                                } else {
-                                    UiEvent::SettingsChanged
-                                }
-                            })
-                            .padding(scale::s(4.0))
-                            .size(scale::s(12.0))
-                            .width(Length::Fixed(scale::s(64.0))),
-                        inc,
-                    ]
-                    .spacing(scale::s(6.0))
-                    .align_y(iced::Alignment::Center)
-                    .into(),
-                );
-                items.push(
-                    text(format!(
-                        "Base font size for all UI text ({}–{}). Padding, spacing, border radius and item gaps scale with it. Window chrome and image overlays stay fixed.",
-                        scale::MIN_FONT_SIZE, scale::MAX_FONT_SIZE
-                    ))
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG)
-                        .into(),
-                );
-            }
+fn appearance_tab_filtered(query: String) -> Element<'static, UiEvent> {
+    let q = query.as_str();
+    let outer = appearance_cards(q);
+    if outer.is_empty() {
+        return scrollable(
+            container(
+                text(format!("No appearance settings match “{query}”."))
+                    .size(scale::s(12.0))
+                    .color(MUTED_FG),
+            )
+            .padding(scale::s(14.0))
+            .style(|_| card_style()),
+        )
+        .height(Length::Fill)
+        .into();
+    }
+
+    let content = column(outer).spacing(scale::s(16.0)).width(FillLength);
+    let padded = container(content).width(FillLength).padding(scale::s(8.0));
+    scrollable(padded).height(Length::Fill).into()
+}
+
+/// Backwards-compatible wrapper (no filter)
+fn appearance_tab() -> Element<'static, UiEvent> {
+    appearance_tab_filtered(String::new())
+}
+
+// ---------------------------------------------------------------------------
+// General tab — now grouped into cards + filtered
+// ---------------------------------------------------------------------------
+
+fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
+    let query_ref = query.as_str();
+    let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
+
+    // ── Automation card: auto-detect / SFX (inpaint moved to Inpaint tab) ──
+    {
+        // collect whether any automation sub-field matches
+        let show_auto_detect = matches_any(query_ref, &["automation", "auto", "detect", "style", "classify", "onnx", "styling"]);
+        let show_sfx = matches_any(query_ref, &["automation", "auto", "sfx", "filter", "balloon", "segment", "manga"]);
+        let show_automation_header = matches_any(query_ref, &["automation", "general", "auto"]);
+        let show_any = show_automation_header || show_auto_detect || show_sfx;
+        if show_any {
+            let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
+            col.push(card_header(Icon::Sparkles, "Automation", Some("Style & SFX filtering")).into());
+
             #[cfg(feature = "styling")]
-            {
+            if show_auto_detect || show_automation_header || query_ref.trim().is_empty() {
                 let auto = scanlateit_settings::get(|s| s.auto_style_detect);
-                items.push(
-                    text("Classify newly OCR-detected entries with the ONNX styling \
-                          model and set their text style from the prediction.")
-                        .size(scale::s(12.0))
-                        .color(MUTED_FG)
-                        .into(),
+                col.push(
+                    column![
+                        checkbox(auto)
+                            .label("Auto-detect entry styles")
+                            .text_size(scale::s(12.0))
+                            .on_toggle(|v| set(move |s| s.auto_style_detect = v)),
+                        helper_text("Classify newly OCR-detected entries with the ONNX styling model."),
+                    ].spacing(scale::s(4.0)).into()
                 );
-                items.push(
-                    checkbox(auto)
-                        .label("Auto-detect entry styles")
-                        .text_size(scale::s(12.0))
-                        .on_toggle(|v| set(move |s| s.auto_style_detect = v))
-                        .into(),
-                );
+                if col.len() > 1 { col.push(item_separator()); }
             }
             #[cfg(feature = "segment")]
-            {
+            if show_sfx || show_automation_header || query_ref.trim().is_empty() {
                 let auto = scanlateit_settings::get(|s| s.auto_sfx_filter);
-                items.push(
-                    text(
-                        "Remove SFX outside balloons via segmentation (manga-mimic grid, 1:6 col). \
-                         True SFX lives outside any balloon; SFX inside a balloon is a hallucination and ignored."
-                    )
-                    .size(scale::s(12.0))
-                    .color(MUTED_FG)
-                    .into(),
+                col.push(
+                    column![
+                        checkbox(auto)
+                            .label("Auto-filter SFX")
+                            .text_size(scale::s(12.0))
+                            .on_toggle(|v| set(move |s| s.auto_sfx_filter = v)),
+                        helper_text("Remove SFX outside balloons via segmentation (manga-mimic grid, 1:6 col). True SFX lives outside balloons."),
+                    ].spacing(scale::s(4.0)).into()
                 );
-                items.push(
-                    checkbox(auto)
-                        .label("Auto-filter SFX")
-                        .text_size(scale::s(12.0))
-                        .on_toggle(|v| set(move |s| s.auto_sfx_filter = v))
-                        .into(),
-                );
+                if col.len() > 2 { col.push(item_separator()); }
             }
-            // ── Auto inpaint (post-OCR bg-aware inpaint) ─────────────────
+
+            // only push card if it actually has content beyond header
+            if col.len() > 1 {
+                cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+            }
+        }
+    }
+
+    // ── Empty state ───────────────────────────────────────────────
+    if cards.is_empty() {
+        cards.push(
+            container(column![
+                row![
+                    crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG),
+                    text(format!("No settings match “{query}”")).size(scale::s(12.0)).color(MUTED_FG),
+                ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
+                text("Try a different term — e.g. font, ocr, inpaint, sfx.").size(scale::s(11.0)).color(MUTED_FG),
+            ].spacing(scale::s(6.0)))
+            .padding(scale::s(14.0))
+            .style(|_| card_style())
+            .into(),
+        );
+    }
+
+    // wrap
+    scrollable(
+        column(cards).spacing(scale::s(10.0))
+    )
+    .height(Length::Fill)
+    .into()
+}
+
+fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
+    let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
+    {
+        let show_auto_detect = matches_any(query, &["automation", "auto", "detect", "style", "classify", "onnx", "styling"]);
+        let show_sfx = matches_any(query, &["automation", "auto", "sfx", "filter", "balloon", "segment", "manga"]);
+        let show_automation_header = matches_any(query, &["automation", "general", "auto"]);
+        let show_any = show_automation_header || show_auto_detect || show_sfx;
+        if show_any {
+            let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
+            col.push(card_header(Icon::Sparkles, "Automation", Some("Style & SFX filtering")).into());
+            #[cfg(feature = "styling")]
+            if show_auto_detect || show_automation_header || query.trim().is_empty() {
+                let auto = scanlateit_settings::get(|s| s.auto_style_detect);
+                col.push(
+                    column![
+                        checkbox(auto)
+                            .label("Auto-detect entry styles")
+                            .text_size(scale::s(12.0))
+                            .on_toggle(|v| set(move |s| s.auto_style_detect = v)),
+                        helper_text("Classify newly OCR-detected entries with the ONNX styling model."),
+                    ].spacing(scale::s(4.0)).into()
+                );
+                if col.len() > 1 { col.push(item_separator()); }
+            }
+            #[cfg(feature = "segment")]
+            if show_sfx || show_automation_header || query.trim().is_empty() {
+                let auto = scanlateit_settings::get(|s| s.auto_sfx_filter);
+                col.push(
+                    column![
+                        checkbox(auto)
+                            .label("Auto-filter SFX")
+                            .text_size(scale::s(12.0))
+                            .on_toggle(|v| set(move |s| s.auto_sfx_filter = v)),
+                        helper_text("Remove SFX outside balloons via segmentation (manga-mimic grid, 1:6 col). True SFX lives outside balloons."),
+                    ].spacing(scale::s(4.0)).into()
+                );
+                if col.len() > 2 { col.push(item_separator()); }
+            }
+            if col.len() > 1 {
+                cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+            }
+        }
+    }
+    cards
+}
+
+// ---------------------------------------------------------------------------
+// OCR tab — dedicated OCR tuning
+// ---------------------------------------------------------------------------
+
+fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
+    let query_ref = query.as_str();
+    let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
+
+    #[cfg(feature = "ocr")]
+    {
+        let show_ocr = matches_any(query_ref, &["ocr", "engine", "detection", "recognition", "confidence", "text", "height", "bbox", "merge", "distance", "threshold", "side", "len", "workers", "parallel", "tuning"]);
+        if show_ocr {
+            let workers = scanlateit_settings::get(|s| s.ocr_workers.clone());
+            let (text_score, min_bbox_h, max_bbox_h, max_side, merge_thr) =
+                scanlateit_settings::get(|s| {
+                    (
+                        s.ocr_text_score.clone(),
+                        s.ocr_min_text_height.clone(),
+                        s.ocr_max_text_height.clone(),
+                        s.ocr_max_side_len.clone(),
+                        s.ocr_merge_threshold.clone(),
+                    )
+                });
+            let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
+            col.push(card_header(Icon::ScanSearch, "OCR Engine", Some("Detection & recognition tuning — next run")).into());
+            if matches_any(query_ref, &["ocr", "workers", "parallel", "detection", "engine"]) || query_ref.trim().is_empty() {
+                col.push(field_row("Detection workers",
+                    text_input("2", &workers)
+                        .on_input(|input| set(move |s| s.ocr_workers = input.clone()))
+                        .padding(scale::s(4.0))
+                        .size(scale::s(12.0))
+                        .width(Length::Fixed(scale::s(80.0)))
+                        .into()
+                ).into());
+                col.push(helper_text("Parallel detection sessions; 2 fits a potato-laptop CPU.").into());
+                col.push(item_separator());
+            }
+            if matches_any(query_ref, &["ocr", "tuning", "confidence"]) || query_ref.trim().is_empty() {
+                col.push(field_row("Min confidence",
+                    text_input("0.7", &text_score)
+                        .on_input(|input| set(move |s| s.ocr_text_score = input.clone()))
+                        .padding(scale::s(4.0))
+                        .size(scale::s(12.0))
+                        .width(Length::Fixed(scale::s(80.0)))
+                        .into()
+                ).into());
+                col.push(helper_text("Minimum recognition confidence 0.0–1.0. Lower keeps more lines.").into());
+            }
+            if matches_any(query_ref, &["ocr", "height", "bbox", "minimum", "min"]) || query_ref.trim().is_empty() {
+                col.push(field_row("Min text height",
+                    text_input("40", &min_bbox_h)
+                        .on_input(|input| set(move |s| s.ocr_min_text_height = input.clone()))
+                        .padding(scale::s(4.0))
+                        .size(scale::s(12.0))
+                        .width(Length::Fixed(scale::s(80.0)))
+                        .into()
+                ).into());
+                col.push(helper_text("Minimum bbox height (px). Drops boxes shorter than this.").into());
+            }
+            if matches_any(query_ref, &["ocr", "height", "bbox", "maximum", "max"]) || query_ref.trim().is_empty() {
+                col.push(field_row("Max text height",
+                    text_input("100", &max_bbox_h)
+                        .on_input(|input| set(move |s| s.ocr_max_text_height = input.clone()))
+                        .padding(scale::s(4.0))
+                        .size(scale::s(12.0))
+                        .width(Length::Fixed(scale::s(80.0)))
+                        .into()
+                ).into());
+                col.push(helper_text("Maximum bbox height (px). Drops boxes taller than this.").into());
+            }
+            if matches_any(query_ref, &["ocr", "merge", "distance", "threshold", "gap"]) || query_ref.trim().is_empty() {
+                col.push(field_row("Merge threshold",
+                    text_input("0.5", &merge_thr)
+                        .on_input(|input| set(move |s| s.ocr_merge_threshold = input.clone()))
+                        .padding(scale::s(4.0))
+                        .size(scale::s(12.0))
+                        .width(Length::Fixed(scale::s(80.0)))
+                        .into()
+                ).into());
+                col.push(helper_text("Gap as ratio of height 0.0–2.0 (0.5 = 50% of height).").into());
+            }
+            if matches_any(query_ref, &["ocr", "side", "len", "max", "resize"]) || query_ref.trim().is_empty() {
+                col.push(field_row("Max side len",
+                    text_input("2000", &max_side)
+                        .on_input(|input| set(move |s| s.ocr_max_side_len = input.clone()))
+                        .padding(scale::s(4.0))
+                        .size(scale::s(12.0))
+                        .width(Length::Fixed(scale::s(80.0)))
+                        .into()
+                ).into());
+                col.push(helper_text("Max longer side before resize (px). Larger keeps more detail but uses more RAM.").into());
+            }
+            let has_field = col.iter().count() > 1;
+            if has_field {
+                cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+            }
+        }
+    }
+    #[cfg(not(feature = "ocr"))]
+    {
+        cards.push(
+            container(column![
+                card_header(Icon::ScanSearch, "OCR Engine", Some("OCR feature not enabled")),
+                helper_text("Rebuild with --features ocr to enable OCR tuning.").into(),
+            ].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into()
+        );
+    }
+    if cards.is_empty() {
+        cards.push(
+            container(column![
+                row![crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG), text(format!("No OCR settings match “{query}”")).size(scale::s(12.0)).color(MUTED_FG)].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
+                helper_text("Try a different term."),
+            ].spacing(scale::s(6.0))).padding(scale::s(14.0)).style(|_| card_style()).into()
+        );
+    }
+    scrollable(column(cards).spacing(scale::s(10.0))).height(Length::Fill).into()
+}
+
+fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
+    let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
+    #[cfg(feature = "ocr")]
+    {
+        let show_ocr = matches_any(query, &["ocr", "engine", "detection", "recognition", "confidence", "text", "height", "bbox", "merge", "distance", "threshold", "side", "len", "workers", "parallel", "tuning"]);
+        if show_ocr {
+            let workers = scanlateit_settings::get(|s| s.ocr_workers.clone());
+            let (text_score, min_bbox_h, max_bbox_h, max_side, merge_thr) =
+                scanlateit_settings::get(|s| {
+                    (
+                        s.ocr_text_score.clone(),
+                        s.ocr_min_text_height.clone(),
+                        s.ocr_max_text_height.clone(),
+                        s.ocr_max_side_len.clone(),
+                        s.ocr_merge_threshold.clone(),
+                    )
+                });
+            let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
+            col.push(card_header(Icon::ScanSearch, "OCR Engine", Some("Detection & recognition tuning — next run")).into());
+            if matches_any(query, &["ocr", "workers", "parallel", "detection", "engine"]) || query.trim().is_empty() {
+                col.push(field_row("Detection workers",
+                    text_input("2", &workers)
+                        .on_input(|input| set(move |s| s.ocr_workers = input.clone()))
+                        .padding(scale::s(4.0))
+                        .size(scale::s(12.0))
+                        .width(Length::Fixed(scale::s(80.0)))
+                        .into()
+                ).into());
+                col.push(helper_text("Parallel detection sessions; 2 fits a potato-laptop CPU.").into());
+                col.push(item_separator());
+            }
+            if matches_any(query, &["ocr", "tuning", "confidence"]) || query.trim().is_empty() {
+                col.push(field_row("Min confidence",
+                    text_input("0.7", &text_score)
+                        .on_input(|input| set(move |s| s.ocr_text_score = input.clone()))
+                        .padding(scale::s(4.0))
+                        .size(scale::s(12.0))
+                        .width(Length::Fixed(scale::s(80.0)))
+                        .into()
+                ).into());
+                col.push(helper_text("Minimum recognition confidence 0.0–1.0. Lower keeps more lines.").into());
+            }
+            if matches_any(query, &["ocr", "height", "bbox", "minimum", "min"]) || query.trim().is_empty() {
+                col.push(field_row("Min text height",
+                    text_input("40", &min_bbox_h)
+                        .on_input(|input| set(move |s| s.ocr_min_text_height = input.clone()))
+                        .padding(scale::s(4.0))
+                        .size(scale::s(12.0))
+                        .width(Length::Fixed(scale::s(80.0)))
+                        .into()
+                ).into());
+                col.push(helper_text("Minimum bbox height (px). Drops boxes shorter than this.").into());
+            }
+            if matches_any(query, &["ocr", "height", "bbox", "maximum", "max"]) || query.trim().is_empty() {
+                col.push(field_row("Max text height",
+                    text_input("100", &max_bbox_h)
+                        .on_input(|input| set(move |s| s.ocr_max_text_height = input.clone()))
+                        .padding(scale::s(4.0))
+                        .size(scale::s(12.0))
+                        .width(Length::Fixed(scale::s(80.0)))
+                        .into()
+                ).into());
+                col.push(helper_text("Maximum bbox height (px). Drops boxes taller than this.").into());
+            }
+            if matches_any(query, &["ocr", "merge", "distance", "threshold", "gap"]) || query.trim().is_empty() {
+                col.push(field_row("Merge threshold",
+                    text_input("0.5", &merge_thr)
+                        .on_input(|input| set(move |s| s.ocr_merge_threshold = input.clone()))
+                        .padding(scale::s(4.0))
+                        .size(scale::s(12.0))
+                        .width(Length::Fixed(scale::s(80.0)))
+                        .into()
+                ).into());
+                col.push(helper_text("Gap as ratio of height 0.0–2.0 (0.5 = 50% of height).").into());
+            }
+            if matches_any(query, &["ocr", "side", "len", "max", "resize"]) || query.trim().is_empty() {
+                col.push(field_row("Max side len",
+                    text_input("2000", &max_side)
+                        .on_input(|input| set(move |s| s.ocr_max_side_len = input.clone()))
+                        .padding(scale::s(4.0))
+                        .size(scale::s(12.0))
+                        .width(Length::Fixed(scale::s(80.0)))
+                        .into()
+                ).into());
+                col.push(helper_text("Max longer side before resize (px). Larger keeps more detail but uses more RAM.").into());
+            }
+            let has_field = col.iter().count() > 1;
+            if has_field {
+                cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+            }
+        }
+    }
+    #[cfg(not(feature = "ocr"))]
+    {
+        cards.push(
+            container(column![
+                card_header(Icon::ScanSearch, "OCR Engine", Some("OCR feature not enabled")),
+                helper_text("Rebuild with --features ocr to enable OCR tuning.").into(),
+            ].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into()
+        );
+    }
+    cards
+}
+
+// ---------------------------------------------------------------------------
+// Inpaint tab — manual + auto bg-aware
+// ---------------------------------------------------------------------------
+
+fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
+    let query_ref = query.as_str();
+    let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
+
+    // Auto inpaint (bg-aware) — moved from General automation
+    {
+        let show_auto = matches_any(query_ref, &["inpaint", "auto", "bg", "telea", "lama", "aot", "mixed", "pipeline", "artwork", "gradient", "solid", "automation"]);
+        if show_auto {
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
             {
-                let (auto_inpaint, auto_model, auto_style) = scanlateit_settings::get(|s| {
-                    (s.auto_inpaint, s.auto_inpaint_model, s.auto_style_detect)
-                });
-                items.push(
-                    text(
-                        "After OCR: style-detect first (deferred), then inpaint \
-                         per bg type — Solid keeps its bg color, Gradient uses \
-                         Telea, Artwork uses LaMa. SFX filtering runs first to \
-                         skip SFX bubbles. All three toggles = full pipeline. \
-                         Mixed needs Auto-detect style; fallback is Telea on all."
-                    )
-                    .size(scale::s(11.0))
-                    .color(MUTED_FG)
-                    .into(),
-                );
-                items.push(
-                    checkbox(auto_inpaint)
-                        .label("Auto inpaint (bg-aware)")
-                        .text_size(scale::s(12.0))
-                        .on_toggle(move |v| set(move |s| s.auto_inpaint = v))
-                        .into(),
-                );
-                let all_models = [
-                    AutoInpaintModel::Telea,
-                    AutoInpaintModel::Lama,
-                    AutoInpaintModel::Aot,
-                    AutoInpaintModel::Mixed,
-                ];
-                let available: Vec<AutoInpaintModel> = if auto_style {
-                    all_models.to_vec()
-                } else {
-                    vec![AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot]
-                };
-                // Keep pick_list value consistent when Mixed is hidden
-                let pick_value = if auto_style || auto_model != AutoInpaintModel::Mixed {
-                    Some(auto_model)
-                } else {
-                    Some(AutoInpaintModel::Telea)
-                };
-                items.push(
-                    row![
-                        container(text("Auto inpaint model").size(scale::s(12.0)).color(MUTED_FG))
-                            .width(Length::Fixed(scale::s(150.0))),
-                        pick_list(available, pick_value, move |model| set(move |s| {
-                            s.auto_inpaint_model = model
-                        }))
-                        .padding(scale::s(4.0))
-                        .text_size(scale::s(12.0)),
-                        if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style {
-                            text("Mixed disabled — no style; falling back to Telea for all.")
-                                .size(scale::s(11.0))
-                                .color(Color::from_rgb8(240, 200, 80))
-                        } else {
-                            text("").size(scale::s(11.0)).color(MUTED_FG)
-                        },
-                    ]
-                    .spacing(scale::s(6.0))
-                    .align_y(iced::Alignment::Center)
-                    .into(),
-                );
+                let (auto_inpaint, auto_model, auto_style) = scanlateit_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model, s.auto_style_detect));
+                let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
+                col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("After OCR: style-detect → per bg type")).into());
+                col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
+                col.push(helper_text("Solid keeps bg color, Gradient → Telea, Artwork → LaMa. Mixed needs Auto-detect style.").into());
+                let all_models = [AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot, AutoInpaintModel::Mixed];
+                let available: Vec<AutoInpaintModel> = if auto_style { all_models.to_vec() } else { vec![AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot] };
+                let pick_value = if auto_style || auto_model != AutoInpaintModel::Mixed { Some(auto_model) } else { Some(AutoInpaintModel::Telea) };
+                col.push(row![
+                    container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
+                    pick_list(available, pick_value, move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
+                    if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style { warning_text("Mixed disabled — falling back to Telea.".to_string()) } else { text("").size(scale::s(11.0)).color(MUTED_FG).into() },
+                ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center).into());
                 if !auto_style && auto_model == AutoInpaintModel::Mixed {
-                    items.push(
-                        text("Pick Telea, Lama or AOT while Auto-detect style is off; Mixed will auto-fallback to Telea.")
-                            .size(scale::s(11.0))
-                            .color(Color::from_rgb8(240, 200, 80))
-                            .into(),
-                    );
+                    col.push(warning_text("Pick Telea, Lama or AOT while Auto-detect style is off; Mixed will auto-fallback to Telea.".to_string()));
                 }
-                items.push(
-                    text("Full pipeline (SFX → style deferred → bg-routed inpaint) runs once when OCR finishes if all three are on. Telea jobs run in parallel, LaMa/AOT sequentially to avoid CPU strain.")
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG)
-                        .into(),
-                );
+                col.push(helper_text("Full pipeline runs once when OCR finishes if all toggles are on. Telea in parallel, LaMa/AOT sequentially.").into());
+                cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
             #[cfg(all(feature = "inpaint", not(all(feature = "styling", feature = "segment"))))]
             {
-                let (auto_inpaint, auto_model) = scanlateit_settings::get(|s| {
-                    (s.auto_inpaint, s.auto_inpaint_model)
-                });
-                items.push(
-                    text(
-                        "Auto inpaint needs both Styling and Segmentation features for the full bg-aware pipeline; fallback is Telea on all bboxes."
-                    )
-                    .size(scale::s(11.0))
-                    .color(MUTED_FG)
-                    .into(),
-                );
-                items.push(
-                    checkbox(auto_inpaint)
-                        .label("Auto inpaint (bg-aware)")
-                        .text_size(scale::s(12.0))
-                        .on_toggle(move |v| set(move |s| s.auto_inpaint = v))
-                        .into(),
-                );
-                items.push(
-                    row![
-                        container(text("Auto inpaint model").size(scale::s(12.0)).color(MUTED_FG))
-                            .width(Length::Fixed(scale::s(150.0))),
-                        pick_list(
-                            [AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot],
-                            Some(if auto_model == AutoInpaintModel::Mixed { AutoInpaintModel::Telea } else { auto_model }),
-                            move |model| set(move |s| s.auto_inpaint_model = model)
-                        )
-                        .padding(scale::s(4.0))
-                        .text_size(scale::s(12.0)),
-                    ]
-                    .spacing(scale::s(6.0))
-                    .into(),
-                );
+                let (auto_inpaint, auto_model) = scanlateit_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model));
+                let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
+                col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("Bg-aware pipeline")).into());
+                col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
+                col.push(helper_text("Needs Styling + Segmentation for full bg-aware pipeline; fallback is Telea.").into());
+                col.push(row![
+                    container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
+                    pick_list([AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot], Some(if auto_model == AutoInpaintModel::Mixed { AutoInpaintModel::Telea } else { auto_model }), move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
+                ].spacing(scale::s(6.0)).into());
+                cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
-            #[cfg(feature = "ocr")]
+            #[cfg(not(feature = "inpaint"))]
             {
-                let workers = scanlateit_settings::get(|s| s.ocr_workers.clone());
-                items.push(
-                    row![
-                        container(text("OCR detection workers").size(scale::s(12.0)).color(MUTED_FG))
-                            .width(Length::Fixed(scale::s(150.0))),
-                        text_input("2", &workers)
-                            .on_input(|input| set(move |s| s.ocr_workers = input.clone()))
-                            .padding(scale::s(4.0))
-                            .size(scale::s(12.0))
-                            .width(Length::Fixed(scale::s(64.0))),
-                    ]
-                    .spacing(scale::s(6.0))
-                    .into(),
-                );
-                items.push(
-                    text("Parallel OCR detection sessions; 2 fits a potato-laptop CPU.")
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG)
-                        .into(),
-                );
-                // ── Configurable OCR thresholds ──────────────────────────
-                let (text_score, min_bbox_h, max_bbox_h, max_side, merge_thr) =
-                    scanlateit_settings::get(|s| {
-                        (
-                            s.ocr_text_score.clone(),
-                            s.ocr_min_text_height.clone(),
-                            s.ocr_max_text_height.clone(),
-                            s.ocr_max_side_len.clone(),
-                            s.ocr_merge_threshold.clone(),
-                        )
-                    });
-                items.push(
-                    text("OCR tuning — changes apply on the next OCR run.")
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG)
-                        .into(),
-                );
-                items.push(
-                    row![
-                        container(text("Min confidence").size(scale::s(12.0)).color(MUTED_FG))
-                            .width(Length::Fixed(scale::s(150.0))),
-                        text_input("0.7", &text_score)
-                            .on_input(|input| set(move |s| s.ocr_text_score = input.clone()))
-                            .padding(scale::s(4.0))
-                            .size(scale::s(12.0))
-                            .width(Length::Fixed(scale::s(64.0))),
-                    ]
-                    .spacing(scale::s(6.0))
-                    .into(),
-                );
-                items.push(
-                    text("Minimum recognition confidence 0.0–1.0 (text_score). Lower keeps more lines.")
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG)
-                        .into(),
-                );
-                items.push(
-                    row![
-                        container(text("Minimum Text Height").size(scale::s(12.0)).color(MUTED_FG))
-                            .width(Length::Fixed(scale::s(150.0))),
-                        text_input("40", &min_bbox_h)
-                            .on_input(|input| set(move |s| s.ocr_min_text_height = input.clone()))
-                            .padding(scale::s(4.0))
-                            .size(scale::s(12.0))
-                            .width(Length::Fixed(scale::s(64.0))),
-                    ]
-                    .spacing(scale::s(6.0))
-                    .into(),
-                );
-                items.push(
-                    text("Minimum Text (bbox) Height filter (px). Drops boxes shorter than this.")
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG)
-                        .into(),
-                );
-                items.push(
-                    row![
-                        container(text("Maximum Text Height").size(scale::s(12.0)).color(MUTED_FG))
-                            .width(Length::Fixed(scale::s(150.0))),
-                        text_input("100", &max_bbox_h)
-                            .on_input(|input| set(move |s| s.ocr_max_text_height = input.clone()))
-                            .padding(scale::s(4.0))
-                            .size(scale::s(12.0))
-                            .width(Length::Fixed(scale::s(64.0))),
-                    ]
-                    .spacing(scale::s(6.0))
-                    .into(),
-                );
-                items.push(
-                    text("Maximum Text (bbox) Height filter (px). Drops boxes taller than this.")
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG)
-                        .into(),
-                );
-                items.push(
-                    row![
-                        container(text("Merge Distance Threshold").size(scale::s(12.0)).color(MUTED_FG))
-                            .width(Length::Fixed(scale::s(150.0))),
-                        text_input("0.5", &merge_thr)
-                            .on_input(|input| set(move |s| s.ocr_merge_threshold = input.clone()))
-                            .padding(scale::s(4.0))
-                            .size(scale::s(12.0))
-                            .width(Length::Fixed(scale::s(64.0))),
-                    ]
-                    .spacing(scale::s(6.0))
-                    .into(),
-                );
-                items.push(
-                    text("Merge Distance Threshold — gap as ratio of height (0.0–2.0, 0.5 = 50% of height).")
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG)
-                        .into(),
-                );
-                items.push(
-                    row![
-                        container(text("Max side len").size(scale::s(12.0)).color(MUTED_FG))
-                            .width(Length::Fixed(scale::s(150.0))),
-                        text_input("2000", &max_side)
-                            .on_input(|input| set(move |s| s.ocr_max_side_len = input.clone()))
-                            .padding(scale::s(4.0))
-                            .size(scale::s(12.0))
-                            .width(Length::Fixed(scale::s(64.0))),
-                    ]
-                    .spacing(scale::s(6.0))
-                    .into(),
-                );
-                items.push(
-                    text("Max side len — max longer side before resize (max_side_len, px). Larger keeps more detail but uses more RAM.")
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG)
-                        .into(),
-                );
+                cards.push(container(column![card_header(Icon::Sparkles, "Auto Inpaint", Some("Inpaint feature not enabled")), helper_text("Rebuild with --features inpaint.").into()].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
+        }
+    }
+
+    // Manual inpaint
+    {
+        let show_manual = matches_any(query_ref, &["inpaint", "backend", "telea", "lama", "aot", "radius", "manual", "brush"]);
+        if show_manual {
             #[cfg(feature = "inpaint")]
             {
                 let backend = scanlateit_settings::get(|s| s.inpaint_backend);
                 let radius = scanlateit_settings::get(|s| s.inpaint_radius.clone());
-                items.push(
-                    row![
-                        container(text("Inpaint backend").size(scale::s(12.0)).color(MUTED_FG))
-                            .width(Length::Fixed(scale::s(150.0))),
-                        pick_list(
-                            [InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot],
-                            Some(backend),
-                            |backend| set(move |s| s.inpaint_backend = backend),
-                        )
-                        .padding(scale::s(4.0))
-                        .text_size(scale::s(12.0)),
-                    ]
-                    .spacing(scale::s(6.0))
-                    .into(),
-                );
-                items.push(
-                    text("Telea (the `inpaint` crate) needs no model and is instant; \
-                          LaMa is high-quality ONNX for complex backgrounds; \
-                          AOT-GAN (ONNX, inpainting_aot.onnx, pad 8, max 1024) is \
-                          2-4× faster + lower memory than LaMa.")
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG)
-                        .into(),
-                );
-                items.push(
-                    row![
-                        container(text("Telea radius").size(scale::s(12.0)).color(MUTED_FG))
-                            .width(Length::Fixed(scale::s(150.0))),
-                        text_input("5", &radius)
-                            .on_input(|input| set(move |s| s.inpaint_radius = input.clone()))
-                            .padding(scale::s(4.0))
-                            .size(scale::s(12.0))
-                            .width(Length::Fixed(scale::s(64.0))),
-                    ]
-                    .spacing(scale::s(6.0))
-                    .into(),
-                );
-                items.push(
-                    text("How many pixels around the mask Telea samples; larger \
-                          smooths more but blurs. Ignored by LaMa and AOT-GAN.")
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG)
-                        .into(),
-                );
+                let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
+                col.push(card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Telea vs ONNX")).into());
+                col.push(field_row("Backend", pick_list([InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()).into());
+                col.push(helper_text("Telea is instant (no model); LaMa is high-quality ONNX; AOT-GAN is 2-4× faster than LaMa (pad 8, max 1024).").into());
+                col.push(item_separator());
+                col.push(field_row("Telea radius", text_input("5", &radius).on_input(|input| set(move |s| s.inpaint_radius = input.clone())).padding(scale::s(4.0)).size(scale::s(12.0)).width(Length::Fixed(scale::s(80.0))).into()).into());
+                col.push(helper_text("Pixels around mask Telea samples; larger smooths more but blurs. Ignored by LaMa/AOT.").into());
+                cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
-            scrollable(column(items).spacing(scale::s(6.0)))
-                .height(Length::Fill)
-                .into()
+            #[cfg(not(feature = "inpaint"))]
+            {
+                // already pushed auto placeholder if not inpaint; manual not needed
+            }
         }
-        SettingsTab::Translation => {
-            // Single read for both connections and free-only flag to keep the
-            // partition consistent for this frame.
-            let (connections, free_only) =
-                scanlateit_settings::get(|s| (s.connections.clone(), s.free_models_only));
+    }
 
-            // Partition every provider (cloud + local, already in SUPPORTED)
-            // and the two custom slots into connected vs available, preserving
-            // display order but with all connected items on top.  "Same" per
-            // user choice: custom + local share the same sections.
-            let mut connected_rows: Vec<Element<'_, UiEvent>> = Vec::new();
-            let mut available_rows: Vec<Element<'_, UiEvent>> = Vec::new();
-            for provider in translation::SUPPORTED_PROVIDERS.iter() {
-                let conn = connections.get(&provider.id).cloned();
-                let el = provider_row_with_connection(provider, conn.clone());
-                if conn.is_some() {
-                    connected_rows.push(el);
-                } else {
-                    available_rows.push(el);
+    if cards.is_empty() {
+        cards.push(container(column![row![crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG), text(format!("No inpaint settings match “{query}”")).size(scale::s(12.0)).color(MUTED_FG)].spacing(scale::s(6.0)).align_y(iced::Alignment::Center)].spacing(scale::s(6.0))).padding(scale::s(14.0)).style(|_| card_style()).into());
+    }
+    scrollable(column(cards).spacing(scale::s(10.0))).height(Length::Fill).into()
+}
+
+fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
+    let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
+    {
+        let show_auto = matches_any(query, &["inpaint", "auto", "bg", "telea", "lama", "aot", "mixed", "pipeline", "artwork", "gradient", "solid", "automation"]);
+        if show_auto {
+            #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+            {
+                let (auto_inpaint, auto_model, auto_style) = scanlateit_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model, s.auto_style_detect));
+                let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
+                col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("After OCR: style-detect → per bg type")).into());
+                col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
+                col.push(helper_text("Solid keeps bg color, Gradient → Telea, Artwork → LaMa. Mixed needs Auto-detect style.").into());
+                let all_models = [AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot, AutoInpaintModel::Mixed];
+                let available: Vec<AutoInpaintModel> = if auto_style { all_models.to_vec() } else { vec![AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot] };
+                let pick_value = if auto_style || auto_model != AutoInpaintModel::Mixed { Some(auto_model) } else { Some(AutoInpaintModel::Telea) };
+                col.push(row![
+                    container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
+                    pick_list(available, pick_value, move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
+                    if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style { warning_text("Mixed disabled — falling back to Telea.".to_string()) } else { text("").size(scale::s(11.0)).color(MUTED_FG).into() },
+                ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center).into());
+                if !auto_style && auto_model == AutoInpaintModel::Mixed {
+                    col.push(warning_text("Pick Telea, Lama or AOT while Auto-detect style is off; Mixed will auto-fallback to Telea.".to_string()));
                 }
+                col.push(helper_text("Full pipeline runs once when OCR finishes if all toggles are on. Telea in parallel, LaMa/AOT sequentially.").into());
+                cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
-            for (id, label) in [
-                (CUSTOM_OPENAI, "OpenAI-compatible"),
-                (CUSTOM_ANTHROPIC, "Anthropic-compatible"),
-            ] {
-                let conn = connections.get(id).cloned();
-                let el = custom_row_with_connection(id, label, conn.clone());
-                if conn.is_some() {
-                    connected_rows.push(el);
-                } else {
-                    available_rows.push(el);
+            #[cfg(all(feature = "inpaint", not(all(feature = "styling", feature = "segment"))))]
+            {
+                let (auto_inpaint, auto_model) = scanlateit_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model));
+                let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
+                col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("Bg-aware pipeline")).into());
+                col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
+                col.push(helper_text("Needs Styling + Segmentation for full bg-aware pipeline; fallback is Telea.").into());
+                col.push(row![
+                    container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
+                    pick_list([AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot], Some(if auto_model == AutoInpaintModel::Mixed { AutoInpaintModel::Telea } else { auto_model }), move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
+                ].spacing(scale::s(6.0)).into());
+                cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+            }
+            #[cfg(not(feature = "inpaint"))]
+            {
+                cards.push(container(column![card_header(Icon::Sparkles, "Auto Inpaint", Some("Inpaint feature not enabled")), helper_text("Rebuild with --features inpaint.").into()].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+            }
+        }
+    }
+    {
+        let show_manual = matches_any(query, &["inpaint", "backend", "telea", "lama", "aot", "radius", "manual", "brush"]);
+        if show_manual {
+            #[cfg(feature = "inpaint")]
+            {
+                let backend = scanlateit_settings::get(|s| s.inpaint_backend);
+                let radius = scanlateit_settings::get(|s| s.inpaint_radius.clone());
+                let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
+                col.push(card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Telea vs ONNX")).into());
+                col.push(field_row("Backend", pick_list([InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()).into());
+                col.push(helper_text("Telea is instant (no model); LaMa is high-quality ONNX; AOT-GAN is 2-4× faster than LaMa (pad 8, max 1024).").into());
+                col.push(item_separator());
+                col.push(field_row("Telea radius", text_input("5", &radius).on_input(|input| set(move |s| s.inpaint_radius = input.clone())).padding(scale::s(4.0)).size(scale::s(12.0)).width(Length::Fixed(scale::s(80.0))).into()).into());
+                col.push(helper_text("Pixels around mask Telea samples; larger smooths more but blurs. Ignored by LaMa/AOT.").into());
+                cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+            }
+        }
+    }
+    cards
+}
+
+// ---------------------------------------------------------------------------
+// Translation tab — card-grouped + filtered
+// ---------------------------------------------------------------------------
+
+fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
+    let (connections, free_only) =
+        scanlateit_settings::get(|s| (s.connections.clone(), s.free_models_only));
+
+    let q = query.trim().to_lowercase();
+    let query_active = !q.is_empty();
+
+    // helper to test provider match
+    let provider_matches = |id: &str, name: &str| -> bool {
+        if !query_active { return true; }
+        matches_query(&q, &format!("{id} {name}"))
+    };
+    let custom_matches = |id: &str, label: &str| -> bool {
+        if !query_active { return true; }
+        matches_query(&q, &format!("{id} {label}"))
+    };
+
+    // partition with filtering
+    let mut connected_rows: Vec<Element<'static, UiEvent>> = Vec::new();
+    let mut available_rows: Vec<Element<'static, UiEvent>> = Vec::new();
+    let mut connected_ids: Vec<String> = Vec::new();
+    for provider in translation::SUPPORTED_PROVIDERS.iter() {
+        if !provider_matches(&provider.id, &provider.name) { continue; }
+        let conn = connections.get(&provider.id).cloned();
+        let el = provider_row_with_connection(provider, conn.clone());
+        if conn.is_some() {
+            connected_rows.push(el);
+            connected_ids.push(provider.id.clone());
+        } else {
+            available_rows.push(el);
+        }
+    }
+    for (id, label) in [
+        (CUSTOM_OPENAI, "OpenAI-compatible"),
+        (CUSTOM_ANTHROPIC, "Anthropic-compatible"),
+    ] {
+        if !custom_matches(id, label) { continue; }
+        let conn = connections.get(id).cloned();
+        let el = custom_row_with_connection(id, label, conn.clone());
+        if conn.is_some() {
+            connected_rows.push(el);
+            connected_ids.push(id.to_string());
+        } else {
+            available_rows.push(el);
+        }
+    }
+
+    // recommended rows (also filtered)
+    let mut recommended_rows: Vec<Element<'static, UiEvent>> = Vec::new();
+    if !translation::RECOMMENDED.is_empty() {
+        for info in translation::RECOMMENDED.iter() {
+            if connections.contains_key(info.id) { continue; }
+            if let Some(provider) = translation::catalog_provider(info.id) {
+                if !provider_matches(provider.id.as_str(), &provider.name) { continue; }
+                // also match description/docs
+                if query_active && !matches_query(&q, &format!("{} {}", info.description, info.docs_url)) && !matches_query(&q, &provider.name) {
+                    // provider already tested, but description may be the match
+                    // if provider didn't match, we already continued; if it did, keep
+                    // So only skip when neither provider nor description matches.
+                    // To keep logic simple: if query and neither provider nor desc matches, skip
+                    // But provider already passed, so we keep.
                 }
+                recommended_rows.push(recommended_row(provider, info));
             }
+        }
+    }
 
-            let mut rows: Vec<Element<'_, UiEvent>> = Vec::new();
-            rows.push(text("Translation Service").size(scale::s(14.0)).into());
-            rows.push(
-                text("Connect the gateway used by the machine translator. \
-                      Disconnect removes its API key.")
-                    .size(scale::s(12.0))
-                    .color(MUTED_FG)
-                    .into(),
-            );
+    let show_connected = !query_active || !connected_rows.is_empty() || matches_query(&q, "connected");
+    let show_recommended = !translation::RECOMMENDED.is_empty() && (!query_active || !recommended_rows.is_empty() || matches_query(&q, "recommended"));
+    let show_available = !query_active || !available_rows.is_empty() || matches_query(&q, "available");
 
-            // ── Connected section (on top) ──────────────────────────────
-            rows.push(
-                row![
-                    text("Connected").size(scale::s(12.0)).color(Color::WHITE),
-                    space::horizontal(),
-                    text(if connected_rows.is_empty() {
-                        "—".to_string()
-                    } else {
-                        format!("{} connected", connected_rows.len())
-                    })
+    let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
+
+    // intro card (hidden when searching and no match)
+    if !query_active || matches_any(&q, &["translation", "service", "connect", "gateway", "provider"]) {
+        cards.push(
+            container(column![
+                text("Translation Service").size(scale::s(14.0)).color(Color::WHITE),
+                text("Connect the gateway used by the machine translator. Disconnect removes its API key.")
                     .size(scale::s(11.0))
                     .color(MUTED_FG),
-                ]
-                .align_y(iced::Alignment::Center)
-                .into(),
+            ].spacing(scale::s(4.0)))
+            .padding(scale::s(10.0))
+            .style(|_| card_style())
+            .into(),
+        );
+    }
+
+    // Connected card
+    if show_connected {
+        let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
+        content.push(
+            row![
+                crate::icon::lucide(Icon::PlugZap).size(scale::s(14.0)).color(ACCENT),
+                text("Connected").size(scale::s(13.0)).color(Color::WHITE),
+                space::horizontal(),
+                text(if connected_rows.is_empty() { "—".to_string() } else { format!("{} connected", connected_rows.len()) }).size(scale::s(11.0)).color(MUTED_FG),
+            ].align_y(iced::Alignment::Center).spacing(scale::s(6.0)).into()
+        );
+        content.push(item_separator());
+        if connected_rows.is_empty() {
+            content.push(
+                text(if query_active { format!("No connected providers match “{query}”.") } else { "No connected providers — connect one below.".to_string() })
+                    .size(scale::s(11.0)).color(MUTED_FG).into()
             );
-            if connected_rows.is_empty() {
-                rows.push(
-                    text("No connected providers — connect one below.")
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG)
-                        .into(),
-                );
-            } else {
-                let len = connected_rows.len();
-                for (idx, el) in connected_rows.into_iter().enumerate() {
-                    rows.push(el);
-                    if idx + 1 < len {
-                        rows.push(item_separator());
-                    }
-                }
+        } else {
+            let len = connected_rows.len();
+            for (idx, el) in connected_rows.into_iter().enumerate() {
+                content.push(el);
+                if idx + 1 < len { content.push(item_separator()); }
             }
-
-            rows.push(section_separator());
-
-            // ── Recommended section (between Connected and Available) ───
-            // Shown when RECOMMENDED is non-empty. Connected providers are
-            // deduped (they already appear in Connected above); not-connected
-            // ones remain in Available as well per "keep them".
-            if !translation::RECOMMENDED.is_empty() {
-                let mut recommended_rows: Vec<Element<'_, UiEvent>> = Vec::new();
-                for info in translation::RECOMMENDED.iter() {
-                    if connections.contains_key(info.id) {
-                        continue;
-                    }
-                    if let Some(provider) = translation::catalog_provider(info.id) {
-                        recommended_rows.push(recommended_row(provider, info));
-                    }
-                }
-                rows.push(
-                    row![
-                        text("Recommended").size(scale::s(12.0)).color(Color::WHITE),
-                        space::horizontal(),
-                        text(if recommended_rows.is_empty() {
-                            "—".to_string()
-                        } else {
-                            format!("{} recommended", recommended_rows.len())
-                        })
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG),
-                    ]
-                    .align_y(iced::Alignment::Center)
-                    .into(),
-                );
-                rows.push(
-                    text("Not sure where to start? Try one of these recommendations.")
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG)
-                        .into(),
-                );
-                if recommended_rows.is_empty() {
-                    rows.push(
-                        text("All recommended providers connected.")
-                            .size(scale::s(11.0))
-                            .color(MUTED_FG)
-                            .into(),
-                    );
-                } else {
-                    let len = recommended_rows.len();
-                    for (idx, el) in recommended_rows.into_iter().enumerate() {
-                        rows.push(el);
-                        if idx + 1 < len {
-                            rows.push(item_separator());
-                        }
-                    }
-                }
-                rows.push(section_separator());
-            }
-
-            // ── Available section ───────────────────────────────────────
-            rows.push(
-                row![
-                    text("Available").size(scale::s(12.0)).color(Color::WHITE),
-                    space::horizontal(),
-                    text(format!("{} available", available_rows.len()))
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG),
-                ]
-                .align_y(iced::Alignment::Center)
-                .into(),
-            );
-            if available_rows.is_empty() {
-                rows.push(
-                    text("All providers connected.")
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG)
-                        .into(),
-                );
-            } else {
-                let len = available_rows.len();
-                for (idx, el) in available_rows.into_iter().enumerate() {
-                    rows.push(el);
-                    if idx + 1 < len {
-                        rows.push(item_separator());
-                    }
-                }
-            }
-
-            rows.push(section_separator());
-
-            // ── Toggler + Manage models ─────────────────────────────────
-            rows.push(
-                row![
-                    column![
-                        text("Only show free models").size(scale::s(12.0)),
-                        text("Hide paid models from the translation picker.")
-                            .size(scale::s(11.0))
-                            .color(MUTED_FG),
-                    ]
-                    .spacing(scale::s(1.0))
-                    .width(FillLength),
-                    toggler(free_only)
-                        .size(scale::s(20.0))
-                        .style(crate::toggler_style::style)
-                        .on_toggle(|v| set(move |s| s.free_models_only = v)),
-                ]
-                .spacing(scale::s(12.0))
-                .align_y(iced::Alignment::Center)
-                .padding([scale::s(4.0), 0.0])
-                .into(),
-            );
-            rows.push(item_separator());
-            rows.push(
-                row![
-                    column![
-                        text("Filter unused models from the translation dropdown.")
-                            .size(scale::s(11.0))
-                            .color(MUTED_FG),
-                        text("Hide models you never use; deprecated are always hidden.")
-                            .size(scale::s(11.0))
-                            .color(MUTED_FG),
-                    ]
-                    .spacing(scale::s(1.0))
-                    .width(FillLength),
-                    button(text("Manage models…").size(scale::s(11.0)))
-                        .padding([scale::s(3.0), scale::s(8.0)])
-                        .style(crate::panel::button_style)
-            .on_press(UiEvent::ManageModelsOpen),
-                ]
-                .spacing(scale::s(6.0))
-                .align_y(iced::Alignment::Center)
-                .padding([scale::s(4.0), 0.0])
-                .into(),
-            );
-            rows.push(item_separator());
-            rows.push(
-                text("Connections are saved to the app's settings file in the \
-                      system configuration directory.")
-                    .size(scale::s(11.0))
-                    .color(MUTED_FG)
-                    .into(),
-            );
-            scrollable(column(rows).spacing(scale::s(6.0)))
-                .height(Length::Fill)
-                .into()
         }
-        SettingsTab::Appearance => appearance_tab(),
+        cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+    }
+
+    // Recommended card
+    if show_recommended {
+        let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
+        content.push(
+            row![
+                crate::icon::lucide(Icon::Star).size(scale::s(14.0)).color(ACCENT),
+                text("Recommended").size(scale::s(13.0)).color(Color::WHITE),
+                space::horizontal(),
+                text(if recommended_rows.is_empty() { "—".to_string() } else { format!("{} recommended", recommended_rows.len()) }).size(scale::s(11.0)).color(MUTED_FG),
+            ].align_y(iced::Alignment::Center).spacing(scale::s(6.0)).into()
+        );
+        content.push(text("Not sure where to start? Try one of these.").size(scale::s(11.0)).color(MUTED_FG).into());
+        content.push(item_separator());
+        if recommended_rows.is_empty() {
+            content.push(text(if query_active { format!("No recommendations match “{query}”.") } else { "All recommended providers connected.".to_string() }).size(scale::s(11.0)).color(MUTED_FG).into());
+        } else {
+            let len = recommended_rows.len();
+            for (idx, el) in recommended_rows.into_iter().enumerate() {
+                content.push(el);
+                if idx + 1 < len { content.push(item_separator()); }
+            }
+        }
+        cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+    }
+
+    // Available card
+    if show_available {
+        let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
+        content.push(
+            row![
+                crate::icon::lucide(Icon::Globe).size(scale::s(14.0)).color(MUTED_FG),
+                text("Available").size(scale::s(13.0)).color(Color::WHITE),
+                space::horizontal(),
+                text(format!("{} available", available_rows.len())).size(scale::s(11.0)).color(MUTED_FG),
+            ].align_y(iced::Alignment::Center).spacing(scale::s(6.0)).into()
+        );
+        content.push(item_separator());
+        if available_rows.is_empty() {
+            content.push(
+                text(if query_active { format!("No available providers match “{query}”.") } else { "All providers connected.".to_string() }).size(scale::s(11.0)).color(MUTED_FG).into()
+            );
+        } else {
+            let len = available_rows.len();
+            for (idx, el) in available_rows.into_iter().enumerate() {
+                content.push(el);
+                if idx + 1 < len { content.push(item_separator()); }
+            }
+        }
+        cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+    }
+
+    // Options card — only when query matches its keywords or empty
+    if matches_any(&q, &["free", "paid", "filter", "models", "manage", "dropdown", "only show free"]) || !query_active {
+        let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
+        content.push(card_header(Icon::SlidersHorizontal, "Options", None).into());
+        content.push(item_separator());
+        content.push(
+            row![
+                column![
+                    text("Only show free models").size(scale::s(12.0)),
+                    text("Hide paid models from the translation picker.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG),
+                ]
+                .spacing(scale::s(1.0))
+                .width(FillLength),
+                toggler(free_only)
+                    .size(scale::s(20.0))
+                    .style(crate::toggler_style::style)
+                    .on_toggle(|v| set(move |s| s.free_models_only = v)),
+            ]
+            .spacing(scale::s(12.0))
+            .align_y(iced::Alignment::Center)
+            .padding([scale::s(4.0), 0.0])
+            .into(),
+        );
+        content.push(item_separator());
+        content.push(
+            row![
+                column![
+                    text("Filter unused models from the translation dropdown.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG),
+                    text("Hide models you never use; deprecated are always hidden.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG),
+                ]
+                .spacing(scale::s(1.0))
+                .width(FillLength),
+                button(text("Manage models…").size(scale::s(11.0)))
+                    .padding([scale::s(3.0), scale::s(8.0)])
+                    .style(crate::panel::button_style)
+                    .on_press(UiEvent::ManageModelsOpen),
+            ]
+            .spacing(scale::s(6.0))
+            .align_y(iced::Alignment::Center)
+            .padding([scale::s(4.0), 0.0])
+            .into(),
+        );
+        content.push(item_separator());
+        content.push(
+            text("Connections are saved to the app's settings file in the system configuration directory.")
+                .size(scale::s(11.0))
+                .color(MUTED_FG)
+                .into(),
+        );
+        cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+    }
+
+    if cards.is_empty() {
+        cards.push(
+            container(column![
+                row![
+                    crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG),
+                    text(format!("No translation settings match “{query}”")).size(scale::s(12.0)).color(MUTED_FG),
+                ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
+            ].spacing(scale::s(6.0)))
+            .padding(scale::s(14.0))
+            .style(|_| card_style())
+            .into(),
+        );
+    }
+
+    scrollable(column(cards).spacing(scale::s(10.0)))
+        .height(Length::Fill)
+        .into()
+}
+
+fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
+    let (connections, free_only) =
+        scanlateit_settings::get(|s| (s.connections.clone(), s.free_models_only));
+    let q = query.trim().to_lowercase();
+    let query_active = !q.is_empty();
+    let provider_matches = |id: &str, name: &str| -> bool {
+        if !query_active { return true; }
+        matches_query(&q, &format!("{id} {name}"))
+    };
+    let custom_matches = |id: &str, label: &str| -> bool {
+        if !query_active { return true; }
+        matches_query(&q, &format!("{id} {label}"))
+    };
+    let mut connected_rows: Vec<Element<'static, UiEvent>> = Vec::new();
+    let mut available_rows: Vec<Element<'static, UiEvent>> = Vec::new();
+    let mut connected_ids: Vec<String> = Vec::new();
+    for provider in translation::SUPPORTED_PROVIDERS.iter() {
+        if !provider_matches(&provider.id, &provider.name) { continue; }
+        let conn = connections.get(&provider.id).cloned();
+        let el = provider_row_with_connection(provider, conn.clone());
+        if conn.is_some() {
+            connected_rows.push(el);
+            connected_ids.push(provider.id.clone());
+        } else {
+            available_rows.push(el);
+        }
+    }
+    for (id, label) in [
+        (CUSTOM_OPENAI, "OpenAI-compatible"),
+        (CUSTOM_ANTHROPIC, "Anthropic-compatible"),
+    ] {
+        if !custom_matches(id, label) { continue; }
+        let conn = connections.get(id).cloned();
+        let el = custom_row_with_connection(id, label, conn.clone());
+        if conn.is_some() {
+            connected_rows.push(el);
+            connected_ids.push(id.to_string());
+        } else {
+            available_rows.push(el);
+        }
+    }
+    let mut recommended_rows: Vec<Element<'static, UiEvent>> = Vec::new();
+    if !translation::RECOMMENDED.is_empty() {
+        for info in translation::RECOMMENDED.iter() {
+            if connections.contains_key(info.id) { continue; }
+            if let Some(provider) = translation::catalog_provider(info.id) {
+                if !provider_matches(provider.id.as_str(), &provider.name) { continue; }
+                recommended_rows.push(recommended_row(provider, info));
+            }
+        }
+    }
+    let show_connected = !query_active || !connected_rows.is_empty() || matches_query(&q, "connected");
+    let show_recommended = !translation::RECOMMENDED.is_empty() && (!query_active || !recommended_rows.is_empty() || matches_query(&q, "recommended"));
+    let show_available = !query_active || !available_rows.is_empty() || matches_query(&q, "available");
+    let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
+    if !query_active || matches_any(&q, &["translation", "service", "connect", "gateway", "provider"]) {
+        cards.push(
+            container(column![
+                text("Translation Service").size(scale::s(14.0)).color(Color::WHITE),
+                text("Connect the gateway used by the machine translator. Disconnect removes its API key.")
+                    .size(scale::s(11.0))
+                    .color(MUTED_FG),
+            ].spacing(scale::s(4.0)))
+            .padding(scale::s(10.0))
+            .style(|_| card_style())
+            .into(),
+        );
+    }
+    if show_connected {
+        let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
+        content.push(
+            row![
+                crate::icon::lucide(Icon::PlugZap).size(scale::s(14.0)).color(ACCENT),
+                text("Connected").size(scale::s(13.0)).color(Color::WHITE),
+                space::horizontal(),
+                text(if connected_rows.is_empty() { "—".to_string() } else { format!("{} connected", connected_rows.len()) }).size(scale::s(11.0)).color(MUTED_FG),
+            ].align_y(iced::Alignment::Center).spacing(scale::s(6.0)).into()
+        );
+        content.push(item_separator());
+        if connected_rows.is_empty() {
+            content.push(
+                text(if query_active { format!("No connected providers match “{query}”.") } else { "No connected providers — connect one below.".to_string() })
+                    .size(scale::s(11.0)).color(MUTED_FG).into()
+            );
+        } else {
+            let len = connected_rows.len();
+            for (idx, el) in connected_rows.into_iter().enumerate() {
+                content.push(el);
+                if idx + 1 < len { content.push(item_separator()); }
+            }
+        }
+        cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+    }
+    if show_recommended {
+        let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
+        content.push(
+            row![
+                crate::icon::lucide(Icon::Star).size(scale::s(14.0)).color(ACCENT),
+                text("Recommended").size(scale::s(13.0)).color(Color::WHITE),
+                space::horizontal(),
+                text(if recommended_rows.is_empty() { "—".to_string() } else { format!("{} recommended", recommended_rows.len()) }).size(scale::s(11.0)).color(MUTED_FG),
+            ].align_y(iced::Alignment::Center).spacing(scale::s(6.0)).into()
+        );
+        content.push(text("Not sure where to start? Try one of these.").size(scale::s(11.0)).color(MUTED_FG).into());
+        content.push(item_separator());
+        if recommended_rows.is_empty() {
+            content.push(text(if query_active { format!("No recommendations match “{query}”.") } else { "All recommended providers connected.".to_string() }).size(scale::s(11.0)).color(MUTED_FG).into());
+        } else {
+            let len = recommended_rows.len();
+            for (idx, el) in recommended_rows.into_iter().enumerate() {
+                content.push(el);
+                if idx + 1 < len { content.push(item_separator()); }
+            }
+        }
+        cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+    }
+    if show_available {
+        let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
+        content.push(
+            row![
+                crate::icon::lucide(Icon::Globe).size(scale::s(14.0)).color(MUTED_FG),
+                text("Available").size(scale::s(13.0)).color(Color::WHITE),
+                space::horizontal(),
+                text(format!("{} available", available_rows.len())).size(scale::s(11.0)).color(MUTED_FG),
+            ].align_y(iced::Alignment::Center).spacing(scale::s(6.0)).into()
+        );
+        content.push(item_separator());
+        if available_rows.is_empty() {
+            content.push(
+                text(if query_active { format!("No available providers match “{query}”.") } else { "All providers connected.".to_string() }).size(scale::s(11.0)).color(MUTED_FG).into()
+            );
+        } else {
+            let len = available_rows.len();
+            for (idx, el) in available_rows.into_iter().enumerate() {
+                content.push(el);
+                if idx + 1 < len { content.push(item_separator()); }
+            }
+        }
+        cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+    }
+    if matches_any(&q, &["free", "paid", "filter", "models", "manage", "dropdown", "only show free"]) || !query_active {
+        let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
+        content.push(card_header(Icon::SlidersHorizontal, "Options", None).into());
+        content.push(item_separator());
+        content.push(
+            row![
+                column![
+                    text("Only show free models").size(scale::s(12.0)),
+                    text("Hide paid models from the translation picker.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG),
+                ]
+                .spacing(scale::s(1.0))
+                .width(FillLength),
+                toggler(free_only)
+                    .size(scale::s(20.0))
+                    .style(crate::toggler_style::style)
+                    .on_toggle(|v| set(move |s| s.free_models_only = v)),
+            ]
+            .spacing(scale::s(12.0))
+            .align_y(iced::Alignment::Center)
+            .padding([scale::s(4.0), 0.0])
+            .into(),
+        );
+        content.push(item_separator());
+        content.push(
+            row![
+                column![
+                    text("Filter unused models from the translation dropdown.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG),
+                    text("Hide models you never use; deprecated are always hidden.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG),
+                ]
+                .spacing(scale::s(1.0))
+                .width(FillLength),
+                button(text("Manage models…").size(scale::s(11.0)))
+                    .padding([scale::s(3.0), scale::s(8.0)])
+                    .style(crate::panel::button_style)
+                    .on_press(UiEvent::ManageModelsOpen),
+            ]
+            .spacing(scale::s(6.0))
+            .align_y(iced::Alignment::Center)
+            .padding([scale::s(4.0), 0.0])
+            .into(),
+        );
+        content.push(item_separator());
+        content.push(
+            text("Connections are saved to the app's settings file in the system configuration directory.")
+                .size(scale::s(11.0))
+                .color(MUTED_FG)
+                .into(),
+        );
+        cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+    }
+    cards
+}
+
+fn global_search_filtered(query: String) -> Element<'static, UiEvent> {
+    let q = query.as_str();
+    let mut all: Vec<Element<'static, UiEvent>> = Vec::new();
+
+    let g = general_cards(q);
+    if !g.is_empty() {
+        all.extend(g);
+    }
+    let a = appearance_cards(q);
+    if !a.is_empty() {
+        all.extend(a);
+    }
+    let o = ocr_cards(q);
+    if !o.is_empty() {
+        all.extend(o);
+    }
+    let i = inpaint_cards(q);
+    if !i.is_empty() {
+        all.extend(i);
+    }
+    let t = translation_cards(q);
+    if !t.is_empty() {
+        all.extend(t);
+    }
+
+    if all.is_empty() {
+        all.push(
+            container(column![
+                row![
+                    crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG),
+                    text(format!("No settings match “{query}”")).size(scale::s(12.0)).color(MUTED_FG),
+                ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
+                text("Try a different term — e.g. font, ocr, inpaint, translation, automation.").size(scale::s(11.0)).color(MUTED_FG),
+            ].spacing(scale::s(6.0)))
+            .padding(scale::s(14.0))
+            .style(|_| card_style())
+            .into(),
+        );
+    }
+
+    scrollable(column(all).spacing(scale::s(10.0))).height(Length::Fill).into()
+}
+
+/// The field area of the currently selected tab.
+fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent> {
+    let query = state.settings_search().to_string();
+    if !query.trim().is_empty() {
+        return global_search_filtered(query);
+    }
+    match state.settings_tab() {
+        SettingsTab::General => general_tab_filtered(query.clone()),
+        SettingsTab::Appearance => appearance_tab_filtered(query.clone()),
+        SettingsTab::Ocr => ocr_tab_filtered(query.clone()),
+        SettingsTab::Inpaint => inpaint_tab_filtered(query.clone()),
+        SettingsTab::Translation => translation_tab_filtered(query.clone()),
     }
 }
 
@@ -1064,14 +1587,47 @@ pub fn view<'a, S: UiState + ?Sized>(
     state: &'a S,
     base: Element<'a, UiEvent>,
 ) -> Element<'a, UiEvent> {
+    let query = state.settings_search().to_string();
+
     let left = container(
         column![
-            tab_button(state, SettingsTab::General, "General"),
-            tab_button(state, SettingsTab::Appearance, "Appearance"),
-            tab_button(state, SettingsTab::Translation, "Translation"),
+            // ── Sidebar search — top of sidebar, settings-wide ──────
+            column![
+                row![
+                    crate::icon::lucide(Icon::Search).size(scale::s(12.0)).color(MUTED_FG),
+                    text("Search").size(scale::s(11.0)).color(MUTED_FG),
+                ].spacing(scale::s(4.0)).align_y(iced::Alignment::Center),
+                text_input("Filter settings…", &query)
+                    .on_input(UiEvent::SettingsSearch)
+                    .padding([scale::s(6.0), scale::s(8.0)])
+                    .size(scale::s(12.0))
+                    .width(Length::Fill),
+                text("Search all settings")
+                    .size(scale::s(10.0))
+                    .color(MUTED_FG),
+            ].spacing(scale::s(4.0)),
+            rule::horizontal(1)
+                .style(|_| rule::Style {
+                    color: Color::from_rgba8(255, 255, 255, 0.08),
+                    radius: 0.0.into(),
+                    fill_mode: rule::FillMode::Full,
+                    snap: true,
+                }),
+            column![
+                tab_button(state, SettingsTab::General, Icon::Settings, "General"),
+                tab_button(state, SettingsTab::Appearance, Icon::Palette, "Appearance"),
+                tab_button(state, SettingsTab::Ocr, Icon::ScanSearch, "OCR"),
+                tab_button(state, SettingsTab::Inpaint, Icon::Brush, "Inpaint"),
+                tab_button(state, SettingsTab::Translation, Icon::Languages, "Translation"),
+            ]
+            .spacing(scale::s(4.0))
+            .width(Length::Fill),
+            space::vertical().height(Length::Fill),
+            text("Click outside to close").size(scale::s(10.0)).color(Color::from_rgba8(255,255,255,0.35)),
         ]
-        .spacing(scale::s(4.0))
-        .width(Length::Fixed(scale::s(TAB_WIDTH))),
+        .spacing(scale::s(10.0))
+        .height(Length::Fill)
+        .width(Length::Fill),
     )
     .width(Length::Fixed(scale::s(TAB_WIDTH)))
     .height(Length::Fill)
