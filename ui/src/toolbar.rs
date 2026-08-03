@@ -84,6 +84,29 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .gap(scale::s(4.0))
             .into();
 
+    let ocr_active = state.ocr_mode();
+    let ocr_btn = button(
+        crate::icon::lucide(if ocr_active {
+            Icon::X
+        } else {
+            Icon::ScanSearch
+        })
+        .size(scale::s(16.0))
+        .center(),
+    )
+    .width(Length::Fixed(btn_size))
+    .height(Length::Fixed(btn_size))
+    .padding(scale::s(0.0))
+    .style(crate::panel::button_style)
+    .on_press_maybe(
+        (!state.images().is_empty() && !state.running() && !state.translating())
+            .then_some(UiEvent::ManualOcr),
+    );
+    let manual_ocr: Element<'_, UiEvent> =
+        tooltip(ocr_btn, tip(if ocr_active { "Exit manual OCR" } else { "Manual OCR" }), tooltip::Position::Right)
+            .gap(scale::s(4.0))
+            .into();
+
     let settings_btn = button(crate::icon::lucide(Icon::Settings).size(scale::s(16.0)).center())
         .width(Length::Fixed(btn_size))
         .height(Length::Fixed(btn_size))
@@ -95,7 +118,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .gap(scale::s(4.0))
             .into();
 
-    container(column![toggle_text, toggle_inpaint, inpaint, settings]
+    container(column![toggle_text, toggle_inpaint, inpaint, manual_ocr, settings]
         .spacing(scale::s(6.0))
         .padding(scale::s(4.0))
         .align_x(iced::Alignment::Center))

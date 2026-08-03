@@ -54,3 +54,9 @@ pub const SCROLLBAR_THUMB: Color = Color::from_rgba8(255, 255, 255, 0.35);
 /// Inpainting range marquee colors.
 pub const INPAINT_FILL: Color = Color::from_rgba8(92, 190, 255, 0.16);
 pub const INPAINT_STROKE: Color = Color::from_rgba8(92, 190, 255, 1.0);
+
+/// Smallest manual OCR range edge, in image pixels (same as inpaint).
+pub const MIN_OCR_EDGE: f32 = 4.0;
+/// Manual OCR range marquee colors (distinct from inpaint).
+pub const OCR_FILL: Color = Color::from_rgba8(120, 220, 120, 0.16);
+pub const OCR_STROKE: Color = Color::from_rgba8(120, 220, 120, 1.0);

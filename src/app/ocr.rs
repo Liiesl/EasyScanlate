@@ -350,3 +350,179 @@ pub fn handle_ocr_stream_failed(app: &mut App, e: String) -> Task<Message> {
     }
     Task::none()
 }
+
+// ---------------------------------------------------------------------------
+// Manual OCR (toolbar drag, same UX as inpaint, no padding, pixel-perfect)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "ocr")]
+fn start_manual_ocr(app: &mut App, index: usize, rect: iced::Rectangle, engine: ocr::Engine) -> Task<Message> {
+    app.manual_ocring = true;
+    app.status = format!("Manual OCR on image {} …", index + 1);
+    let path = app.images[index].path.clone();
+    let rect_copy = rect;
+    // Manual OCR: no min/max height filter and no confidence filter (text_score = 0).
+    // Keep merge threshold and max side len from settings, but force text_score 0.
+    let (merge_cfg, _cfg) = scanlateit_settings::get(|s| {
+        (
+            ocr::MergeConfig::from_threshold_str(&s.ocr_merge_threshold),
+            ocr::config_with(
+                0.0,
+                s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000),
+            ),
+        )
+    });
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || -> Result<Vec<NewEntry>, String> {
+                // Decode image exactly as stored on disk (EXIF honored by OCR's loader, but for manual crop we use direct decode)
+                let dyn_img = image::ImageReader::open(&path)
+                    .map_err(|e| format!("Failed to open {path}: {e}"))?
+                    .with_guessed_format()
+                    .map_err(|e| format!("Failed to decode {path}: {e}"))?
+                    .decode()
+                    .map_err(|e| format!("Failed to decode {path}: {e}"))?;
+                let rgba = dyn_img.into_rgba8();
+                let (img_w, img_h) = rgba.dimensions();
+                // Integer crop exactly covering `rect` (no padding). Use floor for origin, ceil for far edge, clamped to image bounds.
+                let x0f = rect_copy.x.floor().max(0.0);
+                let y0f = rect_copy.y.floor().max(0.0);
+                let x1f = (rect_copy.x + rect_copy.width).ceil().max(x0f + 1.0);
+                let y1f = (rect_copy.y + rect_copy.height).ceil().max(y0f + 1.0);
+                let x0 = (x0f as u32).min(img_w.saturating_sub(1));
+                let y0 = (y0f as u32).min(img_h.saturating_sub(1));
+                let x1 = (x1f as u32).min(img_w);
+                let y1 = (y1f as u32).min(img_h);
+                let cw = x1.saturating_sub(x0).max(1);
+                let ch = y1.saturating_sub(y0).max(1);
+                // Crop without any context expansion – unlike inpaint which adds 32px.
+                let cropped_rgba = image::imageops::crop_imm(&rgba, x0, y0, cw, ch).to_image();
+                let cropped_rgb = image::DynamicImage::ImageRgba8(cropped_rgba).to_rgb8();
+                let token = ocr::OcrCancellationToken::new();
+                let lines = engine
+                    .run_image_cancellable(&cropped_rgb, &token)
+                    .map_err(|e| format!("Manual OCR failed: {e}"))?;
+                // No height/confidence filter for manual OCR: use raw lines.
+                let mut entries = ocr::to_entries_with(lines, merge_cfg);
+                // Translate from crop-local to original image coordinates (pixel-perfect mapping).
+                for entry in &mut entries {
+                    for p in &mut entry.quad.points {
+                        p[0] += x0 as f32;
+                        p[1] += y0 as f32;
+                    }
+                }
+                Ok(entries)
+            })
+            .await
+            .unwrap_or_else(|e| Err(format!("Manual OCR task cancelled: {e}")))
+        },
+        move |res| Message::ManualOcrFinished(index, res),
+    )
+}
+
+#[cfg(feature = "ocr")]
+pub fn handle_manual_ocr_toggle(app: &mut App) -> Task<Message> {
+    use super::edit::clear_editing;
+    if app.manual_ocring || app.running || app.translating {
+        return Task::none();
+    }
+    if app.images.is_empty() {
+        return Task::none();
+    }
+    clear_editing(app);
+    app.ocr_mode = !app.ocr_mode;
+    if app.ocr_mode {
+        // Mutually exclusive with inpaint
+        app.inpaint_mode = false;
+        app.status = "Manual OCR: drag a rectangle over the text to OCR; click Manual OCR again to cancel.".to_string();
+    } else {
+        app.status = "Manual OCR cancelled.".to_string();
+    }
+    Task::none()
+}
+
+#[cfg(not(feature = "ocr"))]
+pub fn handle_manual_ocr_toggle(app: &mut App) -> Task<Message> {
+    app.status = "OCR is not available in this build.".to_string();
+    Task::none()
+}
+
+#[cfg(feature = "ocr")]
+pub fn handle_manual_ocr_selection(app: &mut App, index: usize, rect: iced::Rectangle) -> Task<Message> {
+    if app.manual_ocring || app.running || app.translating || app.inpainting {
+        return Task::none();
+    }
+    if index >= app.images.len() {
+        return Task::none();
+    }
+    if rect.width < 4.0 || rect.height < 4.0 {
+        app.status = "Manual OCR: selection too small.".to_string();
+        return Task::none();
+    }
+    // Manual OCR engine: force text_score 0 (no confidence filter), keep max_side_len from settings.
+    let cfg = scanlateit_settings::get(|s| {
+        ocr::config_with(
+            0.0,
+            s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000),
+        )
+    });
+    let cached = app.manual_ocr_engine.clone();
+    // Simple cache: reuse if any engine exists (settings change will rebuild on next selection via pending path)
+    if let Some(engine) = cached {
+        return start_manual_ocr(app, index, rect, engine);
+    }
+    app.pending_manual_ocr = Some((index, rect));
+    app.status = "Loading OCR engine for manual OCR…".to_string();
+    Task::perform(async move { ocr::Engine::build_with_config(cfg) }, Message::ManualOcrEngineReady)
+}
+
+#[cfg(not(feature = "ocr"))]
+pub fn handle_manual_ocr_selection(app: &mut App, _index: usize, _rect: iced::Rectangle) -> Task<Message> {
+    app.status = "OCR is not available in this build.".to_string();
+    Task::none()
+}
+
+#[cfg(feature = "ocr")]
+pub fn handle_manual_ocr_engine_ready(app: &mut App, result: Result<ocr::Engine, String>) -> Task<Message> {
+    match result {
+        Ok(engine) => {
+            app.manual_ocr_engine = Some(engine.clone());
+            if let Some((index, rect)) = app.pending_manual_ocr.take() {
+                return start_manual_ocr(app, index, rect, engine);
+            }
+            Task::none()
+        }
+        Err(e) => {
+            app.pending_manual_ocr = None;
+            app.status = format!("Manual OCR engine failed: {e}");
+            Task::none()
+        }
+    }
+}
+
+#[cfg(feature = "ocr")]
+pub fn handle_manual_ocr_finished(app: &mut App, index: usize, result: Result<Vec<NewEntry>, String>) -> Task<Message> {
+    app.manual_ocring = false;
+    app.ocr_mode = false;
+    match result {
+        Ok(entries) => {
+            if entries.is_empty() {
+                app.status = format!("Manual OCR: no text found in selection on image {}.", index + 1);
+                return Task::none();
+            }
+            let count = entries.len();
+            if let Some(image) = app.images.get_mut(index) {
+                let added = image.project.append_ocr(entries);
+                // Request reorder by manual OCR orchestrator: keep translation reading order correct.
+                image.project.reorder_entries_by_position();
+                app.status = format!("Manual OCR: {added} line(s) added to image {} ({} detected).", index + 1, count);
+            } else {
+                app.status = format!("Manual OCR: {count} line(s) detected (image no longer exists).");
+            }
+        }
+        Err(e) => {
+            app.status = format!("Manual OCR failed: {e}");
+        }
+    }
+    Task::none()
+}

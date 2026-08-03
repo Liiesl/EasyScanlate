@@ -187,7 +187,7 @@ pub fn hit_top_decor(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point
         tile.overlays.iter().find(|e| e.selected).map(|e| (index, e))
     })?;
     let id = entry.id;
-    if state.inpaint_mode() {
+    if state.inpaint_mode() || state.ocr_mode() {
         return None;
     }
     let (_, rect) = selected_rect(tiles, state)?;

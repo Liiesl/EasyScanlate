@@ -32,11 +32,11 @@ use scanlateit_model::{EntryId, Quad};
 
 use self::constants::{
     DOUBLE_CLICK_DELAY, DRAG_THRESHOLD, HANDLE_SIZE, MIN_BOX_EDGE, MIN_INPAINT_EDGE,
-    SCROLL_LINE_HEIGHT,
+    MIN_OCR_EDGE, SCROLL_LINE_HEIGHT,
 };
 use self::draw::{
-    draw_inpaint_decorations, draw_inpaint_marquee, draw_overlay_buttons, draw_placeholder,
-    draw_scrollbar, draw_selection_decorations,
+    draw_inpaint_decorations, draw_inpaint_marquee, draw_ocr_marquee, draw_overlay_buttons,
+    draw_placeholder, draw_scrollbar, draw_selection_decorations,
 };
 use self::hit_test::{
     editing_rect, entry_quad, entry_rect, hit_entry, hit_handle, hit_inpaint_toolbar,
@@ -70,6 +70,7 @@ pub struct TileView<
     Q = fn((usize, Rectangle)) -> Message,
     R = fn(f32) -> Message,
     S = fn((usize, usize, InpaintToolbarAction)) -> Message,
+    T = fn((usize, Rectangle)) -> Message,
 > where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -81,6 +82,7 @@ pub struct TileView<
     Q: Fn((usize, Rectangle)) -> Message,
     R: Fn(f32) -> Message,
     S: Fn((usize, usize, InpaintToolbarAction)) -> Message,
+    T: Fn((usize, Rectangle)) -> Message,
 {
     tiles: Vec<TileSpec<'a>>,
     font: Font,
@@ -94,6 +96,7 @@ pub struct TileView<
     on_inpaint_selection: Option<Q>,
     editing: Option<(usize, EntryId)>,
     inpaint_mode: bool,
+    ocr_mode: bool,
     show_inpaint: bool,
     show_overlay_text: bool,
     show_overlay_buttons: bool,
@@ -107,9 +110,10 @@ pub struct TileView<
     selected_inpaint: Option<(usize, usize)>,
     on_inpaint_toolbar: Option<S>,
     inpaint_reveal: Option<(usize, usize)>,
+    on_ocr_selection: Option<T>,
 }
 
-impl<'a, Message, F, G, H, K, L, M, P, Q, R, S> TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T> TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -121,6 +125,7 @@ where
     Q: Fn((usize, Rectangle)) -> Message,
     R: Fn(f32) -> Message,
     S: Fn((usize, usize, InpaintToolbarAction)) -> Message,
+    T: Fn((usize, Rectangle)) -> Message,
 {
     pub fn new(tiles: Vec<TileSpec<'a>>, font: Font) -> Self {
         Self {
@@ -136,6 +141,7 @@ where
             on_scroll_ended: None,
             editing: None,
             inpaint_mode: false,
+            ocr_mode: false,
             show_inpaint: true,
             show_overlay_text: true,
             show_overlay_buttons: true,
@@ -146,6 +152,7 @@ where
             selected_inpaint: None,
             on_inpaint_toolbar: None,
             inpaint_reveal: None,
+            on_ocr_selection: None,
         }
     }
 
@@ -203,8 +210,18 @@ where
         self
     }
 
+    pub fn on_ocr_selection(mut self, f: T) -> Self {
+        self.on_ocr_selection = Some(f);
+        self
+    }
+
     pub fn inpaint_mode(mut self, inpaint_mode: bool) -> Self {
         self.inpaint_mode = inpaint_mode;
+        self
+    }
+
+    pub fn ocr_mode(mut self, ocr_mode: bool) -> Self {
+        self.ocr_mode = ocr_mode;
         self
     }
 
@@ -258,8 +275,8 @@ where
 // Widget impl - delegates geometry/hit-testing/drawing to submodules
 // ---------------------------------------------------------------------------
 
-impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -271,6 +288,7 @@ where
     Q: Fn((usize, Rectangle)) -> Message,
     R: Fn(f32) -> Message,
     S: Fn((usize, usize, InpaintToolbarAction)) -> Message,
+    T: Fn((usize, Rectangle)) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
     fn size(&self) -> Size<Length> {
@@ -304,6 +322,7 @@ where
             || (new_content_height - state.content_height).abs() > f32::EPSILON;
         state.width = new_width;
         state.inpaint_mode = self.inpaint_mode;
+        state.ocr_mode = self.ocr_mode;
         state.content_height = new_content_height;
         state.viewport_height = new_viewport;
         if let Some(anchor) = self.scroll_to {
@@ -409,13 +428,21 @@ where
             } else {
                 None
             };
+            let ocr_selecting = if state.ocr_mode() {
+                match state.interaction {
+                    Interaction::OcrSelecting { index, .. } => Some(index),
+                    _ => None,
+                }
+            } else {
+                None
+            };
             let mut visible_tiles: Vec<usize> = self
                 .tiles
                 .iter()
                 .enumerate()
                 .filter_map(|(index, tile)| {
                     let (y, height) = layout[index];
-                    let is_selecting = inpaint_selecting == Some(index);
+                    let is_selecting = inpaint_selecting == Some(index) || ocr_selecting == Some(index);
                     // Keep the selecting tile visible even when it has no overlays so the
                     // inpaint marquee (rubber band) always has a frame to draw into.
                     let tile_visible = y + height > visible_top && y < visible_bottom;
@@ -447,6 +474,15 @@ where
             // Ensure selecting marquee tile is visible even if overlays hidden (original does, but guard again)
             if visible_tiles.is_empty() && inpaint_selecting.is_some() {
                 if let Some(idx) = inpaint_selecting {
+                    if let Some((y, height)) = layout.get(idx).copied() {
+                        if y + height > visible_top && y < visible_bottom {
+                            visible_tiles.push(idx);
+                        }
+                    }
+                }
+            }
+            if visible_tiles.is_empty() && ocr_selecting.is_some() {
+                if let Some(idx) = ocr_selecting {
                     if let Some((y, height)) = layout.get(idx).copied() {
                         if y + height > visible_top && y < visible_bottom {
                             visible_tiles.push(idx);
@@ -507,6 +543,13 @@ where
                                 if let Interaction::InpaintSelecting { index: selecting, start, current } = state.interaction {
                                     if selecting == index {
                                         draw_inpaint_marquee(&mut overlay_frame, start, current, tile_bounds.size());
+                                    }
+                                }
+                            }
+                            if state.ocr_mode() {
+                                if let Interaction::OcrSelecting { index: selecting, start, current } = state.interaction {
+                                    if selecting == index {
+                                        draw_ocr_marquee(&mut overlay_frame, start, current, tile_bounds.size());
                                     }
                                 }
                             }
@@ -629,6 +672,21 @@ where
                                     let (layout, _) = tile_layout(&self.tiles, state.width);
                                     let content = tile_local_point(&layout, hover_index, local, state.offset);
                                     state.interaction = Interaction::InpaintSelecting {
+                                        index: hover_index,
+                                        start: content,
+                                        current: content,
+                                    };
+                                    shell.capture_event();
+                                    return;
+                                }
+                            }
+                        }
+                        if self.ocr_mode {
+                            if let Some(hover_index) = hit_tile(&self.tiles, state, local) {
+                                if !track_rect(bounds).contains(local) {
+                                    let (layout, _) = tile_layout(&self.tiles, state.width);
+                                    let content = tile_local_point(&layout, hover_index, local, state.offset);
+                                    state.interaction = Interaction::OcrSelecting {
                                         index: hover_index,
                                         start: content,
                                         current: content,
@@ -802,6 +860,32 @@ where
                         }
                     }
                 }
+                if let Interaction::OcrSelecting { index, start, current } = state.interaction {
+                    let tile = &self.tiles[index];
+                    let (layout, _) = tile_layout(&self.tiles, state.width);
+                    let scale = if tile.source_width > 0 {
+                        state.width / tile.source_width as f32
+                    } else {
+                        0.0
+                    };
+                    if scale > 0.0 {
+                        let tile_height = layout.get(index).map(|(_, h)| *h).unwrap_or(0.0);
+                        let x0 = start.x.min(current.x).clamp(0.0, state.width);
+                        let y0 = start.y.min(current.y).clamp(0.0, tile_height);
+                        let x1 = start.x.max(current.x).clamp(0.0, state.width);
+                        let y1 = start.y.max(current.y).clamp(0.0, tile_height);
+                        let rect = Rectangle::new(
+                            Point::new(x0 / scale, y0 / scale),
+                            Size::new((x1 - x0) / scale, (y1 - y0) / scale),
+                        );
+                        if rect.width >= MIN_OCR_EDGE && rect.height >= MIN_OCR_EDGE {
+                            if let Some(callback) = self.on_ocr_selection.as_ref() {
+                                shell.publish(callback((index, rect)));
+                                shell.request_redraw();
+                            }
+                        }
+                    }
+                }
                 if let Interaction::OverlayButtonPressed { button } = state.interaction {
                     if let Some(position) = cursor.position_over(bounds) {
                         let local = local_point(position, bounds);
@@ -843,6 +927,7 @@ where
                         | Interaction::InpaintToolbarPressed { .. }
                         | Interaction::OverlayButtonPressed { .. }
                         | Interaction::InpaintSelecting { .. }
+                        | Interaction::OcrSelecting { .. }
                 ) {
                     state.interaction = Interaction::None;
                     shell.capture_event();
@@ -985,6 +1070,14 @@ where
                         shell.request_redraw();
                         shell.capture_event();
                     }
+                    Interaction::OcrSelecting { index, start, .. } => {
+                        let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        let (layout, _) = tile_layout(&self.tiles, state.width);
+                        let current = tile_local_point(&layout, index, local, state.offset);
+                        state.interaction = Interaction::OcrSelecting { index, start, current };
+                        shell.request_redraw();
+                        shell.capture_event();
+                    }
                     Interaction::ToolbarPressed { .. }
                     | Interaction::InpaintToolbarPressed { .. } => {
                         shell.capture_event();
@@ -1023,7 +1116,8 @@ where
             | Interaction::ToolbarPressed { .. }
             | Interaction::InpaintToolbarPressed { .. }
             | Interaction::OverlayButtonPressed { .. }
-            | Interaction::InpaintSelecting { .. } => mouse::Interaction::Grabbing,
+            | Interaction::InpaintSelecting { .. }
+            | Interaction::OcrSelecting { .. } => mouse::Interaction::Grabbing,
             Interaction::None => {
                 let bounds = layout.bounds();
                 if let Some(position) = cursor.position_over(bounds) {
@@ -1058,7 +1152,7 @@ where
                         if let Some((_, _, handle)) = hit_handle(&self.tiles, state, local) {
                             return handle.cursor();
                         }
-                        if self.inpaint_mode && hit_tile(&self.tiles, state, local).is_some() {
+                        if (self.inpaint_mode || self.ocr_mode) && hit_tile(&self.tiles, state, local).is_some() {
                             return mouse::Interaction::Crosshair;
                         }
                     }
@@ -1072,8 +1166,8 @@ where
     }
 }
 
-impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Q: 'a, R: 'a, S: 'a, Theme, Renderer>
-    From<TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S>> for Element<'a, Message, Theme, Renderer>
+impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Q: 'a, R: 'a, S: 'a, T: 'a, Theme, Renderer>
+    From<TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T>> for Element<'a, Message, Theme, Renderer>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -1085,9 +1179,10 @@ where
     Q: Fn((usize, Rectangle)) -> Message,
     R: Fn(f32) -> Message,
     S: Fn((usize, usize, InpaintToolbarAction)) -> Message,
+    T: Fn((usize, Rectangle)) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
-    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S>) -> Self {
+    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T>) -> Self {
         Self::new(view)
     }
 }

@@ -50,6 +50,7 @@ fn build_viewer<'a, S: UiState + ?Sized>(state: &'a S, tiles: Vec<TileSpec<'a>>,
         viewer = viewer
             .on_entry_clicked(UiEvent::EntryClicked)
             .inpaint_mode(false)
+            .ocr_mode(false)
             .show_inpaint(false)
             .show_overlay_text(false)
             .show_scrollbar(false);
@@ -62,7 +63,9 @@ fn build_viewer<'a, S: UiState + ?Sized>(state: &'a S, tiles: Vec<TileSpec<'a>>,
             .on_toolbar_action(UiEvent::EntryToolbar)
             .on_inpaint_selection(UiEvent::InpaintSelection)
             .on_inpaint_toolbar(UiEvent::InpaintToolbar)
+            .on_ocr_selection(UiEvent::ManualOcrSelection)
             .inpaint_mode(state.inpaint_mode())
+            .ocr_mode(state.ocr_mode())
             .show_inpaint(state.show_inpaint())
             .show_overlay_text(state.show_overlay_text())
             .show_overlay_buttons(false)

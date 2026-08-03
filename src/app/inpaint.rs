@@ -408,6 +408,10 @@ pub fn handle_inpaint_selection(app: &mut App, index: usize, rect: iced::Rectang
     if app.inpainting || app.running || app.translating {
         return Task::none();
     }
+    #[cfg(feature = "ocr")]
+    if app.manual_ocring {
+        return Task::none();
+    }
     let rect_arr = [rect.x, rect.y, rect.width, rect.height];
     let Some(image) = app.images.get(index) else {
         return Task::none();
@@ -676,16 +680,23 @@ pub fn handle_inpaint_toolbar(app: &mut App, image_index: usize, patch_idx: usiz
 }
 
 pub fn handle_inpaint_toggle(app: &mut App) -> Task<Message> {
+    use super::edit::clear_editing;
     if app.inpainting || app.running || app.translating || app.images.is_empty() {
         return Task::none();
     }
+    #[cfg(feature = "ocr")]
+    if app.manual_ocring {
+        return Task::none();
+    }
+    clear_editing(app);
     app.inpaint_mode = !app.inpaint_mode;
-    app.status = if app.inpaint_mode {
-        "Inpaint mode: drag a rectangle over the text to remove; \
+    if app.inpaint_mode {
+        app.ocr_mode = false;
+        app.status = "Inpaint mode: drag a rectangle over the text to remove; \
                    click Inpaint again to cancel."
-            .to_string()
+            .to_string();
     } else {
-        "Inpaint mode cancelled.".to_string()
-    };
+        app.status = "Inpaint mode cancelled.".to_string();
+    }
     Task::none()
 }

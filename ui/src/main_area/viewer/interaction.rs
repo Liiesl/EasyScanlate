@@ -109,6 +109,11 @@ pub enum Interaction {
         start: Point,
         current: Point,
     },
+    OcrSelecting {
+        index: usize,
+        start: Point,
+        current: Point,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -200,6 +200,9 @@ pub enum UiEvent {
     /// Toggle inpainting mode from the panel: the next drag on the page
     /// selects the range to clean.
     Inpaint,
+    /// Toggle manual OCR mode: the next drag on the page selects the region
+    /// to OCR. Mutually exclusive with inpaint.
+    ManualOcr,
     /// Toggle hiding the overlay text drawn over the pages in the main area.
     ToggleOverlayText,
     /// Toggle showing the applied inpainting patches over the pages.
@@ -215,6 +218,10 @@ pub enum UiEvent {
     /// The user finished dragging an inpainting range on `index`'s tile;
     /// `Rectangle` is `(x, y, w, h)` in image pixels.
     InpaintSelection((usize, Rectangle)),
+    /// The user finished dragging a manual OCR range on `index`'s tile;
+    /// `Rectangle` is `(x, y, w, h)` in image pixels. No padding is added
+    /// (unlike inpaint's expanded canvas).
+    ManualOcrSelection((usize, Rectangle)),
     EditAction(text_editor::Action),
     EditRect(Rectangle),
     EditSubmit,

@@ -67,6 +67,23 @@ where
     );
 }
 
+pub fn draw_ocr_marquee<F>(frame: &mut F, start: Point, current: Point, tile: Size)
+where
+    F: geometry::frame::Backend,
+{
+    use super::constants::{OCR_FILL, OCR_STROKE};
+    let x0 = start.x.min(current.x).clamp(0.0, tile.width);
+    let y0 = start.y.min(current.y).clamp(0.0, tile.height);
+    let x1 = start.x.max(current.x).clamp(0.0, tile.width);
+    let y1 = start.y.max(current.y).clamp(0.0, tile.height);
+    let rect = Rectangle::new(Point::new(x0, y0), Size::new(x1 - x0, y1 - y0));
+    frame.fill_rectangle(rect.position(), rect.size(), Fill::from(OCR_FILL));
+    frame.stroke(
+        &Path::rectangle(rect.position(), rect.size()),
+        Stroke::default().with_color(OCR_STROKE).with_width(1.0),
+    );
+}
+
 pub fn draw_action_button<F>(frame: &mut F, rect: Rectangle, icon: Icon, hovered: bool)
 where
     F: geometry::frame::Backend,
@@ -260,7 +277,7 @@ pub fn draw_selection_decorations<'a, F>(
             (entry.bounds[3] - entry.bounds[1]) * scale,
         ),
     );
-    if !state.inpaint_mode() {
+    if !state.inpaint_mode() && !state.ocr_mode() {
         let anchors = handle_anchors(quad);
         for (_, anchor) in anchors {
             let handle = handle_rect(anchor);

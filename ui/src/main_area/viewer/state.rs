@@ -24,6 +24,8 @@ pub struct TileViewState {
     pub keyboard_modifiers: keyboard::Modifiers,
     /// Whether inpainting range drags are enabled.
     pub inpaint_mode: bool,
+    /// Whether manual OCR range drags are enabled.
+    pub ocr_mode: bool,
     /// The last `reveal` request consumed in `layout()`.
     pub last_revealed: Option<(usize, EntryId)>,
     /// The last inpaint reveal consumed in `layout()`.
@@ -42,6 +44,9 @@ impl TileViewState {
     pub fn inpaint_mode(&self) -> bool {
         self.inpaint_mode
     }
+    pub fn ocr_mode(&self) -> bool {
+        self.ocr_mode
+    }
 }
 
 impl Default for TileViewState {
@@ -57,6 +62,7 @@ impl Default for TileViewState {
             last_edit_rect: None,
             keyboard_modifiers: keyboard::Modifiers::default(),
             inpaint_mode: false,
+            ocr_mode: false,
             last_revealed: None,
             last_inpaint_revealed: None,
             last_published_offset: None,

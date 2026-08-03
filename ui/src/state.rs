@@ -68,6 +68,9 @@ pub trait UiState {
     /// Whether inpainting range drags are enabled; when `true` a drag on
     /// any tile selects the range to clean.
     fn inpaint_mode(&self) -> bool;
+    /// Whether manual OCR range drags are enabled; when `true` a drag on
+    /// any tile selects the region to OCR (same UX as inpaint, but without padding).
+    fn ocr_mode(&self) -> bool;
     /// Whether the overlay text is drawn over the pages in the main area.
     fn show_overlay_text(&self) -> bool;
     /// Whether applied inpainting patches are drawn over the pages.

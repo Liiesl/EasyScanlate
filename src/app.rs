@@ -75,6 +75,10 @@ pub enum Message {
     #[cfg(feature = "ocr")]
     ParallelEngineReady(Result<ParallelEngine, String>),
     #[cfg(feature = "ocr")]
+    ManualOcrEngineReady(Result<scanlateit_ocr::Engine, String>),
+    #[cfg(feature = "ocr")]
+    ManualOcrFinished(usize, Result<Vec<NewEntry>, String>),
+    #[cfg(feature = "ocr")]
     OcrStreamRun(Result<ocr_engine::RunEvent, String>),
     #[cfg(feature = "ocr")]
     OcrStreamFailed(String),
@@ -141,6 +145,13 @@ pub struct App {
     pending_inpaint: Option<(usize, String, [f32; 4], Vec<Quad>)>,
     pub(crate) inpainting: bool,
     pub(crate) inpaint_mode: bool,
+    pub(crate) ocr_mode: bool,
+    #[cfg(feature = "ocr")]
+    pub(crate) manual_ocring: bool,
+    #[cfg(feature = "ocr")]
+    manual_ocr_engine: Option<scanlateit_ocr::Engine>,
+    #[cfg(feature = "ocr")]
+    pending_manual_ocr: Option<(usize, Rectangle)>,
     pub(crate) show_overlay_text: bool,
     pub(crate) show_inpaint: bool,
     pub(crate) view_mode: MainAreaMode,
@@ -272,6 +283,13 @@ impl App {
             pending_inpaint: None,
             inpainting: false,
             inpaint_mode: false,
+            ocr_mode: false,
+            #[cfg(feature = "ocr")]
+            manual_ocring: false,
+            #[cfg(feature = "ocr")]
+            manual_ocr_engine: None,
+            #[cfg(feature = "ocr")]
+            pending_manual_ocr: None,
             show_overlay_text: true,
             show_inpaint: true,
             view_mode: MainAreaMode::View,
@@ -446,6 +464,10 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::StartOcr) => ocr::handle_start_ocr(app),
         #[cfg(feature = "ocr")]
         Message::ParallelEngineReady(result) => ocr::handle_parallel_ready(app, result),
+        #[cfg(feature = "ocr")]
+        Message::ManualOcrEngineReady(result) => ocr::handle_manual_ocr_engine_ready(app, result),
+        #[cfg(feature = "ocr")]
+        Message::ManualOcrFinished(index, result) => ocr::handle_manual_ocr_finished(app, index, result),
         #[cfg(feature = "inpaint")]
         Message::InpaintEngineReady(result) => inpaint::handle_inpaint_engine_ready(app, result),
         #[cfg(feature = "styling")]
@@ -765,6 +787,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::Ui(UiEvent::Inpaint) => inpaint::handle_inpaint_toggle(app),
+        Message::Ui(UiEvent::ManualOcr) => ocr::handle_manual_ocr_toggle(app),
         Message::Ui(UiEvent::ToggleOverlayText) => {
             app.show_overlay_text = !app.show_overlay_text;
             app.status = if app.show_overlay_text {
@@ -803,6 +826,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::EntryToolbar((index, id, action))) => edit::handle_entry_toolbar(app, index, id, action),
         Message::Ui(UiEvent::EntryMoved((index, id, quad))) => edit::handle_entry_moved(app, index, id, quad),
         Message::Ui(UiEvent::InpaintSelection((index, rect))) => inpaint::handle_inpaint_selection(app, index, rect),
+        Message::Ui(UiEvent::ManualOcrSelection((index, rect))) => ocr::handle_manual_ocr_selection(app, index, rect),
         Message::Ui(UiEvent::EditAction(action)) => edit::handle_edit_action(app, action),
         Message::Ui(UiEvent::EditRect(rect)) => edit::handle_edit_rect(app, rect),
         Message::Ui(UiEvent::EditSubmit) => edit::handle_edit_submit(app),

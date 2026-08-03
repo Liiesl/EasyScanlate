@@ -132,6 +132,10 @@ impl UiState for App {
         self.inpaint_mode
     }
 
+    fn ocr_mode(&self) -> bool {
+        self.ocr_mode
+    }
+
     fn show_overlay_text(&self) -> bool {
         self.show_overlay_text
     }
