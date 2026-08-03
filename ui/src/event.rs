@@ -182,6 +182,10 @@ pub enum UiEvent {
     /// translation for that entry. The result replaces the entry's text in
     /// the selected profile.
     RetranslateEntry((usize, EntryId)),
+    /// Request to reorder OCR entries by image file then visual Y→X (top
+    /// first, left→right). Model operation — future OCR-entry modal will emit
+    /// this; handler loops every image's `Project::reorder_entries_by_position`.
+    ReorderEntries,
     EntryMoved((usize, EntryId, Quad)),
     /// A button of the selection toolbar under the selected entry.
     EntryToolbar((usize, EntryId, ToolbarAction)),

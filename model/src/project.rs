@@ -104,6 +104,40 @@ impl Project {
         self.ocr.soft_delete(entry_id)
     }
 
+    /// Reorder all OCR entries so the highest (smallest `min_y`) comes first,
+    /// tie-broken by smallest `min_x` (left to right), then by `EntryId`.
+    /// Uses each entry's current visual quad (`view_quad` fallback to OCR quad)
+    /// so a user-dragged box is ordered where it appears on the image.
+    /// Stable sort; touches every entry including soft-deleted ones, so
+    /// `ocr.all()` and `ocr.visible()` both reflect the new order — important
+    /// for translation which iterates `visible()` per image.
+    pub fn reorder_entries_by_position(&mut self) {
+        // Snapshot view_quads to avoid borrowing `self` inside the comparator
+        // that mutably borrows `self.ocr`.
+        let view_quads = self.view_quads.clone();
+        self.ocr.sort_by(|a, b| {
+            let qa = view_quads
+                .get(&a.id)
+                .copied()
+                .unwrap_or(a.quad)
+                .bounds();
+            let qb = view_quads
+                .get(&b.id)
+                .copied()
+                .unwrap_or(b.quad)
+                .bounds();
+            qa[1]
+                .partial_cmp(&qb[1])
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    qa[0]
+                        .partial_cmp(&qb[0])
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then_with(|| a.id.cmp(&b.id))
+        });
+    }
+
     /// Ensures a profile named `profile_name` exists, selects it and sets the
     /// entry's translated text in it. Returns the profile id.
     pub fn store_translation(
@@ -341,5 +375,124 @@ mod tests {
         project.revert_transform(id);
         let entry = project.ocr.get(id).unwrap();
         assert_eq!(project.view_quad(entry), entry.quad);
+    }
+
+    fn quad_at(min_x: f32, min_y: f32) -> Quad {
+        Quad {
+            points: [
+                [min_x, min_y],
+                [min_x + 10.0, min_y],
+                [min_x + 10.0, min_y + 10.0],
+                [min_x, min_y + 10.0],
+            ],
+        }
+    }
+
+    #[test]
+    fn reorder_entries_by_position_sorts_by_y_then_x() {
+        let mut project = Project::new();
+        project.ocr.append(NewEntry {
+            source: crate::EntrySource::AutoOcr,
+            text: "bottom".into(),
+            score: 0.9,
+            quad: quad_at(0.0, 100.0),
+        });
+        project.ocr.append(NewEntry {
+            source: crate::EntrySource::AutoOcr,
+            text: "top".into(),
+            score: 0.9,
+            quad: quad_at(0.0, 10.0),
+        });
+        project.ocr.append(NewEntry {
+            source: crate::EntrySource::AutoOcr,
+            text: "middle".into(),
+            score: 0.9,
+            quad: quad_at(0.0, 50.0),
+        });
+        project.reorder_entries_by_position();
+        let texts: Vec<&str> = project.ocr.visible().map(|e| e.text.as_str()).collect();
+        assert_eq!(texts, vec!["top", "middle", "bottom"]);
+    }
+
+    #[test]
+    fn reorder_entries_by_position_tie_breaks_by_x_left_to_right() {
+        let mut project = Project::new();
+        project.ocr.append(NewEntry {
+            source: crate::EntrySource::AutoOcr,
+            text: "right".into(),
+            score: 0.9,
+            quad: quad_at(100.0, 10.0),
+        });
+        project.ocr.append(NewEntry {
+            source: crate::EntrySource::AutoOcr,
+            text: "left".into(),
+            score: 0.9,
+            quad: quad_at(10.0, 10.0),
+        });
+        project.ocr.append(NewEntry {
+            source: crate::EntrySource::AutoOcr,
+            text: "center".into(),
+            score: 0.9,
+            quad: quad_at(50.0, 10.0),
+        });
+        project.reorder_entries_by_position();
+        let texts: Vec<&str> = project.ocr.visible().map(|e| e.text.as_str()).collect();
+        assert_eq!(texts, vec!["left", "center", "right"]);
+    }
+
+    #[test]
+    fn reorder_entries_by_position_uses_view_quad_when_overridden() {
+        let mut project = Project::new();
+        let low_id = project.ocr.append(NewEntry {
+            source: crate::EntrySource::AutoOcr,
+            text: "low".into(),
+            score: 0.9,
+            quad: quad_at(0.0, 100.0),
+        });
+        let high_id = project.ocr.append(NewEntry {
+            source: crate::EntrySource::AutoOcr,
+            text: "high".into(),
+            score: 0.9,
+            quad: quad_at(0.0, 10.0),
+        });
+        // drag "low" to the top via view_quad
+        project.set_view_quad(low_id, quad_at(0.0, 5.0));
+        // visible before reorder is insertion order [low, high]
+        assert_eq!(
+            project.ocr.visible().map(|e| e.text.as_str()).collect::<Vec<_>>(),
+            vec!["low", "high"]
+        );
+        project.reorder_entries_by_position();
+        // after reorder, "low" (now at y=5 via view_quad) should be first
+        let texts: Vec<&str> = project.ocr.visible().map(|e| e.text.as_str()).collect();
+        assert_eq!(texts, vec!["low", "high"]);
+        // ensure view_quad is still respected
+        assert!(project.has_view_quad(low_id));
+        assert!(!project.has_view_quad(high_id));
+    }
+
+    #[test]
+    fn reorder_entries_by_position_keeps_deleted_but_sorts_them() {
+        let mut project = Project::new();
+        let bottom = project.ocr.append(NewEntry {
+            source: crate::EntrySource::AutoOcr,
+            text: "bottom".into(),
+            score: 0.9,
+            quad: quad_at(0.0, 100.0),
+        });
+        let top = project.ocr.append(NewEntry {
+            source: crate::EntrySource::AutoOcr,
+            text: "top".into(),
+            score: 0.9,
+            quad: quad_at(0.0, 10.0),
+        });
+        project.delete_entry(top);
+        project.reorder_entries_by_position();
+        let all: Vec<&str> = project.ocr.all().map(|e| e.text.as_str()).collect();
+        assert_eq!(all, vec!["top", "bottom"]);
+        let visible: Vec<&str> = project.ocr.visible().map(|e| e.text.as_str()).collect();
+        assert_eq!(visible, vec!["bottom"]);
+        assert!(project.ocr.get(top).unwrap().deleted);
+        assert!(!project.ocr.get(bottom).unwrap().deleted);
     }
 }

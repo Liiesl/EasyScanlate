@@ -746,6 +746,24 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::InpaintRepaint(pair)) => inpaint::handle_inpaint_repaint(app, pair.0, pair.1),
         Message::Ui(UiEvent::InpaintToolbar((image_index, patch_idx, action))) => inpaint::handle_inpaint_toolbar(app, image_index, patch_idx, action),
         Message::Ui(UiEvent::RetranslateEntry(pair)) => translation::handle_retranslate_entry(app, pair.0, pair.1),
+        Message::Ui(UiEvent::ReorderEntries) => {
+            if app.images.is_empty() {
+                app.status = "No images to reorder.".to_string();
+                return Task::none();
+            }
+            for image in &mut app.images {
+                image.project.reorder_entries_by_position();
+            }
+            // Per-image file order is the `images` vec order; within each file
+            // entries are now Y→X (top first, left→right) by view-quad bounds.
+            // Translation iterates `visible()` per image, so it immediately
+            // benefits — no translation cache to invalidate.
+            app.status = format!(
+                "Reordered {} image(s) by position (higher first, left to right).",
+                app.images.len()
+            );
+            Task::none()
+        }
         Message::Ui(UiEvent::Inpaint) => inpaint::handle_inpaint_toggle(app),
         Message::Ui(UiEvent::ToggleOverlayText) => {
             app.show_overlay_text = !app.show_overlay_text;
