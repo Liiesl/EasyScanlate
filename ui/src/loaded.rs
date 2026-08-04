@@ -7,6 +7,7 @@ use crate::main_area::decode::PageDecode;
 /// One in-memory inpainting result: the reconstructed pixels of a drawn
 /// range, layered over the original image while the app runs. Never written
 /// to disk.
+#[derive(Debug, Clone)]
 pub struct InpaintLayer {
     /// The covered range `[x, y, w, h]` in image pixels.
     pub bounds: [f32; 4],
@@ -19,6 +20,7 @@ pub struct InpaintLayer {
 /// One loaded image plus everything the viewer needs that the model doesn't
 /// know about (per-image canvas cache). Geometry (`width/height/path`) is
 /// derived from the chapter-wide `Project` via `image_id`.
+#[derive(Debug, Clone)]
 pub struct LoadedImage {
     pub image_id: ImageId,
     pub decode: PageDecode,

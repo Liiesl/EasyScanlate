@@ -14,7 +14,7 @@ use super::{
 /// Every `OcrEntry` carries `image_id: ImageId` — `EntryId` is globally
 /// unique within the chapter `Project` (single `OcrResult.next_id`), and
 /// `Profiles` is shared across all images.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Project {
     /// Images in this chapter, insertion order. Immutable after add.
     images: Vec<ImageMeta>,
@@ -72,6 +72,34 @@ impl Project {
 
     pub fn image_count(&self) -> usize {
         self.images.len()
+    }
+
+    /// Monotonic next image id.
+    pub fn next_image_id(&self) -> u64 {
+        self.next_image_id
+    }
+
+    /// All per-entry style overrides (for persistence).
+    pub fn styles(&self) -> &HashMap<EntryId, EntryStyle> {
+        &self.styles
+    }
+
+    /// All view-quad overrides (for persistence).
+    pub fn view_quads(&self) -> &HashMap<EntryId, Quad> {
+        &self.view_quads
+    }
+
+    /// Reconstruct from raw parts (for persistence).
+    pub fn from_raw(
+        images: Vec<ImageMeta>,
+        next_image_id: u64,
+        ocr: OcrResult,
+        profiles: Profiles,
+        styles: HashMap<EntryId, EntryStyle>,
+        view_quads: HashMap<EntryId, Quad>,
+        extras: Extras,
+    ) -> Self {
+        Self { images, next_image_id, ocr, profiles, styles, view_quads, extras }
     }
 
     /// Append entries for `image_id`. `EntryId` remains globally unique.

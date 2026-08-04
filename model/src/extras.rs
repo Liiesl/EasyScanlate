@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use super::{EntryId, ImageId};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Extras {
     /// Free-form notes attached to entries (e.g. translation notes).
     pub notes: HashMap<EntryId, String>,

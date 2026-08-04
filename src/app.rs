@@ -52,6 +52,7 @@ pub mod segment;
 pub mod pipeline;
 pub mod translation;
 pub mod settings;
+pub mod mmtl;
 pub mod view;
 
 use layout::{PaneKind, SidePaneKind, StylingPaneKind};
@@ -119,6 +120,10 @@ pub enum Message {
         Result<Vec<String>, String>,
     ),
     RetranslateFinished((usize, EntryId), Result<String, String>),
+    MmtlSavePicked(Option<String>),
+    MmtlOpenPicked(Option<String>),
+    MmtlSaved(Result<String, String>),
+    MmtlLoaded(Result<(Project, Vec<LoadedImage>, String, Option<std::sync::Arc<tempfile::TempDir>>), String>),
 }
 
 impl From<UiEvent> for Message {
@@ -231,6 +236,8 @@ pub struct App {
     pub(crate) panes: pane_grid::State<PaneKind>,
     pub(crate) side_panes: pane_grid::State<SidePaneKind>,
     pub(crate) styling_panes: pane_grid::State<StylingPaneKind>,
+    pub(crate) mmtl_path: Option<std::path::PathBuf>,
+    pub(crate) mmtl_temp_dir: Option<std::sync::Arc<tempfile::TempDir>>,
     pub frame: NativeFrame,
 }
 
@@ -397,6 +404,8 @@ impl App {
                 panes.resize(split, STYLING_TOP_RATIO);
                 panes
             },
+            mmtl_path: None,
+            mmtl_temp_dir: None,
         }
     }
 }
@@ -874,6 +883,13 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::SettingsChanged) => settings::handle_settings_changed(app),
         Message::Ui(UiEvent::SettingEdit(edit)) => settings::handle_setting_edit(app, edit),
         Message::Ui(UiEvent::OpenUrl(url)) => settings::handle_open_url(app, url),
+        Message::Ui(UiEvent::SaveProject) => mmtl::handle_save(app),
+        Message::Ui(UiEvent::SaveProjectAs) => mmtl::handle_save_as(app),
+        Message::Ui(UiEvent::OpenProject) => mmtl::handle_open(app),
+        Message::MmtlSavePicked(picked) => mmtl::handle_save_picked(app, picked),
+        Message::MmtlOpenPicked(picked) => mmtl::handle_open_picked(app, picked),
+        Message::MmtlSaved(result) => mmtl::handle_saved(app, result),
+        Message::MmtlLoaded(result) => mmtl::handle_loaded(app, result),
         Message::TranslateFinished(jobs, result) => translation::handle_translate_finished(app, jobs, result),
         Message::RetranslateFinished((index, entry_id), result) => translation::handle_retranslate_finished(app, index, entry_id, result),
     };
@@ -882,14 +898,38 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
 
 pub fn subscription(app: &App) -> Subscription<Message> {
     let frame_sub = app.frame.subscription().map(Message::Frame);
+    let keys = iced::event::listen().filter_map(|event| {
+        if let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event {
+            if modifiers.control() {
+                match key.as_ref() {
+                    iced::keyboard::Key::Character(c) if c == "s" || c == "S" => {
+                        if modifiers.shift() {
+                            Some(Message::Ui(UiEvent::SaveProjectAs))
+                        } else {
+                            Some(Message::Ui(UiEvent::SaveProject))
+                        }
+                    }
+                    iced::keyboard::Key::Character(c) if c == "o" || c == "O" => {
+                        Some(Message::Ui(UiEvent::OpenProject))
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
     #[cfg(feature = "ocr")]
     if app.running {
         return Subscription::batch([
             frame_sub,
+            keys,
             iced::time::every(Duration::from_millis(16)).map(|_| Message::OcrTick),
         ]);
     }
-    Subscription::batch([frame_sub])
+    Subscription::batch([frame_sub, keys])
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {

@@ -46,6 +46,7 @@ pub struct DecodedPage {
 }
 
 /// One decode tier of a page.
+#[derive(Debug, Clone)]
 pub enum Tier {
     /// No decode has been requested yet.
     Absent,
@@ -61,6 +62,7 @@ pub enum Tier {
 ///
 /// The thumb tier is decoded once and never freed; the full tier is decoded
 /// near the settled viewport and evicted when it scrolls far away.
+#[derive(Debug, Clone)]
 pub struct PageDecode {
     pub thumb: Tier,
     pub full: Tier,

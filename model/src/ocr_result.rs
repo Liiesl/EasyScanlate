@@ -7,7 +7,7 @@
 
 use super::{EntryId, ImageId, NewEntry, OcrEntry};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct OcrResult {
     entries: Vec<OcrEntry>,
     next_id: u64,
@@ -57,6 +57,21 @@ impl OcrResult {
 
     pub fn get(&self, id: EntryId) -> Option<&OcrEntry> {
         self.entries.iter().find(|e| e.id == id)
+    }
+
+    /// All entries (including deleted), in storage order.
+    pub fn entries(&self) -> &[OcrEntry] {
+        &self.entries
+    }
+
+    /// Monotonic next id (one past the highest assigned `EntryId.0`).
+    pub fn next_id(&self) -> u64 {
+        self.next_id
+    }
+
+    /// Reconstruct from raw parts (for persistence).
+    pub fn from_raw(entries: Vec<OcrEntry>, next_id: u64) -> Self {
+        Self { entries, next_id }
     }
 
     /// Non-deleted entries for `image_id` in insertion order.

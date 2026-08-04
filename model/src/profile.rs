@@ -63,6 +63,16 @@ impl Profile {
         self.deltas.get(&entry_id)
     }
 
+    /// All deltas (for persistence).
+    pub fn deltas(&self) -> &std::collections::HashMap<EntryId, EntryDelta> {
+        &self.deltas
+    }
+
+    /// Reconstruct from raw parts (for persistence).
+    pub fn from_raw(id: ProfileId, name: String, deltas: std::collections::HashMap<EntryId, EntryDelta>) -> Self {
+        Self { id, name, deltas }
+    }
+
     fn prune(&mut self, entry_id: EntryId) {
         let empty = self
             .deltas
@@ -188,6 +198,16 @@ impl Profiles {
 
     pub fn len(&self) -> usize {
         self.profiles.len()
+    }
+
+    /// Monotonic next id.
+    pub fn next_id(&self) -> u64 {
+        self.next_id
+    }
+
+    /// Reconstruct from raw parts (for persistence).
+    pub fn from_raw(profiles: Vec<Profile>, selected: ProfileId, next_id: u64) -> Self {
+        Self { profiles, selected, next_id }
     }
 }
 

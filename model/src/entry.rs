@@ -6,6 +6,11 @@ pub struct ImageId(pub u64);
 /// Metadata for one image in a chapter `Project`. Immutable after `Project`
 /// creation (images are append-only, like `OcrResult` entries); the pixels and
 /// decode cache live outside the model.
+///
+/// At runtime `path` is an absolute filesystem path (original file or
+/// extracted temp dir after `.mmtl` load). Inside `.mmtl`/`project.xml` it is
+/// stored zip-relative as `images/<id>_<basename>` and resolved to absolute on
+/// load (`mmtl/src/zip.rs`).
 #[derive(Debug, Clone)]
 pub struct ImageMeta {
     pub id: ImageId,

@@ -1,0 +1,13 @@
+[package]
+name = "scanlateit-mmtl"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+scanlateit-model = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+quick-xml = { version = "0.36", features = ["serialize"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+tempfile = { workspace = true }
+image = { workspace = true }

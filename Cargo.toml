@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["model", "inpaint", "ocr", "styling", "translation", "ui", "settings", "segment"]
+members = ["model", "inpaint", "ocr", "styling", "translation", "ui", "settings", "segment", "mmtl"]
 resolver = "3"
 exclude = ["iced", "rapidocr-core", "NeverLiieIcedWidgets"]
 
@@ -47,6 +47,7 @@ scanlateit-styling = { path = "styling" }
 scanlateit-translation = { path = "translation" }
 scanlateit-segment = { path = "segment" }
 scanlateit-ui = { path = "ui", default-features = false }
+scanlateit-mmtl = { path = "mmtl" }
 neverliie-iced-widgets = { path = "NeverLiieIcedWidgets" }
 rapidocr-core = { version = "0.2.2", default-features = false }
 
@@ -84,6 +85,8 @@ scanlateit-styling = { workspace = true, optional = true }
 scanlateit-translation = { workspace = true, optional = true }
 scanlateit-segment = { workspace = true, optional = true }
 scanlateit-ui = { workspace = true }
+scanlateit-mmtl = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true }
 fontdb = { workspace = true }
 open = { workspace = true }
