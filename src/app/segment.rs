@@ -19,18 +19,32 @@ pub fn start_segment_filter(app: &mut App) -> Task<Message> {
             let dims: Vec<(u32, u32)> = app
                 .images
                 .iter()
-                .map(|img| (img.width as u32, img.height as u32))
+                .map(|img| {
+                    app.project
+                        .image(img.image_id)
+                        .map(|m| (m.width as u32, m.height as u32))
+                        .unwrap_or((0, 0))
+                })
                 .collect();
-            let paths: Vec<String> = app.images.iter().map(|img| img.path.clone()).collect();
+            let paths: Vec<String> = app
+                .images
+                .iter()
+                .map(|img| {
+                    app.project
+                        .image(img.image_id)
+                        .map(|m| m.path.clone())
+                        .unwrap_or_default()
+                })
+                .collect();
             let ocr_boxes: Vec<Vec<([f32; 4], EntryId)>> = app
                 .images
                 .iter()
                 .map(|img| {
                     let image_id = img.image_id;
-                    img.project
+                    app.project
                         .ocr
                         .visible_for(image_id)
-                        .map(|e| (img.project.view_quad(e).bounds(), e.id))
+                        .map(|e| (app.project.view_quad(e).bounds(), e.id))
                         .collect()
                 })
                 .collect();
@@ -159,8 +173,8 @@ pub fn handle_filtered(
         Ok(to_delete) => {
             let n = to_delete.len();
             for (idx, id) in to_delete {
-                if let Some(img) = app.images.get_mut(idx) {
-                    img.project.delete_entry(id);
+                if idx < app.images.len() {
+                    app.project.delete_entry(id);
                     if app.selected == Some((idx, id)) {
                         app.selected = None;
                     }

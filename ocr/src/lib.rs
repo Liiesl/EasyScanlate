@@ -613,9 +613,23 @@ pub struct RunResult {
 }
 
 impl RunResult {
-    /// Appends this run's per-page entries to the projects (indexed by page)
-    /// and returns the appended count.
-    pub fn commit_entries(&self, projects: &mut [Project]) -> usize {
+    /// Appends this run's per-page entries to the chapter-wide `project` and
+    /// returns the appended count. `page` indexes `project.images()` (insertion
+    /// order equals `App.images` order).
+    pub fn commit_entries(&self, project: &mut Project) -> usize {
+        self.per_page
+            .iter()
+            .map(|(page, entries)| {
+                let Some(meta) = project.images().get(*page) else { return 0; };
+                project.append_ocr_for_image(meta.id, entries.clone())
+            })
+            .sum()
+    }
+
+    /// Legacy helper: appends to a slice of per-image projects (drift). Prefer
+    /// `commit_entries(&mut Project)`; this is kept for tests that still use the old shape.
+    #[allow(dead_code)]
+    pub fn commit_entries_to_slice(&self, projects: &mut [Project]) -> usize {
         self.per_page
             .iter()
             .map(|(page, entries)| {
@@ -629,10 +643,21 @@ impl RunResult {
 }
 
 impl BoundaryState {
-    /// Appends every held candidate to its page's project and returns the
-    /// appended count. Used when a run fails, is cancelled or never starts:
-    /// the captured bubbles must not be lost.
-    pub fn commit(&self, projects: &mut [Project]) -> usize {
+    /// Appends every held candidate to the chapter-wide `project` and returns
+    /// the appended count.
+    pub fn commit(&self, project: &mut Project) -> usize {
+        self.candidates
+            .iter()
+            .map(|candidate| {
+                let Some(meta) = project.images().get(candidate.page) else { return 0; };
+                project.append_ocr_for_image(meta.id, vec![candidate.entry.clone()])
+            })
+            .sum()
+    }
+
+    /// Legacy helper for per-image slice.
+    #[allow(dead_code)]
+    pub fn commit_to_slice(&self, projects: &mut [Project]) -> usize {
         self.candidates
             .iter()
             .map(|candidate| {
@@ -1974,10 +1999,10 @@ mod tests {
 
     #[test]
     fn commit_entries_appends_per_page_entries_and_counts() {
-        let mut projects = [Project::new(), Project::new()];
+        let mut project = Project::new();
         // Register images so append_ocr_for_image has an ImageId to use
-        let id0 = projects[0].add_image("p0.png", 100.0, 100.0);
-        let id1 = projects[1].add_image("p1.png", 100.0, 100.0);
+        let id0 = project.add_image("p0.png", 100.0, 100.0);
+        let id1 = project.add_image("p1.png", 100.0, 100.0);
         let result = RunResult {
             per_page: vec![
                 (0, vec![entry("a")]),
@@ -1986,15 +2011,15 @@ mod tests {
             ],
             held: None,
         };
-        assert_eq!(result.commit_entries(&mut projects), 3, "out-of-range page skipped");
-        assert_eq!(projects[0].ocr.visible_count_for(id0), 1);
-        assert_eq!(projects[1].ocr.visible_count_for(id1), 2);
+        assert_eq!(result.commit_entries(&mut project), 3, "out-of-range page skipped");
+        assert_eq!(project.ocr.visible_count_for(id0), 1);
+        assert_eq!(project.ocr.visible_count_for(id1), 2);
     }
 
     #[test]
     fn boundary_state_commit_appends_held_candidates() {
-        let mut projects = [Project::new()];
-        let id0 = projects[0].add_image("p0.png", 100.0, 100.0);
+        let mut project = Project::new();
+        let id0 = project.add_image("p0.png", 100.0, 100.0);
         let state = BoundaryState {
             candidates: vec![
                 BoundaryCandidate { canvas_quad: [0.0, 0.0, 1.0, 1.0], entry: entry("a"), page: 0 },
@@ -2004,9 +2029,9 @@ mod tests {
             width: 100,
             boundary: 600,
         };
-        assert_eq!(state.commit(&mut projects), 2, "out-of-range page skipped");
-        assert_eq!(projects[0].ocr.visible_count_for(id0), 2);
-        let texts: Vec<String> = projects[0].ocr.all_for(id0).map(|e| e.text.clone()).collect();
+        assert_eq!(state.commit(&mut project), 2, "out-of-range page skipped");
+        assert_eq!(project.ocr.visible_count_for(id0), 2);
+        let texts: Vec<String> = project.ocr.all_for(id0).map(|e| e.text.clone()).collect();
         assert_eq!(texts, vec!["a".to_string(), "b".to_string()]);
     }
 }

@@ -6,12 +6,13 @@ use scanlateit_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
 use crate::connect::ConnectModal;
 use crate::event::{EditOrigin, MainAreaMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
 use crate::loaded::LoadedImage;
-use scanlateit_model::ProfileId;
+use scanlateit_model::{ProfileId, Project};
 
 /// Read-only view of the app state that the widgets render from. Implemented
 /// by the app for its own state type; the ui crate never depends on the app.
 pub trait UiState {
     fn images(&self) -> &[LoadedImage];
+    fn project(&self) -> &Project;
     fn running(&self) -> bool;
     fn translating(&self) -> bool;
     fn status(&self) -> &str;

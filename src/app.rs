@@ -127,9 +127,9 @@ impl From<UiEvent> for Message {
     }
 }
 
-/// Session state: one loaded image plus everything iced/OCR related that the
-/// model doesn't know about (engine handle, per-image canvas cache).
+/// Session state: chapter-wide model (`project`) plus per-image view caches.
 pub struct App {
+    pub(crate) project: Project,
     pub(crate) images: Vec<LoadedImage>,
     #[cfg(feature = "ocr")]
     pipeline: Option<ParallelEngine>,
@@ -268,6 +268,7 @@ impl App {
         let style = EntryStyle::default();
         Self {
             frame,
+            project: Project::new(),
             images: Vec::new(),
             #[cfg(feature = "ocr")]
             pipeline: None,
@@ -442,22 +443,22 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     app.status = "No images selected.".to_string();
                     return Task::none();
                 }
-                for (path, width, height) in images {
-                    let mut project = Project::new();
-                    let image_id = project.add_image(path.clone(), width as f32, height as f32);
+                let metas: Vec<(String, u32, u32)> = images;
+                // Collect paths for decode scheduler (needs project image meta)
+                let mut image_ids = Vec::new();
+                for (path, width, height) in metas {
+                    let image_id = app.project.add_image(path, width as f32, height as f32);
                     app.images.push(LoadedImage {
-                        width: width as f32,
-                        height: height as f32,
-                        path,
-                        project,
                         image_id,
                         decode: PageDecode::default(),
                         inpaint: Vec::new(),
                     });
+                    image_ids.push(image_id);
                 }
                 app.status = format!("Decoding {} image(s)...", app.images.len());
+                let project = &app.project;
                 app.scheduler
-                    .decode_thumbs(&mut app.images, Message::ThumbDecoded)
+                    .decode_thumbs_with_project(&mut app.images, project, Message::ThumbDecoded)
             }
             Err(e) => {
                 app.status = e;
@@ -545,10 +546,10 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             if app.images.is_empty() {
                 return Task::none();
             }
-            for img in &mut app.images {
-                img.project.profiles.select(id);
+            if !app.project.profiles.select(id) {
+                return Task::none();
             }
-            let name = app.images[0].project.profiles.selected().name.clone();
+            let name = app.project.profiles.selected().name.clone();
             app.status = format!("Profile: {name}");
             Task::none()
         }
@@ -556,22 +557,18 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             if app.images.is_empty() {
                 return Task::none();
             }
-            for img in &mut app.images {
-                let name = img.project.profiles.next_available_name();
-                let id = img.project.profiles.add(name);
-                img.project.profiles.select(id);
-            }
-            let name = app.images[0].project.profiles.selected().name.clone();
+            let name = app.project.profiles.next_available_name();
+            let id = app.project.profiles.add(name);
+            app.project.profiles.select(id);
+            let name = app.project.profiles.selected().name.clone();
             app.status = format!("Profile: {name} (created)");
             Task::none()
         }
         Message::Ui(UiEvent::TranslationPanelMode(mode)) => {
             // Initialize base/target when first entering Translate
             if mode == TranslationPanelMode::Translate && app.translation_panel_mode != TranslationPanelMode::Translate {
-                if app.translate_base.is_none() {
-                    if let Some(img) = app.images.first() {
-                        app.translate_base = Some(img.project.profiles.selected_id());
-                    }
+                if app.translate_base.is_none() && !app.images.is_empty() {
+                    app.translate_base = Some(app.project.profiles.selected_id());
                 }
                 // Ensure target placeholder reflects current lang if it is AutoPlaceholder
                 if let TargetProfileSelection::AutoPlaceholder(_) = app.translate_target.clone() {
@@ -579,13 +576,11 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 }
                 // If placeholder already exists as a profile, convert to Existing so equality checks work
                 if let TargetProfileSelection::AutoPlaceholder(name) = app.translate_target.clone() {
-                    if let Some(img) = app.images.first() {
-                        if let Some(id) = img.project.profiles.find_by_name(&name) {
-                            // Don't select base itself; keep placeholder blank if it would equal base
-                            let base = app.translate_base.or_else(|| Some(img.project.profiles.selected_id()));
-                            if Some(id) != base {
-                                app.translate_target = TargetProfileSelection::Existing(id);
-                            }
+                    if let Some(id) = app.project.profiles.find_by_name(&name) {
+                        // Don't select base itself; keep placeholder blank if it would equal base
+                        let base = app.translate_base.or_else(|| Some(app.project.profiles.selected_id()));
+                        if Some(id) != base {
+                            app.translate_target = TargetProfileSelection::Existing(id);
                         }
                     }
                 }
@@ -613,7 +608,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 return Task::none();
             }
             // validate id exists
-            let exists = app.images[0].project.profiles.iter().any(|p| p.id == id);
+            let exists = app.project.profiles.iter().any(|p| p.id == id);
             if !exists {
                 return Task::none();
             }
@@ -626,17 +621,15 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             // also prevent base name == placeholder name when target is AutoPlaceholder
             if let TargetProfileSelection::AutoPlaceholder(name) = app.translate_target.clone() {
-                if let Some(img) = app.images.first() {
-                    if let Some(bprof) = img.project.profiles.iter().find(|p| p.id == id) {
-                        if bprof.name == name {
-                            app.status = "Base and target must differ.".to_string();
-                            return Task::none();
-                        }
+                if let Some(bprof) = app.project.profiles.iter().find(|p| p.id == id) {
+                    if bprof.name == name {
+                        app.status = "Base and target must differ.".to_string();
+                        return Task::none();
                     }
                 }
             }
             app.translate_base = Some(id);
-            let name = app.images[0].project.profiles.iter().find(|p| p.id == id).map(|p| p.name.clone()).unwrap_or_default();
+            let name = app.project.profiles.iter().find(|p| p.id == id).map(|p| p.name.clone()).unwrap_or_default();
             app.status = format!("Base: {name}");
             Task::none()
         }
@@ -645,21 +638,21 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 return Task::none();
             }
             // validate and prevent == base
-            let base = app.translate_base.or_else(|| app.images.first().map(|i| i.project.profiles.selected_id()));
+            let base = app.translate_base.or_else(|| Some(app.project.profiles.selected_id()));
             match &sel {
                 TargetProfileSelection::Existing(id) => {
                     if Some(*id) == base {
                         app.status = "Base and target must differ.".to_string();
                         return Task::none();
                     }
-                    let exists = app.images[0].project.profiles.iter().any(|p| p.id == *id);
+                    let exists = app.project.profiles.iter().any(|p| p.id == *id);
                     if !exists {
                         return Task::none();
                     }
                 }
                 TargetProfileSelection::AutoPlaceholder(name) => {
                     if let Some(b) = base {
-                        if let Some(bprof) = app.images[0].project.profiles.iter().find(|p| p.id == b) {
+                        if let Some(bprof) = app.project.profiles.iter().find(|p| p.id == b) {
                             if &bprof.name == name {
                                 app.status = "Base and target must differ.".to_string();
                                 return Task::none();
@@ -671,7 +664,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             // If AutoPlaceholder actually already exists, convert to Existing
             let resolved = match sel.clone() {
                 TargetProfileSelection::AutoPlaceholder(name) => {
-                    if let Some(id) = app.images[0].project.profiles.find_by_name(&name) {
+                    if let Some(id) = app.project.profiles.find_by_name(&name) {
                         if Some(id) != base {
                             TargetProfileSelection::Existing(id)
                         } else {
@@ -685,7 +678,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             };
             app.translate_target = resolved.clone();
             let label = match resolved {
-                TargetProfileSelection::Existing(id) => app.images[0].project.profiles.iter().find(|p| p.id == id).map(|p| p.name.clone()).unwrap_or_default(),
+                TargetProfileSelection::Existing(id) => app.project.profiles.iter().find(|p| p.id == id).map(|p| p.name.clone()).unwrap_or_default(),
                 TargetProfileSelection::AutoPlaceholder(n) => n,
             };
             app.status = format!("Target: {label}");
@@ -696,15 +689,18 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             .schedule(range, Message::SettleElapsed),
         Message::SettleElapsed(seq) => {
             if app.scheduler.accept_elapsed(seq) {
+                let project = &app.project;
                 app.scheduler
-                    .settle(&mut app.images, Message::FullDecoded)
+                    .settle_with_project(&mut app.images, project, Message::FullDecoded)
             } else {
                 Task::none()
             }
         }
-        Message::Ui(UiEvent::TileScrollEnded) => app
-            .scheduler
-            .settle(&mut app.images, Message::FullDecoded),
+        Message::Ui(UiEvent::TileScrollEnded) => {
+            let project = &app.project;
+            app.scheduler
+                .settle_with_project(&mut app.images, project, Message::FullDecoded)
+        }
         Message::FullDecoded(index, result) => {
             if index < app.images.len() {
                 let keep = app.scheduler.keep_full(app.images.len(), index);
@@ -736,9 +732,9 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             if let TargetProfileSelection::AutoPlaceholder(_) = app.translate_target.clone() {
                 let new_name = format!("{lang}(auto)");
                 // If that name already exists as a profile (and !== base), convert to Existing
-                if let Some(img) = app.images.first() {
-                    if let Some(id) = img.project.profiles.find_by_name(&new_name) {
-                        let base = app.translate_base.or_else(|| Some(img.project.profiles.selected_id()));
+                if !app.images.is_empty() {
+                    if let Some(id) = app.project.profiles.find_by_name(&new_name) {
+                        let base = app.translate_base.or_else(|| Some(app.project.profiles.selected_id()));
                         if Some(id) != base {
                             app.translate_target = TargetProfileSelection::Existing(id);
                         } else {
@@ -776,10 +772,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 app.status = "No images to reorder.".to_string();
                 return Task::none();
             }
-            for image in &mut app.images {
-                let image_id = image.image_id;
-                image.project.reorder_entries_for_image(image_id);
-            }
+            app.project.reorder_entries_by_position();
             // Per-image file order is the `images` vec order; within each file
             // entries are now Y→X (top first, left→right) by view-quad bounds.
             // Translation iterates `visible_for()` per image, so it immediately

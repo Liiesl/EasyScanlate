@@ -23,16 +23,12 @@ pub fn edit_overlay<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let Some(content) = state.edit_content() else {
         return space().into();
     };
-    let (text, style) = match state
-        .images()
-        .get(index)
-        .and_then(|image| image.project.ocr.get(id))
-    {
-        Some(entry) => (
-            state.images()[index].project.display_text(entry).to_string(),
-            state.images()[index].project.entry_style(entry.id),
-        ),
-        None => (String::new(), EntryStyle::default()),
+    let project = state.project();
+    let (text, style) = match project.ocr.get(id) {
+        Some(entry) if state.images().get(index).is_some_and(|img| img.image_id == entry.image_id) => {
+            (project.display_text(entry).to_string(), project.entry_style(entry.id))
+        }
+        _ => (String::new(), EntryStyle::default()),
     };
     let font = styled_font(state.font().unwrap_or(Font::DEFAULT), &style);
     let wrap_width = rect.width.max(8.0);

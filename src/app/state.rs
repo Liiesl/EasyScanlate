@@ -12,6 +12,10 @@ impl UiState for App {
         &self.images
     }
 
+    fn project(&self) -> &scanlateit_model::Project {
+        &self.project
+    }
+
     fn running(&self) -> bool {
         self.running
     }
@@ -182,22 +186,23 @@ impl UiState for App {
 
     fn base_profile(&self) -> Option<scanlateit_model::ProfileId> {
         if let Some(id) = self.translate_base {
-            if self.images.first().is_some_and(|img| img.project.profiles.iter().any(|p| p.id == id)) {
+            if self.project.profiles.iter().any(|p| p.id == id) {
                 return Some(id);
             }
         }
-        self.images.first().map(|img| img.project.profiles.selected_id())
+        if self.images.is_empty() {
+            return None;
+        }
+        Some(self.project.profiles.selected_id())
     }
 
     fn target_profile(&self) -> TargetProfileSelection {
         // Resolve virtual placeholder that already exists as real profile to Existing
         if let TargetProfileSelection::AutoPlaceholder(name) = &self.translate_target {
-            if let Some(img) = self.images.first() {
-                if let Some(id) = img.project.profiles.find_by_name(name) {
-                    let base = self.base_profile();
-                    if Some(id) != base {
-                        return TargetProfileSelection::Existing(id);
-                    }
+            if let Some(id) = self.project.profiles.find_by_name(name) {
+                let base = self.base_profile();
+                if Some(id) != base {
+                    return TargetProfileSelection::Existing(id);
                 }
             }
         }

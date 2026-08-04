@@ -11,7 +11,7 @@ fn applying_a_preset_seeds_working_style_and_entry() {
     let _ = update(&mut app, Message::Ui(UiEvent::StylePresetApply(1)));
     let preset = app.presets.get(1).expect("preset 1 seeded");
     assert_eq!(app.style_working, preset);
-    assert_eq!(app.images[0].project.entry_style(id), preset);
+    assert_eq!(app.project.entry_style(id), preset);
     assert_eq!(app.style_bg_radius, preset.bg_radius.to_string());
 }
 
@@ -23,7 +23,7 @@ fn applying_a_preset_without_selection_or_out_of_range_is_a_noop() {
     let _ = update(&mut app, Message::Ui(UiEvent::StylePresetApply(0)));
     assert_eq!(app.style_working.bg_color, [1, 2, 3, 255]);
     let image_id = app.images[0].image_id;
-    app.selected = Some((0, app.images[0].project.ocr.visible_for(image_id).next().unwrap().id));
+    app.selected = Some((0, app.project.ocr.visible_for(image_id).next().unwrap().id));
     let _ = update(&mut app, Message::Ui(UiEvent::StylePresetApply(999)));
     assert_eq!(app.style_working.bg_color, [1, 2, 3, 255]);
 }
@@ -33,10 +33,10 @@ fn applying_an_empty_preset_slot_is_a_noop() {
     let (mut app, id) = app_with_entry();
     app.selected = Some((0, id));
     app.style_working.bg_color = [1, 2, 3, 255];
-    app.images[0].project.set_entry_style(id, app.style_working.clone());
+    app.project.set_entry_style(id, app.style_working.clone());
     let _ = update(&mut app, Message::Ui(UiEvent::StylePresetApply(5)));
     assert_eq!(app.style_working.bg_color, [1, 2, 3, 255]);
-    assert_eq!(app.images[0].project.entry_style(id).bg_color, [1, 2, 3, 255]);
+    assert_eq!(app.project.entry_style(id).bg_color, [1, 2, 3, 255]);
 }
 
 #[test]
@@ -105,7 +105,7 @@ fn style_font_sets_family_and_loads_font() {
     let _ = update(&mut app, Message::Ui(UiEvent::StyleFont("Test".to_string())));
     assert_eq!(app.style_working.font_family.as_deref(), Some("Test"));
     assert_eq!(
-        app.images[0].project.entry_style(id).font_family.as_deref(),
+        app.project.entry_style(id).font_family.as_deref(),
         Some("Test")
     );
 }
@@ -117,7 +117,7 @@ fn style_text_align_sets_alignment() {
     let _ = update(&mut app, Message::Ui(UiEvent::StyleTextAlign(TextAlign::Right)));
     assert_eq!(app.style_working.text_align, TextAlign::Right);
     assert_eq!(
-        app.images[0].project.entry_style(id).text_align,
+        app.project.entry_style(id).text_align,
         TextAlign::Right
     );
 }
@@ -128,14 +128,14 @@ fn style_gradient_dir_and_toggle_set_fields() {
     app.selected = Some((0, id));
     let _ = update(&mut app, Message::Ui(UiEvent::StyleGradientToggle(true)));
     assert!(app.style_working.text_gradient);
-    assert!(app.images[0].project.entry_style(id).text_gradient);
+    assert!(app.project.entry_style(id).text_gradient);
     let _ = update(
         &mut app,
         Message::Ui(UiEvent::StyleGradientDir(TextGradientDir::LeftToRight)),
     );
     assert_eq!(app.style_working.gradient_dir, TextGradientDir::LeftToRight);
     assert_eq!(
-        app.images[0].project.entry_style(id).gradient_dir,
+        app.project.entry_style(id).gradient_dir,
         TextGradientDir::LeftToRight
     );
 }

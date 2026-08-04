@@ -159,11 +159,12 @@ fn entry_row<'a, S: UiState + ?Sized>(
             .into();
     let mut buttons: Vec<Element<'_, UiEvent>> = vec![retranslate_tip, delete_tip];
 
+    let project = state.project();
     let content: Element<'_, UiEvent> = match mode {
         TranslationPanelMode::Edit => {
             let editing_here = state.editing() == Some((index, entry_id));
             let editing_from_panel = editing_here && state.editing_origin() == EditOrigin::Panel;
-            let profile_name = state.images()[index].project.profiles.selected().name.clone();
+            let profile_name = project.profiles.selected().name.clone();
             let current: Element<'_, UiEvent> = if editing_from_panel {
                 panel_editor(state)
             } else {
@@ -171,11 +172,9 @@ fn entry_row<'a, S: UiState + ?Sized>(
                     state
                         .edit_content()
                         .map(|content| content.text().to_string())
-                        .unwrap_or_else(|| {
-                            state.images()[index].project.display_text(entry).to_string()
-                        })
+                        .unwrap_or_else(|| project.display_text(entry).to_string())
                 } else {
-                    state.images()[index].project.display_text(entry).to_string()
+                    project.display_text(entry).to_string()
                 };
                 mouse_area(current_box(shown, font))
                     .on_press(UiEvent::PanelEntryEdit((index, entry_id)))
@@ -213,13 +212,12 @@ fn entry_row<'a, S: UiState + ?Sized>(
             }
         }
         TranslationPanelMode::Translate => {
-            // Resolve base and target display strings per image
+            // Resolve base and target display strings per image (project is chapter-wide)
             let base_id = state.base_profile();
             let target_sel = state.target_profile();
-            let image = &state.images()[index];
             // base text
             let base_text: String = if let Some(pid) = base_id {
-                if let Some(p) = image.project.profiles.iter().find(|p| p.id == pid) {
+                if let Some(p) = project.profiles.iter().find(|p| p.id == pid) {
                     p.translation_of(entry_id).unwrap_or(&entry.text).to_string()
                 } else {
                     entry.text.clone()
@@ -228,22 +226,22 @@ fn entry_row<'a, S: UiState + ?Sized>(
                 entry.text.clone()
             };
             let base_name: String = if let Some(pid) = base_id {
-                image.project.profiles.iter().find(|p| p.id == pid).map(|p| p.name.clone()).unwrap_or_else(|| "—".to_string())
+                project.profiles.iter().find(|p| p.id == pid).map(|p| p.name.clone()).unwrap_or_else(|| "—".to_string())
             } else {
                 "—".to_string()
             };
             // target text
             let (target_text, target_name) = match &target_sel {
                 TargetProfileSelection::Existing(pid) => {
-                    let name = image.project.profiles.iter().find(|p| p.id == *pid).map(|p| p.name.clone()).unwrap_or_else(|| "—".to_string());
-                    let txt = image.project.profiles.iter().find(|p| p.id == *pid).and_then(|p| p.translation_of(entry_id)).unwrap_or("").to_string();
+                    let name = project.profiles.iter().find(|p| p.id == *pid).map(|p| p.name.clone()).unwrap_or_else(|| "—".to_string());
+                    let txt = project.profiles.iter().find(|p| p.id == *pid).and_then(|p| p.translation_of(entry_id)).unwrap_or("").to_string();
                     (txt, name)
                 }
                 TargetProfileSelection::AutoPlaceholder(name) => {
                     // If placeholder already exists as real profile, show its content (state getter usually converts, but per-image fallback)
-                    if let Some(id) = image.project.profiles.find_by_name(name) {
-                        let txt = image.project.profiles.iter().find(|p| p.id == id).and_then(|p| p.translation_of(entry_id)).unwrap_or("").to_string();
-                        let real_name = image.project.profiles.iter().find(|p| p.id == id).map(|p| p.name.clone()).unwrap_or_else(|| name.clone());
+                    if let Some(id) = project.profiles.find_by_name(name) {
+                        let txt = project.profiles.iter().find(|p| p.id == id).and_then(|p| p.translation_of(entry_id)).unwrap_or("").to_string();
+                        let real_name = project.profiles.iter().find(|p| p.id == id).map(|p| p.name.clone()).unwrap_or_else(|| name.clone());
                         (txt, real_name)
                     } else {
                         (String::new(), name.clone())
@@ -295,9 +293,10 @@ fn image_results<'a, S: UiState + ?Sized>(
     image: &'a LoadedImage,
     index: usize,
 ) -> Vec<Element<'a, UiEvent>> {
+    let project = state.project();
     let mut elements = Vec::new();
-    if image.project.ocr.visible_count_for(image.image_id) > 0 {
-        for entry in image.project.ocr.visible_for(image.image_id) {
+    if project.ocr.visible_count_for(image.image_id) > 0 {
+        for entry in project.ocr.visible_for(image.image_id) {
             elements.push(entry_row(state, index, entry));
         }
     }
@@ -377,7 +376,8 @@ fn profile_header<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent>
         let mut entries: Vec<MenuItem<'a, ProfileOption, UiEvent, iced::Theme, iced::Renderer>> =
             Vec::new();
         let mut selected = None;
-        if let Some(project) = state.images().first().map(|i| &i.project) {
+        {
+            let project = state.project();
             for profile in project.profiles.iter() {
                 let option = ProfileOption {
                     id: profile.id,
@@ -426,8 +426,8 @@ fn translate_profile_pickers<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'
     let target_sel = state.target_profile();
     let placeholder_name = state.target_placeholder_name();
     // Build base options: all profiles
-    let profiles: Vec<(ProfileId, String)> = state.images()[0]
-        .project
+    let profiles: Vec<(ProfileId, String)> = state
+        .project()
         .profiles
         .iter()
         .map(|p| (p.id, p.name.clone()))
@@ -574,7 +574,8 @@ fn translate_bar<'a, S: UiState + ?Sized>(
 }
 
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
-    let total_results: usize = state.images().iter().map(|i| i.project.ocr.visible_count_for(i.image_id)).sum();
+    let project = state.project();
+    let total_results: usize = state.images().iter().map(|i| project.ocr.visible_count_for(i.image_id)).sum();
     let has_entries = total_results > 0;
     let mode = state.translation_panel_mode();
 

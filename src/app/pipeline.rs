@@ -34,13 +34,11 @@ pub fn dispatch_pipeline_inpaint_after_style(
         {
             app.pipeline_active = false;
         }
-        for (index, id, result, quad, _path) in results {
+        for (_index, id, result, quad, _path) in results {
             if let Ok((_, pred)) = result {
                 let applied = pred.to_entry_style_for_auto(EntryStyle::default());
-                if let Some(image) = app.images.get_mut(index) {
-                    image.project.set_entry_style(id, applied);
-                    let _ = quad;
-                }
+                app.project.set_entry_style(id, applied);
+                let _ = quad;
             }
         }
         app.status = "Applied deferred styles (no auto-inpaint).".to_string();
@@ -55,9 +53,7 @@ pub fn dispatch_pipeline_inpaint_after_style(
             }
         };
         let applied = pred.to_entry_style_for_auto(EntryStyle::default());
-        if let Some(image) = app.images.get_mut(index) {
-            image.project.set_entry_style(id, applied);
-        }
+        app.project.set_entry_style(id, applied);
         let need = match pred.bg_type {
             scanlateit_styling::BgType::Solid => None,
             scanlateit_styling::BgType::Gradient => Some(match effective_model {

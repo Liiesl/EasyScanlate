@@ -54,7 +54,7 @@ fn retranslate_finished_forks_a_profile_off_the_default() {
         &mut app,
         Message::RetranslateFinished((0, id), Ok("Hello".to_string())),
     );
-    let project = &app.images[0].project;
+    let project = &app.project;
     assert_eq!(project.profiles.len(), 2, "a fork must be created");
     assert_eq!(project.profiles.selected().name, "Profile 1");
     assert_eq!(project.profiles.selected().translation_of(id), Some("Hello"));
@@ -70,18 +70,17 @@ fn retranslate_finished_forks_a_profile_off_the_default() {
 #[test]
 fn retranslate_finished_writes_into_the_selected_profile_in_place() {
     let (mut app, id) = app_with_entry();
-    app.images[0]
-        .project
+    app.project
         .profiles
         .selected_mut()
         .set_translation(id, Some("Hello".into()));
-    let jp = app.images[0].project.profiles.add("JP");
-    app.images[0].project.profiles.select(jp);
+    let jp = app.project.profiles.add("JP");
+    app.project.profiles.select(jp);
     let _ = update(
         &mut app,
         Message::RetranslateFinished((0, id), Ok("Hola".to_string())),
     );
-    let project = &app.images[0].project;
+    let project = &app.project;
     assert_eq!(project.profiles.len(), 2, "no fork on non-original profiles");
     assert_eq!(project.profiles.selected_id(), jp);
     assert_eq!(project.profiles.selected().translation_of(id), Some("Hola"));
@@ -91,8 +90,7 @@ fn retranslate_finished_writes_into_the_selected_profile_in_place() {
 #[test]
 fn retranslate_finished_error_leaves_the_profile_untouched() {
     let (mut app, id) = app_with_entry();
-    app.images[0]
-        .project
+    app.project
         .profiles
         .selected_mut()
         .set_translation(id, Some("Hello".into()));
@@ -102,7 +100,7 @@ fn retranslate_finished_error_leaves_the_profile_untouched() {
     );
     assert!(!app.translating);
     assert_eq!(app.status, "boom");
-    let project = &app.images[0].project;
+    let project = &app.project;
     assert_eq!(project.profiles.len(), 1);
     assert_eq!(project.profiles.selected().translation_of(id), Some("Hello"));
 }
@@ -115,7 +113,7 @@ fn retranslate_finished_strips_quotes_and_clears_when_identical_to_ocr() {
         &mut app,
         Message::RetranslateFinished((0, id), Ok("\"안녕\"".to_string())),
     );
-    let project = &app.images[0].project;
+    let project = &app.project;
     assert_eq!(project.profiles.len(), 2, "the fork still happens");
     assert_eq!(
         project.profiles.selected().translation_of(id),

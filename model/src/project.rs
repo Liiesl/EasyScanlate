@@ -146,6 +146,19 @@ impl Project {
         self.ocr.soft_delete(entry_id)
     }
 
+    /// Reorder all images chapter-wide by position (per-image Y→X).
+    pub fn reorder_entries_by_position(&mut self) {
+        let ids: Vec<ImageId> = self.images.iter().map(|m| m.id).collect();
+        if ids.is_empty() {
+            // Legacy fallback: no images registered but entries have ImageId(0)
+            self.reorder_entries_for_image(ImageId(0));
+            return;
+        }
+        for id in ids {
+            self.reorder_entries_for_image(id);
+        }
+    }
+
     /// Reorder only the entries of `image_id` by position. Uses
     /// `view_quad` fallback, stable sort, touches deleted entries too so both
     /// `ocr.visible_for(image_id)` and `ocr.all_for(image_id)` reflect the new

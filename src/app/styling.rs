@@ -23,28 +23,21 @@ pub fn classify_entries(app: &mut App) -> Task<Message> {
 
 #[cfg(feature = "styling")]
 fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
-    let styling = &app.styling;
-    let jobs: Vec<(usize, EntryId, String, Quad)> = app
-        .images
-        .iter()
-        .enumerate()
-        .flat_map(|(index, image)| {
-            let image_id = image.image_id;
-            image
-                .project
-                .ocr
-                .visible_for(image_id)
-                .filter(move |entry| !styling.is_done(index, entry.id))
-                .map(move |entry| {
-                    (
-                        index,
-                        entry.id,
-                        image.path.clone(),
-                        image.project.view_quad(entry),
-                    )
-                })
-        })
-        .collect();
+    let mut jobs: Vec<(usize, EntryId, String, Quad)> = Vec::new();
+    for (index, image) in app.images.iter().enumerate() {
+        let image_id = image.image_id;
+        let path = app
+            .project
+            .image(image_id)
+            .map(|m| m.path.clone())
+            .unwrap_or_default();
+        for entry in app.project.ocr.visible_for(image_id).collect::<Vec<_>>() {
+            if app.styling.is_done(index, entry.id) {
+                continue;
+            }
+            jobs.push((index, entry.id, path.clone(), app.project.view_quad(entry)));
+        }
+    }
     if jobs.is_empty() {
         return Task::none();
     }
@@ -92,28 +85,21 @@ pub fn start_pipeline_style_deferred(app: &mut App) -> Task<Message> {
 
 #[cfg(all(feature = "styling", feature = "inpaint"))]
 fn start_pipeline_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
-    let styling = &app.styling;
-    let jobs: Vec<(usize, EntryId, String, Quad)> = app
-        .images
-        .iter()
-        .enumerate()
-        .flat_map(|(index, image)| {
-            let image_id = image.image_id;
-            image
-                .project
-                .ocr
-                .visible_for(image_id)
-                .filter(move |entry| !styling.is_done(index, entry.id))
-                .map(move |entry| {
-                    (
-                        index,
-                        entry.id,
-                        image.path.clone(),
-                        image.project.view_quad(entry),
-                    )
-                })
-        })
-        .collect();
+    let mut jobs: Vec<(usize, EntryId, String, Quad)> = Vec::new();
+    for (index, image) in app.images.iter().enumerate() {
+        let image_id = image.image_id;
+        let path = app
+            .project
+            .image(image_id)
+            .map(|m| m.path.clone())
+            .unwrap_or_default();
+        for entry in app.project.ocr.visible_for(image_id).collect::<Vec<_>>() {
+            if app.styling.is_done(index, entry.id) {
+                continue;
+            }
+            jobs.push((index, entry.id, path.clone(), app.project.view_quad(entry)));
+        }
+    }
     if jobs.is_empty() {
         #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
         {
@@ -200,8 +186,8 @@ pub fn handle_styling_ready(app: &mut App, result: Result<StylingEngine, String>
 pub fn handle_style_detected(app: &mut App, index: usize, id: EntryId, result: Result<EntryStyle, String>) -> Task<Message> {
     match result {
         Ok(style) => {
-            if let Some(image) = app.images.get_mut(index) {
-                image.project.set_entry_style(id, style);
+            if index < app.images.len() {
+                app.project.set_entry_style(id, style);
                 app.styling.mark_done(index, id);
                 app.status = "Applied auto-detected text style.".to_string();
             }
@@ -216,11 +202,16 @@ pub fn handle_style_detected(app: &mut App, index: usize, id: EntryId, result: R
 #[cfg(all(feature = "styling", feature = "inpaint"))]
 pub fn handle_pipeline_style_detected(app: &mut App, index: usize, id: EntryId, result: Result<(EntryStyle, scanlateit_styling::StylePrediction), String>) -> Task<Message> {
     let quad = app
+        .project
+        .ocr
+        .get(id)
+        .map(|e| app.project.view_quad(e))
+        .unwrap_or(Quad { points: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]] });
+    let path = app
         .images
         .get(index)
-        .and_then(|img| img.project.ocr.get(id).map(|e| img.project.view_quad(e)))
-        .unwrap_or(Quad { points: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]] });
-    let path = app.images.get(index).map(|img| img.path.clone()).unwrap_or_default();
+        .and_then(|img| app.project.image(img.image_id).map(|m| m.path.clone()))
+        .unwrap_or_default();
     app.pipeline_style_results.push((index, id, result, quad, path));
     app.pipeline_style_pending = app.pipeline_style_pending.saturating_sub(1);
     if app.pipeline_style_pending == 0 {
@@ -233,23 +224,23 @@ pub fn handle_pipeline_style_detected(app: &mut App, index: usize, id: EntryId, 
 // ---- UI handlers ----
 
 pub fn handle_bold(app: &mut App, bold: bool) -> Task<Message> {
-    let Some((index, id)) = app.selected else { return Task::none() };
+    let Some((_index, id)) = app.selected else { return Task::none() };
     app.style_working.bold = bold;
-    app.images[index].project.set_entry_style(id, app.style_working.clone());
+    app.project.set_entry_style(id, app.style_working.clone());
     Task::none()
 }
 
 pub fn handle_italic(app: &mut App, italic: bool) -> Task<Message> {
-    let Some((index, id)) = app.selected else { return Task::none() };
+    let Some((_index, id)) = app.selected else { return Task::none() };
     app.style_working.italic = italic;
-    app.images[index].project.set_entry_style(id, app.style_working.clone());
+    app.project.set_entry_style(id, app.style_working.clone());
     Task::none()
 }
 
 pub fn handle_font(app: &mut App, name: String) -> Task<Message> {
-    let Some((index, id)) = app.selected else { return Task::none() };
+    let Some((_index, id)) = app.selected else { return Task::none() };
     app.style_working.font_family = Some(name.clone());
-    app.images[index].project.set_entry_style(id, app.style_working.clone());
+    app.project.set_entry_style(id, app.style_working.clone());
     // Bundled fonts are already embedded in the binary via `include_bytes!`
     // in `main.rs` — no `font::load` needed. System-installed duplicates are
     // already in the fontdb scan. Only load non-bundled families on demand.
@@ -276,23 +267,23 @@ pub fn handle_font(app: &mut App, name: String) -> Task<Message> {
 }
 
 pub fn handle_text_align(app: &mut App, align: TextAlign) -> Task<Message> {
-    let Some((index, id)) = app.selected else { return Task::none() };
+    let Some((_index, id)) = app.selected else { return Task::none() };
     app.style_working.text_align = align;
-    app.images[index].project.set_entry_style(id, app.style_working.clone());
+    app.project.set_entry_style(id, app.style_working.clone());
     Task::none()
 }
 
 pub fn handle_gradient_toggle(app: &mut App, enabled: bool) -> Task<Message> {
-    let Some((index, id)) = app.selected else { return Task::none() };
+    let Some((_index, id)) = app.selected else { return Task::none() };
     app.style_working.text_gradient = enabled;
-    app.images[index].project.set_entry_style(id, app.style_working.clone());
+    app.project.set_entry_style(id, app.style_working.clone());
     Task::none()
 }
 
 pub fn handle_gradient_dir(app: &mut App, dir: TextGradientDir) -> Task<Message> {
-    let Some((index, id)) = app.selected else { return Task::none() };
+    let Some((_index, id)) = app.selected else { return Task::none() };
     app.style_working.gradient_dir = dir;
-    app.images[index].project.set_entry_style(id, app.style_working.clone());
+    app.project.set_entry_style(id, app.style_working.clone());
     Task::none()
 }
 
@@ -311,7 +302,7 @@ pub fn handle_color_submit(app: &mut App, field: StyleField, color: iced::Color)
     // Clear the hex text buffer for this field so the input shows the canonical
     // hex from the picked color instead of stale typed text.
     app.style_hex_overrides.remove(&field);
-    let Some((index, id)) = app.selected else { return Task::none() };
+    let Some((_index, id)) = app.selected else { return Task::none() };
     let rgba = color.into_rgba8();
     match field {
         StyleField::Text => app.style_working.text_color = rgba,
@@ -320,12 +311,12 @@ pub fn handle_color_submit(app: &mut App, field: StyleField, color: iced::Color)
         StyleField::GradientA => app.style_working.gradient_a = rgba,
         StyleField::GradientB => app.style_working.gradient_b = rgba,
     }
-    app.images[index].project.set_entry_style(id, app.style_working.clone());
+    app.project.set_entry_style(id, app.style_working.clone());
     Task::none()
 }
 
 pub fn handle_hex_input(app: &mut App, field: StyleField, text: String) -> Task<Message> {
-    let Some((index, id)) = app.selected else { return Task::none() };
+    let Some((_index, id)) = app.selected else { return Task::none() };
     // Keep the raw buffer so intermediate invalid states don't snap back.
     // Empty string clears the buffer to show the canonical value.
     if text.is_empty() {
@@ -349,7 +340,7 @@ pub fn handle_hex_input(app: &mut App, field: StyleField, text: String) -> Task<
         StyleField::GradientA => app.style_working.gradient_a = rgba,
         StyleField::GradientB => app.style_working.gradient_b = rgba,
     }
-    app.images[index].project.set_entry_style(id, app.style_working.clone());
+    app.project.set_entry_style(id, app.style_working.clone());
     // Update buffer to canonical? Keep original to avoid jump; but if the
     // parsed color's canonical label differs only in case, keep typed text.
     // (No extra work needed.)
@@ -357,32 +348,32 @@ pub fn handle_hex_input(app: &mut App, field: StyleField, text: String) -> Task<
 }
 
 pub fn handle_stroke_width(app: &mut App, text: String) -> Task<Message> {
-    let Some((index, id)) = app.selected else { return Task::none() };
+    let Some((_index, id)) = app.selected else { return Task::none() };
     app.style_stroke_width = text;
     if let Ok(width) = app.style_stroke_width.parse::<f32>() {
         app.style_working.stroke_width = width.max(0.0);
-        app.images[index].project.set_entry_style(id, app.style_working.clone());
+        app.project.set_entry_style(id, app.style_working.clone());
     }
     Task::none()
 }
 
 pub fn handle_bg_radius(app: &mut App, text: String) -> Task<Message> {
-    let Some((index, id)) = app.selected else { return Task::none() };
+    let Some((_index, id)) = app.selected else { return Task::none() };
     app.style_bg_radius = text;
     if let Ok(radius) = app.style_bg_radius.parse::<f32>() {
         app.style_working.bg_radius = radius.max(0.0);
-        app.images[index].project.set_entry_style(id, app.style_working.clone());
+        app.project.set_entry_style(id, app.style_working.clone());
     }
     Task::none()
 }
 
 pub fn handle_preset_apply(app: &mut App, preset: usize) -> Task<Message> {
-    let Some((index, id)) = app.selected else { return Task::none() };
+    let Some((_index, id)) = app.selected else { return Task::none() };
     let Some(preset_style) = app.presets.get(preset) else {
         return Task::none();
     };
     seed_style_inputs(app, preset_style.clone());
-    app.images[index].project.set_entry_style(id, preset_style);
+    app.project.set_entry_style(id, preset_style);
     Task::none()
 }
 
@@ -410,13 +401,13 @@ pub fn handle_auto_detect(app: &mut App) -> Task<Message> {
     }
     #[cfg(not(feature = "styling"))]
     {
-        let Some((index, id)) = app.selected else { return Task::none() };
+        let Some((_index, id)) = app.selected else { return Task::none() };
         let style = EntryStyle {
             bold: true,
             italic: false,
             ..EntryStyle::default()
         };
-        app.images[index].project.set_entry_style(id, style);
+        app.project.set_entry_style(id, style);
         app.status = "Applied a fake auto-detected text style (no styling model in this build)."
             .to_string();
         Task::none()

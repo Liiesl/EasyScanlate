@@ -254,22 +254,26 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let mut total = 0usize;
     let mut sections: Vec<Element<'_, UiEvent>> = Vec::new();
 
+    let project = state.project();
     for (image_index, img) in images.iter().enumerate() {
-        let name = file_name(&img.path);
+        let meta = project.image(img.image_id);
+        let name = file_name(meta.map(|m| m.path.as_str()).unwrap_or(""));
 
         // Build (bounds, Option<Handle>) list per image.
+        let project_patches: Vec<[f32; 4]> = project
+            .extras
+            .inpaint_patches
+            .iter()
+            .filter(|p| p.image_id == img.image_id)
+            .map(|p| p.bounds)
+            .collect();
         let entries: Vec<([f32; 4], Option<Handle>)> = if !img.inpaint.is_empty() {
             img.inpaint
                 .iter()
                 .map(|layer| (layer.bounds, Some(layer.handle.clone())))
                 .collect()
-        } else if !img.project.extras.inpaint_patches.is_empty() {
-            img.project
-                .extras
-                .inpaint_patches
-                .iter()
-                .map(|p| (p.bounds, None))
-                .collect()
+        } else if !project_patches.is_empty() {
+            project_patches.into_iter().map(|b| (b, None)).collect()
         } else {
             Vec::new()
         };

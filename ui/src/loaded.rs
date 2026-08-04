@@ -1,6 +1,6 @@
 use iced::widget::image::Handle;
 
-use scanlateit_model::{ImageId, Project};
+use scanlateit_model::ImageId;
 
 use crate::main_area::decode::PageDecode;
 
@@ -17,12 +17,9 @@ pub struct InpaintLayer {
 }
 
 /// One loaded image plus everything the viewer needs that the model doesn't
-/// know about (per-image canvas cache).
+/// know about (per-image canvas cache). Geometry (`width/height/path`) is
+/// derived from the chapter-wide `Project` via `image_id`.
 pub struct LoadedImage {
-    pub width: f32,
-    pub height: f32,
-    pub path: String,
-    pub project: Project,
     pub image_id: ImageId,
     pub decode: PageDecode,
     /// Inpaint layers drawn over the original image, oldest first.

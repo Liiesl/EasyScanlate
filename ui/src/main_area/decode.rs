@@ -214,6 +214,21 @@ impl Scheduler {
     where
         T: Send + 'static,
     {
+        // Project is queried by caller for path; decode itself only needs `LoadedImage.decode`.
+        // This overload keeps callers simple when project not needed (tests). For app, caller resolves path before calling.
+        self.settle_with_project(images, &scanlateit_model::Project::new(), map)
+    }
+
+    /// Like `settle` but resolves `path` via `project.image(image_id)`.
+    pub fn settle_with_project<T>(
+        &mut self,
+        images: &mut [LoadedImage],
+        project: &scanlateit_model::Project,
+        map: impl Fn(usize, Result<Arc<DecodedPage>, String>) -> T + Send + Clone + 'static,
+    ) -> Task<T>
+    where
+        T: Send + 'static,
+    {
         let Some((_, range)) = self.pending_settle.take() else {
             return Task::none();
         };
@@ -236,7 +251,14 @@ impl Scheduler {
                 continue;
             }
             image.decode.full = Tier::Decoding;
-            let path = image.path.clone();
+            let path = project
+                .image(image.image_id)
+                .map(|m| m.path.clone())
+                .unwrap_or_default();
+            if path.is_empty() {
+                image.decode.full = Tier::Failed;
+                continue;
+            }
             let map = map.clone();
             tasks.push(Task::perform(
                 decode_async(path, MAX_DECODE_EDGE),
@@ -269,13 +291,34 @@ impl Scheduler {
     where
         T: Send + 'static,
     {
+        self.decode_thumbs_with_project(images, &scanlateit_model::Project::new(), map)
+    }
+
+    /// Like `decode_thumbs` but resolves `path` via `project.image(image_id)`.
+    pub fn decode_thumbs_with_project<T>(
+        &mut self,
+        images: &mut [LoadedImage],
+        project: &scanlateit_model::Project,
+        map: impl Fn(usize, Result<Arc<DecodedPage>, String>) -> T + Send + Clone + 'static,
+    ) -> Task<T>
+    where
+        T: Send + 'static,
+    {
         let tasks: Vec<Task<T>> = images
             .iter_mut()
             .enumerate()
             .map(|(index, image)| {
                 image.decode.thumb = Tier::Decoding;
-                let path = image.path.clone();
+                let path = project
+                    .image(image.image_id)
+                    .map(|m| m.path.clone())
+                    .unwrap_or_default();
                 let map = map.clone();
+                if path.is_empty() {
+                    image.decode.thumb = Tier::Failed;
+                    // Still return a trivial task that immediately reports failure? No-op for now.
+                    return Task::perform(async { Err("missing image path".to_string()) }, move |r| map(index, r));
+                }
                 Task::perform(
                     decode_async(path, THUMB_DECODE_EDGE),
                     move |result| map(index, result),
@@ -291,18 +334,18 @@ mod tests {
     use super::*;
     use scanlateit_model::Project;
 
-    fn image() -> LoadedImage {
+    fn test_project_and_images(n: usize) -> (Project, Vec<LoadedImage>) {
         let mut project = Project::new();
-        let image_id = project.add_image("x.png", 100.0, 100.0);
-        LoadedImage {
-            width: 100.0,
-            height: 100.0,
-            path: "x.png".to_string(),
-            project,
-            image_id,
-            decode: PageDecode::default(),
-            inpaint: Vec::new(),
+        let mut images = Vec::new();
+        for _ in 0..n {
+            let image_id = project.add_image("x.png", 100.0, 100.0);
+            images.push(LoadedImage {
+                image_id,
+                decode: PageDecode::default(),
+                inpaint: Vec::new(),
+            });
         }
+        (project, images)
     }
 
     #[test]
@@ -349,9 +392,9 @@ mod tests {
     #[test]
     fn settle_takes_the_pending_range_and_records_it() {
         let mut scheduler = Scheduler::new();
-        let mut images: Vec<LoadedImage> = (0..10).map(|_| image()).collect();
+        let (project, mut images) = test_project_and_images(10);
         scheduler.pending_settle = Some((1, 2..4));
-        let _task = scheduler.settle(&mut images, |_i, _r| ());
+        let _task = scheduler.settle_with_project(&mut images, &project, |_i, _r| ());
         assert_eq!(scheduler.settled(), Some(&(2..4)));
         assert!(scheduler.pending_settle.is_none());
         // Full decodes were requested for the window around 2..4 (0..6);
@@ -360,7 +403,7 @@ mod tests {
         assert!(matches!(images[5].decode.full, Tier::Decoding));
         assert!(matches!(images[9].decode.full, Tier::Absent));
         // No pending settle left: a second settle is a no-op.
-        let _ = scheduler.settle(&mut images, |_i, _r| ());
+        let _ = scheduler.settle_with_project(&mut images, &project, |_i, _r| ());
         assert_eq!(scheduler.settled(), Some(&(2..4)));
     }
 }

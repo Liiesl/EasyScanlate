@@ -20,15 +20,38 @@ pub fn start_ocr_stream(app: &mut App) -> Task<Message> {
     let dims = app.ocr_dims.clone();
     let paths: Vec<Vec<String>> = runs
         .iter()
-        .map(|run| (run.page_start..=run.page_end).map(|i| app.images[i].path.clone()).collect())
+        .map(|run| {
+            (run.page_start..=run.page_end)
+                .map(|i| {
+                    app.project
+                        .image(app.images[i].image_id)
+                        .map(|m| m.path.clone())
+                        .unwrap_or_default()
+                })
+                .collect()
+        })
         .collect();
     let above_paths: Vec<Option<String>> = runs
         .iter()
-        .map(|run| run.above.map(|(page, _)| app.images[page].path.clone()))
+        .map(|run| {
+            run.above.map(|(page, _)| {
+                app.project
+                    .image(app.images[page].image_id)
+                    .map(|m| m.path.clone())
+                    .unwrap_or_default()
+            })
+        })
         .collect();
     let below_paths: Vec<Option<String>> = runs
         .iter()
-        .map(|run| run.below.map(|(page, _)| app.images[page].path.clone()))
+        .map(|run| {
+            run.below.map(|(page, _)| {
+                app.project
+                    .image(app.images[page].image_id)
+                    .map(|m| m.path.clone())
+                    .unwrap_or_default()
+            })
+        })
         .collect();
     let workers = scanlateit_settings::get(|s| s.ocr_workers.parse::<usize>().unwrap_or(2)).max(1);
     let mut session = ocr::RunSession::new(runs, dims, paths, above_paths, below_paths, workers);
@@ -55,11 +78,11 @@ pub fn start_ocr_stream(app: &mut App) -> Task<Message> {
 #[cfg(feature = "ocr")]
 pub fn commit_per_page(app: &mut App, per_page: Vec<(usize, Vec<NewEntry>)>) {
     for (page, entries) in per_page {
-        let Some(image) = app.images.get_mut(page) else {
+        let Some(image) = app.images.get(page) else {
             continue;
         };
         let image_id = image.image_id;
-        app.ocr_total += image.project.append_ocr_for_image(image_id, entries);
+        app.ocr_total += app.project.append_ocr_for_image(image_id, entries);
     }
 }
 
@@ -67,9 +90,9 @@ pub fn commit_per_page(app: &mut App, per_page: Vec<(usize, Vec<NewEntry>)>) {
 pub fn flush_held_boundary(app: &mut App) {
     if let Some(state) = app.held_boundary.take() {
         for candidate in state.candidates {
-            if let Some(image) = app.images.get_mut(candidate.page) {
+            if let Some(image) = app.images.get(candidate.page) {
                 let image_id = image.image_id;
-                app.ocr_total += image.project.append_ocr_for_image(image_id, vec![candidate.entry]);
+                app.ocr_total += app.project.append_ocr_for_image(image_id, vec![candidate.entry]);
             }
         }
     }
@@ -124,7 +147,12 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
     let dims: Vec<(u32, u32)> = app
         .images
         .iter()
-        .map(|image| (image.width as u32, image.height as u32))
+        .map(|image| {
+            app.project
+                .image(image.image_id)
+                .map(|m| (m.width as u32, m.height as u32))
+                .unwrap_or((0, 0))
+        })
         .collect();
     let runs = ocr::plan_runs(&dims);
     let run_count = runs.len();
@@ -170,9 +198,9 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
     }
     app.running = true;
     let mut added = 0;
-    for image in &mut app.images {
+    for image in &app.images {
         let image_id = image.image_id;
-        added += image.project.append_ocr_for_image(image_id, fake_ocr_entries());
+        added += app.project.append_ocr_for_image(image_id, fake_ocr_entries());
     }
     app.running = false;
     app.status = format!("Fake OCR done: {added} line(s) (no OCR engine in this build).");
@@ -223,13 +251,18 @@ pub fn handle_ocr_stream_run(app: &mut App, result: Result<ocr::RunEvent, String
             let run = app.ocr_plans[index];
             let prev = run.dedup.map(|(page, offset)| {
                 let image_id = app.images[page].image_id;
-                let quads: Vec<Quad> = app.images[page]
+                let quads: Vec<Quad> = app
                     .project
                     .ocr
                     .all_for(image_id)
                     .map(|entry| entry.quad)
                     .collect();
-                (quads, app.images[page].width as u32, offset)
+                let width = app
+                    .project
+                    .image(image_id)
+                    .map(|m| m.width as u32)
+                    .unwrap_or(0);
+                (quads, width, offset)
             });
             let (merge_cfg, min_h, max_h) = scanlateit_settings::get(|s| {
                 (
@@ -363,7 +396,11 @@ pub fn handle_ocr_stream_failed(app: &mut App, e: String) -> Task<Message> {
 fn start_manual_ocr(app: &mut App, index: usize, rect: iced::Rectangle, engine: ocr::Engine) -> Task<Message> {
     app.manual_ocring = true;
     app.status = format!("Manual OCR on image {} …", index + 1);
-    let path = app.images[index].path.clone();
+    let path = app
+        .project
+        .image(app.images[index].image_id)
+        .map(|m| m.path.clone())
+        .unwrap_or_default();
     let rect_copy = rect;
     // Manual OCR: no min/max height filter and no confidence filter (text_score = 0).
     // Keep merge threshold and max side len from settings, but force text_score 0.
@@ -515,11 +552,11 @@ pub fn handle_manual_ocr_finished(app: &mut App, index: usize, result: Result<Ve
                 return Task::none();
             }
             let count = entries.len();
-            if let Some(image) = app.images.get_mut(index) {
-                let image_id = image.image_id;
-                let added = image.project.append_ocr_for_image(image_id, entries);
+            if index < app.images.len() {
+                let image_id = app.images[index].image_id;
+                let added = app.project.append_ocr_for_image(image_id, entries);
                 // Request reorder by manual OCR orchestrator: keep translation reading order correct.
-                image.project.reorder_entries_for_image(image_id);
+                app.project.reorder_entries_for_image(image_id);
                 app.status = format!("Manual OCR: {added} line(s) added to image {} ({} detected).", index + 1, count);
             } else {
                 app.status = format!("Manual OCR: {count} line(s) detected (image no longer exists).");

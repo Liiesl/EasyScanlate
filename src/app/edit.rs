@@ -14,13 +14,18 @@ use super::{App, Message};
 /// overlay editor or the panel's results-row editor). Shared by the
 /// double-click action, the toolbar's "Rename" button and the panel rows.
 pub fn start_inline_edit(app: &mut App, index: usize, id: EntryId, origin: EditOrigin) -> Task<Message> {
-    let Some(image) = app.images.get(index) else {
+    if index >= app.images.len() {
+        return Task::none();
+    }
+    let Some(entry) = app.project.ocr.get(id) else {
         return Task::none();
     };
-    let Some(entry) = image.project.ocr.get(id) else {
+    // Validate entry belongs to requested image
+    let image_id = app.images[index].image_id;
+    if entry.image_id != image_id {
         return Task::none();
-    };
-    let text = image.project.display_text(entry).to_string();
+    }
+    let text = app.project.display_text(entry).to_string();
     clear_editing(app);
     let mut tasks = vec![select_entry(app, index, id)];
     app.editing = Some((index, id));
@@ -69,7 +74,7 @@ pub fn seed_style_inputs(app: &mut App, style: scanlateit_model::EntryStyle) {
 pub fn select_entry(app: &mut App, index: usize, id: EntryId) -> Task<Message> {
     app.selected_inpaint = None;
     app.selected = Some((index, id));
-    seed_style_inputs(app, app.images[index].project.entry_style(id));
+    seed_style_inputs(app, app.project.entry_style(id));
     if app.scheduler.needs_settle(index, app.images.len()) {
         app.scheduler
             .schedule(index..index + 1, Message::SettleElapsed)
@@ -89,10 +94,7 @@ pub fn handle_entry_clicked(app: &mut App, selection: Option<(usize, EntryId)>) 
     }
     match selection {
         Some((index, id))
-            if app
-                .images
-                .get(index)
-                .is_some_and(|image| image.project.ocr.get(id).is_some()) =>
+            if index < app.images.len() && app.project.ocr.get(id).is_some() =>
         {
             Task::batch([select_entry(app, index, id), scroll_to_row::<Message>(index, id)])
         }
@@ -125,10 +127,10 @@ pub fn handle_entry_toolbar(app: &mut App, index: usize, id: EntryId, action: To
     match action {
         ToolbarAction::Rename => start_inline_edit(app, index, id, EditOrigin::Overlay),
         ToolbarAction::Delete => {
-            let Some(image) = app.images.get_mut(index) else {
+            if index >= app.images.len() {
                 return Task::none();
-            };
-            if !image.project.delete_entry(id) {
+            }
+            if !app.project.delete_entry(id) {
                 return Task::none();
             }
             app.selected = None;
@@ -137,13 +139,13 @@ pub fn handle_entry_toolbar(app: &mut App, index: usize, id: EntryId, action: To
             Task::none()
         }
         ToolbarAction::RevertTransform => {
-            let Some(image) = app.images.get_mut(index) else {
-                return Task::none();
-            };
-            if !image.project.has_view_quad(id) {
+            if index >= app.images.len() {
                 return Task::none();
             }
-            image.project.revert_transform(id);
+            if !app.project.has_view_quad(id) {
+                return Task::none();
+            }
+            app.project.revert_transform(id);
             app.status = "Reverted transform.".to_string();
             Task::none()
         }
@@ -151,8 +153,8 @@ pub fn handle_entry_toolbar(app: &mut App, index: usize, id: EntryId, action: To
 }
 
 pub fn handle_entry_moved(app: &mut App, index: usize, id: EntryId, quad: scanlateit_model::Quad) -> Task<Message> {
-    if let Some(image) = app.images.get_mut(index) {
-        image.project.set_view_quad(id, quad);
+    if index < app.images.len() {
+        app.project.set_view_quad(id, quad);
     }
     Task::none()
 }
@@ -163,44 +165,24 @@ pub fn handle_edit_action(app: &mut App, action: text_editor::Action) -> Task<Me
     };
     content.perform(action);
     let text = content.text();
-    let Some((index, id)) = app.editing else {
+    let Some((_index, id)) = app.editing else {
         return Task::none();
     };
     if !app.editing_dirty {
         app.editing_dirty = true;
-        // Fork the edited image's profile and propagate the new profile to all images
-        let forked_name = {
-            let project = &mut app.images[index].project;
-            project.profiles.fork_for_edit()
-        };
+        // Fork the chapter-wide profile if editing Default
+        let forked_name = app.project.profiles.fork_for_edit();
         if let Some(name) = forked_name {
-            for (i, img) in app.images.iter_mut().enumerate() {
-                if i == index {
-                    continue;
-                }
-                if let Some(existing) = img.project.profiles.find_by_name(&name) {
-                    img.project.profiles.select(existing);
-                } else {
-                    let nid = img.project.profiles.add(name.clone());
-                    img.project.profiles.select(nid);
-                }
-            }
-            // Keep translate base in sync when it was the original profile
-            // (so base can be the forked profile if needed)
             app.status = format!(
                 "Edit forked into '{name}': the OCR text stays untouched."
             );
         }
     }
-    let project = &mut app.images[index].project;
     let target_text = text.clone();
-    project
+    app.project
         .profiles
         .selected_mut()
         .set_translation(id, Some(target_text.clone()));
-    // Propagate the same translation to the forked profile of other images if they were synced
-    // (other images don't have this entry id, but keep profiles in sync for consistency;
-    // only the edited image's entry matters)
     Task::none()
 }
 

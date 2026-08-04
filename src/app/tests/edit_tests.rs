@@ -9,7 +9,7 @@ fn first_keystroke_forks_off_the_original_profile() {
     let (mut app, id) = app_with_entry();
     start_edit(&mut app, id);
     type_text(&mut app, "안녕하세요");
-    let project = &app.images[0].project;
+    let project = &app.project;
     assert_eq!(project.profiles.len(), 2);
     assert_ne!(project.profiles.selected_id(), project.profiles.original_id());
     assert_eq!(project.profiles.selected().name, "Profile 1");
@@ -23,7 +23,7 @@ fn later_keystrokes_stay_on_the_forked_profile() {
     let (mut app, id) = app_with_entry();
     start_edit(&mut app, id);
     type_text(&mut app, "abc");
-    let project = &app.images[0].project;
+    let project = &app.project;
     assert_eq!(project.profiles.len(), 2, "fork must happen exactly once");
     assert_eq!(project.profiles.selected().name, "Profile 1");
     let entry = project.ocr.get(id).unwrap();
@@ -33,16 +33,15 @@ fn later_keystrokes_stay_on_the_forked_profile() {
 #[test]
 fn edits_on_a_non_original_profile_apply_in_place() {
     let (mut app, id) = app_with_entry();
-    app.images[0]
-        .project
+    app.project
         .profiles
         .selected_mut()
         .set_translation(id, Some("Hello".into()));
-    let jp = app.images[0].project.profiles.add("JP");
-    app.images[0].project.profiles.select(jp);
+    let jp = app.project.profiles.add("JP");
+    app.project.profiles.select(jp);
     start_edit(&mut app, id);
     type_text(&mut app, "Hi");
-    let project = &app.images[0].project;
+    let project = &app.project;
     assert_eq!(project.profiles.len(), 2, "no fork on non-original profiles");
     assert_eq!(project.profiles.selected_id(), jp);
     let entry = project.ocr.get(id).unwrap();
@@ -53,7 +52,7 @@ fn edits_on_a_non_original_profile_apply_in_place() {
 fn double_click_alone_does_not_fork() {
     let (mut app, id) = app_with_entry();
     let _ = update(&mut app, Message::Ui(UiEvent::EntryDoubleClicked((0, id))));
-    assert_eq!(app.images[0].project.profiles.len(), 1);
+    assert_eq!(app.project.profiles.len(), 1);
     assert_eq!(app.editing, Some((0, id)));
     assert_eq!(app.editing_origin, EditOrigin::Overlay);
     assert!(app.edit_content.is_some(), "double-click must seed the editor");
@@ -67,7 +66,7 @@ fn panel_edit_forks_on_first_keystroke() {
     assert_eq!(app.editing_origin, EditOrigin::Panel);
     assert_eq!(app.selected, Some((0, id)), "panel edit must select the row");
     type_text(&mut app, "안녕하세요");
-    let project = &app.images[0].project;
+    let project = &app.project;
     assert_eq!(project.profiles.len(), 2, "fork must happen on first keystroke");
     assert_ne!(project.profiles.selected_id(), project.profiles.original_id());
     let entry = project.ocr.get(id).unwrap();
@@ -84,8 +83,8 @@ fn panel_edit_submit_clears_editing_state() {
     assert_eq!(app.editing, None);
     assert_eq!(app.editing_origin, EditOrigin::Overlay);
     assert!(app.edit_content.is_none());
-    let entry = app.images[0].project.ocr.get(id).unwrap();
-    assert_eq!(app.images[0].project.display_text(entry), "hi");
+    let entry = app.project.ocr.get(id).unwrap();
+    assert_eq!(app.project.display_text(entry), "hi");
 }
 
 #[test]
@@ -96,9 +95,8 @@ fn moving_an_entry_updates_view_quad_but_not_the_ocr_quad() {
         points: [[20.0, 25.0], [40.0, 25.0], [40.0, 35.0], [20.0, 35.0]],
     };
     let _ = update(&mut app, Message::Ui(UiEvent::EntryMoved((0, id, moved))));
-    let image = &app.images[0];
-    let entry = image.project.ocr.get(id).unwrap();
-    assert_eq!(image.project.view_quad(entry), moved);
+    let entry = app.project.ocr.get(id).unwrap();
+    assert_eq!(app.project.view_quad(entry), moved);
     assert_eq!(
         entry.quad.bounds(),
         [0.0, 0.0, 10.0, 10.0],
@@ -122,9 +120,9 @@ fn enter_inserts_a_newline() {
     let (mut app, id) = app_with_entry();
     start_edit(&mut app, id);
     edit_action(&mut app, text_editor::Action::Edit(text_editor::Edit::Enter));
-    let entry = app.images[0].project.ocr.get(id).unwrap();
+    let entry = app.project.ocr.get(id).unwrap();
     assert_eq!(
-        app.images[0].project.display_text(entry),
+        app.project.display_text(entry),
         "\n",
         "the selected text is replaced by the newline"
     );
@@ -140,8 +138,8 @@ fn submit_clears_the_editing_state() {
     let _ = update(&mut app, Message::Ui(UiEvent::EditSubmit));
     assert_eq!(app.editing, None);
     assert!(app.edit_content.is_none());
-    let entry = app.images[0].project.ocr.get(id).unwrap();
-    assert_eq!(app.images[0].project.display_text(entry), "hi");
+    let entry = app.project.ocr.get(id).unwrap();
+    assert_eq!(app.project.display_text(entry), "hi");
 }
 
 #[test]
@@ -156,7 +154,7 @@ fn toolbar_rename_starts_an_inline_edit() {
     assert_eq!(app.selected, Some((0, id)));
     assert_eq!(app.editing, Some((0, id)));
     assert!(app.edit_content.is_some());
-    assert_eq!(app.images[0].project.profiles.len(), 1, "rename must not fork");
+    assert_eq!(app.project.profiles.len(), 1, "rename must not fork");
 }
 
 #[test]
@@ -171,15 +169,15 @@ fn toolbar_delete_soft_deletes_and_clears_selection() {
     assert_eq!(app.selected, None);
     assert_eq!(app.editing, None);
     assert!(app.edit_content.is_none());
-    assert_eq!(app.images[0].project.ocr.visible_count_for(app.images[0].image_id), 0);
-    assert!(app.images[0].project.ocr.get(id).unwrap().deleted);
+    assert_eq!(app.project.ocr.visible_count_for(app.images[0].image_id), 0);
+    assert!(app.project.ocr.get(id).unwrap().deleted);
 }
 
 #[test]
 fn toolbar_actions_on_unknown_entries_are_noops() {
     let (mut app, _id) = app_with_entry();
     let image_id = app.images[0].image_id;
-    let id = app.images[0].project.ocr.visible_for(image_id).next().unwrap().id;
+    let id = app.project.ocr.visible_for(image_id).next().unwrap().id;
     start_edit(&mut app, id);
     let _ = update(&mut app, Message::Ui(UiEvent::EditSubmit));
     app.selected = None;
@@ -202,24 +200,24 @@ fn toolbar_actions_on_unknown_entries_are_noops() {
     );
     assert_eq!(app.editing, None);
     assert_eq!(app.selected, None);
-    assert_eq!(app.images[0].project.ocr.visible_count_for(app.images[0].image_id), 1);
+    assert_eq!(app.project.ocr.visible_count_for(app.images[0].image_id), 1);
 }
 
 #[test]
 fn toolbar_revert_drops_the_view_quad_back_to_the_ocr_quad() {
     let (mut app, id) = app_with_entry();
-    let ocr_quad = app.images[0].project.ocr.get(id).unwrap().quad;
+    let ocr_quad = app.project.ocr.get(id).unwrap().quad;
     let ocr_tl = ocr_quad.ordered()[0];
     let moved = ocr_quad.translate(15.0, 8.0).rotate([50.0, 50.0], 0.4);
     let moved_tl = moved.ordered()[0];
     let _ = update(&mut app, Message::Ui(UiEvent::EntryMoved((0, id, moved))));
-    assert_ne!(app.images[0].project.view_quad(app.images[0].project.ocr.get(id).unwrap()), ocr_quad);
+    assert_ne!(app.project.view_quad(app.project.ocr.get(id).unwrap()), ocr_quad);
     app.selected = Some((0, id));
     let _ = update(
         &mut app,
         Message::Ui(UiEvent::EntryToolbar((0, id, ToolbarAction::RevertTransform))),
     );
-    let view = app.images[0].project.view_quad(app.images[0].project.ocr.get(id).unwrap());
+    let view = app.project.view_quad(app.project.ocr.get(id).unwrap());
     let tl = view.ordered()[0];
     assert!(
         (tl[0] - moved_tl[0]).abs() < 1e-3 && (tl[1] - moved_tl[1]).abs() < 1e-3,
@@ -229,7 +227,7 @@ fn toolbar_revert_drops_the_view_quad_back_to_the_ocr_quad() {
         "revert must restore the OCR shape/rotation/size");
     assert_eq!(app.selected, Some((0, id)), "revert must keep the selection");
     assert!(
-        !app.images[0].project.ocr.get(id).unwrap().deleted,
+        !app.project.ocr.get(id).unwrap().deleted,
         "revert must not touch the entry"
     );
 }

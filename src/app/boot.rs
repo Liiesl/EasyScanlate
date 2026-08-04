@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use iced::Task;
 use neverliie_iced_widgets::title_bar::NativeFrame;
-use scanlateit_model::{EntrySource, NewEntry, Project, Quad};
+use scanlateit_model::{EntrySource, NewEntry, Quad};
 use scanlateit_ui::main_area::decode::{DecodedPage, PageDecode, Tier};
 use scanlateit_ui::{KOREAN_FONT_PATH, LoadedImage};
 #[cfg(any(feature = "inpaint", feature = "test-ui"))]
@@ -78,14 +78,9 @@ pub fn boot(frame: NativeFrame) -> (App, Task<Message>) {
             width,
             height,
         });
-        let mut project = Project::new();
-        let image_id = project.add_image("fake-white-page.png", width as f32, height as f32);
-        project.append_ocr_for_image(image_id, fake_ocr_entries());
+        let image_id = app.project.add_image("fake-white-page.png", width as f32, height as f32);
+        app.project.append_ocr_for_image(image_id, fake_ocr_entries());
         app.images.push(LoadedImage {
-            width: width as f32,
-            height: height as f32,
-            path: "fake-white-page.png".to_string(),
-            project,
             image_id,
             decode: PageDecode {
                 thumb: Tier::Ready(page.clone()),

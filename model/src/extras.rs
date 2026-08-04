@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use super::EntryId;
+use super::{EntryId, ImageId};
 
 #[derive(Debug, Default)]
 pub struct Extras {
@@ -35,6 +35,8 @@ impl Extras {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InpaintPatch {
+    /// Which image the patch belongs to (chapter-wide `Project`).
+    pub image_id: ImageId,
     /// Pixel bounds `[x, y, w, h]` of the patched region.
     pub bounds: [f32; 4],
 }
