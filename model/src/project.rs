@@ -1,11 +1,24 @@
 use std::collections::HashMap;
 
-use super::{EntryId, EntryStyle, Extras, NewEntry, OcrEntry, OcrResult, ProfileId, Profiles, Quad};
+use super::{
+    EntryId, EntryStyle, Extras, ImageId, ImageMeta, NewEntry, OcrEntry, OcrResult, ProfileId,
+    Profiles, Quad,
+};
 
-/// The whole document model for one image: immutable OCR results, freely
-/// editable profiles, cross-profile entry styles, view bounds, and extras.
+/// The whole document model for one chapter (session): immutable OCR results
+/// for every image, freely editable profiles (chapter-wide), cross-profile
+/// entry styles, view bounds, and extras. Images are immutable after being
+/// added (from `Start OCR` till close); `reorder` is for manual-OCR order
+/// fixing so translation sees reading order.
+///
+/// Every `OcrEntry` carries `image_id: ImageId` — `EntryId` is globally
+/// unique within the chapter `Project` (single `OcrResult.next_id`), and
+/// `Profiles` is shared across all images.
 #[derive(Debug)]
 pub struct Project {
+    /// Images in this chapter, insertion order. Immutable after add.
+    images: Vec<ImageMeta>,
+    next_image_id: u64,
     pub ocr: OcrResult,
     pub profiles: Profiles,
     /// Per-OCR-result styles shared by every profile. An entry without an
@@ -24,6 +37,8 @@ pub struct Project {
 impl Project {
     pub fn new() -> Self {
         Self {
+            images: Vec::new(),
+            next_image_id: 0,
             ocr: OcrResult::new(),
             profiles: Profiles::default(),
             styles: HashMap::new(),
@@ -32,9 +47,42 @@ impl Project {
         }
     }
 
-    /// Append one OCR run to the source-of-truth store.
+    /// Add an image to the chapter. Returns its stable `ImageId`.
+    /// Images are append-only and immutable thereafter (until `Project` is
+    /// dropped at close), matching the current UI lifecycle.
+    pub fn add_image(&mut self, path: impl Into<String>, width: f32, height: f32) -> ImageId {
+        let id = ImageId(self.next_image_id);
+        self.next_image_id += 1;
+        self.images.push(ImageMeta {
+            id,
+            path: path.into(),
+            width,
+            height,
+        });
+        id
+    }
+
+    pub fn images(&self) -> &[ImageMeta] {
+        &self.images
+    }
+
+    pub fn image(&self, id: ImageId) -> Option<&ImageMeta> {
+        self.images.iter().find(|m| m.id == id)
+    }
+
+    pub fn image_count(&self) -> usize {
+        self.images.len()
+    }
+
+    /// Append one OCR run to the source-of-truth store for `ImageId(0)`.
+    /// Legacy single-image helper; prefer `append_ocr_for_image`.
     pub fn append_ocr(&mut self, entries: Vec<NewEntry>) -> usize {
         self.ocr.append_many(entries)
+    }
+
+    /// Append entries for `image_id`. `EntryId` remains globally unique.
+    pub fn append_ocr_for_image(&mut self, image_id: ImageId, entries: Vec<NewEntry>) -> usize {
+        self.ocr.append_many_for_image(image_id, entries)
     }
 
     /// The text the UI should show for an entry: the selected profile's
@@ -111,30 +159,96 @@ impl Project {
     /// Stable sort; touches every entry including soft-deleted ones, so
     /// `ocr.all()` and `ocr.visible()` both reflect the new order — important
     /// for translation which iterates `visible()` per image.
+    ///
+    /// When the chapter has images, this reorders per image in chapter order
+    /// (images are immutable, `reorder` is for manual-OCR fixing). For a
+    /// single-image legacy `Project` (no `images` yet, entries have
+    /// `ImageId(0)`) it falls back to the global view-quad-aware sort.
     pub fn reorder_entries_by_position(&mut self) {
-        // Snapshot view_quads to avoid borrowing `self` inside the comparator
-        // that mutably borrows `self.ocr`.
+        if self.images.is_empty() {
+            // Legacy single-image path: global sort as before.
+            let view_quads = self.view_quads.clone();
+            self.ocr.sort_by(|a, b| {
+                let qa = view_quads
+                    .get(&a.id)
+                    .copied()
+                    .unwrap_or(a.quad)
+                    .bounds();
+                let qb = view_quads
+                    .get(&b.id)
+                    .copied()
+                    .unwrap_or(b.quad)
+                    .bounds();
+                qa[1]
+                    .partial_cmp(&qb[1])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| {
+                        qa[0]
+                            .partial_cmp(&qb[0])
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .then_with(|| a.id.cmp(&b.id))
+            });
+            return;
+        }
+        let ids: Vec<ImageId> = self.images.iter().map(|m| m.id).collect();
+        for id in ids {
+            self.reorder_entries_for_image(id);
+        }
+    }
+
+    /// Reorder only the entries of `image_id` by position. Uses
+    /// `view_quad` fallback, stable sort, touches deleted entries too so both
+    /// `ocr.visible_for(image_id)` and `ocr.all_for(image_id)` reflect the new
+    /// order — needed for translation which iterates per image.
+    pub fn reorder_entries_for_image(&mut self, image_id: ImageId) {
         let view_quads = self.view_quads.clone();
+        // Collect entries of this image in current global order, sort that
+        // subset, then put back in the same slots to keep images grouped by
+        // insertion but sorted within the image.
+        // We need positions of this image's entries in the global vec.
+        // Since `OcrResult.entries` is private, we operate via `sort_by` with
+        // a comparator that only reorders within the image and keeps cross-image
+        // order stable by image insertion order.
+        let image_order: std::collections::HashMap<ImageId, usize> = self
+            .images
+            .iter()
+            .enumerate()
+            .map(|(idx, m)| (m.id, idx))
+            .collect();
         self.ocr.sort_by(|a, b| {
-            let qa = view_quads
-                .get(&a.id)
-                .copied()
-                .unwrap_or(a.quad)
-                .bounds();
-            let qb = view_quads
-                .get(&b.id)
-                .copied()
-                .unwrap_or(b.quad)
-                .bounds();
-            qa[1]
-                .partial_cmp(&qb[1])
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| {
-                    qa[0]
-                        .partial_cmp(&qb[0])
+            let a_is_target = a.image_id == image_id;
+            let b_is_target = b.image_id == image_id;
+            match (a_is_target, b_is_target) {
+                (true, true) => {
+                    let qa = view_quads
+                        .get(&a.id)
+                        .copied()
+                        .unwrap_or(a.quad)
+                        .bounds();
+                    let qb = view_quads
+                        .get(&b.id)
+                        .copied()
+                        .unwrap_or(b.quad)
+                        .bounds();
+                    qa[1]
+                        .partial_cmp(&qb[1])
                         .unwrap_or(std::cmp::Ordering::Equal)
-                })
-                .then_with(|| a.id.cmp(&b.id))
+                        .then_with(|| {
+                            qa[0]
+                                .partial_cmp(&qb[0])
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                        })
+                        .then_with(|| a.id.cmp(&b.id))
+                }
+                (true, false) | (false, true) => {
+                    // Keep chapter image order stable; do not intermix.
+                    let ai = image_order.get(&a.image_id).copied().unwrap_or(usize::MAX);
+                    let bi = image_order.get(&b.image_id).copied().unwrap_or(usize::MAX);
+                    ai.cmp(&bi).then_with(|| a.image_id.cmp(&b.image_id)).then_with(|| a.id.cmp(&b.id))
+                }
+                (false, false) => std::cmp::Ordering::Equal, // keep original
+            }
         });
     }
 

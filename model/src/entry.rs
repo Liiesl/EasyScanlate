@@ -1,5 +1,22 @@
+/// Stable identifier for an image within a chapter `Project`. Assigned by
+/// [`Project`] when an image is added, never reused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub struct ImageId(pub u64);
+
+/// Metadata for one image in a chapter `Project`. Immutable after `Project`
+/// creation (images are append-only, like `OcrResult` entries); the pixels and
+/// decode cache live outside the model.
+#[derive(Debug, Clone)]
+pub struct ImageMeta {
+    pub id: ImageId,
+    pub path: String,
+    pub width: f32,
+    pub height: f32,
+}
+
 /// Stable identifier for an OCR entry. Assigned by [`OcrResult`] on append,
-/// never reused, survives soft-deletes.
+/// never reused, survives soft-deletes. Unique within the whole `Project`
+/// (chapter), not per image.
 ///
 /// [`OcrResult`]: crate::OcrResult
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -209,6 +226,8 @@ mod tests {
 #[derive(Debug, Clone)]
 pub struct OcrEntry {
     pub id: EntryId,
+    /// Which image this entry belongs to (chapter-wide `Project`).
+    pub image_id: ImageId,
     /// Auto or manual OCR. Not read by the UI yet.
     #[allow(dead_code)]
     pub source: EntrySource,

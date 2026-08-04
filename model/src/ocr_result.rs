@@ -5,7 +5,7 @@
 //! diagnostics) and are not yet reachable from the UI.
 #![allow(dead_code)]
 
-use super::{EntryId, NewEntry, OcrEntry};
+use super::{EntryId, ImageId, NewEntry, OcrEntry};
 
 #[derive(Debug, Default)]
 pub struct OcrResult {
@@ -19,11 +19,19 @@ impl OcrResult {
     }
 
     /// Append one entry, returning its freshly assigned id.
+    /// Legacy: assigns `ImageId(0)` when the chapter has a single image.
     pub fn append(&mut self, new: NewEntry) -> EntryId {
+        self.append_for_image(ImageId(0), new)
+    }
+
+    /// Append one entry for `image_id`, returning its freshly assigned id.
+    /// Global `EntryId` is unique across the whole chapter `Project`.
+    pub fn append_for_image(&mut self, image_id: ImageId, new: NewEntry) -> EntryId {
         let id = EntryId(self.next_id);
         self.next_id += 1;
         self.entries.push(OcrEntry {
             id,
+            image_id,
             source: new.source,
             text: new.text,
             score: new.score,
@@ -34,10 +42,16 @@ impl OcrResult {
     }
 
     /// Append many entries (one OCR run). Returns the number appended.
+    /// Legacy: all entries get `ImageId(0)`.
     pub fn append_many(&mut self, new: Vec<NewEntry>) -> usize {
+        self.append_many_for_image(ImageId(0), new)
+    }
+
+    /// Append many entries for `image_id`.
+    pub fn append_many_for_image(&mut self, image_id: ImageId, new: Vec<NewEntry>) -> usize {
         let count = new.len();
         for entry in new {
-            self.append(entry);
+            self.append_for_image(image_id, entry);
         }
         count
     }
@@ -62,6 +76,11 @@ impl OcrResult {
         self.entries.iter().filter(|e| !e.deleted)
     }
 
+    /// Non-deleted entries for `image_id` in insertion order.
+    pub fn visible_for(&self, image_id: ImageId) -> impl Iterator<Item = &OcrEntry> {
+        self.entries.iter().filter(move |e| !e.deleted && e.image_id == image_id)
+    }
+
     /// Every entry in insertion order, including soft-deleted ones. Used by
     /// inpainting so text removed from the view still contributes to the
     /// cleanup mask.
@@ -69,12 +88,28 @@ impl OcrResult {
         self.entries.iter()
     }
 
+    /// Every entry for `image_id` in insertion order, including soft-deleted.
+    pub fn all_for(&self, image_id: ImageId) -> impl Iterator<Item = &OcrEntry> {
+        self.entries.iter().filter(move |e| e.image_id == image_id)
+    }
+
     pub fn visible_count(&self) -> usize {
         self.entries.iter().filter(|e| !e.deleted).count()
     }
 
+    pub fn visible_count_for(&self, image_id: ImageId) -> usize {
+        self.entries
+            .iter()
+            .filter(|e| !e.deleted && e.image_id == image_id)
+            .count()
+    }
+
     pub fn total_count(&self) -> usize {
         self.entries.len()
+    }
+
+    pub fn total_count_for(&self, image_id: ImageId) -> usize {
+        self.entries.iter().filter(|e| e.image_id == image_id).count()
     }
 
     /// Reorder entries in place by a custom comparator. Stable sort; not
@@ -92,6 +127,8 @@ impl OcrResult {
     /// Uses each entry's immutable OCR quad only; `Project` wraps this with
     /// view-quad awareness. Sorts all entries (including soft-deleted ones)
     /// so `all()` and `visible()` both reflect the new order.
+    /// For a chapter `Project` with multiple images this sorts across all
+    /// images; prefer `reorder_by_position_for_image` for per-image ordering.
     pub fn reorder_by_position(&mut self) {
         self.entries.sort_by(|a, b| {
             let ba = a.quad.bounds();
@@ -106,6 +143,41 @@ impl OcrResult {
                 })
                 .then_with(|| a.id.cmp(&b.id))
         });
+    }
+
+    /// Reorder only entries of `image_id` by position, keeping other images
+    /// untouched. Stable sort; touches every entry of that image including
+    /// soft-deleted ones, so `all_for()` and `visible_for()` both reflect the
+    /// new order — important for translation which iterates `visible_for()` per image.
+    pub fn reorder_by_position_for_image(&mut self, image_id: ImageId) {
+        // Indices of entries belonging to this image, in current order.
+        let indices: Vec<usize> = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.image_id == image_id)
+            .map(|(i, _)| i)
+            .collect();
+        if indices.len() <= 1 {
+            return;
+        }
+        let mut subset: Vec<OcrEntry> = indices.iter().map(|&i| self.entries[i].clone()).collect();
+        subset.sort_by(|a, b| {
+            let ba = a.quad.bounds();
+            let bb = b.quad.bounds();
+            ba[1]
+                .partial_cmp(&bb[1])
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    ba[0]
+                        .partial_cmp(&bb[0])
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        for (pos, entry) in indices.into_iter().zip(subset) {
+            self.entries[pos] = entry;
+        }
     }
 }
 
