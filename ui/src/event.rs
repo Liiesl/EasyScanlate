@@ -184,7 +184,7 @@ pub enum UiEvent {
     RetranslateEntry((usize, EntryId)),
     /// Request to reorder OCR entries by image file then visual Y→X (top
     /// first, left→right). Model operation — future OCR-entry modal will emit
-    /// this; handler loops every image's `Project::reorder_entries_by_position`.
+    /// this; handler loops every image's `Project::reorder_entries_for_image`.
     ReorderEntries,
     EntryMoved((usize, EntryId, Quad)),
     /// A button of the selection toolbar under the selected entry.

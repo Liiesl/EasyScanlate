@@ -162,10 +162,11 @@ pub fn dispatch_auto_inpaint_solo(app: &mut App, effective_model: scanlateit_set
         .iter()
         .enumerate()
         .flat_map(|(index, image)| {
+            let image_id = image.image_id;
             image
                 .project
                 .ocr
-                .visible()
+                .visible_for(image_id)
                 .map(move |entry| AutoInpaintJob {
                     index,
                     id: entry.id,
@@ -419,7 +420,7 @@ pub fn handle_inpaint_selection(app: &mut App, index: usize, rect: iced::Rectang
     let quads: Vec<Quad> = image
         .project
         .ocr
-        .all()
+        .all_for(image.image_id)
         .map(|entry| image.project.view_quad(entry))
         .filter(|quad| quad.intersects_rect(rect_arr))
         .collect();
@@ -611,7 +612,7 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
         let quads: Vec<Quad> = image
             .project
             .ocr
-            .all()
+            .all_for(image.image_id)
             .map(|e| image.project.view_quad(e))
             .filter(|q| q.intersects_rect(rect))
             .collect();

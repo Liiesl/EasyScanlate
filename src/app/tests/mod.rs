@@ -6,22 +6,27 @@ pub use super::*;
 use scanlateit_model::INITIAL_PRESET_SLOTS;
 
 pub(crate) fn app_with_entry() -> (App, EntryId) {
-    use scanlateit_model::{EntrySource, NewEntry, Quad};
+    use scanlateit_model::{EntrySource, ImageId, NewEntry, Quad};
     let mut app = App::new(NativeFrame::default());
     let mut project = Project::new();
-    let id = project.ocr.append(NewEntry {
-        source: EntrySource::AutoOcr,
-        text: "안녕".to_string(),
-        score: 0.9,
-        quad: Quad {
-            points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+    let image_id = project.add_image("x.png", 100.0, 100.0);
+    let id = project.ocr.append_for_image(
+        image_id,
+        NewEntry {
+            source: EntrySource::AutoOcr,
+            text: "안녕".to_string(),
+            score: 0.9,
+            quad: Quad {
+                points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            },
         },
-    });
+    );
     app.images.push(LoadedImage {
         width: 100.0,
         height: 100.0,
         path: "x.png".to_string(),
         project,
+        image_id,
         decode: PageDecode::default(),
         inpaint: Vec::new(),
     });

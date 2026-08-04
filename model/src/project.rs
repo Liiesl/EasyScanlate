@@ -74,12 +74,6 @@ impl Project {
         self.images.len()
     }
 
-    /// Append one OCR run to the source-of-truth store for `ImageId(0)`.
-    /// Legacy single-image helper; prefer `append_ocr_for_image`.
-    pub fn append_ocr(&mut self, entries: Vec<NewEntry>) -> usize {
-        self.ocr.append_many(entries)
-    }
-
     /// Append entries for `image_id`. `EntryId` remains globally unique.
     pub fn append_ocr_for_image(&mut self, image_id: ImageId, entries: Vec<NewEntry>) -> usize {
         self.ocr.append_many_for_image(image_id, entries)
@@ -150,51 +144,6 @@ impl Project {
     /// is dropped, so a future restore keeps every adjustment.
     pub fn delete_entry(&mut self, entry_id: EntryId) -> bool {
         self.ocr.soft_delete(entry_id)
-    }
-
-    /// Reorder all OCR entries so the highest (smallest `min_y`) comes first,
-    /// tie-broken by smallest `min_x` (left to right), then by `EntryId`.
-    /// Uses each entry's current visual quad (`view_quad` fallback to OCR quad)
-    /// so a user-dragged box is ordered where it appears on the image.
-    /// Stable sort; touches every entry including soft-deleted ones, so
-    /// `ocr.all()` and `ocr.visible()` both reflect the new order — important
-    /// for translation which iterates `visible()` per image.
-    ///
-    /// When the chapter has images, this reorders per image in chapter order
-    /// (images are immutable, `reorder` is for manual-OCR fixing). For a
-    /// single-image legacy `Project` (no `images` yet, entries have
-    /// `ImageId(0)`) it falls back to the global view-quad-aware sort.
-    pub fn reorder_entries_by_position(&mut self) {
-        if self.images.is_empty() {
-            // Legacy single-image path: global sort as before.
-            let view_quads = self.view_quads.clone();
-            self.ocr.sort_by(|a, b| {
-                let qa = view_quads
-                    .get(&a.id)
-                    .copied()
-                    .unwrap_or(a.quad)
-                    .bounds();
-                let qb = view_quads
-                    .get(&b.id)
-                    .copied()
-                    .unwrap_or(b.quad)
-                    .bounds();
-                qa[1]
-                    .partial_cmp(&qb[1])
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| {
-                        qa[0]
-                            .partial_cmp(&qb[0])
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                    .then_with(|| a.id.cmp(&b.id))
-            });
-            return;
-        }
-        let ids: Vec<ImageId> = self.images.iter().map(|m| m.id).collect();
-        for id in ids {
-            self.reorder_entries_for_image(id);
-        }
     }
 
     /// Reorder only the entries of `image_id` by position. Uses
@@ -284,7 +233,7 @@ mod tests {
     #[test]
     fn display_text_prefers_selected_profile_translation() {
         let mut project = Project::new();
-        let id = project.ocr.append(NewEntry {
+        let id = project.ocr.append_for_image(ImageId(0), NewEntry {
             source: crate::EntrySource::AutoOcr,
             text: "안녕".to_string(),
             score: 0.9,
@@ -319,7 +268,7 @@ mod tests {
     #[test]
     fn view_quad_falls_back_to_quad_then_override_then_reset() {
         let mut project = Project::new();
-        let id = project.ocr.append(NewEntry {
+        let id = project.ocr.append_for_image(ImageId(0), NewEntry {
             source: crate::EntrySource::AutoOcr,
             text: "hi".to_string(),
             score: 0.9,
@@ -355,7 +304,7 @@ mod tests {
         let mut project = Project::new();
         let jp = project.profiles.add("JP");
 
-        let id = project.ocr.append(NewEntry {
+        let id = project.ocr.append_for_image(ImageId(0), NewEntry {
             source: crate::EntrySource::AutoOcr,
             text: "hi".to_string(),
             score: 0.9,
@@ -384,7 +333,7 @@ mod tests {
     fn delete_entry_hides_it_but_keeps_its_overrides() {
         let mut project = Project::new();
         let style = EntryStyle { bold: true, ..EntryStyle::default() };
-        let id = project.ocr.append(NewEntry {
+        let id = project.ocr.append_for_image(ImageId(0), NewEntry {
             source: crate::EntrySource::AutoOcr,
             text: "bye".to_string(),
             score: 0.9,
@@ -399,7 +348,7 @@ mod tests {
         project.set_view_quad(id, distorted);
 
         assert!(project.delete_entry(id));
-        assert_eq!(project.ocr.visible_count(), 0);
+        assert_eq!(project.ocr.visible_count_for(ImageId(0)), 0);
         assert!(project.ocr.get(id).unwrap().deleted);
         assert_eq!(
             project.entry_style(id),
@@ -417,7 +366,7 @@ mod tests {
     #[test]
     fn store_translation_creates_and_selects_a_profile_by_name() {
         let mut project = Project::new();
-        let id = project.ocr.append(NewEntry {
+        let id = project.ocr.append_for_image(ImageId(0), NewEntry {
             source: crate::EntrySource::AutoOcr,
             text: "raw".to_string(),
             score: 0.9,
@@ -450,7 +399,7 @@ mod tests {
     #[test]
     fn revert_transform_keeps_position_and_restores_ocr_shape() {
         let mut project = Project::new();
-        let id = project.ocr.append(NewEntry {
+        let id = project.ocr.append_for_image(ImageId(0), NewEntry {
             source: crate::EntrySource::AutoOcr,
             text: "hi".to_string(),
             score: 0.9,
@@ -478,7 +427,7 @@ mod tests {
     #[test]
     fn revert_transform_without_override_is_a_noop() {
         let mut project = Project::new();
-        let id = project.ocr.append(NewEntry {
+        let id = project.ocr.append_for_image(ImageId(0), NewEntry {
             source: crate::EntrySource::AutoOcr,
             text: "hi".to_string(),
             score: 0.9,
@@ -505,65 +454,65 @@ mod tests {
     #[test]
     fn reorder_entries_by_position_sorts_by_y_then_x() {
         let mut project = Project::new();
-        project.ocr.append(NewEntry {
+        project.ocr.append_for_image(ImageId(0), NewEntry {
             source: crate::EntrySource::AutoOcr,
             text: "bottom".into(),
             score: 0.9,
             quad: quad_at(0.0, 100.0),
         });
-        project.ocr.append(NewEntry {
+        project.ocr.append_for_image(ImageId(0), NewEntry {
             source: crate::EntrySource::AutoOcr,
             text: "top".into(),
             score: 0.9,
             quad: quad_at(0.0, 10.0),
         });
-        project.ocr.append(NewEntry {
+        project.ocr.append_for_image(ImageId(0), NewEntry {
             source: crate::EntrySource::AutoOcr,
             text: "middle".into(),
             score: 0.9,
             quad: quad_at(0.0, 50.0),
         });
-        project.reorder_entries_by_position();
-        let texts: Vec<&str> = project.ocr.visible().map(|e| e.text.as_str()).collect();
+        project.reorder_entries_for_image(ImageId(0));
+        let texts: Vec<&str> = project.ocr.visible_for(ImageId(0)).map(|e| e.text.as_str()).collect();
         assert_eq!(texts, vec!["top", "middle", "bottom"]);
     }
 
     #[test]
     fn reorder_entries_by_position_tie_breaks_by_x_left_to_right() {
         let mut project = Project::new();
-        project.ocr.append(NewEntry {
+        project.ocr.append_for_image(ImageId(0), NewEntry {
             source: crate::EntrySource::AutoOcr,
             text: "right".into(),
             score: 0.9,
             quad: quad_at(100.0, 10.0),
         });
-        project.ocr.append(NewEntry {
+        project.ocr.append_for_image(ImageId(0), NewEntry {
             source: crate::EntrySource::AutoOcr,
             text: "left".into(),
             score: 0.9,
             quad: quad_at(10.0, 10.0),
         });
-        project.ocr.append(NewEntry {
+        project.ocr.append_for_image(ImageId(0), NewEntry {
             source: crate::EntrySource::AutoOcr,
             text: "center".into(),
             score: 0.9,
             quad: quad_at(50.0, 10.0),
         });
-        project.reorder_entries_by_position();
-        let texts: Vec<&str> = project.ocr.visible().map(|e| e.text.as_str()).collect();
+        project.reorder_entries_for_image(ImageId(0));
+        let texts: Vec<&str> = project.ocr.visible_for(ImageId(0)).map(|e| e.text.as_str()).collect();
         assert_eq!(texts, vec!["left", "center", "right"]);
     }
 
     #[test]
     fn reorder_entries_by_position_uses_view_quad_when_overridden() {
         let mut project = Project::new();
-        let low_id = project.ocr.append(NewEntry {
+        let low_id = project.ocr.append_for_image(ImageId(0), NewEntry {
             source: crate::EntrySource::AutoOcr,
             text: "low".into(),
             score: 0.9,
             quad: quad_at(0.0, 100.0),
         });
-        let high_id = project.ocr.append(NewEntry {
+        let high_id = project.ocr.append_for_image(ImageId(0), NewEntry {
             source: crate::EntrySource::AutoOcr,
             text: "high".into(),
             score: 0.9,
@@ -573,12 +522,12 @@ mod tests {
         project.set_view_quad(low_id, quad_at(0.0, 5.0));
         // visible before reorder is insertion order [low, high]
         assert_eq!(
-            project.ocr.visible().map(|e| e.text.as_str()).collect::<Vec<_>>(),
+            project.ocr.visible_for(ImageId(0)).map(|e| e.text.as_str()).collect::<Vec<_>>(),
             vec!["low", "high"]
         );
-        project.reorder_entries_by_position();
+        project.reorder_entries_for_image(ImageId(0));
         // after reorder, "low" (now at y=5 via view_quad) should be first
-        let texts: Vec<&str> = project.ocr.visible().map(|e| e.text.as_str()).collect();
+        let texts: Vec<&str> = project.ocr.visible_for(ImageId(0)).map(|e| e.text.as_str()).collect();
         assert_eq!(texts, vec!["low", "high"]);
         // ensure view_quad is still respected
         assert!(project.has_view_quad(low_id));
@@ -588,23 +537,23 @@ mod tests {
     #[test]
     fn reorder_entries_by_position_keeps_deleted_but_sorts_them() {
         let mut project = Project::new();
-        let bottom = project.ocr.append(NewEntry {
+        let bottom = project.ocr.append_for_image(ImageId(0), NewEntry {
             source: crate::EntrySource::AutoOcr,
             text: "bottom".into(),
             score: 0.9,
             quad: quad_at(0.0, 100.0),
         });
-        let top = project.ocr.append(NewEntry {
+        let top = project.ocr.append_for_image(ImageId(0), NewEntry {
             source: crate::EntrySource::AutoOcr,
             text: "top".into(),
             score: 0.9,
             quad: quad_at(0.0, 10.0),
         });
         project.delete_entry(top);
-        project.reorder_entries_by_position();
-        let all: Vec<&str> = project.ocr.all().map(|e| e.text.as_str()).collect();
+        project.reorder_entries_for_image(ImageId(0));
+        let all: Vec<&str> = project.ocr.all_for(ImageId(0)).map(|e| e.text.as_str()).collect();
         assert_eq!(all, vec!["top", "bottom"]);
-        let visible: Vec<&str> = project.ocr.visible().map(|e| e.text.as_str()).collect();
+        let visible: Vec<&str> = project.ocr.visible_for(ImageId(0)).map(|e| e.text.as_str()).collect();
         assert_eq!(visible, vec!["bottom"]);
         assert!(project.ocr.get(top).unwrap().deleted);
         assert!(!project.ocr.get(bottom).unwrap().deleted);

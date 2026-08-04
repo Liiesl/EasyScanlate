@@ -29,10 +29,11 @@ fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
         .iter()
         .enumerate()
         .flat_map(|(index, image)| {
+            let image_id = image.image_id;
             image
                 .project
                 .ocr
-                .visible()
+                .visible_for(image_id)
                 .filter(move |entry| !styling.is_done(index, entry.id))
                 .map(move |entry| {
                     (
@@ -97,10 +98,11 @@ fn start_pipeline_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Messa
         .iter()
         .enumerate()
         .flat_map(|(index, image)| {
+            let image_id = image.image_id;
             image
                 .project
                 .ocr
-                .visible()
+                .visible_for(image_id)
                 .filter(move |entry| !styling.is_done(index, entry.id))
                 .map(move |entry| {
                     (

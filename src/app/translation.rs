@@ -91,10 +91,11 @@ pub fn handle_translate(app: &mut App) -> Task<Message> {
             let filename = translation::file_tag(&image.path);
             let is_translate_mode = app.translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate;
             let base_id = if is_translate_mode { resolve_base_id(app) } else { None };
+            let image_id = image.image_id;
             image
                 .project
                 .ocr
-                .visible()
+                .visible_for(image_id)
                 .map(move |entry| {
                     let text = if let Some(pid) = base_id {
                         image.project.profiles.iter().find(|p| p.id == pid)
@@ -364,7 +365,7 @@ pub fn handle_retranslate_entry(app: &mut App, index: usize, entry_id: EntryId) 
             let ctx: Vec<translation::TranslateItem> = image
                 .project
                 .ocr
-                .visible()
+                .visible_for(image.image_id)
                 .map(|e| {
                     let t = base_id
                         .and_then(|pid| image.project.profiles.iter().find(|p| p.id == pid))
@@ -379,7 +380,7 @@ pub fn handle_retranslate_entry(app: &mut App, index: usize, entry_id: EntryId) 
             let ctx: Vec<translation::TranslateItem> = image
                 .project
                 .ocr
-                .visible()
+                .visible_for(image.image_id)
                 .map(|e| translation::TranslateItem {
                     filename: filename.clone(),
                     id: e.id.0,

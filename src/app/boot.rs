@@ -79,12 +79,14 @@ pub fn boot(frame: NativeFrame) -> (App, Task<Message>) {
             height,
         });
         let mut project = Project::new();
-        project.append_ocr(fake_ocr_entries());
+        let image_id = project.add_image("fake-white-page.png", width as f32, height as f32);
+        project.append_ocr_for_image(image_id, fake_ocr_entries());
         app.images.push(LoadedImage {
             width: width as f32,
             height: height as f32,
             path: "fake-white-page.png".to_string(),
             project,
+            image_id,
             decode: PageDecode {
                 thumb: Tier::Ready(page.clone()),
                 full: Tier::Ready(page),

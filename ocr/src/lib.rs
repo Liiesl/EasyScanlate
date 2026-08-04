@@ -619,9 +619,10 @@ impl RunResult {
         self.per_page
             .iter()
             .map(|(page, entries)| {
-                projects
-                    .get_mut(*page)
-                    .map_or(0, |project| project.append_ocr(entries.clone()))
+                projects.get_mut(*page).map_or(0, |project| {
+                    let image_id = project.images().first().map(|m| m.id).unwrap_or(scanlateit_model::ImageId(0));
+                    project.append_ocr_for_image(image_id, entries.clone())
+                })
             })
             .sum()
     }
@@ -635,9 +636,10 @@ impl BoundaryState {
         self.candidates
             .iter()
             .map(|candidate| {
-                projects
-                    .get_mut(candidate.page)
-                    .map_or(0, |project| project.append_ocr(vec![candidate.entry.clone()]))
+                projects.get_mut(candidate.page).map_or(0, |project| {
+                    let image_id = project.images().first().map(|m| m.id).unwrap_or(scanlateit_model::ImageId(0));
+                    project.append_ocr_for_image(image_id, vec![candidate.entry.clone()])
+                })
             })
             .sum()
     }
@@ -1973,6 +1975,9 @@ mod tests {
     #[test]
     fn commit_entries_appends_per_page_entries_and_counts() {
         let mut projects = [Project::new(), Project::new()];
+        // Register images so append_ocr_for_image has an ImageId to use
+        let id0 = projects[0].add_image("p0.png", 100.0, 100.0);
+        let id1 = projects[1].add_image("p1.png", 100.0, 100.0);
         let result = RunResult {
             per_page: vec![
                 (0, vec![entry("a")]),
@@ -1982,13 +1987,14 @@ mod tests {
             held: None,
         };
         assert_eq!(result.commit_entries(&mut projects), 3, "out-of-range page skipped");
-        assert_eq!(projects[0].ocr.visible_count(), 1);
-        assert_eq!(projects[1].ocr.visible_count(), 2);
+        assert_eq!(projects[0].ocr.visible_count_for(id0), 1);
+        assert_eq!(projects[1].ocr.visible_count_for(id1), 2);
     }
 
     #[test]
     fn boundary_state_commit_appends_held_candidates() {
         let mut projects = [Project::new()];
+        let id0 = projects[0].add_image("p0.png", 100.0, 100.0);
         let state = BoundaryState {
             candidates: vec![
                 BoundaryCandidate { canvas_quad: [0.0, 0.0, 1.0, 1.0], entry: entry("a"), page: 0 },
@@ -1999,8 +2005,8 @@ mod tests {
             boundary: 600,
         };
         assert_eq!(state.commit(&mut projects), 2, "out-of-range page skipped");
-        assert_eq!(projects[0].ocr.visible_count(), 2);
-        let texts: Vec<String> = projects[0].ocr.all().map(|e| e.text.clone()).collect();
+        assert_eq!(projects[0].ocr.visible_count_for(id0), 2);
+        let texts: Vec<String> = projects[0].ocr.all_for(id0).map(|e| e.text.clone()).collect();
         assert_eq!(texts, vec!["a".to_string(), "b".to_string()]);
     }
 }

@@ -18,7 +18,7 @@ pub fn tiles<'a, S: UiState + ?Sized>(state: &'a S, original: bool) -> Vec<TileS
                 image
                     .project
                     .ocr
-                    .visible()
+                    .visible_for(image.image_id)
                     .map(|entry| OverlayEntry {
                         id: entry.id,
                         text: image.project.display_text(entry),

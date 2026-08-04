@@ -58,7 +58,8 @@ pub fn commit_per_page(app: &mut App, per_page: Vec<(usize, Vec<NewEntry>)>) {
         let Some(image) = app.images.get_mut(page) else {
             continue;
         };
-        app.ocr_total += image.project.append_ocr(entries);
+        let image_id = image.image_id;
+        app.ocr_total += image.project.append_ocr_for_image(image_id, entries);
     }
 }
 
@@ -67,7 +68,8 @@ pub fn flush_held_boundary(app: &mut App) {
     if let Some(state) = app.held_boundary.take() {
         for candidate in state.candidates {
             if let Some(image) = app.images.get_mut(candidate.page) {
-                app.ocr_total += image.project.append_ocr(vec![candidate.entry]);
+                let image_id = image.image_id;
+                app.ocr_total += image.project.append_ocr_for_image(image_id, vec![candidate.entry]);
             }
         }
     }
@@ -169,7 +171,8 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
     app.running = true;
     let mut added = 0;
     for image in &mut app.images {
-        added += image.project.append_ocr(fake_ocr_entries());
+        let image_id = image.image_id;
+        added += image.project.append_ocr_for_image(image_id, fake_ocr_entries());
     }
     app.running = false;
     app.status = format!("Fake OCR done: {added} line(s) (no OCR engine in this build).");
@@ -219,10 +222,11 @@ pub fn handle_ocr_stream_run(app: &mut App, result: Result<ocr::RunEvent, String
         }) => {
             let run = app.ocr_plans[index];
             let prev = run.dedup.map(|(page, offset)| {
+                let image_id = app.images[page].image_id;
                 let quads: Vec<Quad> = app.images[page]
                     .project
                     .ocr
-                    .all()
+                    .all_for(image_id)
                     .map(|entry| entry.quad)
                     .collect();
                 (quads, app.images[page].width as u32, offset)
@@ -512,9 +516,10 @@ pub fn handle_manual_ocr_finished(app: &mut App, index: usize, result: Result<Ve
             }
             let count = entries.len();
             if let Some(image) = app.images.get_mut(index) {
-                let added = image.project.append_ocr(entries);
+                let image_id = image.image_id;
+                let added = image.project.append_ocr_for_image(image_id, entries);
                 // Request reorder by manual OCR orchestrator: keep translation reading order correct.
-                image.project.reorder_entries_by_position();
+                image.project.reorder_entries_for_image(image_id);
                 app.status = format!("Manual OCR: {added} line(s) added to image {} ({} detected).", index + 1, count);
             } else {
                 app.status = format!("Manual OCR: {count} line(s) detected (image no longer exists).");

@@ -1,6 +1,6 @@
 use iced::widget::image::Handle;
 
-use scanlateit_model::Project;
+use scanlateit_model::{ImageId, Project};
 
 use crate::main_area::decode::PageDecode;
 
@@ -23,6 +23,7 @@ pub struct LoadedImage {
     pub height: f32,
     pub path: String,
     pub project: Project,
+    pub image_id: ImageId,
     pub decode: PageDecode,
     /// Inpaint layers drawn over the original image, oldest first.
     pub inpaint: Vec<InpaintLayer>,

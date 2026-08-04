@@ -443,11 +443,14 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     return Task::none();
                 }
                 for (path, width, height) in images {
+                    let mut project = Project::new();
+                    let image_id = project.add_image(path.clone(), width as f32, height as f32);
                     app.images.push(LoadedImage {
                         width: width as f32,
                         height: height as f32,
                         path,
-                        project: Project::new(),
+                        project,
+                        image_id,
                         decode: PageDecode::default(),
                         inpaint: Vec::new(),
                     });
@@ -774,11 +777,12 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 return Task::none();
             }
             for image in &mut app.images {
-                image.project.reorder_entries_by_position();
+                let image_id = image.image_id;
+                image.project.reorder_entries_for_image(image_id);
             }
             // Per-image file order is the `images` vec order; within each file
             // entries are now Y→X (top first, left→right) by view-quad bounds.
-            // Translation iterates `visible()` per image, so it immediately
+            // Translation iterates `visible_for()` per image, so it immediately
             // benefits — no translation cache to invalidate.
             app.status = format!(
                 "Reordered {} image(s) by position (higher first, left to right).",

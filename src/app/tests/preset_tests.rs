@@ -22,7 +22,8 @@ fn applying_a_preset_without_selection_or_out_of_range_is_a_noop() {
     app.selected = None;
     let _ = update(&mut app, Message::Ui(UiEvent::StylePresetApply(0)));
     assert_eq!(app.style_working.bg_color, [1, 2, 3, 255]);
-    app.selected = Some((0, app.images[0].project.ocr.visible().next().unwrap().id));
+    let image_id = app.images[0].image_id;
+    app.selected = Some((0, app.images[0].project.ocr.visible_for(image_id).next().unwrap().id));
     let _ = update(&mut app, Message::Ui(UiEvent::StylePresetApply(999)));
     assert_eq!(app.style_working.bg_color, [1, 2, 3, 255]);
 }

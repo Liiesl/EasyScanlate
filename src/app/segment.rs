@@ -26,9 +26,10 @@ pub fn start_segment_filter(app: &mut App) -> Task<Message> {
                 .images
                 .iter()
                 .map(|img| {
+                    let image_id = img.image_id;
                     img.project
                         .ocr
-                        .visible()
+                        .visible_for(image_id)
                         .map(|e| (img.project.view_quad(e).bounds(), e.id))
                         .collect()
                 })

@@ -292,11 +292,14 @@ mod tests {
     use scanlateit_model::Project;
 
     fn image() -> LoadedImage {
+        let mut project = Project::new();
+        let image_id = project.add_image("x.png", 100.0, 100.0);
         LoadedImage {
             width: 100.0,
             height: 100.0,
             path: "x.png".to_string(),
-            project: Project::new(),
+            project,
+            image_id,
             decode: PageDecode::default(),
             inpaint: Vec::new(),
         }

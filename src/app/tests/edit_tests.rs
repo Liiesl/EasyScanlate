@@ -171,14 +171,15 @@ fn toolbar_delete_soft_deletes_and_clears_selection() {
     assert_eq!(app.selected, None);
     assert_eq!(app.editing, None);
     assert!(app.edit_content.is_none());
-    assert_eq!(app.images[0].project.ocr.visible_count(), 0);
+    assert_eq!(app.images[0].project.ocr.visible_count_for(app.images[0].image_id), 0);
     assert!(app.images[0].project.ocr.get(id).unwrap().deleted);
 }
 
 #[test]
 fn toolbar_actions_on_unknown_entries_are_noops() {
     let (mut app, _id) = app_with_entry();
-    let id = app.images[0].project.ocr.visible().next().unwrap().id;
+    let image_id = app.images[0].image_id;
+    let id = app.images[0].project.ocr.visible_for(image_id).next().unwrap().id;
     start_edit(&mut app, id);
     let _ = update(&mut app, Message::Ui(UiEvent::EditSubmit));
     app.selected = None;
@@ -201,7 +202,7 @@ fn toolbar_actions_on_unknown_entries_are_noops() {
     );
     assert_eq!(app.editing, None);
     assert_eq!(app.selected, None);
-    assert_eq!(app.images[0].project.ocr.visible_count(), 1);
+    assert_eq!(app.images[0].project.ocr.visible_count_for(app.images[0].image_id), 1);
 }
 
 #[test]
