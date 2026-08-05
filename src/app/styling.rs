@@ -31,7 +31,7 @@ fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
             .image(image_id)
             .map(|m| m.path.clone())
             .unwrap_or_default();
-        for entry in app.project.ocr.visible_for(image_id).collect::<Vec<_>>() {
+        for entry in app.project.visible_for(image_id).collect::<Vec<_>>() {
             if app.styling.is_done(index, entry.id) {
                 continue;
             }
@@ -93,7 +93,7 @@ fn start_pipeline_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Messa
             .image(image_id)
             .map(|m| m.path.clone())
             .unwrap_or_default();
-        for entry in app.project.ocr.visible_for(image_id).collect::<Vec<_>>() {
+        for entry in app.project.visible_for(image_id).collect::<Vec<_>>() {
             if app.styling.is_done(index, entry.id) {
                 continue;
             }
@@ -187,7 +187,8 @@ pub fn handle_style_detected(app: &mut App, index: usize, id: EntryId, result: R
     match result {
         Ok(style) => {
             if index < app.images.len() {
-                app.project.set_entry_style(id, style);
+                let ev = app.project.set_entry_style_with_event(id, style);
+                crate::app::handle_model_event(app, ev);
                 app.styling.mark_done(index, id);
                 app.status = "Applied auto-detected text style.".to_string();
             }
@@ -203,8 +204,7 @@ pub fn handle_style_detected(app: &mut App, index: usize, id: EntryId, result: R
 pub fn handle_pipeline_style_detected(app: &mut App, index: usize, id: EntryId, result: Result<(EntryStyle, scanlateit_styling::StylePrediction), String>) -> Task<Message> {
     let quad = app
         .project
-        .ocr
-        .get(id)
+        .entry_including_deleted(id)
         .map(|e| app.project.view_quad(e))
         .unwrap_or(Quad { points: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]] });
     let path = app
@@ -226,21 +226,24 @@ pub fn handle_pipeline_style_detected(app: &mut App, index: usize, id: EntryId, 
 pub fn handle_bold(app: &mut App, bold: bool) -> Task<Message> {
     let Some((_index, id)) = app.selected else { return Task::none() };
     app.style_working.bold = bold;
-    app.project.set_entry_style(id, app.style_working.clone());
+    let ev = app.project.set_entry_style_with_event(id, app.style_working.clone());
+    crate::app::handle_model_event(app, ev);
     Task::none()
 }
 
 pub fn handle_italic(app: &mut App, italic: bool) -> Task<Message> {
     let Some((_index, id)) = app.selected else { return Task::none() };
     app.style_working.italic = italic;
-    app.project.set_entry_style(id, app.style_working.clone());
+    let ev = app.project.set_entry_style_with_event(id, app.style_working.clone());
+    crate::app::handle_model_event(app, ev);
     Task::none()
 }
 
 pub fn handle_font(app: &mut App, name: String) -> Task<Message> {
     let Some((_index, id)) = app.selected else { return Task::none() };
     app.style_working.font_family = Some(name.clone());
-    app.project.set_entry_style(id, app.style_working.clone());
+    let ev = app.project.set_entry_style_with_event(id, app.style_working.clone());
+    crate::app::handle_model_event(app, ev);
     // Bundled fonts are already embedded in the binary via `include_bytes!`
     // in `main.rs` — no `font::load` needed. System-installed duplicates are
     // already in the fontdb scan. Only load non-bundled families on demand.
@@ -269,21 +272,24 @@ pub fn handle_font(app: &mut App, name: String) -> Task<Message> {
 pub fn handle_text_align(app: &mut App, align: TextAlign) -> Task<Message> {
     let Some((_index, id)) = app.selected else { return Task::none() };
     app.style_working.text_align = align;
-    app.project.set_entry_style(id, app.style_working.clone());
+    let ev = app.project.set_entry_style_with_event(id, app.style_working.clone());
+    crate::app::handle_model_event(app, ev);
     Task::none()
 }
 
 pub fn handle_gradient_toggle(app: &mut App, enabled: bool) -> Task<Message> {
     let Some((_index, id)) = app.selected else { return Task::none() };
     app.style_working.text_gradient = enabled;
-    app.project.set_entry_style(id, app.style_working.clone());
+    let ev = app.project.set_entry_style_with_event(id, app.style_working.clone());
+    crate::app::handle_model_event(app, ev);
     Task::none()
 }
 
 pub fn handle_gradient_dir(app: &mut App, dir: TextGradientDir) -> Task<Message> {
     let Some((_index, id)) = app.selected else { return Task::none() };
     app.style_working.gradient_dir = dir;
-    app.project.set_entry_style(id, app.style_working.clone());
+    let ev = app.project.set_entry_style_with_event(id, app.style_working.clone());
+    crate::app::handle_model_event(app, ev);
     Task::none()
 }
 
@@ -311,7 +317,8 @@ pub fn handle_color_submit(app: &mut App, field: StyleField, color: iced::Color)
         StyleField::GradientA => app.style_working.gradient_a = rgba,
         StyleField::GradientB => app.style_working.gradient_b = rgba,
     }
-    app.project.set_entry_style(id, app.style_working.clone());
+    let ev = app.project.set_entry_style_with_event(id, app.style_working.clone());
+    crate::app::handle_model_event(app, ev);
     Task::none()
 }
 
@@ -340,7 +347,8 @@ pub fn handle_hex_input(app: &mut App, field: StyleField, text: String) -> Task<
         StyleField::GradientA => app.style_working.gradient_a = rgba,
         StyleField::GradientB => app.style_working.gradient_b = rgba,
     }
-    app.project.set_entry_style(id, app.style_working.clone());
+    let ev = app.project.set_entry_style_with_event(id, app.style_working.clone());
+    crate::app::handle_model_event(app, ev);
     // Update buffer to canonical? Keep original to avoid jump; but if the
     // parsed color's canonical label differs only in case, keep typed text.
     // (No extra work needed.)
@@ -352,7 +360,8 @@ pub fn handle_stroke_width(app: &mut App, text: String) -> Task<Message> {
     app.style_stroke_width = text;
     if let Ok(width) = app.style_stroke_width.parse::<f32>() {
         app.style_working.stroke_width = width.max(0.0);
-        app.project.set_entry_style(id, app.style_working.clone());
+        let ev = app.project.set_entry_style_with_event(id, app.style_working.clone());
+        crate::app::handle_model_event(app, ev);
     }
     Task::none()
 }
@@ -362,7 +371,8 @@ pub fn handle_bg_radius(app: &mut App, text: String) -> Task<Message> {
     app.style_bg_radius = text;
     if let Ok(radius) = app.style_bg_radius.parse::<f32>() {
         app.style_working.bg_radius = radius.max(0.0);
-        app.project.set_entry_style(id, app.style_working.clone());
+        let ev = app.project.set_entry_style_with_event(id, app.style_working.clone());
+        crate::app::handle_model_event(app, ev);
     }
     Task::none()
 }
@@ -373,22 +383,26 @@ pub fn handle_preset_apply(app: &mut App, preset: usize) -> Task<Message> {
         return Task::none();
     };
     seed_style_inputs(app, preset_style.clone());
-    app.project.set_entry_style(id, preset_style);
+    let ev = app.project.set_entry_style_with_event(id, preset_style);
+    crate::app::handle_model_event(app, ev);
     Task::none()
 }
 
 pub fn handle_preset_add(app: &mut App) -> Task<Message> {
     app.presets.add(app.style_working.clone());
+    let _ = scanlateit_settings::modify(|s| s.style_presets = app.presets.clone());
     Task::none()
 }
 
 pub fn handle_preset_replace(app: &mut App, preset: usize) -> Task<Message> {
     app.presets.replace(preset, app.style_working.clone());
+    let _ = scanlateit_settings::modify(|s| s.style_presets = app.presets.clone());
     Task::none()
 }
 
 pub fn handle_preset_remove(app: &mut App, preset: usize) -> Task<Message> {
     app.presets.remove(preset);
+    let _ = scanlateit_settings::modify(|s| s.style_presets = app.presets.clone());
     Task::none()
 }
 
@@ -407,7 +421,8 @@ pub fn handle_auto_detect(app: &mut App) -> Task<Message> {
             italic: false,
             ..EntryStyle::default()
         };
-        app.project.set_entry_style(id, style);
+        let ev = app.project.set_entry_style_with_event(id, style);
+        crate::app::handle_model_event(app, ev);
         app.status = "Applied a fake auto-detected text style (no styling model in this build)."
             .to_string();
         Task::none()

@@ -1,9 +1,6 @@
 //! Append-only store for all text detected in the image: the single source of
-//! truth of the document model.
-//!
-//! Some methods are reserved for upcoming features (delete UI, manual OCR,
-//! diagnostics) and are not yet reachable from the UI.
-#![allow(dead_code)]
+//! truth of the document model. Filtered queries (`visible_for`) hide `deleted`
+//! by default; `all_for`/`entries` are escape hatches.
 
 use super::{EntryId, ImageId, NewEntry, OcrEntry};
 
@@ -55,8 +52,23 @@ impl OcrResult {
         }
     }
 
+    pub fn restore(&mut self, id: EntryId) -> bool {
+        match self.entries.iter_mut().find(|e| e.id == id) {
+            Some(entry) if entry.deleted => {
+                entry.deleted = false;
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub fn get(&self, id: EntryId) -> Option<&OcrEntry> {
         self.entries.iter().find(|e| e.id == id)
+    }
+
+    /// Filtered get: `None` if deleted or missing (primary read path).
+    pub fn get_visible(&self, id: EntryId) -> Option<&OcrEntry> {
+        self.entries.iter().find(|e| e.id == id && !e.deleted)
     }
 
     /// All entries (including deleted), in storage order.
@@ -105,10 +117,11 @@ impl OcrResult {
         self.entries.sort_by(compare);
     }
 
-    /// Reorder only entries of `image_id` by position, keeping other images
-    /// untouched. Stable sort; touches every entry of that image including
-    /// soft-deleted ones, so `all_for()` and `visible_for()` both reflect the
-    /// new order — important for translation which iterates `visible_for()` per image.
+    /// Reorder only entries of `image_id` by raw `quad` (ignores `view_quad`).
+    /// Prefer `Project::reorder_entries_for_image` which is view-quad-aware
+    /// and the single entry-point for ordering. This method remains for tests/
+    /// legacy bulk paths that need raw-quad ordering.
+    #[deprecated(note = "use Project::reorder_entries_for_image instead — view-quad aware")]
     pub fn reorder_by_position_for_image(&mut self, image_id: ImageId) {
         // Indices of entries belonging to this image, in current order.
         let indices: Vec<usize> = self

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use super::{
-    EntryId, EntryStyle, Extras, ImageId, ImageMeta, NewEntry, OcrEntry, OcrResult, ProfileId,
-    Profiles, Quad,
+    EntryId, EntryStyle, Extras, ImageId, ImageMeta, InpaintId, InpaintPatch, ModelEvent,
+    NewEntry, OcrEntry, OcrResult, ProfileId, Profiles, Quad,
 };
 
 /// The whole document model for one chapter (session): immutable OCR results
@@ -29,9 +29,9 @@ pub struct Project {
     /// `quad`, this supports free transform (move, resize, corner distort);
     /// an entry without an override falls back to its OCR quad.
     view_quads: HashMap<EntryId, Quad>,
-    /// Reserved for upcoming features (notes, inpainting, geometries).
-    #[allow(dead_code)]
+    /// Extras (notes, inpaint patches, shapes) — survives across profiles.
     pub extras: Extras,
+    next_inpaint_id: u64,
 }
 
 impl Project {
@@ -44,6 +44,7 @@ impl Project {
             styles: HashMap::new(),
             view_quads: HashMap::new(),
             extras: Extras::default(),
+            next_inpaint_id: 0,
         }
     }
 
@@ -79,6 +80,85 @@ impl Project {
         self.next_image_id
     }
 
+    pub fn next_inpaint_id(&self) -> u64 {
+        self.next_inpaint_id
+    }
+
+    // -----------------------------------------------------------------------
+    // Entry-centric queries: filtered by default, escape hatch for deleted
+    // -----------------------------------------------------------------------
+    /// Visible (non-deleted) entries globally, in storage order (grouped by
+    /// image insertion order and Y→X within each image after reorder).
+    pub fn visible_entries(&self) -> impl Iterator<Item = &OcrEntry> {
+        self.ocr.entries().iter().filter(|e| !e.deleted)
+    }
+
+    /// All entries including deleted, in storage order (for persistence/debug).
+    pub fn all_entries(&self) -> &[OcrEntry] {
+        self.ocr.entries()
+    }
+
+    /// Filtered read: returns `None` if the entry is deleted or missing.
+    /// This is the primary read path — callers don't manually check `deleted`.
+    pub fn entry(&self, id: EntryId) -> Option<&OcrEntry> {
+        self.ocr.get(id).filter(|e| !e.deleted)
+    }
+
+    /// Escape hatch: returns the entry even if soft-deleted.
+    pub fn entry_including_deleted(&self, id: EntryId) -> Option<&OcrEntry> {
+        self.ocr.get(id)
+    }
+
+    /// Visible entries for `image_id` (deleted hidden). Primary per-image query.
+    pub fn visible_for(&self, image_id: ImageId) -> impl Iterator<Item = &OcrEntry> {
+        self.ocr.visible_for(image_id)
+    }
+
+    /// All entries for `image_id` including deleted (escape hatch for dedup,
+    /// inpaint intersection and future "show deleted" feature).
+    pub fn all_for(&self, image_id: ImageId) -> impl Iterator<Item = &OcrEntry> {
+        self.ocr.all_for(image_id)
+    }
+
+    pub fn visible_count_for(&self, image_id: ImageId) -> usize {
+        self.ocr.visible_count_for(image_id)
+    }
+
+    pub fn total_count_for(&self, image_id: ImageId) -> usize {
+        self.ocr.total_count_for(image_id)
+    }
+
+    /// Profile-resolved text for the entry (falls back to OCR text).
+    pub fn display_text_for(&self, id: EntryId) -> Option<&str> {
+        self.ocr.get(id).map(|e| self.display_text(e))
+    }
+
+    /// Text for `entry_id` as seen through `profile_id` (falls back to OCR text).
+    /// Centralized profile resolution — callers in `app`/`ui` should use this
+    /// instead of iterating `profiles` manually.
+    pub fn resolved_text_for(&self, profile_id: ProfileId, entry_id: EntryId) -> Option<&str> {
+        let entry = self.ocr.get(entry_id)?;
+        if let Some(p) = self.profiles.iter().find(|p| p.id == profile_id) {
+            p.translation_of(entry_id).or(Some(entry.text.as_str()))
+        } else {
+            Some(entry.text.as_str())
+        }
+    }
+
+    /// Like `display_text_for` but for an explicit profile (not selected).
+    pub fn display_text_for_profile(&self, profile_id: ProfileId, entry_id: EntryId) -> Option<String> {
+        self.resolved_text_for(profile_id, entry_id).map(|s| s.to_string())
+    }
+
+    /// Inpaint patches for `image_id`.
+    pub fn inpaint_for(&self, image_id: ImageId) -> impl Iterator<Item = &InpaintPatch> {
+        self.extras.inpaint_patches.iter().filter(move |p| p.image_id == image_id)
+    }
+
+    pub fn inpaint_patches(&self) -> &[InpaintPatch] {
+        &self.extras.inpaint_patches
+    }
+
     /// All per-entry style overrides (for persistence).
     pub fn styles(&self) -> &HashMap<EntryId, EntryStyle> {
         &self.styles
@@ -99,12 +179,50 @@ impl Project {
         view_quads: HashMap<EntryId, Quad>,
         extras: Extras,
     ) -> Self {
-        Self { images, next_image_id, ocr, profiles, styles, view_quads, extras }
+        let next_inpaint_id = extras
+            .inpaint_patches
+            .iter()
+            .map(|p| p.id.0 + 1)
+            .max()
+            .unwrap_or(0);
+        Self { images, next_image_id, ocr, profiles, styles, view_quads, extras, next_inpaint_id }
+    }
+
+    /// Reconstruct from raw parts with explicit next_inpaint_id (for persistence with id-aware files).
+    pub fn from_raw_with_inpaint(
+        images: Vec<ImageMeta>,
+        next_image_id: u64,
+        ocr: OcrResult,
+        profiles: Profiles,
+        styles: HashMap<EntryId, EntryStyle>,
+        view_quads: HashMap<EntryId, Quad>,
+        extras: Extras,
+        next_inpaint_id: u64,
+    ) -> Self {
+        Self { images, next_image_id, ocr, profiles, styles, view_quads, extras, next_inpaint_id }
     }
 
     /// Append entries for `image_id`. `EntryId` remains globally unique.
     pub fn append_ocr_for_image(&mut self, image_id: ImageId, entries: Vec<NewEntry>) -> usize {
         self.ocr.append_many_for_image(image_id, entries)
+    }
+
+    pub fn append_ocr_for_image_with_event(&mut self, image_id: ImageId, entries: Vec<NewEntry>) -> Option<ModelEvent> {
+        if entries.is_empty() {
+            return None;
+        }
+        let start = self.ocr.next_id();
+        let count = self.ocr.append_many_for_image(image_id, entries);
+        if count == 0 {
+            return None;
+        }
+        let ids: Vec<EntryId> = (start..start + count as u64).map(EntryId).collect();
+        Some(ModelEvent::EntriesAdded { image_id, ids })
+    }
+
+    pub fn add_image_with_event(&mut self, path: impl Into<String>, width: f32, height: f32) -> (ImageId, ModelEvent) {
+        let id = self.add_image(path, width, height);
+        (id, ModelEvent::ImageAdded { image_id: id })
     }
 
     /// The text the UI should show for an entry: the selected profile's
@@ -128,6 +246,11 @@ impl Project {
         }
     }
 
+    pub fn set_entry_style_with_event(&mut self, entry_id: EntryId, style: EntryStyle) -> ModelEvent {
+        self.set_entry_style(entry_id, style);
+        ModelEvent::EntryStyleUpdated { id: entry_id }
+    }
+
     /// The entry's overlay box in the view: the user-adjusted view quad when
     /// present, otherwise the OCR quad itself (which may be rotated or
     /// skewed).
@@ -139,6 +262,11 @@ impl Project {
     /// The OCR quad stays untouched.
     pub fn set_view_quad(&mut self, entry_id: EntryId, quad: Quad) {
         self.view_quads.insert(entry_id, quad);
+    }
+
+    pub fn set_view_quad_with_event(&mut self, entry_id: EntryId, quad: Quad) -> ModelEvent {
+        self.set_view_quad(entry_id, quad);
+        ModelEvent::EntryMoved { id: entry_id, quad }
     }
 
     /// Whether the entry has a user-adjusted view quad (vs. falling back to
@@ -161,6 +289,16 @@ impl Project {
         self.view_quads.insert(entry_id, ocr.translate(dx, dy));
     }
 
+    pub fn revert_transform_with_event(&mut self, entry_id: EntryId) -> Option<ModelEvent> {
+        let ocr_quad = self.ocr.get(entry_id)?.quad;
+        if !self.has_view_quad(entry_id) {
+            return None;
+        }
+        self.revert_transform(entry_id);
+        let quad = self.view_quads.get(&entry_id).copied().unwrap_or(ocr_quad);
+        Some(ModelEvent::EntryMoved { id: entry_id, quad })
+    }
+
     /// Drop the view-quad override, falling back to the OCR quad.
     #[allow(dead_code)]
     pub fn reset_view_quad(&mut self, entry_id: EntryId) {
@@ -174,6 +312,22 @@ impl Project {
         self.ocr.soft_delete(entry_id)
     }
 
+    pub fn delete_entry_with_event(&mut self, entry_id: EntryId) -> Option<ModelEvent> {
+        if self.ocr.soft_delete(entry_id) {
+            Some(ModelEvent::EntryDeleted { id: entry_id })
+        } else {
+            None
+        }
+    }
+
+    pub fn restore_entry_with_event(&mut self, entry_id: EntryId) -> Option<ModelEvent> {
+        if self.ocr.restore(entry_id) {
+            Some(ModelEvent::EntryRestored { id: entry_id })
+        } else {
+            None
+        }
+    }
+
     /// Reorder all images chapter-wide by position (per-image Y→X).
     pub fn reorder_entries_by_position(&mut self) {
         let ids: Vec<ImageId> = self.images.iter().map(|m| m.id).collect();
@@ -185,6 +339,11 @@ impl Project {
         for id in ids {
             self.reorder_entries_for_image(id);
         }
+    }
+
+    pub fn reorder_entries_for_image_with_event(&mut self, image_id: ImageId) -> ModelEvent {
+        self.reorder_entries_for_image(image_id);
+        ModelEvent::EntriesReordered { image_id }
     }
 
     /// Reorder only the entries of `image_id` by position. Uses
@@ -257,6 +416,131 @@ impl Project {
         self.profiles.select(id);
         self.profiles.selected_mut().set_translation(entry_id, text);
         id
+    }
+
+    pub fn store_translation_with_event(
+        &mut self,
+        profile_name: &str,
+        entry_id: EntryId,
+        text: Option<String>,
+    ) -> (ProfileId, Vec<ModelEvent>) {
+        let mut events = Vec::new();
+        let existed = self.profiles.find_by_name(profile_name);
+        let id = existed.unwrap_or_else(|| {
+            let new_id = self.profiles.add(profile_name);
+            events.push(ModelEvent::ProfileCreated { id: new_id, name: profile_name.to_string() });
+            new_id
+        });
+        if self.profiles.selected_id() != id {
+            self.profiles.select(id);
+            events.push(ModelEvent::ProfileSelected { id });
+        }
+        self.profiles.selected_mut().set_translation(entry_id, text);
+        events.push(ModelEvent::EntryTextUpdated { id: entry_id, profile: id });
+        (id, events)
+    }
+
+    // -----------------------------------------------------------------------
+    // Profile helpers with events (wrappers around `self.profiles`)
+    // -----------------------------------------------------------------------
+    pub fn create_profile_with_event(&mut self, name: impl Into<String>) -> (ProfileId, ModelEvent) {
+        let name = name.into();
+        let id = self.profiles.add(name.clone());
+        (id, ModelEvent::ProfileCreated { id, name })
+    }
+
+    pub fn select_profile_with_event(&mut self, id: ProfileId) -> Option<ModelEvent> {
+        if self.profiles.select(id) {
+            Some(ModelEvent::ProfileSelected { id })
+        } else {
+            None
+        }
+    }
+
+    pub fn set_translation_with_event(&mut self, entry_id: EntryId, text: Option<String>) -> ModelEvent {
+        let pid = self.profiles.selected_id();
+        self.profiles.selected_mut().set_translation(entry_id, text);
+        ModelEvent::EntryTextUpdated { id: entry_id, profile: pid }
+    }
+
+    /// Remove a profile (cannot be selected or last remaining). Emits `ProfileRemoved`.
+    pub fn remove_profile_with_event(&mut self, id: ProfileId) -> Option<ModelEvent> {
+        if self.profiles.remove(id) {
+            Some(ModelEvent::ProfileRemoved { id })
+        } else {
+            None
+        }
+    }
+
+    /// Rename a profile. Emits `ProfileRenamed`.
+    pub fn rename_profile_with_event(&mut self, id: ProfileId, new_name: impl Into<String>) -> Option<ModelEvent> {
+        let new_name = new_name.into();
+        if self.profiles.rename(id, new_name.clone()) {
+            Some(ModelEvent::ProfileRenamed { id, name: new_name })
+        } else {
+            None
+        }
+    }
+
+    /// Fork a fresh profile off the original ("Default") when it is selected.
+    /// Returns `(name, events)` where events are `ProfileCreated` + `ProfileSelected`.
+    /// Prefer this over `profiles.fork_for_edit()` so callers get granular events.
+    pub fn fork_for_edit_with_event(&mut self) -> Option<(String, Vec<ModelEvent>)> {
+        if self.profiles.selected_id() != self.profiles.original_id() {
+            return None;
+        }
+        let name = self.profiles.next_available_name();
+        let id = self.profiles.add(name.clone());
+        debug_assert!(self.profiles.select(id));
+        Some((
+            name.clone(),
+            vec![
+                ModelEvent::ProfileCreated { id, name: name.clone() },
+                ModelEvent::ProfileSelected { id },
+            ],
+        ))
+    }
+
+    // -----------------------------------------------------------------------
+    // Inpaint patches — first-class with stable InpaintId
+    // -----------------------------------------------------------------------
+    pub fn add_inpaint_patch(&mut self, image_id: ImageId, bounds: [f32; 4]) -> ModelEvent {
+        let id = InpaintId(self.next_inpaint_id);
+        self.next_inpaint_id += 1;
+        self.extras.inpaint_patches.push(InpaintPatch { id, image_id, bounds });
+        ModelEvent::InpaintAdded { id, image_id, bounds }
+    }
+
+    pub fn remove_inpaint_patch(&mut self, id: InpaintId) -> Option<ModelEvent> {
+        let pos = self.extras.inpaint_patches.iter().position(|p| p.id == id)?;
+        self.extras.inpaint_patches.remove(pos);
+        Some(ModelEvent::InpaintRemoved { id })
+    }
+
+    /// Remove by image-relative index (legacy helper for UI that tracks per-image index).
+    /// Prefer `remove_inpaint_patch(InpaintId)` with a stable id. This index
+    /// helper exists only because `ui::LoadedImage::inpaint` is a per-image `Vec`
+    /// cache; the live DB order is `extras.inpaint_patches`.
+    #[deprecated(note = "use remove_inpaint_patch(InpaintId) — stable id, single source in model")]
+    pub fn remove_inpaint_patch_by_image_index(&mut self, image_id: ImageId, per_image_idx: usize) -> Option<ModelEvent> {
+        let mut count = 0;
+        let pos = self.extras.inpaint_patches.iter().position(|p| {
+            if p.image_id == image_id {
+                let cur = count;
+                count += 1;
+                cur == per_image_idx
+            } else {
+                false
+            }
+        })?;
+        let id = self.extras.inpaint_patches[pos].id;
+        self.extras.inpaint_patches.remove(pos);
+        Some(ModelEvent::InpaintRemoved { id })
+    }
+
+    pub fn set_note_with_event(&mut self, entry_id: EntryId, note: String) -> ModelEvent {
+        self.extras.set_note(entry_id, note);
+        ModelEvent::NoteUpdated { entry: entry_id }
     }
 }
 

@@ -24,7 +24,7 @@ pub fn edit_overlay<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         return space().into();
     };
     let project = state.project();
-    let (text, style) = match project.ocr.get(id) {
+    let (text, style) = match project.entry(id) {
         Some(entry) if state.images().get(index).is_some_and(|img| img.image_id == entry.image_id) => {
             (project.display_text(entry).to_string(), project.entry_style(entry.id))
         }

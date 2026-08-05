@@ -82,7 +82,16 @@ pub fn commit_per_page(app: &mut App, per_page: Vec<(usize, Vec<NewEntry>)>) {
             continue;
         };
         let image_id = image.image_id;
-        app.ocr_total += app.project.append_ocr_for_image(image_id, entries);
+        let count = entries.len();
+        if let Some(ev) = app.project.append_ocr_for_image_with_event(image_id, entries) {
+            // ocr_total tracks total appended lines, matches ids length
+            if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev {
+                app.ocr_total += ids.len();
+            } else {
+                app.ocr_total += count;
+            }
+            crate::app::handle_model_event(app, ev);
+        }
     }
 }
 
@@ -92,7 +101,14 @@ pub fn flush_held_boundary(app: &mut App) {
         for candidate in state.candidates {
             if let Some(image) = app.images.get(candidate.page) {
                 let image_id = image.image_id;
-                app.ocr_total += app.project.append_ocr_for_image(image_id, vec![candidate.entry]);
+                if let Some(ev) = app.project.append_ocr_for_image_with_event(image_id, vec![candidate.entry]) {
+                    if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev {
+                        app.ocr_total += ids.len();
+                    } else {
+                        app.ocr_total += 1;
+                    }
+                    crate::app::handle_model_event(app, ev);
+                }
             }
         }
     }
@@ -198,9 +214,20 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
     }
     app.running = true;
     let mut added = 0;
-    for image in &app.images {
-        let image_id = image.image_id;
-        added += app.project.append_ocr_for_image(image_id, fake_ocr_entries());
+    // Collect ids first to avoid holding an immutable borrow across the mutable
+    // Project mutation + handle_model_event (&mut App).
+    let image_ids: Vec<_> = app.images.iter().map(|i| i.image_id).collect();
+    for image_id in image_ids {
+        let entries = fake_ocr_entries();
+        let cnt = entries.len();
+        if let Some(ev) = app.project.append_ocr_for_image_with_event(image_id, entries) {
+            if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev {
+                added += ids.len();
+            } else {
+                added += cnt;
+            }
+            crate::app::handle_model_event(app, ev);
+        }
     }
     app.running = false;
     app.status = format!("Fake OCR done: {added} line(s) (no OCR engine in this build).");
@@ -253,8 +280,7 @@ pub fn handle_ocr_stream_run(app: &mut App, result: Result<ocr::RunEvent, String
                 let image_id = app.images[page].image_id;
                 let quads: Vec<Quad> = app
                     .project
-                    .ocr
-                    .all_for(image_id)
+                    .all_for(image_id) // escape hatch: includes deleted for dedup `model/src/project.rs:120`
                     .map(|entry| entry.quad)
                     .collect();
                 let width = app
@@ -554,9 +580,18 @@ pub fn handle_manual_ocr_finished(app: &mut App, index: usize, result: Result<Ve
             let count = entries.len();
             if index < app.images.len() {
                 let image_id = app.images[index].image_id;
-                let added = app.project.append_ocr_for_image(image_id, entries);
-                // Request reorder by manual OCR orchestrator: keep translation reading order correct.
-                app.project.reorder_entries_for_image(image_id);
+                let mut added = 0;
+                if let Some(ev) = app.project.append_ocr_for_image_with_event(image_id, entries) {
+                    if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev {
+                        added = ids.len();
+                    } else {
+                        added = count;
+                    }
+                    crate::app::handle_model_event(app, ev);
+                }
+                // Request reorder by manual OCR orchestrator: keep translation reading order correct (per-image)
+                let ev = app.project.reorder_entries_for_image_with_event(image_id);
+                crate::app::handle_model_event(app, ev);
                 app.status = format!("Manual OCR: {added} line(s) added to image {} ({} detected).", index + 1, count);
             } else {
                 app.status = format!("Manual OCR: {count} line(s) detected (image no longer exists).");

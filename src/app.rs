@@ -74,10 +74,8 @@ use neverliie_iced_widgets::title_bar::{FrameAction, NativeFrame};
 
 #[cfg(feature = "inpaint")]
 use scanlateit_inpaint::Engine as InpaintEngine;
-use scanlateit_model::{
-    EntryId, EntryStyle, NewEntry, Project, Quad, StylePresets, TextAlign,
-    TextGradientDir,
-};
+use scanlateit_model::{EntryId, EntryStyle, ModelEvent, NewEntry, Project, Quad, TextAlign, TextGradientDir};
+use scanlateit_settings::StylePresets;
 #[cfg(feature = "inpaint")]
 use scanlateit_settings::InpaintBackend;
 #[cfg(feature = "inpaint")]
@@ -145,6 +143,8 @@ pub enum Message {
     Frame(FrameAction),
     /// A widget-level event from the ui crate.
     Ui(UiEvent),
+    /// Granular model change event (synchronously emitted by `Project` mutators).
+    Model(ModelEvent),
     ImagesPicked(Result<Vec<(String, u32, u32)>, String>),
     #[cfg(feature = "ocr")]
     ParallelEngineReady(Result<ParallelEngine, String>),
@@ -460,7 +460,7 @@ impl App {
             style_stroke_width: style.stroke_width.to_string(),
             style_bg_radius: style.bg_radius.to_string(),
             style_hex_overrides: HashMap::new(),
-            presets: StylePresets::default_presets(),
+            presets: scanlateit_settings::get(|s| s.style_presets.clone()),
             panes: {
                 let (mut panes, main) = pane_grid::State::new(PaneKind::MainArea);
                 let (_, split) = panes
@@ -498,9 +498,73 @@ pub fn boot(frame: NativeFrame) -> (App, Task<Message>) {
     boot::boot(frame)
 }
 
+pub(crate) fn handle_model_event(app: &mut App, event: ModelEvent) {
+    // Granular live-DB reactivity: every Project::*_with_event flows here via
+    // Message::Model so UI state (selection, editing, inpaint cache) stays in
+    // sync without coarse "DataChanged" broadcasts.
+    match event {
+        ModelEvent::EntryDeleted { id } => {
+            if app.selected.is_some_and(|(_, sel_id)| sel_id == id) {
+                app.selected = None;
+                crate::app::edit::clear_editing(app);
+            }
+            // editing may be on same id even if not selected (panel origin)
+            if app.editing.is_some_and(|(_, eid)| eid == id) {
+                crate::app::edit::clear_editing(app);
+            }
+        }
+        ModelEvent::EntryRestored { .. } => {
+            // dormant: kept for future "undo delete" — no selection fixup needed,
+            // the restored entry becomes visible via visible_for() again.
+        }
+        ModelEvent::EntriesReordered { .. } => {
+            // no per-entry selection fixup needed; ordering is global per-image
+        }
+        ModelEvent::EntryMoved { .. } => {
+            // view-quad move — ordering may be stale until next ReorderEntries;
+            // no selection fixup.
+        }
+        ModelEvent::EntriesAdded { .. } => {
+            debug_assert!(app.images.len() == app.project.image_count());
+        }
+        ModelEvent::ImageAdded { .. } => {
+            debug_assert!(app.images.len() == app.project.image_count());
+        }
+        ModelEvent::EntryTextUpdated { .. } => {
+            // panel/results reads via Project::resolved_text_for / display_text;
+            // no extra app state to sync — text is live.
+        }
+        ModelEvent::EntryStyleUpdated { .. } => {
+            // styling panel reads via Project::entry_style; working inputs are
+            // seeded on selection, so no global refresh needed.
+        }
+        ModelEvent::ProfileCreated { .. }
+        | ModelEvent::ProfileRemoved { .. }
+        | ModelEvent::ProfileSelected { .. }
+        | ModelEvent::ProfileRenamed { .. } => {
+            // profile dropdown / translation panel read directly from Project;
+            // translation's base/target validation happens in the UiEvent handlers.
+            // Keep dormant events exhaustive for future UI listeners.
+        }
+        ModelEvent::InpaintAdded { .. } | ModelEvent::InpaintRemoved { .. } => {
+            // Live DB owns bounds+InpaintId; ui::LoadedImage::inpaint is a
+            // derived GPU-cache keyed by InpaintId. Handlers in inpaint.rs keep
+            // both in sync and already call handle_model_event for each.
+            // No extra app state — parity is ensured by emit-per-op.
+        }
+        ModelEvent::NoteUpdated { .. } => {
+            // Extras::notes live in Project; no UI listener yet.
+        }
+    }
+}
+
 pub fn update(app: &mut App, message: Message) -> Task<Message> {
     let task = match message {
         Message::Frame(action) => app.frame.update(action, Message::Frame),
+        Message::Model(ev) => {
+            handle_model_event(app, ev);
+            Task::none()
+        }
         Message::FetchModels => translation::handle_fetch_models(app),
         Message::ModelsFetched(providers) => translation::handle_models_fetched(app, providers),
         Message::Ui(UiEvent::HomeNewProject) => {
@@ -543,6 +607,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                                 inpaint: layers,
                             });
                         }
+                        debug_assert_eq!(res.project.image_count(), out_images.len());
                         let display = path_for_task.to_string_lossy().to_string();
                         Ok((res.project, out_images, display, Some(Arc::new(res.temp_dir))))
                     })
@@ -695,6 +760,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                             let image_id = project.add_image(path.clone(), w as f32, h as f32);
                             loaded.push(LoadedImage { image_id, decode: PageDecode::default(), inpaint: Vec::new() });
                         }
+                        debug_assert_eq!(project.image_count(), loaded.len());
                         scanlateit_mmtl::save_mmtl(&project, &[], &dest_for_task)
                             .map_err(|e| e.to_string())?;
                         Ok(dest_for_task.to_string_lossy().to_string())
@@ -742,6 +808,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             match result {
                 Ok(path_str) => match mmtl::load_created_project(path_str.clone()) {
                     Ok((project, images, display, temp_dir)) => {
+                        debug_assert_eq!(project.image_count(), images.len());
                         app.project = project;
                         app.images = images;
                         app.mmtl_path = Some(std::path::PathBuf::from(display.clone()));
@@ -771,6 +838,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::RecentPickedToLoad(result) => {
             match result {
                 Ok((project, images, display, temp_dir)) => {
+                    debug_assert_eq!(project.image_count(), images.len());
                     app.project = project;
                     app.images = images;
                     app.mmtl_path = Some(std::path::PathBuf::from(display.clone()));
@@ -872,7 +940,9 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             if app.images.is_empty() {
                 return Task::none();
             }
-            if !app.project.profiles.select(id) {
+            if let Some(ev) = app.project.select_profile_with_event(id) {
+                handle_model_event(app, ev);
+            } else {
                 return Task::none();
             }
             let name = app.project.profiles.selected().name.clone();
@@ -884,8 +954,11 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 return Task::none();
             }
             let name = app.project.profiles.next_available_name();
-            let id = app.project.profiles.add(name);
-            app.project.profiles.select(id);
+            let (id, ev) = app.project.create_profile_with_event(name);
+            handle_model_event(app, ev);
+            if let Some(sel_ev) = app.project.select_profile_with_event(id) {
+                handle_model_event(app, sel_ev);
+            }
             let name = app.project.profiles.selected().name.clone();
             app.status = format!("Profile: {name} (created)");
             Task::none()
@@ -1098,7 +1171,17 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 app.status = "No images to reorder.".to_string();
                 return Task::none();
             }
-            app.project.reorder_entries_by_position();
+            // Per-image emission per decision 4: one EntriesReordered per image
+            let ids: Vec<_> = app.project.images().iter().map(|m| m.id).collect();
+            if ids.is_empty() {
+                let ev = app.project.reorder_entries_for_image_with_event(scanlateit_model::ImageId(0));
+                handle_model_event(app, ev);
+            } else {
+                for image_id in ids {
+                    let ev = app.project.reorder_entries_for_image_with_event(image_id);
+                    handle_model_event(app, ev);
+                }
+            }
             // Per-image file order is the `images` vec order; within each file
             // entries are now Y→X (top first, left→right) by view-quad bounds.
             // Translation iterates `visible_for()` per image, so it immediately

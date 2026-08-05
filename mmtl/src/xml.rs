@@ -10,8 +10,9 @@ use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::Reader;
 use quick_xml::Writer;
 use scanlateit_model::{
-    EntryId, EntrySource, EntryStyle, Extras, ImageId, ImageMeta, InpaintPatch, OcrEntry,
-    OcrResult, Profile, ProfileId, Project, Quad, Shape, ShapeKind, TextAlign, TextGradientDir,
+    EntryId, EntrySource, EntryStyle, Extras, ImageId, ImageMeta, InpaintId, InpaintPatch,
+    OcrEntry, OcrResult, Profile, ProfileId, Project, Quad, Shape, ShapeKind, TextAlign,
+    TextGradientDir,
 };
 
 const VERSION: u32 = 1;
@@ -460,6 +461,7 @@ pub fn to_xml_string(project: &Project) -> Result<String, String> {
                 .write_event(Event::Text(BytesText::from_escaped("\n      ")))
                 .map_err(|e| e.to_string())?;
             let mut p = BytesStart::new("patch");
+            p.push_attribute(("id", patch.id.0.to_string().as_str()));
             p.push_attribute(("image_id", patch.image_id.0.to_string().as_str()));
             p.push_attribute(("x", patch.bounds[0].to_string().as_str()));
             p.push_attribute(("y", patch.bounds[1].to_string().as_str()));
@@ -743,12 +745,13 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                         // could be inpaint patch: distinguish by parent
                         let parent = stack.get(stack.len().saturating_sub(2)).map(|s| s.as_str()).unwrap_or("");
                         if parent=="inpaint_patches" {
+                            let id = attr(&e, b"id").map(|v| InpaintId(parse_u64(&v))).unwrap_or(InpaintId(ctx.inpaint_patches.len() as u64));
                             let image_id = attr(&e, b"image_id").map(|v| ImageId(parse_u64(&v))).unwrap_or(ImageId(0));
                             let x = attr(&e, b"x").map(|v| parse_f32(&v)).unwrap_or(0.0);
                             let y = attr(&e, b"y").map(|v| parse_f32(&v)).unwrap_or(0.0);
                             let w = attr(&e, b"w").map(|v| parse_f32(&v)).unwrap_or(0.0);
                             let h = attr(&e, b"h").map(|v| parse_f32(&v)).unwrap_or(0.0);
-                            ctx.inpaint_patches.push(InpaintPatch{ image_id, bounds:[x,y,w,h]});
+                            ctx.inpaint_patches.push(InpaintPatch{ id, image_id, bounds:[x,y,w,h]});
                             stack.pop();
                         }
                     }
@@ -812,12 +815,13 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                     "patch" => {
                         let parent = stack.last().map(|s| s.as_str()).unwrap_or("");
                         if parent=="inpaint_patches" {
+                            let id = attr(&e, b"id").map(|v| InpaintId(parse_u64(&v))).unwrap_or(InpaintId(ctx.inpaint_patches.len() as u64));
                             let image_id = attr(&e, b"image_id").map(|v| ImageId(parse_u64(&v))).unwrap_or(ImageId(0));
                             let x = attr(&e, b"x").map(|v| parse_f32(&v)).unwrap_or(0.0);
                             let y = attr(&e, b"y").map(|v| parse_f32(&v)).unwrap_or(0.0);
                             let w = attr(&e, b"w").map(|v| parse_f32(&v)).unwrap_or(0.0);
                             let h = attr(&e, b"h").map(|v| parse_f32(&v)).unwrap_or(0.0);
-                            ctx.inpaint_patches.push(InpaintPatch{ image_id, bounds:[x,y,w,h]});
+                            ctx.inpaint_patches.push(InpaintPatch{ id, image_id, bounds:[x,y,w,h]});
                         }
                     }
                     "profile" => {

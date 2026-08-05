@@ -17,12 +17,13 @@ pub fn start_inline_edit(app: &mut App, index: usize, id: EntryId, origin: EditO
     if index >= app.images.len() {
         return Task::none();
     }
-    let Some(entry) = app.project.ocr.get(id) else {
+    // Image existence is source of truth via Project, not images[index] alone
+    let Some(entry) = app.project.entry(id) else {
         return Task::none();
     };
-    // Validate entry belongs to requested image
+    // Validate entry belongs to requested image (and image exists in Project)
     let image_id = app.images[index].image_id;
-    if entry.image_id != image_id {
+    if entry.image_id != image_id || app.project.image(image_id).is_none() {
         return Task::none();
     }
     let text = app.project.display_text(entry).to_string();
@@ -93,9 +94,7 @@ pub fn handle_entry_clicked(app: &mut App, selection: Option<(usize, EntryId)>) 
         app.selected_inpaint = None;
     }
     match selection {
-        Some((index, id))
-            if index < app.images.len() && app.project.ocr.get(id).is_some() =>
-        {
+        Some((index, id)) if index < app.images.len() && app.project.entry(id).is_some() => {
             Task::batch([select_entry(app, index, id), scroll_to_row::<Message>(index, id)])
         }
         _ => {
@@ -130,11 +129,10 @@ pub fn handle_entry_toolbar(app: &mut App, index: usize, id: EntryId, action: To
             if index >= app.images.len() {
                 return Task::none();
             }
-            if !app.project.delete_entry(id) {
+            let Some(ev) = app.project.delete_entry_with_event(id) else {
                 return Task::none();
-            }
-            app.selected = None;
-            clear_editing(app);
+            };
+            crate::app::handle_model_event(app, ev);
             app.status = "Deleted entry.".to_string();
             Task::none()
         }
@@ -145,7 +143,9 @@ pub fn handle_entry_toolbar(app: &mut App, index: usize, id: EntryId, action: To
             if !app.project.has_view_quad(id) {
                 return Task::none();
             }
-            app.project.revert_transform(id);
+            if let Some(ev) = app.project.revert_transform_with_event(id) {
+                crate::app::handle_model_event(app, ev);
+            }
             app.status = "Reverted transform.".to_string();
             Task::none()
         }
@@ -154,7 +154,8 @@ pub fn handle_entry_toolbar(app: &mut App, index: usize, id: EntryId, action: To
 
 pub fn handle_entry_moved(app: &mut App, index: usize, id: EntryId, quad: scanlateit_model::Quad) -> Task<Message> {
     if index < app.images.len() {
-        app.project.set_view_quad(id, quad);
+        let ev = app.project.set_view_quad_with_event(id, quad);
+        crate::app::handle_model_event(app, ev);
     }
     Task::none()
 }
@@ -170,19 +171,21 @@ pub fn handle_edit_action(app: &mut App, action: text_editor::Action) -> Task<Me
     };
     if !app.editing_dirty {
         app.editing_dirty = true;
-        // Fork the chapter-wide profile if editing Default
-        let forked_name = app.project.profiles.fork_for_edit();
-        if let Some(name) = forked_name {
+        // Fork the chapter-wide profile if editing Default — go through the
+        // live DB so callers get granular ModelEvents (ProfileCreated/Selected)
+        // via the single Message::Model hub.
+        if let Some((name, evs)) = app.project.fork_for_edit_with_event() {
+            for ev in evs {
+                crate::app::handle_model_event(app, ev);
+            }
             app.status = format!(
                 "Edit forked into '{name}': the OCR text stays untouched."
             );
         }
     }
     let target_text = text.clone();
-    app.project
-        .profiles
-        .selected_mut()
-        .set_translation(id, Some(target_text.clone()));
+    let ev = app.project.set_translation_with_event(id, Some(target_text.clone()));
+    crate::app::handle_model_event(app, ev);
     Task::none()
 }
 

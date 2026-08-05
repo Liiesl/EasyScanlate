@@ -37,7 +37,8 @@ pub fn dispatch_pipeline_inpaint_after_style(
         for (_index, id, result, quad, _path) in results {
             if let Ok((_, pred)) = result {
                 let applied = pred.to_entry_style_for_auto(EntryStyle::default());
-                app.project.set_entry_style(id, applied);
+                let ev = app.project.set_entry_style_with_event(id, applied);
+                crate::app::handle_model_event(app, ev);
                 let _ = quad;
             }
         }
@@ -53,7 +54,8 @@ pub fn dispatch_pipeline_inpaint_after_style(
             }
         };
         let applied = pred.to_entry_style_for_auto(EntryStyle::default());
-        app.project.set_entry_style(id, applied);
+        let ev = app.project.set_entry_style_with_event(id, applied);
+        crate::app::handle_model_event(app, ev);
         let need = match pred.bg_type {
             scanlateit_styling::BgType::Solid => None,
             scanlateit_styling::BgType::Gradient => Some(match effective_model {

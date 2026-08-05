@@ -78,8 +78,9 @@ pub fn boot(frame: NativeFrame) -> (App, Task<Message>) {
             width,
             height,
         });
-        let image_id = app.project.add_image("fake-white-page.png", width as f32, height as f32);
-        app.project.append_ocr_for_image(image_id, fake_ocr_entries());
+        // Live DB: go through granular ModelEvents even for test boot,
+        // keeping the single Message::Model hub the reactivity source.
+        let (image_id, ev) = app.project.add_image_with_event("fake-white-page.png", width as f32, height as f32);
         app.images.push(LoadedImage {
             image_id,
             decode: PageDecode {
@@ -88,6 +89,10 @@ pub fn boot(frame: NativeFrame) -> (App, Task<Message>) {
             },
             inpaint: Vec::new(),
         });
+        crate::app::handle_model_event(&mut app, ev);
+        if let Some(ev) = app.project.append_ocr_for_image_with_event(image_id, fake_ocr_entries()) {
+            crate::app::handle_model_event(&mut app, ev);
+        }
         app.app_view = crate::app::AppView::Editor;
         #[cfg(all(feature = "test-ui", not(feature = "translation")))]
         {

@@ -137,6 +137,7 @@ pub fn handle_open_picked(app: &mut App, picked: Option<String>) -> Task<Message
                         inpaint: layers,
                     });
                 }
+                debug_assert_eq!(project.image_count(), out_images.len());
                 let display = path_clone.to_string_lossy().to_string();
                 Ok((project, out_images, display, Some(Arc::new(res.temp_dir))))
             })
@@ -182,6 +183,7 @@ pub fn load_created_project(path_str: String) -> Result<(scanlateit_model::Proje
             inpaint: layers,
         });
     }
+    debug_assert_eq!(res.project.image_count(), out_images.len());
     let display = path.to_string_lossy().to_string();
     Ok((res.project, out_images, display, Some(Arc::new(res.temp_dir))))
 }
@@ -192,6 +194,7 @@ pub fn handle_loaded(
 ) -> Task<Message> {
     match result {
         Ok((project, images, display_path, temp_dir)) => {
+            debug_assert_eq!(project.image_count(), images.len(), "project/images parity must hold after load");
             app.project = project;
             app.images = images;
             app.mmtl_path = Some(PathBuf::from(display_path.clone()));

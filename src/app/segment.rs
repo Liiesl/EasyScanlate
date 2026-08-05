@@ -42,7 +42,6 @@ pub fn start_segment_filter(app: &mut App) -> Task<Message> {
                 .map(|img| {
                     let image_id = img.image_id;
                     app.project
-                        .ocr
                         .visible_for(image_id)
                         .map(|e| (app.project.view_quad(e).bounds(), e.id))
                         .collect()
@@ -174,9 +173,8 @@ pub fn handle_filtered(
             let n = to_delete.len();
             for (idx, id) in to_delete {
                 if idx < app.images.len() {
-                    app.project.delete_entry(id);
-                    if app.selected == Some((idx, id)) {
-                        app.selected = None;
+                    if let Some(ev) = app.project.delete_entry_with_event(id) {
+                        crate::app::handle_model_event(app, ev);
                     }
                 }
             }

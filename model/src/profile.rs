@@ -1,13 +1,6 @@
 //! Translation variants of a project. Profiles are a pure delta layer on top
-//! of the immutable OCR result: anything here can be freely edited without
-//! touching the source of truth.
-//!
-//! Exactly one profile is selected at any time; the rest of the app reads all
-//! profile-dependent data (translated text) through it.
-//!
-//! Some methods are reserved for upcoming features (translation UI, profile
-//! management) and are not yet reachable from the UI.
-#![allow(dead_code)]
+//! of the immutable OCR result: one profile is selected, the rest read through
+//! it. All mutations go via `Project::*_with_event`.
 
 use std::collections::HashMap;
 
@@ -186,6 +179,9 @@ impl Profiles {
     /// it, for inline edits that must not touch the OCR source of truth.
     /// Returns the new profile's name, or `None` when the original profile is
     /// not selected (edits then apply in place).
+    ///
+    /// Prefer `Project::fork_for_edit_with_event` so callers get a granular
+    /// `ModelEvent`; this bare method exists for tests/internal use.
     pub fn fork_for_edit(&mut self) -> Option<String> {
         if self.selected_id() == self.original_id() {
             let name = self.next_available_name();
@@ -194,6 +190,16 @@ impl Profiles {
             return Some(name);
         }
         None
+    }
+
+    /// Rename a profile by id. Returns false if id not found.
+    pub fn rename(&mut self, id: ProfileId, new_name: impl Into<String>) -> bool {
+        if let Some(p) = self.profiles.iter_mut().find(|p| p.id == id) {
+            p.name = new_name.into();
+            true
+        } else {
+            false
+        }
     }
 
     pub fn len(&self) -> usize {

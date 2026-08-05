@@ -20,10 +20,18 @@ pub struct InpaintLayer {
 /// One loaded image plus everything the viewer needs that the model doesn't
 /// know about (per-image canvas cache). Geometry (`width/height/path`) is
 /// derived from the chapter-wide `Project` via `image_id`.
+///
+/// `decode` is a pure view-cache (thumb/full tiers) that lives outside the
+/// live DB. `inpaint` is a **derived GPU cache** that mirrors
+/// `Project::extras.inpaint_patches` (single source of `bounds`+`InpaintId`);
+/// its length must not be treated as canonical — use `Project::inpaint_for()`
+/// for counts and prefer stable `InpaintId` over per-image `usize` indexes.
 #[derive(Debug, Clone)]
 pub struct LoadedImage {
     pub image_id: ImageId,
     pub decode: PageDecode,
     /// Inpaint layers drawn over the original image, oldest first.
+    /// Derived from `Project`; `ModelEvent::InpaintAdded/Removed` is the
+    /// reactivity source, not this vec's length.
     pub inpaint: Vec<InpaintLayer>,
 }

@@ -15,6 +15,7 @@ use std::fmt;
 use std::sync::{OnceLock, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use scanlateit_model::EntryStyle;
 use serde::{Deserialize, Serialize};
 
 /// The confy application name; decides the config directory name.
@@ -130,6 +131,81 @@ impl fmt::Display for AutoInpaintModel {
             Self::Aot => "AOT-GAN",
             Self::Mixed => "Mixed (bg-aware)",
         })
+    }
+}
+
+/// How many preset slots the app starts with: five built-in styles plus
+/// three empty slots.
+pub const INITIAL_PRESET_SLOTS: usize = 8;
+
+fn default_style_presets() -> StylePresets {
+    StylePresets::default_presets()
+}
+
+/// The style-preset slot list, persisted per-user in `settings` (not per-project in `model`).
+/// `None` = empty slot. "+" fills the first empty slot or appends.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StylePresets(Vec<Option<EntryStyle>>);
+
+impl Default for StylePresets {
+    fn default() -> Self {
+        Self::default_presets()
+    }
+}
+
+impl StylePresets {
+    pub fn default_presets() -> Self {
+        let mut presets = Vec::with_capacity(INITIAL_PRESET_SLOTS);
+        let mut preset = EntryStyle::default();
+        presets.push(Some(preset.clone()));
+        preset.bg_color = [0, 0, 0, 255];
+        preset.text_color = [255, 255, 255, 255];
+        presets.push(Some(preset.clone()));
+        preset.bg_color = [0, 0, 0, 0];
+        preset.text_color = [0, 0, 0, 255];
+        presets.push(Some(preset.clone()));
+        preset.text_color = [255, 255, 255, 255];
+        presets.push(Some(preset.clone()));
+        preset.bg_color = [255, 0, 0, 255];
+        presets.push(Some(preset));
+        presets.resize(INITIAL_PRESET_SLOTS, None);
+        Self(presets)
+    }
+
+    pub fn get(&self, index: usize) -> Option<EntryStyle> {
+        self.0.get(index).cloned().flatten()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn as_slice(&self) -> &[Option<EntryStyle>] {
+        &self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn add(&mut self, style: EntryStyle) {
+        if let Some(slot) = self.0.iter_mut().find(|slot| slot.is_none()) {
+            *slot = Some(style);
+        } else {
+            self.0.push(Some(style));
+        }
+    }
+
+    pub fn replace(&mut self, index: usize, style: EntryStyle) {
+        if let Some(slot) = self.0.get_mut(index) {
+            *slot = Some(style);
+        }
+    }
+
+    pub fn remove(&mut self, index: usize) {
+        if let Some(slot) = self.0.get_mut(index) {
+            *slot = None;
+        }
     }
 }
 
@@ -268,6 +344,10 @@ pub struct Settings {
     /// Recent projects for the homepage, most-recent first. Max 20.
     #[serde(default)]
     pub recent_projects: Vec<RecentProject>,
+    /// User style presets (per-user, not per-project). Persisted here so
+    /// `model` stays pure project data.
+    #[serde(default = "default_style_presets")]
+    pub style_presets: StylePresets,
     /// Stored translation connections, keyed by provider id (`openai`,
     /// `deepseek`, `custom-openai`, ...). A provider is "connected" when it
     /// has an entry here; disconnect removes the entry.
@@ -306,6 +386,7 @@ impl Default for Settings {
             auto_inpaint: true,
             auto_inpaint_model: AutoInpaintModel::default(),
             recent_projects: Vec::new(),
+            style_presets: default_style_presets(),
         }
     }
 }
@@ -422,6 +503,8 @@ mod tests {
             auto_sfx_filter: true,
             auto_inpaint: true,
             auto_inpaint_model: AutoInpaintModel::Mixed,
+            recent_projects: Vec::new(),
+            style_presets: StylePresets::default_presets(),
         };
         let text = toml::to_string(&settings).unwrap();
         let back: Settings = toml::from_str(&text).unwrap();
@@ -480,6 +563,7 @@ mod tests {
         assert!(back.auto_sfx_filter);
         assert!(back.auto_inpaint);
         assert_eq!(back.auto_inpaint_model, AutoInpaintModel::Mixed);
+        assert_eq!(back.style_presets, StylePresets::default_presets());
     }
 
     #[test]

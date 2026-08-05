@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 serde = { workspace = true }
 confy = { workspace = true }
+scanlateit-model = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

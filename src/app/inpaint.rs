@@ -165,7 +165,7 @@ pub fn dispatch_auto_inpaint_solo(app: &mut App, effective_model: scanlateit_set
             .image(image_id)
             .map(|m| m.path.clone())
             .unwrap_or_default();
-        for entry in app.project.ocr.visible_for(image_id).collect::<Vec<_>>() {
+        for entry in app.project.visible_for(image_id).collect::<Vec<_>>() {
             jobs.push(AutoInpaintJob {
                 index,
                 id: entry.id,
@@ -180,7 +180,8 @@ pub fn dispatch_auto_inpaint_solo(app: &mut App, effective_model: scanlateit_set
     for job in &jobs {
         let mut style = app.project.entry_style(job.id);
         style.bg_color = [0, 0, 0, 0];
-        app.project.set_entry_style(job.id, style);
+        let ev = app.project.set_entry_style_with_event(job.id, style);
+        crate::app::handle_model_event(app, ev);
     }
     match effective_model {
         scanlateit_settings::AutoInpaintModel::Telea => dispatch_auto_telea_jobs(app, jobs),
@@ -258,20 +259,28 @@ pub fn handle_auto_finished(app: &mut App, index: usize, id: EntryId, result: Re
     let pending = app.auto_inpaint_pending;
     match result {
         Ok(patches) => {
-            let Some(image) = app.images.get_mut(index) else {
+            let Some(image_id) = app.images.get(index).map(|i| i.image_id) else {
                 return Task::none();
             };
-            let image_id = image.image_id;
-            for (patch, bounds) in patches {
-                let (width, height) = (patch.width(), patch.height());
-                let layer = InpaintLayer {
-                    bounds,
-                    handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())),
-                    width,
-                    height,
+            let mut pending_evs = Vec::new();
+            {
+                let Some(image) = app.images.get_mut(index) else {
+                    return Task::none();
                 };
-                image.inpaint.push(layer);
-                app.project.extras.inpaint_patches.push(InpaintPatch { image_id, bounds });
+                for (patch, bounds) in patches {
+                    let (width, height) = (patch.width(), patch.height());
+                    let layer = InpaintLayer {
+                        bounds,
+                        handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())),
+                        width,
+                        height,
+                    };
+                    image.inpaint.push(layer);
+                    pending_evs.push(app.project.add_inpaint_patch(image_id, bounds));
+                }
+            }
+            for ev in pending_evs {
+                crate::app::handle_model_event(app, ev);
             }
             app.show_inpaint = true;
             if pending == 0 {
@@ -301,19 +310,25 @@ pub fn handle_auto_lama_batch(app: &mut App, batch: Vec<(usize, EntryId, Result<
         app.auto_inpaint_pending = app.auto_inpaint_pending.saturating_sub(1);
         match result {
             Ok(patches) => {
-                if let Some(image) = app.images.get_mut(index) {
-                    let image_id = image.image_id;
-                    for (patch, bounds) in patches {
-                        let (width, height) = (patch.width(), patch.height());
-                        let layer = InpaintLayer {
-                            bounds,
-                            handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())),
-                            width,
-                            height,
-                        };
-                        image.inpaint.push(layer);
-                        app.project.extras.inpaint_patches.push(InpaintPatch { image_id, bounds });
+                let Some(image_id) = app.images.get(index).map(|i| i.image_id) else { continue; };
+                let mut pending_evs = Vec::new();
+                {
+                    if let Some(image) = app.images.get_mut(index) {
+                        for (patch, bounds) in patches {
+                            let (width, height) = (patch.width(), patch.height());
+                            let layer = InpaintLayer {
+                                bounds,
+                                handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())),
+                                width,
+                                height,
+                            };
+                            image.inpaint.push(layer);
+                            pending_evs.push(app.project.add_inpaint_patch(image_id, bounds));
+                        }
                     }
+                }
+                for ev in pending_evs { crate::app::handle_model_event(app, ev); }
+                if app.images.get(index).is_some() {
                     app.show_inpaint = true;
                 }
             }
@@ -336,19 +351,25 @@ pub fn handle_auto_aot_batch(app: &mut App, batch: Vec<(usize, EntryId, Result<V
         app.auto_inpaint_pending = app.auto_inpaint_pending.saturating_sub(1);
         match result {
             Ok(patches) => {
-                if let Some(image) = app.images.get_mut(index) {
-                    let image_id = image.image_id;
-                    for (patch, bounds) in patches {
-                        let (width, height) = (patch.width(), patch.height());
-                        let layer = InpaintLayer {
-                            bounds,
-                            handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())),
-                            width,
-                            height,
-                        };
-                        image.inpaint.push(layer);
-                        app.project.extras.inpaint_patches.push(InpaintPatch { image_id, bounds });
+                let Some(image_id) = app.images.get(index).map(|i| i.image_id) else { continue; };
+                let mut pending_evs = Vec::new();
+                {
+                    if let Some(image) = app.images.get_mut(index) {
+                        for (patch, bounds) in patches {
+                            let (width, height) = (patch.width(), patch.height());
+                            let layer = InpaintLayer {
+                                bounds,
+                                handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())),
+                                width,
+                                height,
+                            };
+                            image.inpaint.push(layer);
+                            pending_evs.push(app.project.add_inpaint_patch(image_id, bounds));
+                        }
                     }
+                }
+                for ev in pending_evs { crate::app::handle_model_event(app, ev); }
+                if app.images.get(index).is_some() {
                     app.show_inpaint = true;
                 }
             }
@@ -370,29 +391,32 @@ pub fn handle_inpaint_finished(app: &mut App, index: usize, result: Result<Vec<(
     app.inpainting = false;
     match result {
         Ok(patches) => {
-            let Some(image) = app.images.get_mut(index) else {
+            let Some(image_id) = app.images.get(index).map(|i| i.image_id) else {
                 return Task::none();
             };
-            let image_id = image.image_id;
             let count = patches.len();
-            for (patch, bounds) in patches {
-                let (width, height) = (patch.width(), patch.height());
-                let layer = InpaintLayer {
-                    bounds,
-                    handle: iced::widget::image::Handle::from_rgba(
+            let mut pending_evs = Vec::new();
+            {
+                let Some(image) = app.images.get_mut(index) else {
+                    return Task::none();
+                };
+                for (patch, bounds) in patches {
+                    let (width, height) = (patch.width(), patch.height());
+                    let layer = InpaintLayer {
+                        bounds,
+                        handle: iced::widget::image::Handle::from_rgba(
+                            width,
+                            height,
+                            bytes::Bytes::from(patch.into_raw()),
+                        ),
                         width,
                         height,
-                        bytes::Bytes::from(patch.into_raw()),
-                    ),
-                    width,
-                    height,
-                };
-                image.inpaint.push(layer);
-                app.project
-                    .extras
-                    .inpaint_patches
-                    .push(InpaintPatch { image_id, bounds });
+                    };
+                    image.inpaint.push(layer);
+                    pending_evs.push(app.project.add_inpaint_patch(image_id, bounds));
+                }
             }
+            for ev in pending_evs { crate::app::handle_model_event(app, ev); }
             app.inpaint_mode = false;
             app.show_inpaint = true;
             app.status = format!("Inpainted {count} region(s).");
@@ -420,8 +444,7 @@ pub fn handle_inpaint_selection(app: &mut App, index: usize, rect: iced::Rectang
     let image_id = image.image_id;
     let quads: Vec<Quad> = app
         .project
-        .ocr
-        .all_for(image_id)
+        .all_for(image_id) // includes deleted for inpaint intersection
         .map(|entry| app.project.view_quad(entry))
         .filter(|quad| quad.intersects_rect(rect_arr))
         .collect();
@@ -480,7 +503,7 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
         return Task::none();
     }
     let (path, quad) = {
-        let Some(entry) = app.project.ocr.get(id) else {
+        let Some(entry) = app.project.entry(id) else {
             return Task::none();
         };
         let image_id = app.images[index].image_id;
@@ -495,8 +518,9 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
         (path, app.project.view_quad(entry))
     };
     app.style_working.bg_color = [0, 0, 0, 0];
-    if app.project.ocr.get(id).is_some() {
-        app.project.set_entry_style(id, app.style_working.clone());
+    if app.project.entry(id).is_some() {
+        let ev = app.project.set_entry_style_with_event(id, app.style_working.clone());
+        crate::app::handle_model_event(app, ev);
     }
     let [x0, y0, x1, y1] = quad.bounds();
     let rect = [x0, y0, x1 - x0, y1 - y0];
@@ -538,8 +562,9 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
         return Task::none();
     };
     app.style_working.bg_color = [0, 0, 0, 0];
-    if app.project.ocr.get(id).is_some() {
-        app.project.set_entry_style(id, app.style_working.clone());
+    if app.project.entry(id).is_some() {
+        let ev = app.project.set_entry_style_with_event(id, app.style_working.clone());
+        crate::app::handle_model_event(app, ev);
     }
     app.status =
         "Background made transparent (inpaint not available in this build).".to_string();
@@ -603,22 +628,8 @@ pub fn handle_inpaint_delete(app: &mut App, image_index: usize, patch_idx: usize
     if patch_idx < image.inpaint.len() {
         image.inpaint.remove(patch_idx);
     }
-    // Remove nth patch for this image_id from extras
-    {
-        let mut seen = 0usize;
-        let mut remove_idx: Option<usize> = None;
-        for (idx, patch) in app.project.extras.inpaint_patches.iter().enumerate() {
-            if patch.image_id == image_id {
-                if seen == patch_idx {
-                    remove_idx = Some(idx);
-                    break;
-                }
-                seen += 1;
-            }
-        }
-        if let Some(idx) = remove_idx {
-            app.project.extras.inpaint_patches.remove(idx);
-        }
+    if let Some(ev) = app.project.remove_inpaint_patch_by_image_index(image_id, patch_idx) {
+        crate::app::handle_model_event(app, ev);
     }
     if app.selected_inpaint == Some((image_index, patch_idx)) {
         app.selected_inpaint = None;
@@ -664,7 +675,6 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
         let rect = [bounds[0], bounds[1], bounds[2], bounds[3]];
         let quads: Vec<Quad> = app
             .project
-            .ocr
             .all_for(image_id)
             .map(|e| app.project.view_quad(e))
             .filter(|q| q.intersects_rect(rect))
@@ -681,21 +691,8 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
         if patch_idx < image.inpaint.len() {
             image.inpaint.remove(patch_idx);
         }
-        {
-            let mut seen = 0usize;
-            let mut remove_idx: Option<usize> = None;
-            for (idx, patch) in app.project.extras.inpaint_patches.iter().enumerate() {
-                if patch.image_id == image_id {
-                    if seen == patch_idx {
-                        remove_idx = Some(idx);
-                        break;
-                    }
-                    seen += 1;
-                }
-            }
-            if let Some(idx) = remove_idx {
-                app.project.extras.inpaint_patches.remove(idx);
-            }
+        if let Some(ev) = app.project.remove_inpaint_patch_by_image_index(image_id, patch_idx) {
+            crate::app::handle_model_event(app, ev);
         }
         if app.selected_inpaint == Some((image_index, patch_idx)) {
             app.selected_inpaint = None;

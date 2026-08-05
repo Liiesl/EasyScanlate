@@ -805,7 +805,7 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
         cards.push(
             container(column![
                 card_header(Icon::ScanSearch, "OCR Engine", Some("OCR feature not enabled")),
-                helper_text("Rebuild with --features ocr to enable OCR tuning.").into(),
+                helper_text("Rebuild with --features ocr to enable OCR tuning."),
             ].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into()
         );
     }
@@ -917,14 +917,14 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         cards.push(
             container(column![
                 card_header(Icon::ScanSearch, "OCR Engine", Some("OCR feature not enabled")),
-                helper_text("Rebuild with --features ocr to enable OCR tuning.").into(),
+                helper_text("Rebuild with --features ocr to enable OCR tuning."),
             ].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into()
         );
     }
     cards
 }
 
-// ---------------------------------------------------------------------------
+ // ---------------------------------------------------------------------------
 // Inpaint tab — manual + auto bg-aware
 // ---------------------------------------------------------------------------
 
@@ -972,7 +972,7 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
             }
             #[cfg(not(feature = "inpaint"))]
             {
-                cards.push(container(column![card_header(Icon::Sparkles, "Auto Inpaint", Some("Inpaint feature not enabled")), helper_text("Rebuild with --features inpaint.").into()].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+                cards.push(container(column![card_header(Icon::Sparkles, "Auto Inpaint", Some("Inpaint feature not enabled")), helper_text("Rebuild with --features inpaint.")].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
         }
     }
@@ -1048,7 +1048,7 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             }
             #[cfg(not(feature = "inpaint"))]
             {
-                cards.push(container(column![card_header(Icon::Sparkles, "Auto Inpaint", Some("Inpaint feature not enabled")), helper_text("Rebuild with --features inpaint.").into()].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+                cards.push(container(column![card_header(Icon::Sparkles, "Auto Inpaint", Some("Inpaint feature not enabled")), helper_text("Rebuild with --features inpaint.")].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
         }
     }

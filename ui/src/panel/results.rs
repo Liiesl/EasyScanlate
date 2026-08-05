@@ -295,8 +295,8 @@ fn image_results<'a, S: UiState + ?Sized>(
 ) -> Vec<Element<'a, UiEvent>> {
     let project = state.project();
     let mut elements = Vec::new();
-    if project.ocr.visible_count_for(image.image_id) > 0 {
-        for entry in project.ocr.visible_for(image.image_id) {
+    if project.visible_count_for(image.image_id) > 0 {
+        for entry in project.visible_for(image.image_id) {
             elements.push(entry_row(state, index, entry));
         }
     }
@@ -575,7 +575,7 @@ fn translate_bar<'a, S: UiState + ?Sized>(
 
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let project = state.project();
-    let total_results: usize = state.images().iter().map(|i| project.ocr.visible_count_for(i.image_id)).sum();
+    let total_results: usize = state.images().iter().map(|i| project.visible_count_for(i.image_id)).sum();
     let has_entries = total_results > 0;
     let mode = state.translation_panel_mode();
 

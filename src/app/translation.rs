@@ -99,15 +99,12 @@ pub fn handle_translate(app: &mut App) -> Task<Message> {
             .image(image_id)
             .map(|m| translation::file_tag(&m.path))
             .unwrap_or_default();
-        for entry in app.project.ocr.visible_for(image_id).collect::<Vec<_>>() {
+        for entry in app.project.visible_for(image_id).collect::<Vec<_>>() {
             let text = if let Some(pid) = base_id {
                 app.project
-                    .profiles
-                    .iter()
-                    .find(|p| p.id == pid)
-                    .and_then(|p| p.translation_of(entry.id))
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| entry.text.clone())
+                    .resolved_text_for(pid, entry.id)
+                    .unwrap_or(&entry.text)
+                    .to_string()
             } else {
                 entry.text.clone()
             };
@@ -176,8 +173,8 @@ pub fn handle_translate_finished(
                     if translation.is_empty() {
                         continue;
                     }
-                    app.project
-                        .store_translation(&profile_name, *entry_id, Some(translation.clone()));
+                    let (_, evs) = app.project.store_translation_with_event(&profile_name, *entry_id, Some(translation.clone()));
+                    for ev in evs { crate::app::handle_model_event(app, ev); }
                     saved += 1;
                 }
                 app.status = format!(
@@ -194,8 +191,8 @@ pub fn handle_translate_finished(
                         skipped += 1;
                         continue;
                     }
-                    app.project
-                        .store_translation(&profile_name, *entry_id, Some(translation.clone()));
+                    let (_, evs) = app.project.store_translation_with_event(&profile_name, *entry_id, Some(translation.clone()));
+                    for ev in evs { crate::app::handle_model_event(app, ev); }
                     saved += 1;
                 }
                 if skipped > 0 {
@@ -256,11 +253,11 @@ pub fn handle_retranslate_finished(
                 }
                 let equals_original = app
                     .project
-                    .ocr
-                    .get(entry_id)
+                    .entry_including_deleted(entry_id)
                     .is_some_and(|entry| entry.text == text);
                 let stored = if equals_original { None } else { Some(text) };
-                let _target_id = app.project.store_translation(&target_name, entry_id, stored.clone());
+                let (_target_id, evs) = app.project.store_translation_with_event(&target_name, entry_id, stored.clone());
+                for ev in evs { crate::app::handle_model_event(app, ev); }
                 // Update target selection to Existing if it was placeholder
                 if let scanlateit_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.translate_target.clone() {
                     if name == target_name {
@@ -280,15 +277,15 @@ pub fn handle_retranslate_finished(
             }
             let equals_original = app
                 .project
-                .ocr
-                .get(entry_id)
+                .entry_including_deleted(entry_id)
                 .is_some_and(|entry| entry.text == text);
             let stored = if equals_original { None } else { Some(text) };
-            let forked_name = app.project.profiles.fork_for_edit();
-            app.project
-                .profiles
-                .selected_mut()
-                .set_translation(entry_id, stored);
+            let forked_name = if let Some((name, evs)) = app.project.fork_for_edit_with_event() {
+                for ev in evs { crate::app::handle_model_event(app, ev); }
+                Some(name)
+            } else { None };
+            let ev = app.project.set_translation_with_event(entry_id, stored.clone());
+            crate::app::handle_model_event(app, ev);
             let label = forked_name
                 .unwrap_or_else(|| app.project.profiles.selected().name.clone());
             app.status = format!("Retranslated 1 line into '{label}'.");
@@ -310,7 +307,7 @@ pub fn handle_retranslate_entry(app: &mut App, index: usize, entry_id: EntryId) 
             return Task::none();
         };
         let image_id = image.image_id;
-        let Some(entry) = app.project.ocr.get(entry_id) else {
+        let Some(entry) = app.project.entry(entry_id) else {
             app.status = "That result no longer exists.".to_string();
             return Task::none();
         };
@@ -331,18 +328,15 @@ pub fn handle_retranslate_entry(app: &mut App, index: usize, entry_id: EntryId) 
         let (text, context_items) = if app.translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate {
             let base_id = resolve_base_id(app);
             let txt = base_id
-                .and_then(|pid| app.project.profiles.iter().find(|p| p.id == pid))
-                .and_then(|p| p.translation_of(entry_id))
+                .and_then(|pid| app.project.resolved_text_for(pid, entry_id))
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| entry.text.clone());
             let ctx: Vec<translation::TranslateItem> = app
                 .project
-                .ocr
                 .visible_for(image_id)
                 .map(|e| {
                     let t = base_id
-                        .and_then(|pid| app.project.profiles.iter().find(|p| p.id == pid))
-                        .and_then(|p| p.translation_of(e.id))
+                        .and_then(|pid| app.project.resolved_text_for(pid, e.id))
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| e.text.clone());
                     translation::TranslateItem { filename: filename.clone(), id: e.id.0, text: t }
@@ -352,7 +346,6 @@ pub fn handle_retranslate_entry(app: &mut App, index: usize, entry_id: EntryId) 
         } else {
             let ctx: Vec<translation::TranslateItem> = app
                 .project
-                .ocr
                 .visible_for(image_id)
                 .map(|e| translation::TranslateItem {
                     filename: filename.clone(),
