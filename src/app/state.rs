@@ -212,4 +212,23 @@ impl UiState for App {
     fn target_placeholder_name(&self) -> String {
         format!("{}(auto)", self.translate_lang)
     }
+
+    fn app_view(&self) -> scanlateit_ui::state::AppView {
+        match self.app_view {
+            super::AppView::Home => scanlateit_ui::state::AppView::Home,
+            super::AppView::Editor => scanlateit_ui::state::AppView::Editor,
+        }
+    }
+
+    fn recent_projects(&self) -> &[scanlateit_settings::RecentProject] {
+        &self.recent_projects
+    }
+
+    fn new_project_overlay(&self) -> Option<scanlateit_ui::state::NewProjectOverlay> {
+        self.new_project.as_ref().map(|np| scanlateit_ui::state::NewProjectOverlay {
+            source_paths: np.source_files.iter().map(|(p, _, _)| p.clone()).collect(),
+            original_lang: np.original_lang.clone(),
+            project_location: np.project_location.clone(),
+        })
+    }
 }

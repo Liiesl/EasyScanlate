@@ -13,6 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::{OnceLock, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -132,6 +133,56 @@ impl fmt::Display for AutoInpaintModel {
     }
 }
 
+/// One entry in the homepage's recent-projects list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecentProject {
+    /// Absolute path to the `.mmtl` file.
+    pub path: String,
+    /// File stem for display (e.g. `tesies.mmtl`).
+    pub name: String,
+    /// Unix seconds when last opened/created.
+    pub last_opened: i64,
+}
+
+pub fn now_unix_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+pub fn format_relative(last_opened: i64) -> String {
+    let now = now_unix_secs();
+    let diff = (now - last_opened).max(0);
+    const MIN: i64 = 60;
+    const HOUR: i64 = 3600;
+    const DAY: i64 = 86400;
+    const WEEK: i64 = 7 * DAY;
+    const MONTH: i64 = 30 * DAY;
+    const YEAR: i64 = 365 * DAY;
+    if diff < MIN {
+        "just now".to_string()
+    } else if diff < HOUR {
+        let m = diff / MIN;
+        if m == 1 { "1 minute ago".to_string() } else { format!("{m} minutes ago") }
+    } else if diff < DAY {
+        let h = diff / HOUR;
+        if h == 1 { "1 hour ago".to_string() } else { format!("{h} hours ago") }
+    } else if diff < WEEK {
+        let d = diff / DAY;
+        if d == 1 { "1 day ago".to_string() } else { format!("{d} days ago") }
+    } else if diff < MONTH {
+        let w = diff / WEEK;
+        if w == 1 { "1 week ago".to_string() } else { format!("{w} weeks ago") }
+    } else if diff < YEAR {
+        let mo = diff / MONTH;
+        if mo == 1 { "1 month ago".to_string() } else { format!("{mo} months ago") }
+    } else {
+        let y = diff / YEAR;
+        if y == 1 { "1 year ago".to_string() } else { format!("{y} years ago") }
+    }
+}
+
 /// The whole persisted app configuration. Every field is unconditional:
 /// this crate has no heavy dependencies, so subsystem features stay at the
 /// app/ui level while the config always knows all values.
@@ -214,6 +265,9 @@ pub struct Settings {
     /// Which model the auto-inpaint step uses; `Mixed` routes by bg type.
     #[serde(default)]
     pub auto_inpaint_model: AutoInpaintModel,
+    /// Recent projects for the homepage, most-recent first. Max 20.
+    #[serde(default)]
+    pub recent_projects: Vec<RecentProject>,
     /// Stored translation connections, keyed by provider id (`openai`,
     /// `deepseek`, `custom-openai`, ...). A provider is "connected" when it
     /// has an entry here; disconnect removes the entry.
@@ -251,6 +305,7 @@ impl Default for Settings {
             auto_sfx_filter: true,
             auto_inpaint: true,
             auto_inpaint_model: AutoInpaintModel::default(),
+            recent_projects: Vec::new(),
         }
     }
 }
@@ -293,6 +348,30 @@ pub fn modify(f: impl FnOnce(&mut Settings)) -> Result<(), String> {
         eprintln!("[settings] persist failed: {e}");
     }
     result
+}
+
+/// Bump `recent_projects` with `path`, moving it to front and updating
+/// `last_opened`. Keeps at most 20 entries.
+pub fn touch_recent(path: String) {
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.clone());
+    let now = now_unix_secs();
+    let _ = modify(|s| {
+        s.recent_projects.retain(|r| r.path != path);
+        s.recent_projects.insert(
+            0,
+            RecentProject {
+                path: path.clone(),
+                name,
+                last_opened: now,
+            },
+        );
+        if s.recent_projects.len() > 20 {
+            s.recent_projects.truncate(20);
+        }
+    });
 }
 
 #[cfg(test)]

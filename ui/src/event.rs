@@ -123,7 +123,17 @@ pub enum SettingEdit {
 /// own `Message` and owns all state changes; widgets never see the app.
 #[derive(Debug, Clone)]
 pub enum UiEvent {
-    OpenImages,
+    // -- Homepage / New Project (single-window overlay) --
+    HomeNewProject,
+    HomeOpenProject,
+    HomeRecentClicked(String),
+    HomeSettings,
+    NewProjectClose,
+    NewProjectSourceImage,
+    NewProjectSourceFolder,
+    NewProjectLocationBrowse,
+    NewProjectOriginalLang(String),
+    NewProjectCreate,
     StartOcr,
     StopOcr,
     /// The user selected profile `id` in the results panel's profile

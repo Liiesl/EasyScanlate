@@ -1,8 +1,68 @@
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 #[cfg(all(feature = "test-ui", not(feature = "translation")))]
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
+
+/// Natural ordering for file paths: numeric chunks compared as numbers
+/// so `2.jpg < 10.jpg < 11.jpg` instead of lexical `10 < 11 < 2`.
+fn natural_cmp(a: &str, b: &str) -> Ordering {
+    let mut a_chars = a.chars().peekable();
+    let mut b_chars = b.chars().peekable();
+    loop {
+        match (a_chars.peek(), b_chars.peek()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(&ac), Some(&bc)) => {
+                let a_digit = ac.is_ascii_digit();
+                let b_digit = bc.is_ascii_digit();
+                if a_digit && b_digit {
+                    let mut a_num = String::new();
+                    while let Some(&c) = a_chars.peek() {
+                        if c.is_ascii_digit() { a_num.push(c); a_chars.next(); } else { break; }
+                    }
+                    let mut b_num = String::new();
+                    while let Some(&c) = b_chars.peek() {
+                        if c.is_ascii_digit() { b_num.push(c); b_chars.next(); } else { break; }
+                    }
+                    let a_trim = a_num.trim_start_matches('0');
+                    let b_trim = b_num.trim_start_matches('0');
+                    // empty means value 0
+                    let a_trim = if a_trim.is_empty() { "0" } else { a_trim };
+                    let b_trim = if b_trim.is_empty() { "0" } else { b_trim };
+                    match a_trim.len().cmp(&b_trim.len()) {
+                        Ordering::Equal => match a_trim.cmp(b_trim) {
+                            Ordering::Equal => {
+                                // same numeric value → fewer leading zeros first for stability
+                                match a_num.len().cmp(&b_num.len()) {
+                                    Ordering::Equal => continue,
+                                    ord => return ord,
+                                }
+                            }
+                            ord => return ord,
+                        },
+                        ord => return ord,
+                    }
+                } else {
+                    let mut a_chunk = String::new();
+                    while let Some(&c) = a_chars.peek() {
+                        if !c.is_ascii_digit() { a_chunk.push(c); a_chars.next(); } else { break; }
+                    }
+                    let mut b_chunk = String::new();
+                    while let Some(&c) = b_chars.peek() {
+                        if !c.is_ascii_digit() { b_chunk.push(c); b_chars.next(); } else { break; }
+                    }
+                    let ord = a_chunk.to_ascii_lowercase().cmp(&b_chunk.to_ascii_lowercase());
+                    if ord != Ordering::Equal { return ord; }
+                    let ord2 = a_chunk.cmp(&b_chunk);
+                    if ord2 != Ordering::Equal { return ord2; }
+                }
+            }
+        }
+    }
+}
 
 #[cfg(any(feature = "inpaint", feature = "test-ui"))]
 use iced::widget::image::Handle;
@@ -57,6 +117,19 @@ pub mod view;
 
 use layout::{PaneKind, SidePaneKind, StylingPaneKind};
 use layout::{IMAGE_FILTERS, MAIN_AREA_DEFAULT_RATIO, STYLING_DEFAULT_RATIO, STYLING_TOP_RATIO};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppView {
+    Home,
+    Editor,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewProjectState {
+    pub source_files: Vec<(String, u32, u32)>,
+    pub original_lang: String,
+    pub project_location: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct AutoInpaintJob {
@@ -124,6 +197,11 @@ pub enum Message {
     MmtlOpenPicked(Option<String>),
     MmtlSaved(Result<String, String>),
     MmtlLoaded(Result<(Project, Vec<LoadedImage>, String, Option<std::sync::Arc<tempfile::TempDir>>), String>),
+    NewProjectSourcePicked(Result<Vec<(String, u32, u32)>, String>),
+    NewProjectFolderPicked(Result<Vec<(String, u32, u32)>, String>),
+    NewProjectLocationPicked(Option<String>),
+    CreateProjectPicked(Result<String, String>),
+    RecentPickedToLoad(Result<(Project, Vec<LoadedImage>, String, Option<std::sync::Arc<tempfile::TempDir>>), String>),
 }
 
 impl From<UiEvent> for Message {
@@ -239,6 +317,9 @@ pub struct App {
     pub(crate) mmtl_path: Option<std::path::PathBuf>,
     pub(crate) mmtl_temp_dir: Option<std::sync::Arc<tempfile::TempDir>>,
     pub frame: NativeFrame,
+    pub(crate) app_view: AppView,
+    pub(crate) new_project: Option<NewProjectState>,
+    pub(crate) recent_projects: Vec<scanlateit_settings::RecentProject>,
 }
 
 impl App {
@@ -406,6 +487,9 @@ impl App {
             },
             mmtl_path: None,
             mmtl_temp_dir: None,
+            app_view: AppView::Home,
+            new_project: None,
+            recent_projects: scanlateit_settings::get(|s| s.recent_projects.clone()),
         }
     }
 }
@@ -419,61 +503,294 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Frame(action) => app.frame.update(action, Message::Frame),
         Message::FetchModels => translation::handle_fetch_models(app),
         Message::ModelsFetched(providers) => translation::handle_models_fetched(app, providers),
-        Message::Ui(UiEvent::OpenImages) => Task::perform(
-            async {
-                let files = rfd::AsyncFileDialog::new()
-                    .add_filter("Images", IMAGE_FILTERS)
-                    .pick_files()
-                    .await;
-                match files {
-                    Some(files) => {
-                        let mut out = Vec::with_capacity(files.len());
-                        for file in files {
-                            let path = file.path().to_string_lossy().into_owned();
-                            let dims = image::ImageReader::open(&path)
-                                .map_err(|e| format!("Failed to open {path}: {e}"))?
-                                .into_dimensions()
-                                .map_err(|e| format!("Failed to decode {path}: {e}"));
-                            match dims {
-                                Ok((width, height)) => out.push((path, width, height)),
-                                Err(e) => return Err(e),
-                            }
+        Message::Ui(UiEvent::HomeNewProject) => {
+            app.new_project = Some(NewProjectState {
+                source_files: Vec::new(),
+                original_lang: "Korean".to_string(),
+                project_location: None,
+            });
+            app.status = "New Project...".to_string();
+            Task::none()
+        }
+        Message::Ui(UiEvent::HomeOpenProject) => mmtl::handle_open(app),
+        Message::Ui(UiEvent::HomeRecentClicked(path)) => {
+            let p = std::path::PathBuf::from(path.clone());
+            if !p.exists() {
+                app.status = format!("Missing: {path}");
+                return Task::none();
+            }
+            app.status = format!("Loading {}...", p.display());
+            let path_clone = p.clone();
+            Task::perform(
+                async move {
+                    let path_for_task = path_clone.clone();
+                    tokio::task::spawn_blocking(move || -> Result<(Project, Vec<LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String> {
+                        let res = scanlateit_mmtl::load_mmtl(&path_for_task)?;
+                        let mut inpaint_map: std::collections::HashMap<scanlateit_model::ImageId, Vec<scanlateit_ui::loaded::InpaintLayer>> = std::collections::HashMap::new();
+                        for (img_id, bounds, png_path) in &res.inpaint_files {
+                            let data = std::fs::read(png_path).map_err(|e| e.to_string())?;
+                            let img = image::load_from_memory(&data).map_err(|e| e.to_string())?.to_rgba8();
+                            let (w, h) = (img.width(), img.height());
+                            let handle = iced::widget::image::Handle::from_rgba(w, h, bytes::Bytes::from(img.into_raw()));
+                            inpaint_map.entry(*img_id).or_default().push(scanlateit_ui::loaded::InpaintLayer { bounds: *bounds, handle, width: w, height: h });
                         }
-                        Ok(out)
+                        let mut out_images = Vec::new();
+                        for meta in res.project.images() {
+                            let layers = inpaint_map.remove(&meta.id).unwrap_or_default();
+                            out_images.push(LoadedImage {
+                                image_id: meta.id,
+                                decode: PageDecode::default(),
+                                inpaint: layers,
+                            });
+                        }
+                        let display = path_for_task.to_string_lossy().to_string();
+                        Ok((res.project, out_images, display, Some(Arc::new(res.temp_dir))))
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(format!("load task failed: {e}")))
+                },
+                Message::RecentPickedToLoad,
+            )
+        }
+        Message::Ui(UiEvent::HomeSettings) => settings::handle_settings_open(app),
+        Message::Ui(UiEvent::NewProjectClose) => {
+            app.new_project = None;
+            Task::none()
+        }
+        Message::Ui(UiEvent::NewProjectSourceImage) => {
+            Task::perform(
+                async {
+                    let files = rfd::AsyncFileDialog::new()
+                        .add_filter("Images", IMAGE_FILTERS)
+                        .pick_files()
+                        .await;
+                    match files {
+                        Some(files) => {
+                            let mut out = Vec::with_capacity(files.len());
+                            for file in files {
+                                let path = file.path().to_string_lossy().into_owned();
+                                let dims = image::ImageReader::open(&path)
+                                    .map_err(|e| format!("Failed to open {path}: {e}"))?
+                                    .into_dimensions()
+                                    .map_err(|e| format!("Failed to decode {path}: {e}"));
+                                match dims {
+                                    Ok((w, h)) => out.push((path, w, h)),
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                            Ok(out)
+                        }
+                        None => Ok(Vec::new()),
                     }
-                    None => Ok(Vec::new()),
-                }
-            },
-            Message::ImagesPicked,
-        ),
-        Message::ImagesPicked(result) => match result {
-            Ok(images) => {
-                if images.is_empty() {
-                    app.status = "No images selected.".to_string();
-                    return Task::none();
-                }
-                let metas: Vec<(String, u32, u32)> = images;
-                // Collect paths for decode scheduler (needs project image meta)
-                let mut image_ids = Vec::new();
-                for (path, width, height) in metas {
-                    let image_id = app.project.add_image(path, width as f32, height as f32);
-                    app.images.push(LoadedImage {
-                        image_id,
-                        decode: PageDecode::default(),
-                        inpaint: Vec::new(),
-                    });
-                    image_ids.push(image_id);
-                }
-                app.status = format!("Decoding {} image(s)...", app.images.len());
-                let project = &app.project;
-                app.scheduler
-                    .decode_thumbs_with_project(&mut app.images, project, Message::ThumbDecoded)
+                },
+                Message::NewProjectSourcePicked,
+            )
+        }
+        Message::Ui(UiEvent::NewProjectSourceFolder) => {
+            Task::perform(
+                async {
+                    let folder = rfd::AsyncFileDialog::new().pick_folder().await;
+                    let Some(folder) = folder else { return Ok(Vec::new()) };
+                    let dir = folder.path().to_path_buf();
+                    let entries = std::fs::read_dir(&dir).map_err(|e| e.to_string())?;
+                    let mut out = Vec::new();
+                    for entry in entries {
+                        let entry = entry.map_err(|e| e.to_string())?;
+                        let path = entry.path();
+                        if !path.is_file() { continue; }
+                        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+                        if !IMAGE_FILTERS.contains(&ext.as_str()) { continue; }
+                        let pstr = path.to_string_lossy().into_owned();
+                        let dims = image::ImageReader::open(&path)
+                            .map_err(|e| format!("Failed to open {pstr}: {e}"))?
+                            .into_dimensions()
+                            .map_err(|e| format!("Failed to decode {pstr}: {e}"));
+                        match dims {
+                            Ok((w, h)) => out.push((pstr, w, h)),
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    out.sort_by(|a, b| natural_cmp(&a.0, &b.0));
+                    Ok(out)
+                },
+                Message::NewProjectFolderPicked,
+            )
+        }
+        Message::Ui(UiEvent::NewProjectLocationBrowse) => {
+            let default_dir = app
+                .new_project
+                .as_ref()
+                .and_then(|np| np.source_files.first().map(|(p, _, _)| std::path::Path::new(p).parent().map(|par| par.to_path_buf()).unwrap_or_default()))
+                .unwrap_or_default();
+            Task::perform(
+                async move {
+                    let mut dlg = rfd::AsyncFileDialog::new()
+                        .add_filter("Manga Translation (.mmtl)", &["mmtl"])
+                        .set_file_name("project.mmtl");
+                    if default_dir.exists() {
+                        dlg = dlg.set_directory(&default_dir);
+                    }
+                    let file = dlg.save_file().await;
+                    file.map(|f| f.path().to_string_lossy().to_string())
+                },
+                Message::NewProjectLocationPicked,
+            )
+        }
+        Message::Ui(UiEvent::NewProjectOriginalLang(lang)) => {
+            if let Some(np) = app.new_project.as_mut() {
+                np.original_lang = lang;
             }
-            Err(e) => {
-                app.status = e;
-                Task::none()
+            Task::none()
+        }
+        Message::Ui(UiEvent::NewProjectCreate) => {
+            let Some(np) = app.new_project.clone() else { return Task::none() };
+            if np.source_files.is_empty() || np.project_location.is_none() {
+                app.status = "Select source and project location.".to_string();
+                return Task::none();
             }
-        },
+            // Build project and save directly
+            let dest_str = np.project_location.clone().unwrap();
+            let mut dest = std::path::PathBuf::from(&dest_str);
+            // Ensure .mmtl extension
+            if dest.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()) != Some("mmtl".to_string()) {
+                let mut os = dest.as_os_str().to_owned();
+                os.push(".mmtl");
+                dest = std::path::PathBuf::from(os);
+            }
+            // Explorer-style dedup:  "{name} ({num}).mmtl"
+            let unique_dest = {
+                if !dest.exists() {
+                    dest.clone()
+                } else {
+                    let parent = dest.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+                    let stem = dest.file_stem().and_then(|s| s.to_str()).unwrap_or("project").to_string();
+                    let ext = dest.extension().and_then(|e| e.to_str()).unwrap_or("mmtl").to_string();
+                    let mut n = 1;
+                    let mut cand;
+                    loop {
+                        cand = parent.join(format!("{stem} ({n}).{ext}"));
+                        if !cand.exists() { break; }
+                        n += 1;
+                        if n > 999 { break; }
+                    }
+                    cand
+                }
+            };
+            if let Some(parent) = unique_dest.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let files = np.source_files.clone();
+            let dest_for_task = unique_dest.clone();
+            // Reset UI immediately to home editor: we'll transition on success
+            app.new_project = None;
+            app.status = format!("Creating {}...", unique_dest.display());
+            Task::perform(
+                async move {
+                    let res: Result<String, String> = tokio::task::spawn_blocking(move || -> Result<String, String> {
+                        let mut project = Project::new();
+                        let mut metas: Vec<(String, u32, u32)> = files;
+                        metas.sort_by(|a, b| natural_cmp(&a.0, &b.0));
+                        let mut loaded: Vec<LoadedImage> = Vec::new();
+                        for (path, w, h) in metas {
+                            let image_id = project.add_image(path.clone(), w as f32, h as f32);
+                            loaded.push(LoadedImage { image_id, decode: PageDecode::default(), inpaint: Vec::new() });
+                        }
+                        scanlateit_mmtl::save_mmtl(&project, &[], &dest_for_task)
+                            .map_err(|e| e.to_string())?;
+                        Ok(dest_for_task.to_string_lossy().to_string())
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(format!("create task failed: {e}")));
+                    res
+                },
+                Message::CreateProjectPicked,
+            )
+        }
+        Message::NewProjectSourcePicked(result) => {
+            match result {
+                Ok(files) if !files.is_empty() => {
+                    if let Some(np) = app.new_project.as_mut() {
+                        np.source_files = files;
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => { app.status = e; }
+            }
+            Task::none()
+        }
+        Message::NewProjectFolderPicked(result) => {
+            match result {
+                Ok(files) if !files.is_empty() => {
+                    if let Some(np) = app.new_project.as_mut() {
+                        np.source_files = files;
+                    }
+                }
+                Ok(_) => { app.status = "No images found in folder.".to_string(); }
+                Err(e) => { app.status = e; }
+            }
+            Task::none()
+        }
+        Message::NewProjectLocationPicked(picked) => {
+            if let Some(p) = picked {
+                if let Some(np) = app.new_project.as_mut() {
+                    np.project_location = Some(p);
+                }
+            }
+            Task::none()
+        }
+        Message::CreateProjectPicked(result) => {
+            match result {
+                Ok(path_str) => match mmtl::load_created_project(path_str.clone()) {
+                    Ok((project, images, display, temp_dir)) => {
+                        app.project = project;
+                        app.images = images;
+                        app.mmtl_path = Some(std::path::PathBuf::from(display.clone()));
+                        app.mmtl_temp_dir = temp_dir;
+                        app.selected = None;
+                        app.selected_inpaint = None;
+                        app.editing = None;
+                        app.edit_content = None;
+                        app.app_view = AppView::Editor;
+                        app.recent_projects = scanlateit_settings::get(|s| s.recent_projects.clone());
+                        scanlateit_settings::touch_recent(display.clone());
+                        app.recent_projects = scanlateit_settings::get(|s| s.recent_projects.clone());
+                        app.status = format!("Created {} ({} image(s))", display, app.images.len());
+                        let project = &app.project;
+                        return app.scheduler.decode_thumbs_with_project(&mut app.images, project, Message::ThumbDecoded);
+                    }
+                    Err(e) => {
+                        app.status = format!("Created {path_str} but load failed: {e}");
+                        scanlateit_settings::touch_recent(path_str.clone());
+                        app.recent_projects = scanlateit_settings::get(|s| s.recent_projects.clone());
+                    }
+                },
+                Err(e) => { app.status = format!("Create failed: {e}"); }
+            }
+            Task::none()
+        }
+        Message::RecentPickedToLoad(result) => {
+            match result {
+                Ok((project, images, display, temp_dir)) => {
+                    app.project = project;
+                    app.images = images;
+                    app.mmtl_path = Some(std::path::PathBuf::from(display.clone()));
+                    app.mmtl_temp_dir = temp_dir;
+                    app.selected = None;
+                    app.selected_inpaint = None;
+                    app.editing = None;
+                    app.edit_content = None;
+                    app.app_view = AppView::Editor;
+                    scanlateit_settings::touch_recent(display.clone());
+                    app.recent_projects = scanlateit_settings::get(|s| s.recent_projects.clone());
+                    app.status = format!("Loaded {} ({} image(s))", display, app.images.len());
+                    let project = &app.project;
+                    return app.scheduler.decode_thumbs_with_project(&mut app.images, project, Message::ThumbDecoded);
+                }
+                Err(e) => { app.status = format!("Load failed: {e}"); }
+            }
+            Task::none()
+        }
+        Message::ImagesPicked(_) => Task::none(),
         Message::Ui(UiEvent::StartOcr) => ocr::handle_start_ocr(app),
         #[cfg(feature = "ocr")]
         Message::ParallelEngineReady(result) => ocr::handle_parallel_ready(app, result),

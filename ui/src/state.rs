@@ -8,6 +8,19 @@ use crate::event::{EditOrigin, MainAreaMode, SettingsTab, StyleField, TargetProf
 use crate::loaded::LoadedImage;
 use scanlateit_model::{ProfileId, Project};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppView {
+    Home,
+    Editor,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewProjectOverlay {
+    pub source_paths: Vec<String>,
+    pub original_lang: String,
+    pub project_location: Option<String>,
+}
+
 /// Read-only view of the app state that the widgets render from. Implemented
 /// by the app for its own state type; the ui crate never depends on the app.
 pub trait UiState {
@@ -109,4 +122,7 @@ pub trait UiState {
     fn target_profile(&self) -> TargetProfileSelection;
     /// Placeholder name for the current language in translate mode: `"{Lang}(auto)"`.
     fn target_placeholder_name(&self) -> String;
+    fn app_view(&self) -> AppView;
+    fn recent_projects(&self) -> &[scanlateit_settings::RecentProject];
+    fn new_project_overlay(&self) -> Option<NewProjectOverlay>;
 }

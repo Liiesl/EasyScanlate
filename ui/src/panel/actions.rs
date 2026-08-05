@@ -17,21 +17,6 @@ fn tip_label(label: &str) -> container::Container<'_, UiEvent> {
 }
 
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
-    let open_btn = button(
-        row![
-            crate::icon::lucide(Icon::FolderOpen).size(scale::s(14.0)).center(),
-            text("Open Images").size(scale::s(12.0))
-        ]
-        .spacing(scale::s(4.0))
-        .align_y(iced::Alignment::Center),
-    )
-    .style(crate::panel::button_style)
-    .on_press(UiEvent::OpenImages)
-    .padding(scale::s(6.0));
-    let open: Element<'_, UiEvent> = tooltip(open_btn, tip_label("Open images"), tooltip::Position::Bottom)
-        .gap(scale::s(4.0))
-        .into();
-
     let is_running = state.running();
     let ocr_label = if is_running { "Stop OCR" } else { "Start OCR" };
     let ocr_btn = button(
@@ -69,7 +54,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .into();
 
     container(
-        row![open, ocr, text(state.status()).size(scale::s(12.0)).width(Length::Fill), settings]
+        row![ocr, text(state.status()).size(scale::s(12.0)).width(Length::Fill), settings]
         .spacing(scale::s(6.0))
         .width(Length::Fill),
     )

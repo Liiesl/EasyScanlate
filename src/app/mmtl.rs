@@ -151,13 +151,39 @@ pub fn handle_saved(app: &mut App, result: Result<String, String>) -> Task<Messa
     match result {
         Ok(path) => {
             app.status = format!("Saved to {path}");
-            app.mmtl_path = Some(PathBuf::from(path));
+            app.mmtl_path = Some(PathBuf::from(path.clone()));
+            scanlateit_settings::touch_recent(path);
+            app.recent_projects = scanlateit_settings::get(|s| s.recent_projects.clone());
         }
         Err(e) => {
             app.status = format!("Save failed: {e}");
         }
     }
     Task::none()
+}
+
+pub fn load_created_project(path_str: String) -> Result<(scanlateit_model::Project, Vec<scanlateit_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String> {
+    let path = PathBuf::from(&path_str);
+    let res = scanlateit_mmtl::load_mmtl(&path)?;
+    let mut inpaint_map: std::collections::HashMap<scanlateit_model::ImageId, Vec<scanlateit_ui::loaded::InpaintLayer>> = std::collections::HashMap::new();
+    for (img_id, bounds, png_path) in &res.inpaint_files {
+        let data = std::fs::read(png_path).map_err(|e| e.to_string())?;
+        let img = image::load_from_memory(&data).map_err(|e| e.to_string())?.to_rgba8();
+        let (w, h) = (img.width(), img.height());
+        let handle = iced::widget::image::Handle::from_rgba(w, h, bytes::Bytes::from(img.into_raw()));
+        inpaint_map.entry(*img_id).or_default().push(scanlateit_ui::loaded::InpaintLayer { bounds: *bounds, handle, width: w, height: h });
+    }
+    let mut out_images = Vec::new();
+    for meta in res.project.images() {
+        let layers = inpaint_map.remove(&meta.id).unwrap_or_default();
+        out_images.push(scanlateit_ui::LoadedImage {
+            image_id: meta.id,
+            decode: scanlateit_ui::main_area::decode::PageDecode::default(),
+            inpaint: layers,
+        });
+    }
+    let display = path.to_string_lossy().to_string();
+    Ok((res.project, out_images, display, Some(Arc::new(res.temp_dir))))
 }
 
 pub fn handle_loaded(
@@ -174,6 +200,9 @@ pub fn handle_loaded(
             app.selected_inpaint = None;
             app.editing = None;
             app.edit_content = None;
+            app.app_view = super::AppView::Editor;
+            scanlateit_settings::touch_recent(display_path.clone());
+            app.recent_projects = scanlateit_settings::get(|s| s.recent_projects.clone());
             app.status = format!("Loaded {} ({} image(s))", display_path, app.images.len());
             let project = &app.project;
             return app.scheduler.decode_thumbs_with_project(&mut app.images, project, super::Message::ThumbDecoded);

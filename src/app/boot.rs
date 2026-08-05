@@ -88,6 +88,7 @@ pub fn boot(frame: NativeFrame) -> (App, Task<Message>) {
             },
             inpaint: Vec::new(),
         });
+        app.app_view = crate::app::AppView::Editor;
         #[cfg(all(feature = "test-ui", not(feature = "translation")))]
         {
             use std::collections::BTreeMap;
