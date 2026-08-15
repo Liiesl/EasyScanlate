@@ -99,9 +99,15 @@ pub fn save_mmtl(
         zip.write_all(&data).map_err(|e| e.to_string())?;
     }
 
-    // inpaint/
-    for (idx, patch) in inpaint_images.iter().enumerate() {
-        let name = format!("inpaint/{}_{}.png", patch.image_id.0, idx);
+    // inpaint/ — per-image sequential naming (0..n for each image) so
+    // load can map by image_id + per-image ordinal regardless of global order.
+    // Previous versions used global enumerate idx (bug: load treated it as per-image).
+    let mut per_image_next: HashMap<ImageId, usize> = HashMap::new();
+    for patch in inpaint_images.iter() {
+        let cnt = per_image_next.entry(patch.image_id).or_insert(0);
+        let per_idx = *cnt;
+        *cnt += 1;
+        let name = format!("inpaint/{}_{}.png", patch.image_id.0, per_idx);
         zip.start_file(name, options).map_err(|e| e.to_string())?;
         // encode rgba to PNG
         let mut buf = Vec::new();
@@ -266,33 +272,116 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
         project = rebuilt;
     }
 
-    // inpaint files
+    // inpaint files — robust mapping that handles both new per-image naming
+    // and legacy global-idx naming. New saves use per-image ordinal (0..n).
+    // Old saves used global enumerate idx, which exceeds per-image len for
+    // most images and caused 0×0 fallback (bug). We therefore group files
+    // by image_id and assign sequentially by patch order, with dimension
+    // verification to catch mismatches.
     let mut inpaint_files = Vec::new();
-    for name in inpaint_names {
-        let path = temp.path().join(&name);
-        // parse bounds from project extras? but we need to map files to patches order
-        // Our save wrote files as inpaint/<image_id>_<idx>.png in order of inpaint_images slice.
-        // For loading, we just provide paths list; App will load them as Handles via image crate.
-        // We'll attach them by reading patch index from filename
-        // Format: <image_id>_<idx>.png
-        let stem = Path::new(&name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    // Parse each name into (image_id, raw_idx, PathBuf, full_name)
+    struct Parsed { image_id: ImageId, raw_idx: Option<usize>, path: PathBuf, name: String }
+    let mut parsed: Vec<Parsed> = Vec::new();
+    for name in &inpaint_names {
+        let path = temp.path().join(name);
+        let stem = Path::new(name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
         let mut parts = stem.split('_');
-        if let (Some(id_str), Some(_idx_str)) = (parts.next(), parts.next()) {
+        if let (Some(id_str), Some(idx_str)) = (parts.next(), parts.next()) {
             if let Ok(id) = id_str.parse::<u64>() {
-                let image_id = ImageId(id);
-                // find matching patch in extras by order? Instead use bounds from extras at same idx per image
-                // We'll find nth patch for this image_id by idx
-                if let Ok(idx_val) = _idx_str.parse::<usize>() {
-                    // get bounds from project.extras.inpaint_patches filtered per image_id nth
-                    let patches_for_image: Vec<_> = project.extras.inpaint_patches.iter().filter(|p| p.image_id==image_id).collect();
-                    if let Some(patch) = patches_for_image.get(idx_val) {
-                        inpaint_files.push((patch.image_id, patch.bounds, path.clone()));
-                    } else {
-                        // fallback bounds empty
-                        inpaint_files.push((image_id, [0.0;4], path.clone()));
+                let raw_idx = idx_str.parse::<usize>().ok();
+                parsed.push(Parsed { image_id: ImageId(id), raw_idx, path: path.clone(), name: name.clone() });
+                continue;
+            }
+        }
+        // unparsable -> push with dummy id 0 (will be skipped)
+        parsed.push(Parsed { image_id: ImageId(0), raw_idx: None, path: path.clone(), name: name.clone() });
+    }
+    // Group by image_id, sort each group by raw_idx (or name) for stable order.
+    let mut groups: HashMap<ImageId, Vec<Parsed>> = HashMap::new();
+    for p in parsed {
+        // skip dummy unparsable that looked like inpaint/.png with no id
+        if p.image_id == ImageId(0) && p.raw_idx.is_none() {
+            // try to still expose as fallback entry so user sees something
+            inpaint_files.push((ImageId(0), [0.0;4], p.path));
+            continue;
+        }
+        groups.entry(p.image_id).or_default().push(p);
+    }
+    for (image_id, mut entries) in groups {
+        // sort by raw_idx numeric if present, else lexicographically; this
+        // makes legacy global-idx files (e.g. 19_5.png,19_6.png,19_7.png) fall
+        // into per-image sequential order 5->0,6->1,7->2 after grouping.
+        entries.sort_by(|a, b| {
+            match (a.raw_idx, b.raw_idx) {
+                (Some(ai), Some(bi)) => ai.cmp(&bi),
+                _ => a.name.cmp(&b.name),
+            }
+        });
+        // Patches for this image in insertion order (the canonical store)
+        let patches_for_image: Vec<_> = project.extras.inpaint_patches.iter().filter(|p| p.image_id==image_id).collect();
+        // If file count != patch count, still assign 1:1 in sorted order up to min;
+        // extras may be ground truth length, so use min.
+        // We attempt dimension-aware matching to detect ordering drift:
+        // Build map of not-yet-assigned patch indices.
+        // First pass: try to match by dimensions (PNG w/h == patch w/h) for robustness.
+        let mut assigned: Vec<bool> = vec![false; patches_for_image.len()];
+        // Pre-read dimensions for entries (cheap: read header via image crate)
+        let mut entry_dims: Vec<Option<(u32,u32)>> = Vec::new();
+        for e in &entries {
+            let dim = image::ImageReader::open(&e.path)
+                .and_then(|r| r.with_guessed_format().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
+                .and_then(|r| r.into_dimensions().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
+                .ok();
+            // into_dimensions returns (w,h); but we called via ImageReader? Actually with_guessed_format returns Reader; use .into_dimensions
+            // If we used ImageReader::open + with_guessed_format, we get an ImageReader; into_dimensions works without decoding full.
+            entry_dims.push(dim);
+        }
+        // Try dimension match
+        let mut matched_by_dim: Vec<Option<usize>> = vec![None; entries.len()];
+        for (ei, dim) in entry_dims.iter().enumerate() {
+            if let Some((w,h)) = dim {
+                let mut best: Option<usize> = None;
+                for (pi, patch) in patches_for_image.iter().enumerate() {
+                    if assigned[pi] { continue; }
+                    if patch.bounds[2] as u32 == *w && patch.bounds[3] as u32 == *h {
+                        best = Some(pi);
+                        break;
                     }
+                }
+                if let Some(pi) = best {
+                    assigned[pi] = true;
+                    matched_by_dim[ei] = Some(pi);
+                }
+            }
+        }
+        // Now emit inpaint_files: for each entry in sorted order, use dimension match if found,
+        // else fallback to sequential next unassigned per-image ordinal.
+        let mut next_seq = 0usize;
+        for (ei, entry) in entries.iter().enumerate() {
+            if let Some(pi) = matched_by_dim[ei] {
+                let patch = patches_for_image[pi];
+                inpaint_files.push((patch.image_id, patch.bounds, entry.path.clone()));
+            } else {
+                // find next unassigned sequential
+                while next_seq < patches_for_image.len() && assigned[next_seq] {
+                    next_seq += 1;
+                }
+                if next_seq < patches_for_image.len() {
+                    let patch = patches_for_image[next_seq];
+                    assigned[next_seq] = true;
+                    inpaint_files.push((patch.image_id, patch.bounds, entry.path.clone()));
+                    next_seq += 1;
                 } else {
-                    inpaint_files.push((ImageId(id), [0.0;4], path.clone()));
+                    // More files than patches (or patches missing) -> fallback zero
+                    // Still expose file with dummy bounds so UI shows something instead of silently dropping.
+                    // Try raw_idx direct if possible
+                    if let Some(raw) = entry.raw_idx {
+                        if let Some(patch) = patches_for_image.get(raw) {
+                            inpaint_files.push((patch.image_id, patch.bounds, entry.path.clone()));
+                            continue;
+                        }
+                    }
+                    inpaint_files.push((entry.image_id, [0.0;4], entry.path.clone()));
                 }
             }
         }
@@ -303,7 +392,6 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
     for (id, path) in &id_to_path {
         image_paths.insert(*id, path.clone());
     }
-
     Ok(LoadResult { project, image_paths, temp_dir: temp, inpaint_files })
 }
 
