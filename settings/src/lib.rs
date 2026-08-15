@@ -144,8 +144,89 @@ fn default_style_presets() -> StylePresets {
 
 /// The style-preset slot list, persisted per-user in `settings` (not per-project in `model`).
 /// `None` = empty slot. "+" fills the first empty slot or appends.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// TOML has no `null`, so `Vec<Option<T>>` cannot be serialized directly
+/// (`UnsupportedNone`). We store only the filled presets compactly as
+/// `Vec<EntryStyle>`; on load we pad trailing `None`s to at least
+/// `INITIAL_PRESET_SLOTS` so the UI still renders empty placeholder tiles.
+#[derive(Debug, Clone, PartialEq)]
 pub struct StylePresets(Vec<Option<EntryStyle>>);
+
+impl Serialize for StylePresets {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // Preserve middle `None`s as `{ empty = true }` so order/holes survive,
+        // but trim trailing `None`s for compactness (they are re-padded on load).
+        // This avoids `Vec<Option<T>>`'s `UnsupportedNone` (TOML has no null).
+        #[derive(Serialize)]
+        #[serde(untagged)]
+        enum SerSlot<'a> {
+            Filled(&'a EntryStyle),
+            Empty { empty: bool },
+        }
+        let mut slots: Vec<SerSlot> = self
+            .0
+            .iter()
+            .map(|o| match o {
+                None => SerSlot::Empty { empty: true },
+                Some(st) => SerSlot::Filled(st),
+            })
+            .collect();
+        // Trim trailing empties — they will be re-added as placeholders.
+        while matches!(slots.last(), Some(SerSlot::Empty { empty: true })) {
+            slots.pop();
+        }
+        slots.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for StylePresets {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Flexible: handle compact `Vec<EntryStyle>`, trimmed `Vec<Slot>`,
+        // and legacy full `Vec<Option<EntryStyle>>` (via toml::Value inspection).
+        let values = Vec::<toml::Value>::deserialize(deserializer)?;
+        let mut out: Vec<Option<EntryStyle>> = Vec::new();
+        for val in values {
+            if let Some(tbl) = val.as_table() {
+                // `{ empty = true }` placeholder
+                if tbl.get("empty").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    out.push(None);
+                    continue;
+                }
+                // `{ empty = false, style = { ... } }` wrapper
+                if let Some(style_val) = tbl.get("style") {
+                    match style_val.clone().try_into::<EntryStyle>() {
+                        Ok(st) => out.push(Some(st)),
+                        Err(e) => return Err(serde::de::Error::custom(e)),
+                    }
+                    continue;
+                }
+                // If table has `empty = false` without `style`, treat as None? fallback
+                if tbl.contains_key("empty") {
+                    // empty == false but no style -> treat as None placeholder? Should not happen.
+                    out.push(None);
+                    continue;
+                }
+            }
+            // Otherwise treat whole value as `EntryStyle` (compact case or direct style table)
+            if val.is_table() {
+                let style: EntryStyle = val.clone().try_into().map_err(serde::de::Error::custom)?;
+                out.push(Some(style));
+            } else {
+                out.push(None);
+            }
+        }
+        if out.len() < INITIAL_PRESET_SLOTS {
+            out.resize_with(INITIAL_PRESET_SLOTS, || None);
+        }
+        Ok(Self(out))
+    }
+}
 
 impl Default for StylePresets {
     fn default() -> Self {
