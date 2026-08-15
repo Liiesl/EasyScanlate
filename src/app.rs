@@ -111,6 +111,7 @@ pub mod pipeline;
 pub mod translation;
 pub mod settings;
 pub mod mmtl;
+pub mod export;
 pub mod view;
 
 use layout::{PaneKind, SidePaneKind, StylingPaneKind};
@@ -204,6 +205,8 @@ pub enum Message {
     NewProjectLocationPicked(Option<String>),
     CreateProjectPicked(Result<String, String>),
     RecentPickedToLoad(Result<(Project, Vec<LoadedImage>, String, Option<std::sync::Arc<tempfile::TempDir>>), String>),
+    ExportFolderPicked(Option<String>),
+    ExportFinished(Result<String, String>),
 }
 
 impl From<UiEvent> for Message {
@@ -1295,10 +1298,13 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::SaveProject) => mmtl::handle_save(app),
         Message::Ui(UiEvent::SaveProjectAs) => mmtl::handle_save_as(app),
         Message::Ui(UiEvent::OpenProject) => mmtl::handle_open(app),
+        Message::Ui(UiEvent::ExportAll) => export::handle_export_all(app),
         Message::MmtlSavePicked(picked) => mmtl::handle_save_picked(app, picked),
         Message::MmtlOpenPicked(picked) => mmtl::handle_open_picked(app, picked),
         Message::MmtlSaved(result) => mmtl::handle_saved(app, result),
         Message::MmtlLoaded(result) => mmtl::handle_loaded(app, result),
+        Message::ExportFolderPicked(picked) => export::handle_export_picked(app, picked),
+        Message::ExportFinished(result) => export::handle_export_finished(app, result),
         Message::TranslateFinished(jobs, result) => translation::handle_translate_finished(app, jobs, result),
         Message::RetranslateFinished((index, entry_id), result) => translation::handle_retranslate_finished(app, index, entry_id, result),
     };

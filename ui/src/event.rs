@@ -314,4 +314,7 @@ pub enum UiEvent {
     SaveProjectAs,
     /// Open a .mmtl project from disk (native XML or legacy JSON).
     OpenProject,
+    /// Export every page as a baked raster image (original + inpaint + overlay)
+    /// to a chosen folder. One click exports the whole chapter.
+    ExportAll,
 }

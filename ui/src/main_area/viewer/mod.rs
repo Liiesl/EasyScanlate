@@ -72,6 +72,7 @@ pub struct TileView<
     S = fn((usize, usize, InpaintToolbarAction)) -> Message,
     T = fn((usize, Rectangle)) -> Message,
     U = fn(Vec<(usize, Rectangle)>) -> Message,
+    V = fn() -> Message,
 > where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -85,6 +86,7 @@ pub struct TileView<
     S: Fn((usize, usize, InpaintToolbarAction)) -> Message,
     T: Fn((usize, Rectangle)) -> Message,
     U: Fn(Vec<(usize, Rectangle)>) -> Message,
+    V: Fn() -> Message,
 {
     tiles: Vec<TileSpec<'a>>,
     font: Font,
@@ -114,9 +116,10 @@ pub struct TileView<
     on_inpaint_toolbar: Option<S>,
     inpaint_reveal: Option<(usize, usize)>,
     on_ocr_selection: Option<T>,
+    on_export: Option<V>,
 }
 
-impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U> TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V> TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -130,6 +133,7 @@ where
     S: Fn((usize, usize, InpaintToolbarAction)) -> Message,
     T: Fn((usize, Rectangle)) -> Message,
     U: Fn(Vec<(usize, Rectangle)>) -> Message,
+    V: Fn() -> Message,
 {
     pub fn new(tiles: Vec<TileSpec<'a>>, font: Font) -> Self {
         Self {
@@ -158,6 +162,7 @@ where
             on_inpaint_toolbar: None,
             inpaint_reveal: None,
             on_ocr_selection: None,
+            on_export: None,
         }
     }
 
@@ -279,14 +284,19 @@ where
         self.on_inpaint_toolbar = Some(f);
         self
     }
+
+    pub fn on_export(mut self, f: V) -> Self {
+        self.on_export = Some(f);
+        self
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Widget impl - delegates geometry/hit-testing/drawing to submodules
 // ---------------------------------------------------------------------------
 
-impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -300,6 +310,7 @@ where
     S: Fn((usize, usize, InpaintToolbarAction)) -> Message,
     T: Fn((usize, Rectangle)) -> Message,
     U: Fn(Vec<(usize, Rectangle)>) -> Message,
+    V: Fn() -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
     fn size(&self) -> Size<Length> {
@@ -985,7 +996,11 @@ where
                                         }
                                     }
                                 }
-                                OverlayButton::Save => {}
+                                OverlayButton::Save => {
+                                    if let Some(callback) = self.on_export.as_ref() {
+                                        shell.publish(callback());
+                                    }
+                                }
                             }
                         }
                     }
@@ -1245,8 +1260,8 @@ where
     }
 }
 
-impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Q: 'a, R: 'a, S: 'a, T: 'a, U: 'a, Theme, Renderer>
-    From<TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U>> for Element<'a, Message, Theme, Renderer>
+impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Q: 'a, R: 'a, S: 'a, T: 'a, U: 'a, V: 'a, Theme, Renderer>
+    From<TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V>> for Element<'a, Message, Theme, Renderer>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -1260,9 +1275,10 @@ where
     S: Fn((usize, usize, InpaintToolbarAction)) -> Message,
     T: Fn((usize, Rectangle)) -> Message,
     U: Fn(Vec<(usize, Rectangle)>) -> Message,
+    V: Fn() -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
-    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U>) -> Self {
+    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V>) -> Self {
         Self::new(view)
     }
 }

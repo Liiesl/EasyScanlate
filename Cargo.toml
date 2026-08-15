@@ -24,6 +24,7 @@ bytes = "1.6"
 rfd = "0.17"
 tokio = { version = "1", features = ["rt", "time"] }
 fontdb = "0.24"
+tiny-skia = "0.11"
 open = "5"
 serde = { version = "1", features = ["derive"] }
 lucide-icons = { version = "1", features = ["iced"] }
@@ -89,6 +90,7 @@ scanlateit-mmtl = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 fontdb = { workspace = true }
+tiny-skia = { workspace = true }
 open = { workspace = true }
 serde = { workspace = true }
 lucide-icons = { workspace = true }
