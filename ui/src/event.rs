@@ -228,6 +228,9 @@ pub enum UiEvent {
     /// The user finished dragging an inpainting range on `index`'s tile;
     /// `Rectangle` is `(x, y, w, h)` in image pixels.
     InpaintSelection((usize, Rectangle)),
+    /// The user finished dragging an inpainting range that spans two tiles
+    /// (global drag across the seam). Each entry is `(image_index, rect_in_image_pixels)`.
+    InpaintSelectionSpan(Vec<(usize, Rectangle)>),
     /// The user finished dragging a manual OCR range on `index`'s tile;
     /// `Rectangle` is `(x, y, w, h)` in image pixels. No padding is added
     /// (unlike inpaint's expanded canvas).

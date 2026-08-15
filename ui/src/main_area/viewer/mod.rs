@@ -71,6 +71,7 @@ pub struct TileView<
     R = fn(f32) -> Message,
     S = fn((usize, usize, InpaintToolbarAction)) -> Message,
     T = fn((usize, Rectangle)) -> Message,
+    U = fn(Vec<(usize, Rectangle)>) -> Message,
 > where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -83,6 +84,7 @@ pub struct TileView<
     R: Fn(f32) -> Message,
     S: Fn((usize, usize, InpaintToolbarAction)) -> Message,
     T: Fn((usize, Rectangle)) -> Message,
+    U: Fn(Vec<(usize, Rectangle)>) -> Message,
 {
     tiles: Vec<TileSpec<'a>>,
     font: Font,
@@ -94,6 +96,7 @@ pub struct TileView<
     on_toolbar_action: Option<M>,
     on_scroll_ended: Option<P>,
     on_inpaint_selection: Option<Q>,
+    on_inpaint_span: Option<U>,
     editing: Option<(usize, EntryId)>,
     inpaint_mode: bool,
     ocr_mode: bool,
@@ -113,7 +116,7 @@ pub struct TileView<
     on_ocr_selection: Option<T>,
 }
 
-impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T> TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U> TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -126,6 +129,7 @@ where
     R: Fn(f32) -> Message,
     S: Fn((usize, usize, InpaintToolbarAction)) -> Message,
     T: Fn((usize, Rectangle)) -> Message,
+    U: Fn(Vec<(usize, Rectangle)>) -> Message,
 {
     pub fn new(tiles: Vec<TileSpec<'a>>, font: Font) -> Self {
         Self {
@@ -138,6 +142,7 @@ where
             on_entry_moved: None,
             on_toolbar_action: None,
             on_inpaint_selection: None,
+            on_inpaint_span: None,
             on_scroll_ended: None,
             editing: None,
             inpaint_mode: false,
@@ -210,6 +215,11 @@ where
         self
     }
 
+    pub fn on_inpaint_span(mut self, f: U) -> Self {
+        self.on_inpaint_span = Some(f);
+        self
+    }
+
     pub fn on_ocr_selection(mut self, f: T) -> Self {
         self.on_ocr_selection = Some(f);
         self
@@ -275,8 +285,8 @@ where
 // Widget impl - delegates geometry/hit-testing/drawing to submodules
 // ---------------------------------------------------------------------------
 
-impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -289,6 +299,7 @@ where
     R: Fn(f32) -> Message,
     S: Fn((usize, usize, InpaintToolbarAction)) -> Message,
     T: Fn((usize, Rectangle)) -> Message,
+    U: Fn(Vec<(usize, Rectangle)>) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
     fn size(&self) -> Size<Length> {
@@ -420,21 +431,35 @@ where
             let (layout, _) = tile_layout(&self.tiles, content_w);
             let visible_top = state.offset;
             let visible_bottom = state.offset + visible_bounds.height;
-            let inpaint_selecting = if state.inpaint_mode() {
+            let inpaint_span = if state.inpaint_mode() {
                 match state.interaction {
-                    Interaction::InpaintSelecting { index, .. } => Some(index),
+                    Interaction::InpaintSelecting { index, start, current } => {
+                        let (sy, _) = layout[index];
+                        let gy0 = sy + start.y.min(current.y);
+                        let gy1 = sy + start.y.max(current.y);
+                        Some((gy0, gy1))
+                    }
                     _ => None,
                 }
             } else {
                 None
             };
-            let ocr_selecting = if state.ocr_mode() {
+            let ocr_span = if state.ocr_mode() {
                 match state.interaction {
-                    Interaction::OcrSelecting { index, .. } => Some(index),
+                    Interaction::OcrSelecting { index, start, current } => {
+                        let (sy, _) = layout[index];
+                        let gy0 = sy + start.y.min(current.y);
+                        let gy1 = sy + start.y.max(current.y);
+                        Some((gy0, gy1))
+                    }
                     _ => None,
                 }
             } else {
                 None
+            };
+            let is_inpaint_span = |index: usize, gy0: f32, gy1: f32| {
+                let (y, h) = layout[index];
+                gy1 > y && gy0 < y + h
             };
             let mut visible_tiles: Vec<usize> = self
                 .tiles
@@ -442,10 +467,11 @@ where
                 .enumerate()
                 .filter_map(|(index, tile)| {
                     let (y, height) = layout[index];
-                    let is_selecting = inpaint_selecting == Some(index) || ocr_selecting == Some(index);
+                    let tile_visible = y + height > visible_top && y < visible_bottom;
+                    let is_selecting = inpaint_span.map_or(false, |(gy0, gy1)| is_inpaint_span(index, gy0, gy1))
+                        || ocr_span.map_or(false, |(gy0, gy1)| is_inpaint_span(index, gy0, gy1));
                     // Keep the selecting tile visible even when it has no overlays so the
                     // inpaint marquee (rubber band) always has a frame to draw into.
-                    let tile_visible = y + height > visible_top && y < visible_bottom;
                     if is_selecting && tile_visible {
                         return Some(index);
                     }
@@ -471,21 +497,19 @@ where
                     }
                 }
             }
-            // Ensure selecting marquee tile is visible even if overlays hidden (original does, but guard again)
-            if visible_tiles.is_empty() && inpaint_selecting.is_some() {
-                if let Some(idx) = inpaint_selecting {
-                    if let Some((y, height)) = layout.get(idx).copied() {
-                        if y + height > visible_top && y < visible_bottom {
-                            visible_tiles.push(idx);
+            // Ensure selecting marquee tiles are visible even if overlays hidden (span-aware)
+            if visible_tiles.is_empty() {
+                if let Some((gy0, gy1)) = inpaint_span {
+                    for (idx, (y, height)) in layout.iter().enumerate() {
+                        if gy1 > *y && gy0 < *y + *height && *y + *height > visible_top && *y < visible_bottom {
+                            if !visible_tiles.contains(&idx) { visible_tiles.push(idx); }
                         }
                     }
                 }
-            }
-            if visible_tiles.is_empty() && ocr_selecting.is_some() {
-                if let Some(idx) = ocr_selecting {
-                    if let Some((y, height)) = layout.get(idx).copied() {
-                        if y + height > visible_top && y < visible_bottom {
-                            visible_tiles.push(idx);
+                if let Some((gy0, gy1)) = ocr_span {
+                    for (idx, (y, height)) in layout.iter().enumerate() {
+                        if gy1 > *y && gy0 < *y + *height && *y + *height > visible_top && *y < visible_bottom {
+                            if !visible_tiles.contains(&idx) { visible_tiles.push(idx); }
                         }
                     }
                 }
@@ -540,16 +564,36 @@ where
                                 );
                             }
                             if state.inpaint_mode() {
-                                if let Interaction::InpaintSelecting { index: selecting, start, current } = state.interaction {
-                                    if selecting == index {
-                                        draw_inpaint_marquee(&mut overlay_frame, start, current, tile_bounds.size());
+                                if let Interaction::InpaintSelecting { index: sel_idx, start, current } = state.interaction {
+                                    let (sel_y, _) = layout[sel_idx];
+                                    let global_y0 = sel_y + start.y.min(current.y);
+                                    let global_y1 = sel_y + start.y.max(current.y);
+                                    let x0 = start.x.min(current.x).clamp(0.0, state.width);
+                                    let x1 = start.x.max(current.x).clamp(0.0, state.width);
+                                    let (y_tile, h_tile) = layout[index];
+                                    if global_y1 > y_tile && global_y0 < y_tile + h_tile {
+                                        let y0 = (global_y0.max(y_tile) - y_tile).max(0.0);
+                                        let y1 = (global_y1.min(y_tile + h_tile) - y_tile).max(0.0);
+                                        let a = Point::new(x0, y0);
+                                        let b = Point::new(x1, y1);
+                                        draw_inpaint_marquee(&mut overlay_frame, a, b, tile_bounds.size());
                                     }
                                 }
                             }
                             if state.ocr_mode() {
-                                if let Interaction::OcrSelecting { index: selecting, start, current } = state.interaction {
-                                    if selecting == index {
-                                        draw_ocr_marquee(&mut overlay_frame, start, current, tile_bounds.size());
+                                if let Interaction::OcrSelecting { index: sel_idx, start, current } = state.interaction {
+                                    let (sel_y, _) = layout[sel_idx];
+                                    let global_y0 = sel_y + start.y.min(current.y);
+                                    let global_y1 = sel_y + start.y.max(current.y);
+                                    let x0 = start.x.min(current.x).clamp(0.0, state.width);
+                                    let x1 = start.x.max(current.x).clamp(0.0, state.width);
+                                    let (y_tile, h_tile) = layout[index];
+                                    if global_y1 > y_tile && global_y0 < y_tile + h_tile {
+                                        let y0 = (global_y0.max(y_tile) - y_tile).max(0.0);
+                                        let y1 = (global_y1.min(y_tile + h_tile) - y_tile).max(0.0);
+                                        let a = Point::new(x0, y0);
+                                        let b = Point::new(x1, y1);
+                                        draw_ocr_marquee(&mut overlay_frame, a, b, tile_bounds.size());
                                     }
                                 }
                             }
@@ -835,52 +879,87 @@ where
                     }
                 }
                 if let Interaction::InpaintSelecting { index, start, current } = state.interaction {
-                    let tile = &self.tiles[index];
                     let (layout, _) = tile_layout(&self.tiles, state.width);
-                    let scale = if tile.source_width > 0 {
-                        state.width / tile.source_width as f32
-                    } else {
-                        0.0
-                    };
-                    if scale > 0.0 {
-                        let tile_height = layout.get(index).map(|(_, h)| *h).unwrap_or(0.0);
-                        let x0 = start.x.min(current.x).clamp(0.0, state.width);
-                        let y0 = start.y.min(current.y).clamp(0.0, tile_height);
-                        let x1 = start.x.max(current.x).clamp(0.0, state.width);
-                        let y1 = start.y.max(current.y).clamp(0.0, tile_height);
-                        let rect = Rectangle::new(
-                            Point::new(x0 / scale, y0 / scale),
-                            Size::new((x1 - x0) / scale, (y1 - y0) / scale),
-                        );
-                        if rect.width >= MIN_INPAINT_EDGE && rect.height >= MIN_INPAINT_EDGE {
+                    let x0 = start.x.min(current.x).clamp(0.0, state.width);
+                    let x1 = start.x.max(current.x).clamp(0.0, state.width);
+                    if x1 > x0 {
+                        let sel_y = layout[index].0;
+                        let gy0_raw = sel_y + start.y.min(current.y);
+                        let gy1_raw = sel_y + start.y.max(current.y);
+                        let (gy0, gy1) = (gy0_raw.min(gy1_raw), gy0_raw.max(gy1_raw));
+                        let mut spans: Vec<(usize, Rectangle)> = Vec::new();
+                        for (i, (y, h)) in layout.iter().enumerate() {
+                            if gy1 <= *y || gy0 >= y + h { continue; }
+                            let y0_tile = (gy0.max(*y) - y).max(0.0);
+                            let y1_tile = (gy1.min(y + h) - y).max(0.0);
+                            if y1_tile <= y0_tile { continue; }
+                            let tile = &self.tiles[i];
+                            if tile.source_width == 0 { continue; }
+                            let scale = state.width / tile.source_width as f32;
+                            if scale <= 0.0 { continue; }
+                            let rect = Rectangle::new(
+                                Point::new(x0 / scale, y0_tile / scale),
+                                Size::new((x1 - x0) / scale, (y1_tile - y0_tile) / scale),
+                            );
+                            if rect.width >= MIN_INPAINT_EDGE && rect.height >= MIN_INPAINT_EDGE {
+                                spans.push((i, rect));
+                            }
+                        }
+                        if spans.is_empty() {
+                            // nothing
+                        } else if spans.len() == 1 {
                             if let Some(callback) = self.on_inpaint_selection.as_ref() {
-                                shell.publish(callback((index, rect)));
+                                shell.publish(callback(spans[0]));
+                                shell.request_redraw();
+                            }
+                        } else {
+                            spans.sort_by_key(|(idx, _)| *idx);
+                            // limit to 2 consecutive images (span across seam only)
+                            let trimmed = if spans.len() > 2 { spans[..2].to_vec() } else { spans };
+                            if let Some(callback) = self.on_inpaint_span.as_ref() {
+                                shell.publish(callback(trimmed));
+                                shell.request_redraw();
+                            } else if let Some(callback) = self.on_inpaint_selection.as_ref() {
+                                shell.publish(callback(trimmed[0]));
                                 shell.request_redraw();
                             }
                         }
                     }
                 }
                 if let Interaction::OcrSelecting { index, start, current } = state.interaction {
-                    let tile = &self.tiles[index];
                     let (layout, _) = tile_layout(&self.tiles, state.width);
-                    let scale = if tile.source_width > 0 {
-                        state.width / tile.source_width as f32
-                    } else {
-                        0.0
-                    };
-                    if scale > 0.0 {
-                        let tile_height = layout.get(index).map(|(_, h)| *h).unwrap_or(0.0);
-                        let x0 = start.x.min(current.x).clamp(0.0, state.width);
-                        let y0 = start.y.min(current.y).clamp(0.0, tile_height);
-                        let x1 = start.x.max(current.x).clamp(0.0, state.width);
-                        let y1 = start.y.max(current.y).clamp(0.0, tile_height);
-                        let rect = Rectangle::new(
-                            Point::new(x0 / scale, y0 / scale),
-                            Size::new((x1 - x0) / scale, (y1 - y0) / scale),
-                        );
-                        if rect.width >= MIN_OCR_EDGE && rect.height >= MIN_OCR_EDGE {
+                    let x0 = start.x.min(current.x).clamp(0.0, state.width);
+                    let x1 = start.x.max(current.x).clamp(0.0, state.width);
+                    if x1 > x0 {
+                        let sel_y = layout[index].0;
+                        let gy0_raw = sel_y + start.y.min(current.y);
+                        let gy1_raw = sel_y + start.y.max(current.y);
+                        let (gy0, gy1) = (gy0_raw.min(gy1_raw), gy0_raw.max(gy1_raw));
+                        let mut spans: Vec<(usize, Rectangle, f32)> = Vec::new();
+                        for (i, (y, h)) in layout.iter().enumerate() {
+                            if gy1 <= *y || gy0 >= y + h { continue; }
+                            let y0_tile = (gy0.max(*y) - y).max(0.0);
+                            let y1_tile = (gy1.min(y + h) - y).max(0.0);
+                            if y1_tile <= y0_tile { continue; }
+                            let tile = &self.tiles[i];
+                            if tile.source_width == 0 { continue; }
+                            let scale = state.width / tile.source_width as f32;
+                            if scale <= 0.0 { continue; }
+                            let rect = Rectangle::new(
+                                Point::new(x0 / scale, y0_tile / scale),
+                                Size::new((x1 - x0) / scale, (y1_tile - y0_tile) / scale),
+                            );
+                            if rect.width >= MIN_OCR_EDGE && rect.height >= MIN_OCR_EDGE {
+                                let area = rect.width * rect.height;
+                                spans.push((i, rect, area));
+                            }
+                        }
+                        if !spans.is_empty() {
+                            // For OCR keep single-image behavior: pick largest piece.
+                            spans.sort_by(|a, b| b.2.total_cmp(&a.2));
+                            let (best_idx, best_rect, _) = spans[0];
                             if let Some(callback) = self.on_ocr_selection.as_ref() {
-                                shell.publish(callback((index, rect)));
+                                shell.publish(callback((best_idx, best_rect)));
                                 shell.request_redraw();
                             }
                         }
@@ -1166,8 +1245,8 @@ where
     }
 }
 
-impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Q: 'a, R: 'a, S: 'a, T: 'a, Theme, Renderer>
-    From<TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T>> for Element<'a, Message, Theme, Renderer>
+impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Q: 'a, R: 'a, S: 'a, T: 'a, U: 'a, Theme, Renderer>
+    From<TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U>> for Element<'a, Message, Theme, Renderer>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -1180,9 +1259,10 @@ where
     R: Fn(f32) -> Message,
     S: Fn((usize, usize, InpaintToolbarAction)) -> Message,
     T: Fn((usize, Rectangle)) -> Message,
+    U: Fn(Vec<(usize, Rectangle)>) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
-    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T>) -> Self {
+    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U>) -> Self {
         Self::new(view)
     }
 }

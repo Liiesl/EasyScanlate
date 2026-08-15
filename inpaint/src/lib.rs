@@ -176,6 +176,41 @@ impl Engine {
             }
         }
     }
+
+    /// Like [`Self::run_blocking`] but for an already-decoded [`RgbaImage`].
+    /// Used for stitched canvases that span two pages (manual in-between
+    /// inpaint). The `rect` and `quads` are in the passed image's pixel
+    /// space. For the stitched path every backend follows Lama's 512-edge
+    /// handling (window / resize) is inside `inpaint_crop` / `aot_inpaint_crop`;
+    /// Telea simply expands by `radius`.
+    pub fn run_on_image(
+        &self,
+        image: &RgbaImage,
+        rect: [f32; 4],
+        quads: &[Quad],
+    ) -> Result<Vec<(RgbaImage, [f32; 4])>, String> {
+        match self.backend {
+            InpaintBackend::Telea => telea_inpaint_crop(image, rect, quads, self.radius),
+            InpaintBackend::Lama => {
+                let mut session = self
+                    .session
+                    .as_ref()
+                    .ok_or("LaMa engine has no session")?
+                    .lock()
+                    .map_err(|e| format!("Inpaint engine lock poisoned: {e}"))?;
+                inpaint_crop(&mut session, image, rect, quads)
+            }
+            InpaintBackend::Aot => {
+                let mut session = self
+                    .session
+                    .as_ref()
+                    .ok_or("AOT engine has no session")?
+                    .lock()
+                    .map_err(|e| format!("Inpaint engine lock poisoned: {e}"))?;
+                aot_inpaint_crop(&mut session, image, rect, quads)
+            }
+        }
+    }
 }
 
 /// Runs one LaMa inference on the single `input` [1,4,512,512] tensor

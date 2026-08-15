@@ -163,6 +163,8 @@ pub enum Message {
     #[cfg(feature = "inpaint")]
     InpaintFinished(usize, Result<Vec<(image::RgbaImage, [f32; 4])>, String>),
     #[cfg(feature = "inpaint")]
+    InpaintSpanFinished(Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4])>)>, String>),
+    #[cfg(feature = "inpaint")]
     AutoInpaintEngineReady(InpaintBackend, Result<InpaintEngine, String>),
     #[cfg(feature = "inpaint")]
     AutoInpaintFinished(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4])>, String>),
@@ -226,6 +228,8 @@ pub struct App {
     inpaint_engine: Option<InpaintEngine>,
     #[cfg(feature = "inpaint")]
     pending_inpaint: Option<(usize, String, [f32; 4], Vec<Quad>)>,
+    #[cfg(feature = "inpaint")]
+    pending_inpaint_span: Option<Vec<(usize, String, [f32; 4], Vec<Quad>)>>,
     pub(crate) inpainting: bool,
     pub(crate) inpaint_mode: bool,
     pub(crate) ocr_mode: bool,
@@ -370,6 +374,8 @@ impl App {
             inpaint_engine: None,
             #[cfg(feature = "inpaint")]
             pending_inpaint: None,
+            #[cfg(feature = "inpaint")]
+            pending_inpaint_span: None,
             inpainting: false,
             inpaint_mode: false,
             ocr_mode: false,
@@ -888,6 +894,8 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::SegmentFiltered(result) => segment::handle_filtered(app, result),
         #[cfg(feature = "inpaint")]
         Message::InpaintFinished(index, result) => inpaint::handle_inpaint_finished(app, index, result),
+        #[cfg(feature = "inpaint")]
+        Message::InpaintSpanFinished(result) => inpaint::handle_inpaint_span_finished(app, result),
         Message::Ui(UiEvent::StopOcr) => ocr::handle_stop_ocr(app),
         #[cfg(feature = "ocr")]
         Message::OcrStreamRun(result) => ocr::handle_ocr_stream_run(app, result),
@@ -1232,6 +1240,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::EntryToolbar((index, id, action))) => edit::handle_entry_toolbar(app, index, id, action),
         Message::Ui(UiEvent::EntryMoved((index, id, quad))) => edit::handle_entry_moved(app, index, id, quad),
         Message::Ui(UiEvent::InpaintSelection((index, rect))) => inpaint::handle_inpaint_selection(app, index, rect),
+        Message::Ui(UiEvent::InpaintSelectionSpan(spans)) => inpaint::handle_inpaint_span(app, spans),
         Message::Ui(UiEvent::ManualOcrSelection((index, rect))) => ocr::handle_manual_ocr_selection(app, index, rect),
         Message::Ui(UiEvent::EditAction(action)) => edit::handle_edit_action(app, action),
         Message::Ui(UiEvent::EditRect(rect)) => edit::handle_edit_rect(app, rect),
