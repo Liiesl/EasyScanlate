@@ -1,29 +1,42 @@
 use iced::widget::{button, center, column, container, mouse_area, opaque, row, stack, text, text_input};
-use iced::{Color, Element, Length, Fill as FillLength};
+use iced::{Background, Border, Color, Element, Length, Fill as FillLength};
 
 use crate::event::UiEvent;
 use crate::panel::PANEL_BG;
 use crate::scale;
+use crate::segmented::{ACCENT, BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
 use crate::state::UiState;
 
 const MODAL_WIDTH: f32 = 640.0;
+
+fn input_style(_theme: &iced::Theme, _status: text_input::Status) -> text_input::Style {
+    text_input::Style {
+        background: Background::Color(INPUT_BG),
+        border: Border {
+            color: BORDER,
+            width: scale::s(1.0),
+            radius: scale::s(4.0).into(),
+        },
+        placeholder: MUTED_FG,
+        value: TEXT_MAIN,
+        selection: ACCENT,
+        icon: MUTED_FG,
+    }
+}
 
 pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -> Element<'a, UiEvent> {
     let Some(np) = state.new_project_overlay() else {
         return base;
     };
     let np = np;
-    let source_placeholder = if np.source_paths.is_empty() {
-        "Select an image or folder...".to_string()
+    let source_value = if np.source_paths.is_empty() {
+        String::new()
     } else if np.source_paths.len() == 1 {
         np.source_paths[0].clone()
     } else {
         format!("{} files selected", np.source_paths.len())
     };
-    let location_placeholder = np
-        .project_location
-        .clone()
-        .unwrap_or_else(|| "Choose project save location...".to_string());
+    let location_value = np.project_location.clone().unwrap_or_default();
     let can_create = !np.source_paths.is_empty() && np.project_location.is_some();
 
     let content = column![
@@ -32,10 +45,11 @@ pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -
         column![
             text("Source:").size(scale::s(12.0)).color(Color::WHITE),
             row![
-                text_input("Select an image or folder...", &source_placeholder)
+                text_input("Select an image or folder...", &source_value)
                     .padding(scale::s(6.0))
                     .size(scale::s(12.0))
-                    .width(FillLength),
+                    .width(FillLength)
+                    .style(input_style),
                 button(text("Image").size(scale::s(12.0)).width(FillLength).center())
                     .padding(scale::s(6.0))
                     .width(Length::Fixed(scale::s(90.0)))
@@ -72,10 +86,11 @@ pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -
         column![
             text("Project Location:").size(scale::s(12.0)).color(Color::WHITE),
             row![
-                text_input("Choose project save location...", &location_placeholder)
+                text_input("Choose project save location...", &location_value)
                     .padding(scale::s(6.0))
                     .size(scale::s(12.0))
-                    .width(FillLength),
+                    .width(FillLength)
+                    .style(input_style),
                 button(text("Browse").size(scale::s(12.0)).width(FillLength).center())
                     .padding(scale::s(6.0))
                     .width(Length::Fixed(scale::s(90.0)))
