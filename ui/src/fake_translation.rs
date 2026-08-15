@@ -85,6 +85,8 @@ pub struct Model {
     pub name: String,
     pub free: bool,
     pub family: Option<String>,
+    pub release_date: Option<String>,
+    pub last_updated: Option<String>,
 }
 
 impl Model {
@@ -210,10 +212,49 @@ fn fallback_models(ids: &[&str]) -> Vec<Model> {
                 name: display.to_string(),
                 free: false,
                 family: None,
+                release_date: None,
+                last_updated: None,
             }
         })
         .collect()
 }
+
+/// Mirrors real crate's default hidden helpers (family latest, free/*-latest exempt).
+pub fn default_hidden_ids(_listing: &()) -> BTreeSet<String> {
+    BTreeSet::new()
+}
+pub fn default_hidden_ids_for_models(models: &[Model]) -> BTreeSet<String> {
+    use std::collections::BTreeMap;
+    let mut latest: BTreeMap<String, &Model> = BTreeMap::new();
+    for m in models {
+        if m.free || m.id.ends_with("-latest") { continue; }
+        let family = m.family.clone().unwrap_or_else(|| m.id.clone());
+        let keep = match latest.get(&family) {
+            Some(current) => {
+                let a_newer = match (m.release_date.as_deref(), current.release_date.as_deref()) {
+                    (Some(a), Some(b)) if a != b => a > b,
+                    (Some(_), None) => true,
+                    (None, Some(_)) => false,
+                    _ => match (m.last_updated.as_deref(), current.last_updated.as_deref()) {
+                        (Some(a), Some(b)) => a > b,
+                        (Some(_), None) => true,
+                        _ => false,
+                    },
+                };
+                a_newer
+            }
+            None => true,
+        };
+        if keep { latest.insert(family, m); }
+    }
+    let visible_latest: BTreeSet<String> = latest.into_values().map(|m| m.id.clone()).collect();
+    models.iter().filter(|m| {
+        if m.free || m.id.ends_with("-latest") { return false; }
+        if visible_latest.contains(&m.id) { return false; }
+        true
+    }).map(|m| m.id.clone()).collect()
+}
+pub fn usable_models(_listing: &()) -> Vec<Model> { Vec::new() }
 
 /// Looks up a fake gateway by its provider id.
 pub fn catalog_provider(id: &str) -> Option<&'static Provider> {
@@ -407,7 +448,7 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
             .unwrap_or_else(|| provider.api.clone());
         if let Some(model) = connection.model.clone().filter(|m| !m.trim().is_empty()) {
             if provider.models.is_empty() {
-                provider.models = vec![Model { id: model.clone(), name: model, free: false, family: None }];
+                provider.models = vec![Model { id: model.clone(), name: model.clone(), free: false, family: None, release_date: None, last_updated: None }];
             }
         }
         return provider;
@@ -423,6 +464,8 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
             name: model,
             free: false,
             family: None,
+            release_date: None,
+            last_updated: None,
         }];
     }
     provider
@@ -828,6 +871,40 @@ impl Session {
         self.sync_models();
     }
 
+    fn provider_for_default_hidden(&self, provider: &str) -> Option<Provider> {
+        self.fetched.get(provider).cloned().or_else(|| {
+            self.connections.get(provider).map(|c| provider_for_connection(provider, c))
+        }).or_else(|| catalog_provider(provider).cloned())
+    }
+    pub fn default_hidden_for(&self, provider: &str) -> BTreeSet<String> {
+        if let Some(p) = self.provider_for_default_hidden(provider) {
+            default_hidden_ids_for_models(&p.models)
+        } else {
+            BTreeSet::new()
+        }
+    }
+    pub fn ensure_default_hidden_seeded(&mut self) {
+        for id in self.connected_ids.clone() {
+            if !self.hidden_models.contains_key(&id) {
+                let default = self.default_hidden_for(&id);
+                if !default.is_empty() { self.hidden_models.insert(id, default); }
+            }
+        }
+        self.sync_models();
+    }
+    pub fn reset_hidden_to_default(&mut self, provider: &str) {
+        let default = self.default_hidden_for(provider);
+        if default.is_empty() { self.hidden_models.remove(provider); } else { self.hidden_models.insert(provider.to_string(), default); }
+        self.sync_models();
+    }
+    pub fn reset_all_hidden_to_default(&mut self) {
+        let ids = self.connected_ids.clone();
+        for id in ids {
+            let default = self.default_hidden_for(&id);
+            if default.is_empty() { self.hidden_models.remove(&id); } else { self.hidden_models.insert(id, default); }
+        }
+        self.sync_models();
+    }
     pub fn clear_hidden(&mut self, provider: &str) {
         self.hidden_models.remove(provider);
         self.sync_models();

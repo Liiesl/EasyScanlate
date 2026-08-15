@@ -95,13 +95,18 @@ pub const LANGUAGES: [&str; 13] = [
 /// display name (shown in the UI), plus whether it is free (input or output
 /// cost 0). `family` is the models.dev family (if any), used to seed the
 /// default hidden set (older family members hidden until the user enables them
-/// in Manage Models). The request always uses `id`; the UI always shows `name`.
+/// in Manage Models). `release_date` / `last_updated` are kept for default
+/// hidden computation (latest per family) so resets can be recomputed from the
+/// fetched provider without the original listing. The request always uses `id`;
+/// the UI always shows `name`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Model {
     pub id: String,
     pub name: String,
     pub free: bool,
     pub family: Option<String>,
+    pub release_date: Option<String>,
+    pub last_updated: Option<String>,
 }
 
 impl Model {
@@ -116,8 +121,10 @@ impl Model {
 }
 
 /// One translation gateway: where to call, which environment variable holds
-/// its API key, and the selectable models (already filtered and sorted, or
-/// the fallback list when the mirror is unreachable).
+/// its API key, and the selectable models (usable models: deprecated and
+/// non-text filtered, sorted; family older members and `*-latest` are not
+/// filtered but hidden by default via `hidden_models`, or the fallback list
+/// when the mirror is unreachable).
 #[derive(Debug, Clone)]
 pub struct Provider {
     /// models.dev provider id (or a custom-* id for free-form endpoints).
@@ -258,6 +265,8 @@ fn fallback_models(ids: &[&str]) -> Vec<Model> {
             name: String::new(),
             free: false,
             family: None,
+            release_date: None,
+            last_updated: None,
         })
         .collect()
 }
@@ -492,7 +501,7 @@ pub async fn fetch_local_models(base_url: &str, id: &str) -> Result<Vec<Model>, 
                         .data
                         .into_iter()
                         .filter(|m| !m.id.trim().is_empty())
-                        .map(|m| Model { id: m.id.clone(), name: m.id, free: false, family: None })
+                        .map(|m| Model { id: m.id.clone(), name: m.id, free: false, family: None, release_date: None, last_updated: None })
                         .collect();
                     if !ids.is_empty() {
                         ids.sort_by(|a, b| a.id.cmp(&b.id));
@@ -526,7 +535,7 @@ pub async fn fetch_local_models(base_url: &str, id: &str) -> Result<Vec<Model>, 
                         .into_iter()
                         .map(|m| {
                             let name = if !m.name.trim().is_empty() { m.name } else { m.model };
-                            Model { id: name.clone(), name, free: false, family: None }
+                            Model { id: name.clone(), name, free: false, family: None, release_date: None, last_updated: None }
                         })
                         .filter(|m| !m.id.trim().is_empty())
                         .collect();
@@ -627,7 +636,7 @@ pub async fn fetch_provider(id: &str) -> Provider {
             return catalog.clone();
         }
     };
-    let models = select_models(&listing);
+    let models = usable_models(&listing);
     eprintln!("[translation] {} model(s) loaded from {url}", models.len());
     Provider {
         id: catalog.id.to_string(),
@@ -675,6 +684,8 @@ fn custom_fallback_provider(id: &str) -> Provider {
                 name: (*m).to_string(),
                 free: false,
                 family: None,
+                release_date: None,
+                last_updated: None,
             })
             .collect(),
     }
@@ -720,7 +731,7 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
         // fetched provider already had (empty until fetch completes).
         if let Some(model) = connection.model.clone().filter(|m| !m.trim().is_empty()) {
             if provider.models.is_empty() {
-                provider.models = vec![Model { id: model.clone(), name: model, free: false, family: None }];
+                provider.models = vec![Model { id: model.clone(), name: model.clone(), free: false, family: None, release_date: None, last_updated: None }];
             }
         }
         return provider;
@@ -736,6 +747,8 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
             name: model,
             free: false,
             family: None,
+            release_date: None,
+            last_updated: None,
         }];
     }
     provider
@@ -743,7 +756,10 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
 
 /// Returns every usable model from `listing`: drops deprecated models and
 /// any model that does not output plain text. Free flag preserved, no family
-/// de-duplication – this is the full list shown in the Manage Models overlay.
+/// de-duplication – this is the full list shown in the Manage Models overlay
+/// and the list that `fetch_provider` now returns (older family members are
+/// hidden by default via `default_hidden_ids()` / `hidden_models` instead of
+/// being filtered out, `*-latest` is never hidden).
 pub fn usable_models(listing: &ProviderListing) -> Vec<Model> {
     let mut out = Vec::new();
     for (id, info) in &listing.models {
@@ -763,36 +779,22 @@ pub fn usable_models(listing: &ProviderListing) -> Vec<Model> {
             name: display,
             free: is_free(info),
             family: info.family.clone(),
+            release_date: info.release_date.clone(),
+            last_updated: info.last_updated.clone(),
         });
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
     out
 }
 
-/// The ids of usable models that are hidden by the default family filter
-/// (older releases of each paid family). `usable` should be the result of
-/// `usable_models(listing)`; this recomputes the family latest selection to
-/// find the hidden tail. Free models and deprecated (already removed) are
-/// never hidden.
+/// The ids of usable models that are hidden by default: older releases of
+/// each paid family. Free models, `*-latest` models and the newest release of
+/// each family stay visible. Deprecated and non-text models are never usable
+/// and never counted as hidden. `is_newer` drives the latest-per-family
+/// choice, `*-latest` and free are always exempt.
 pub fn default_hidden_ids(listing: &ProviderListing) -> std::collections::BTreeSet<String> {
     let usable = usable_models(listing);
-    let visible = select_models(listing);
-    let visible_set: std::collections::BTreeSet<String> =
-        visible.into_iter().map(|m| m.id).collect();
-    usable
-        .into_iter()
-        .filter(|m| !m.free && !visible_set.contains(&m.id))
-        .map(|m| m.id)
-        .collect()
-}
-
-/// Applies the listing filters: drops deprecated models and any model that
-/// outputs something other than text (image/audio/video generators are not
-/// usable for translation), keeps only the newest release of each family for
-/// paid models, always lists free models (input or output cost 0), and sorts
-/// the result by id.
-fn select_models(listing: &ProviderListing) -> Vec<Model> {
-    let mut ids: Vec<Model> = Vec::new();
+    // Compute latest paid, non-free, non-*-latest per family.
     let mut latest: BTreeMap<String, (&str, &ModelInfo)> = BTreeMap::new();
     for (id, info) in &listing.models {
         if info.status.as_deref() == Some("deprecated") {
@@ -801,18 +803,7 @@ fn select_models(listing: &ProviderListing) -> Vec<Model> {
         if !outputs_text_only(info) {
             continue;
         }
-        if is_free(info) {
-            let display = info
-                .name
-                .clone()
-                .filter(|n| !n.trim().is_empty())
-                .unwrap_or_else(|| id.clone());
-            ids.push(Model {
-                id: id.clone(),
-                name: display,
-                free: true,
-                family: info.family.clone(),
-            });
+        if is_free(info) || id.ends_with("-latest") {
             continue;
         }
         let family = info.family.clone().unwrap_or_else(|| id.clone());
@@ -824,25 +815,71 @@ fn select_models(listing: &ProviderListing) -> Vec<Model> {
             latest.insert(family, (id, info));
         }
     }
-    ids.extend(
-        latest
-            .into_values()
-            .map(|(id, info)| {
-                let display = info
-                    .name
-                    .clone()
-                    .filter(|n| !n.trim().is_empty())
-                    .unwrap_or_else(|| id.to_string());
-                Model {
-                    id: id.to_string(),
-                    name: display,
-                    free: false,
-                    family: info.family.clone(),
-                }
-            }),
-    );
-    ids.sort_by(|a, b| a.id.cmp(&b.id));
-    ids
+    let visible_latest: std::collections::BTreeSet<String> =
+        latest.into_values().map(|(id, _)| id.to_string()).collect();
+    usable
+        .into_iter()
+        .filter(|m| {
+            if m.free || m.id.ends_with("-latest") {
+                return false;
+            }
+            if visible_latest.contains(&m.id) {
+                return false;
+            }
+            // Models with unique family (or family=None) were inserted as latest
+            // above, so they are visible_latest. Remaining are older siblings.
+            true
+        })
+        .map(|m| m.id)
+        .collect()
+}
+
+/// Like `default_hidden_ids` but computed from an already-fetched `Provider`
+/// model list (which carries `family`/`release_date`/`last_updated`). Used for
+/// `Manage Models` reset when the original `ProviderListing` is no longer
+/// available. Same rules: free, `*-latest`, and newest per family stay visible.
+pub fn default_hidden_ids_for_models(models: &[Model]) -> std::collections::BTreeSet<String> {
+    // Usable here means every model in the slice (already filtered for deprecated/non-text).
+    // Keep free/*-latest always visible, otherwise latest per family.
+    let mut latest: BTreeMap<String, &Model> = BTreeMap::new();
+    for m in models {
+        if m.free || m.id.ends_with("-latest") {
+            continue;
+        }
+        let family = m.family.clone().unwrap_or_else(|| m.id.clone());
+        let keep = match latest.get(&family) {
+            Some(current) if !is_newer_model(m, current) => false,
+            _ => true,
+        };
+        if keep {
+            latest.insert(family, m);
+        }
+    }
+    let visible_latest: std::collections::BTreeSet<String> =
+        latest.into_values().map(|m| m.id.clone()).collect();
+    models
+        .iter()
+        .filter(|m| {
+            if m.free || m.id.ends_with("-latest") {
+                return false;
+            }
+            if visible_latest.contains(&m.id) {
+                return false;
+            }
+            true
+        })
+        .map(|m| m.id.clone())
+        .collect()
+}
+
+/// Applies the listing filters: drops deprecated models and any model that
+/// outputs something other than text. **No family de-duplication** – older
+/// family members are kept and hidden by default via `default_hidden_ids()`/
+/// `hidden_models` instead of being filtered out, so the user can unhide them
+/// in Manage Models. `*-latest` models are never hidden by default either.
+/// This now behaves identically to `usable_models`.
+fn select_models(listing: &ProviderListing) -> Vec<Model> {
+    usable_models(listing)
 }
 
 /// A model whose input or output cost is zero is free and always listed.
@@ -875,6 +912,21 @@ fn is_newer(info: &ModelInfo, current: &ModelInfo) -> bool {
     }
     match (info.last_updated.as_deref(), current.last_updated.as_deref()) {
         (Some(a), Some(b)) => a > b,
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
+/// Model-level `is_newer` for `default_hidden_ids_for_models`.
+fn is_newer_model(a: &Model, b: &Model) -> bool {
+    match (a.release_date.as_deref(), b.release_date.as_deref()) {
+        (Some(ra), Some(rb)) if ra != rb => return ra > rb,
+        (Some(_), None) => return true,
+        (None, Some(_)) => return false,
+        _ => {}
+    }
+    match (a.last_updated.as_deref(), b.last_updated.as_deref()) {
+        (Some(ra), Some(rb)) => ra > rb,
         (Some(_), None) => true,
         _ => false,
     }
@@ -1689,12 +1741,14 @@ mod tests {
         };
         let selected = select_models(&listing);
         let ids: Vec<&str> = selected.iter().map(|m| m.id.as_str()).collect();
+        // select_models now returns all usable (no family dedup) – older family
+        // members are hidden via default_hidden_ids, not filtered.
         assert!(ids.contains(&"paid-v2"));
-        assert!(!ids.contains(&"paid-v1"));
+        assert!(ids.contains(&"paid-v1"));
         assert!(ids.contains(&"free-old"));
         assert!(ids.contains(&"free-new"));
         assert!(!ids.contains(&"retired"));
-        // Models without a family are their own family: all of them are kept.
+        // Models without a family are their own family: all kept.
         assert!(ids.contains(&"loner-v2"));
         assert!(ids.contains(&"loner-v1"));
         assert!(ids.windows(2).all(|w| w[0] <= w[1]));
@@ -1706,6 +1760,79 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["free-new", "free-old"]
         );
+        // Default hidden should hide older paid family member, keep free/latest/loner.
+        let hidden = default_hidden_ids(&listing);
+        assert!(hidden.contains("paid-v1"));
+        assert!(!hidden.contains("paid-v2"));
+        assert!(!hidden.contains("free-old"));
+        assert!(!hidden.contains("free-new"));
+        assert!(!hidden.contains("loner-v1"));
+        assert!(!hidden.contains("loner-v2"));
+        // Same via model list.
+        let hidden2 = default_hidden_ids_for_models(&selected);
+        assert_eq!(hidden, hidden2);
+    }
+
+    #[test]
+    fn latest_suffix_models_are_never_hidden() {
+        let listing = ProviderListing {
+            api: None,
+            env: vec![],
+            models: BTreeMap::from([
+                (
+                    "mistral-small-latest".into(),
+                    ModelInfo {
+                        id: None,
+                        name: None,
+                        status: None,
+                        family: Some("mistral-small".into()),
+                        release_date: Some("2024-01-01".into()),
+                        last_updated: None,
+                        modalities: None,
+                        cost: Some(ModelCost { input: Some(2.0), output: Some(4.0) }),
+                    },
+                ),
+                (
+                    "mistral-small-2407".into(),
+                    ModelInfo {
+                        id: None,
+                        name: None,
+                        status: None,
+                        family: Some("mistral-small".into()),
+                        release_date: Some("2024-07-01".into()),
+                        last_updated: None,
+                        modalities: None,
+                        cost: Some(ModelCost { input: Some(2.0), output: Some(4.0) }),
+                    },
+                ),
+                (
+                    "mistral-small-2409".into(),
+                    ModelInfo {
+                        id: None,
+                        name: None,
+                        status: None,
+                        family: Some("mistral-small".into()),
+                        release_date: Some("2024-09-01".into()),
+                        last_updated: None,
+                        modalities: None,
+                        cost: Some(ModelCost { input: Some(2.0), output: Some(4.0) }),
+                    },
+                ),
+            ]),
+        };
+        let selected = select_models(&listing);
+        let ids: Vec<&str> = selected.iter().map(|m| m.id.as_str()).collect();
+        // All usable models are returned (no family dedup, *-latest kept)
+        assert!(ids.contains(&"mistral-small-latest"));
+        assert!(ids.contains(&"mistral-small-2407"));
+        assert!(ids.contains(&"mistral-small-2409"));
+        // Default hidden hides older paid siblings but never *-latest or latest per family
+        let hidden = default_hidden_ids(&listing);
+        assert!(hidden.contains("mistral-small-2407"));
+        assert!(!hidden.contains("mistral-small-latest"));
+        assert!(!hidden.contains("mistral-small-2409"));
+        let hidden2 = default_hidden_ids_for_models(&selected);
+        assert_eq!(hidden, hidden2);
     }
 
     #[test]
@@ -1795,7 +1922,9 @@ mod tests {
                 id: "deepseek-v4-flash-free".to_string(),
                 name: "DeepSeek V4 Flash Free".to_string(),
                 free: true,
-                family: Some("deepseek-flash".to_string())
+                family: Some("deepseek-flash".to_string()),
+                release_date: Some("2026-07-31".to_string()),
+                last_updated: None
             }]
         );
     }
@@ -1891,8 +2020,8 @@ mod tests {
             kind: CompatKind::OpenAI,
             api_key_env: "TEST_API_KEY".to_string(),
             models: vec![
-                Model { id: "free-1".to_string(), name: "Free 1".to_string(), free: true, family: None },
-                Model { id: "paid-1".to_string(), name: "Paid 1".to_string(), free: false, family: None },
+                Model { id: "free-1".to_string(), name: "Free 1".to_string(), free: true, family: None, release_date: None, last_updated: None },
+                Model { id: "paid-1".to_string(), name: "Paid 1".to_string(), free: false, family: None, release_date: None, last_updated: None },
             ],
         };
         assert_eq!(provider.selectable_models(true), vec!["free-1"]);

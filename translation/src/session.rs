@@ -29,7 +29,10 @@ pub struct Session {
     pub free_only: bool,
     /// Per-provider set of model ids explicitly hidden by the user via the
     /// Manage Models overlay. The overlay lists all usable models (deprecated
-    /// already removed) and this set hides older-family models by default.
+    /// and non-text already removed); older family members are hidden by
+    /// default via `default_hidden_ids_for_models` (free and `*-latest` stay
+    /// visible). The request still uses `id`; hiding is purely UI via
+    /// `visible_models`.
     pub hidden_models: BTreeMap<String, BTreeSet<String>>,
     /// Cached output of [`Self::model_groups`]; rebuilt at the top of every
     /// [`Self::sync_models`] call so callers can borrow it for the frame.
@@ -267,13 +270,78 @@ impl Session {
         self.sync_models();
     }
 
+    /// Provider models for `provider`: fetched listing if available, otherwise
+    /// the catalog fallback (or custom/local placeholder). Used for default
+    /// hidden computation.
+    fn provider_for_default_hidden(&self, provider: &str) -> Option<Provider> {
+        self.fetched.get(provider).cloned().or_else(|| {
+            self.connections
+                .get(provider)
+                .map(|connection| provider_for_connection(provider, connection))
+        }).or_else(|| super::catalog_provider(provider).cloned())
+    }
+
+    /// Default hidden set for `provider`: older paid family members, free and
+    /// `*-latest` always visible. Computed from the provider's current model
+    /// list (which now contains all usable models).
+    pub fn default_hidden_for(&self, provider: &str) -> BTreeSet<String> {
+        if let Some(p) = self.provider_for_default_hidden(provider) {
+            super::default_hidden_ids_for_models(&p.models)
+        } else {
+            BTreeSet::new()
+        }
+    }
+
+    /// Ensures every connected provider has a hidden entry seeded to its
+    /// default (only when the entry is absent). Call after `on_fetched` or
+    /// at boot so older-family models are auto-hidden via Manage Models
+    /// instead of being filtered out.
+    pub fn ensure_default_hidden_seeded(&mut self) {
+        for id in self.connected_ids.clone() {
+            if !self.hidden_models.contains_key(&id) {
+                let default = self.default_hidden_for(&id);
+                if !default.is_empty() {
+                    self.hidden_models.insert(id, default);
+                }
+            }
+        }
+        self.sync_models();
+    }
+
+    /// Reset hidden set for `provider` to its default (older family hidden,
+    /// free/`*-latest`/latest-per-family visible). Use this for the Reset
+    /// button instead of clearing to empty.
+    pub fn reset_hidden_to_default(&mut self, provider: &str) {
+        let default = self.default_hidden_for(provider);
+        if default.is_empty() {
+            self.hidden_models.remove(provider);
+        } else {
+            self.hidden_models.insert(provider.to_string(), default);
+        }
+        self.sync_models();
+    }
+
     /// Reset hidden set for `provider` to empty (all models visible).
     pub fn clear_hidden(&mut self, provider: &str) {
         self.hidden_models.remove(provider);
         self.sync_models();
     }
 
-    /// Reset all hidden models (show everything).
+    /// Reset all hidden models to defaults (older family hidden, free/`*-latest`/latest visible).
+    pub fn reset_all_hidden_to_default(&mut self) {
+        let ids = self.connected_ids.clone();
+        for id in ids {
+            let default = self.default_hidden_for(&id);
+            if default.is_empty() {
+                self.hidden_models.remove(&id);
+            } else {
+                self.hidden_models.insert(id, default);
+            }
+        }
+        self.sync_models();
+    }
+
+    /// Clear all hidden models (show everything). Kept for internal use.
     pub fn clear_all_hidden(&mut self) {
         self.hidden_models.clear();
         self.sync_models();
@@ -481,8 +549,8 @@ mod tests {
             kind: super::super::CompatKind::OpenAI,
             api_key_env: "DEEPSEEK_API_KEY".to_string(),
             models: vec![
-                super::super::Model { id: "free-1".to_string(), name: "Free 1".to_string(), free: true, family: None },
-                super::super::Model { id: "paid-1".to_string(), name: "Paid 1".to_string(), free: false, family: None },
+                super::super::Model { id: "free-1".to_string(), name: "Free 1".to_string(), free: true, family: None, release_date: None, last_updated: None },
+                super::super::Model { id: "paid-1".to_string(), name: "Paid 1".to_string(), free: false, family: None, release_date: None, last_updated: None },
             ],
         }
     }

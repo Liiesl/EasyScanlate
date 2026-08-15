@@ -1,8 +1,13 @@
 //! Manage Models overlay: opened from Translation settings, lets the user
-//! toggle each model per provider. Deprecated models are never listed here
-//! (they are filtered at the provider layer). The basic configuration (no
-//! hidden entry) shows the default latest-per-family filtered list; hiding
-//! is written straight into the shared settings store.
+//! toggle each model per provider. Deprecated and non-text models are never
+//! listed here (filtered at provider layer). All usable models are fetched
+//! (no family de-duplication); older paid family members are auto-hidden by
+//! default via `default_hidden_ids_for_models` (free and `*-latest` stay
+//! visible, newest per family via `release_date`/`last_updated` stays visible)
+//! and stored in `hidden_models`. The basic configuration with a hidden entry
+//! shows the default older-family-hidden list; clearing the entry shows all.
+//! Hiding is written straight into the shared settings store; "Reset" restores
+//! the default hidden set, not an empty one.
 
 use iced::widget::{
     button, center, column, container, mouse_area, opaque, row, rule, scrollable, space, stack,

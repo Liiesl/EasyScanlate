@@ -3,9 +3,10 @@ use iced::Task;
 use scanlateit_model::EntryId;
 use scanlateit_ui::translation as translation;
 pub use scanlateit_ui::translation::{
-    catalog_provider, fetch_local_provider, fetch_local_providers, fetch_providers, file_tag,
-    is_custom, is_local, profile_name, provider_name, validate_connection_for, Connection,
-    Provider, Session, LANGUAGES,
+    catalog_provider, default_hidden_ids, default_hidden_ids_for_models, fetch_local_provider,
+    fetch_local_providers, fetch_providers, file_tag, is_custom, is_local, profile_name,
+    provider_name, usable_models, validate_connection_for, Connection, Model, Provider,
+    Session, LANGUAGES,
 };
 #[cfg(not(feature = "translation"))]
 pub use scanlateit_ui::translation::FAKE_PROVIDER;
@@ -36,6 +37,31 @@ pub fn handle_fetch_models(app: &mut App) -> Task<Message> {
 
 pub fn handle_models_fetched(app: &mut App, providers: HashMap<String, translation::Provider>) -> Task<Message> {
     app.tx.on_fetched(providers);
+    // Seed default hidden (older family members) for newly fetched providers
+    // where the user has no entry yet: hidden via Manage Models instead of
+    // being filtered out. Free and `*-latest` stay visible.
+    let mut to_seed: Vec<(String, std::collections::BTreeSet<String>)> = Vec::new();
+    for (id, provider) in app.tx.fetched.iter() {
+        let has_entry = scanlateit_settings::get(|s| s.hidden_models.contains_key(id));
+        if !has_entry {
+            let default = translation::default_hidden_ids_for_models(&provider.models);
+            if !default.is_empty() {
+                to_seed.push((id.clone(), default));
+            }
+        }
+    }
+    if !to_seed.is_empty() {
+        let _ = scanlateit_settings::modify(|s| {
+            for (id, default) in to_seed {
+                s.hidden_models.entry(id).or_insert(default);
+            }
+        });
+        // Pull seeded hidden back into session and sync models visibility
+        scanlateit_settings::get(|s| {
+            app.tx.hidden_models = s.hidden_models.clone();
+        });
+        app.tx.sync_models();
+    }
     Task::none()
 }
 

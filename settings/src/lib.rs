@@ -435,9 +435,13 @@ pub struct Settings {
     #[serde(default)]
     pub connections: BTreeMap<String, Connection>,
     /// Per-provider set of hidden model ids (Manage Models overlay). A model
-    /// is hidden by the user to filter unused entries; deprecated models are
-    /// always hidden and never stored here. The basic configuration (empty)
-    /// hides nothing beyond the default latest-per-family filter.
+    /// is hidden by the user to filter unused entries; deprecated and non-text
+    /// models are always filtered out and never stored here. When a provider is
+    /// first fetched, older paid family members are auto-hidden (free and
+    /// `*-latest` stay visible; newest per family via `release_date`/
+    /// `last_updated` stays visible) – this is the default hidden set
+    /// produced by `default_hidden_ids` / `default_hidden_ids_for_models`.
+    /// Clearing the entry shows all usable models.
     #[serde(default)]
     pub hidden_models: BTreeMap<String, BTreeSet<String>>,
 }
