@@ -491,7 +491,8 @@ impl Project {
         }
         let name = self.profiles.next_available_name();
         let id = self.profiles.add(name.clone());
-        debug_assert!(self.profiles.select(id));
+        let ok = self.profiles.select(id);
+        debug_assert!(ok);
         Some((
             name.clone(),
             vec![
