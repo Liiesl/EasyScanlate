@@ -192,13 +192,10 @@ pub fn hit_top_decor(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point
     }
     let (_, rect) = selected_rect(tiles, state)?;
     let quad = selected_quad_view(tiles, state, index)?;
-    let decor = top_decor_geometry(
-        rect,
-        quad,
-        state.width,
-        state.offset,
-        state.offset + state.viewport_height,
-    );
+    // rect/quad are viewport-relative (global - offset) and `local` is
+    // viewport-local (0..viewport_height), so the decor must be built in
+    // the same viewport-local space (0..vh), not global offset..offset+vh.
+    let decor = top_decor_geometry(rect, quad, state.width, 0.0, state.viewport_height);
     if handle_rect(decor.anchor).contains(local) {
         return Some((index, id, TopDecorHit::Rotate));
     }
