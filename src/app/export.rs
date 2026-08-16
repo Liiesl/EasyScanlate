@@ -571,11 +571,19 @@ fn export_blocking(
             .and_then(|e| e.to_str())
             .map(|s| s.to_ascii_lowercase())
             .unwrap_or_else(|| "png".to_string());
-        let stem = src
+        let raw_stem = src
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("image");
-        // strip leading "<id>_" prefix that mmtl extraction uses? Keep as is, just add _export
+        // Strip leading "<id>_" that mmtl extraction adds (images/<id>_<basename>).
+        // Only for export: keep original basename for the output.
+        let id_prefix = format!("{}_", image_id.0);
+        let stem = if raw_stem.starts_with(&id_prefix) {
+            &raw_stem[id_prefix.len()..]
+        } else {
+            raw_stem
+        };
+        let stem = if stem.is_empty() { raw_stem } else { stem };
         let mut out_name = format!("{stem}_export.{ext}");
         let mut out_path = folder.join(&out_name);
         // dedup like NewProjectCreate (n)
