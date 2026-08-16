@@ -70,7 +70,7 @@ fn into_paint(style: geometry::Style) -> Paint<'static> {
     Paint {
         shader: match style {
             GStyle::Solid(color) => Shader::SolidColor(
-                tiny_skia::Color::from_rgba(color.b, color.g, color.r, color.a)
+                tiny_skia::Color::from_rgba(color.r, color.g, color.b, color.a)
                     .expect("valid color"),
             ),
             GStyle::Gradient(grad) => {
@@ -379,11 +379,59 @@ fn rasterize_page(
 
     // Build OverlayEntry list (always baked, ignore UI toggles)
     // Keep owned strings alive
+    // Global stitched canvas: each image stacked vertically using meta heights (matches viewer tile_layout).
+    // An entry whose view_quad is beyond its owning image (y<0 or y>h) or that visually spans a seam
+    // in the viewer will have a global y that intersects the neighboring page. We therefore render
+    // *any* visible entry whose global bounds intersect this page's global interval, translating
+    // its quad to this page's local pixel space. This fixes both "span 2 images" and "beyond" cases.
+    let images = project.images();
+    let mut global_offsets: Vec<f32> = Vec::with_capacity(images.len());
+    let mut cur = 0.0f32;
+    for m in images {
+        global_offsets.push(cur);
+        cur += m.height;
+    }
+    let page_idx = images.iter().position(|m| m.id == image_id).unwrap_or(0);
+    let page_g0 = global_offsets.get(page_idx).copied().unwrap_or(0.0);
+    let page_g1 = page_g0 + h as f32;
+    // owner -> idx map for O(1)
+    let mut owner_to_idx: std::collections::HashMap<scanlateit_model::ImageId, usize> = std::collections::HashMap::new();
+    for (i, m) in images.iter().enumerate() {
+        owner_to_idx.insert(m.id, i);
+    }
+
     let mut texts: Vec<String> = Vec::new();
     let mut metas: Vec<(scanlateit_model::EntryId, scanlateit_model::Quad, scanlateit_model::EntryStyle)> = Vec::new();
-    for e in project.visible_for(image_id) {
+
+    for e in project.visible_entries() {
+        let orig_quad = project.view_quad(e);
+        let [vx0, vy0, vx1, vy1] = orig_quad.bounds();
+        let owner_idx = match owner_to_idx.get(&e.image_id) {
+            Some(v) => *v,
+            None => continue,
+        };
+        let owner_g0 = global_offsets.get(owner_idx).copied().unwrap_or(0.0);
+        let owner_meta = project.image(e.image_id);
+        let owner_w = owner_meta.map(|m| m.width).unwrap_or(w as f32);
+        let scale_x = if owner_w > 1.0 && (owner_w - w as f32).abs() > 0.5 { w as f32 / owner_w } else { 1.0 };
+        // global bounds (x stays local unless width differs)
+        let gx0 = vx0 * scale_x;
+        let gx1 = vx1 * scale_x;
+        let gy0 = owner_g0 + vy0;
+        let gy1 = owner_g0 + vy1;
+        let intersects = !(gx1 <= 0.0 || gx0 >= w as f32 || gy1 <= page_g0 || gy0 >= page_g1);
+        if !intersects {
+            continue;
+        }
+        // Map to target local space
+        let dy = owner_g0 - page_g0;
+        let mut q = orig_quad;
+        for p in &mut q.points {
+            p[0] *= scale_x;
+            p[1] += dy;
+        }
         texts.push(project.display_text(e).to_string());
-        metas.push((e.id, project.view_quad(e), project.entry_style(e.id)));
+        metas.push((e.id, q, project.entry_style(e.id)));
     }
     let mut entries: Vec<OverlayEntry<'_>> = Vec::with_capacity(metas.len());
     for (i, (id, quad, style)) in metas.iter().enumerate() {
@@ -401,7 +449,7 @@ fn rasterize_page(
 
     if !entries.is_empty() {
         let mut frame = ExportFrame::new(pix);
-        // scale = frame.width / image_width, here 1.0
+        // scale = frame.width / image_width, here 1.0 (already mapped to target local)
         overlay::draw_entries(&mut frame, &entries, font, w as f32, false);
         pix = frame.into_pixmap();
     }
@@ -592,14 +640,9 @@ fn export_blocking(
     }
 
     let msg = format!("Saved {saved} image(s) to {}", folder.display());
-    eprintln!("{msg}");
-    if !errors.is_empty() {
-        eprintln!("export warnings: {}", errors.join("; "));
-    }
     if saved == 0 {
         Err("No images saved.".to_string())
     } else {
-        // if partial errors, still return Ok with message
         Ok(msg)
     }
 }
