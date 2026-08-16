@@ -31,12 +31,22 @@ fn unescape(text: &str) -> String {
         .replace("&amp;", "&")
 }
 
-/// How the provider speaks: OpenAI chat-completions style or the Anthropic
-/// Messages API. Mirrors the real module.
+/// How the provider speaks. Mirrors the real module — native rig providers
+/// (`Xai`, `Mistral`, …) each have their own variant; free-form slots stay
+/// `OpenAI`/`Anthropic`, `Gemini` is singleton.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompatKind {
     OpenAI,
     Anthropic,
+    Gemini,
+    Xai,
+    Mistral,
+    DeepSeek,
+    OpenRouter,
+    Moonshot,
+    Zai,
+    MiniMax,
+    Ollama,
 }
 
 /// One stored connection: the API key plus (for custom endpoints) the base
@@ -261,11 +271,21 @@ pub fn catalog_provider(id: &str) -> Option<&'static Provider> {
     SUPPORTED_PROVIDERS.iter().find(|p| p.id == id)
 }
 
-/// The connection id of a custom endpoint matching `kind`.
+/// The connection id of a custom endpoint matching `kind`. Native providers
+/// have no custom slot (same as Gemini).
 pub fn custom_id(kind: CompatKind) -> &'static str {
     match kind {
         CompatKind::OpenAI => CUSTOM_OPENAI,
         CompatKind::Anthropic => CUSTOM_ANTHROPIC,
+        CompatKind::Gemini
+        | CompatKind::Xai
+        | CompatKind::Mistral
+        | CompatKind::DeepSeek
+        | CompatKind::OpenRouter
+        | CompatKind::Moonshot
+        | CompatKind::Zai
+        | CompatKind::MiniMax
+        | CompatKind::Ollama => CUSTOM_OPENAI,
     }
 }
 
@@ -399,17 +419,17 @@ fn custom_fallback_provider(id: &str) -> Provider {
 }
 
 fn local_fallback_provider(id: &str, base_url: &str) -> Provider {
-    let name = match id {
-        LOCAL_OLLAMA => "Ollama",
-        LOCAL_VLLM => "vLLM",
-        LOCAL_LLAMA_CPP => "llama.cpp",
-        _ => id,
+    let (name, kind) = match id {
+        LOCAL_OLLAMA => ("Ollama", CompatKind::Ollama),
+        LOCAL_VLLM => ("vLLM", CompatKind::OpenAI),
+        LOCAL_LLAMA_CPP => ("llama.cpp", CompatKind::OpenAI),
+        _ => (id, CompatKind::OpenAI),
     };
     Provider {
         id: id.to_string(),
         name: name.to_string(),
         api: base_url.trim().trim_end_matches('/').to_string(),
-        kind: CompatKind::OpenAI,
+        kind,
         api_key_env: String::new(),
         models: Vec::new(),
     }

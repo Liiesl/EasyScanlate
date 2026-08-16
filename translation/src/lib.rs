@@ -36,12 +36,26 @@ const RETRANSLATE_CONTEXT: usize = 3;
 /// keep the payload small instead of the ~6 MB full index.
 const MODELS_MIRROR: &str = "https://models.pileofthings.top";
 
-/// How the provider speaks: OpenAI chat-completions style or the Anthropic
-/// Messages API. Custom connections are built around one of these.
+/// How the provider speaks. Built-in gateways that have a dedicated
+/// `rig::providers::*` client use their own variant so the translation can be
+/// dispatched through the native rig implementation (handling provider-specific
+/// quirks like Mistral's `prefix`/`tool_choice` or DeepSeek's content
+/// flattening). Providers without a rig-native client, plus the two free-form
+/// custom slots, stay `OpenAI`/`Anthropic`. `Gemini` is Google AI Studio's
+/// native API. `Ollama` is the local Ollama daemon (`api/chat`, no `/v1`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompatKind {
     OpenAI,
     Anthropic,
+    Gemini,
+    Xai,
+    Mistral,
+    DeepSeek,
+    OpenRouter,
+    Moonshot,
+    Zai,
+    MiniMax,
+    Ollama,
 }
 
 /// One stored connection: the API key plus (for custom endpoints) the base
@@ -191,27 +205,31 @@ fn entry(
 /// The supported gateways offered in the settings UI ("connect" buttons).
 /// Data verified against the models.dev mirror (`{MODELS_MIRROR}/{id}`):
 /// the `api` and `env` fields come from the API when present, otherwise from
-/// the provider's public defaults. `google` speaks through Gemini's
-/// OpenAI-compatibility endpoint; `minimax` is Anthropic-compatible.
+/// the provider's public defaults. `google` is Google AI Studio's native
+/// Gemini API (`generativelanguage.googleapis.com`, distinct from Vertex AI
+/// `aiplatform.googleapis.com`). Providers with a dedicated `rig` client
+/// (`xai`, `mistral`, `deepseek`, `openrouter`, `moonshotai`, `zai`,
+/// `minimax`, `ollama`) use that native client instead of the OpenAI-compat
+/// fallback; the rest (e.g. `nvidia`, `kilo`, `opencode`) stay OpenAI-compat.
 pub static SUPPORTED_PROVIDERS: LazyLock<Vec<Provider>> = LazyLock::new(|| {
     vec![
         entry("openai", "OpenAI", "https://api.openai.com/v1", CompatKind::OpenAI, "OPENAI_API_KEY", &["gpt-4o-mini", "gpt-5-nano"]),
         entry("anthropic", "Anthropic", "https://api.anthropic.com", CompatKind::Anthropic, "ANTHROPIC_API_KEY", &["claude-sonnet-4-5", "claude-haiku-4-5"]),
-        entry("google", "Google (Gemini)", "https://generativelanguage.googleapis.com/v1beta/openai/", CompatKind::OpenAI, "GOOGLE_API_KEY", &["gemini-flash-lite-latest", "gemini-3.5-flash"]),
-        entry("xai", "xAI (Grok)", "https://api.x.ai/v1", CompatKind::OpenAI, "XAI_API_KEY", &["grok-4.3", "grok-4.5"]),
-        entry("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", CompatKind::OpenAI, "OPENROUTER_API_KEY", &["openai/gpt-4o-mini"]),
+        entry("google", "Google (Gemini AI Studio)", "https://generativelanguage.googleapis.com", CompatKind::Gemini, "GOOGLE_API_KEY", &["gemini-flash-latest", "gemini-flash-lite-latest"]),
+        entry("xai", "xAI (Grok)", "https://api.x.ai", CompatKind::Xai, "XAI_API_KEY", &["grok-4.3", "grok-4.5"]),
+        entry("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", CompatKind::OpenRouter, "OPENROUTER_API_KEY", &["openai/gpt-4o-mini"]),
         entry("nvidia", "NVIDIA", "https://integrate.api.nvidia.com/v1", CompatKind::OpenAI, "NVIDIA_API_KEY", &["nvidia/llama-3.1-nemotron-nano-8b-v1"]),
-        entry("deepseek", "DeepSeek", "https://api.deepseek.com", CompatKind::OpenAI, "DEEPSEEK_API_KEY", &["deepseek-chat", "deepseek-reasoner"]),
+        entry("deepseek", "DeepSeek", "https://api.deepseek.com", CompatKind::DeepSeek, "DEEPSEEK_API_KEY", &["deepseek-chat", "deepseek-reasoner"]),
         entry("kilo", "Kilo", "https://api.kilo.ai/api/gateway", CompatKind::OpenAI, "KILO_API_KEY", &["deepseek-v4-flash", "mimo-v2.5"]),
-        entry("moonshotai", "Moonshot AI", "https://api.moonshot.ai/v1", CompatKind::OpenAI, "MOONSHOT_API_KEY", &["kimi-k2.5", "kimi-k3"]),
-        entry("zai", "Z.AI", "https://api.z.ai/api/paas/v4", CompatKind::OpenAI, "ZHIPU_API_KEY", &["glm-4.5-flash", "glm-4.6"]),
-        entry("minimax", "MiniMax", "https://api.minimax.io/anthropic/v1", CompatKind::Anthropic, "MINIMAX_API_KEY", &["MiniMax-M2.1", "MiniMax-M2.5"]),
+        entry("moonshotai", "Moonshot AI", "https://api.moonshot.ai/v1", CompatKind::Moonshot, "MOONSHOT_API_KEY", &["kimi-k2.5", "kimi-k3"]),
+        entry("zai", "Z.AI", "https://api.z.ai/api/paas/v4", CompatKind::Zai, "ZHIPU_API_KEY", &["glm-4.5-flash", "glm-4.6"]),
+        entry("minimax", "MiniMax", "https://api.minimax.io/anthropic", CompatKind::MiniMax, "MINIMAX_API_KEY", &["MiniMax-M2.1", "MiniMax-M2.5"]),
         entry("opencode", "OpenCode Zen", "https://opencode.ai/zen/v1", CompatKind::OpenAI, "OPENCODE_API_KEY", &["deepseek-v4-flash", "mimo-v2.5-free"]),
         entry("opencode-go", "OpenCode Go", "https://opencode.ai/zen/go/v1", CompatKind::OpenAI, "OPENCODE_API_KEY", &["deepseek-v4-flash", "mimo-v2.5"]),
-        entry("mistral", "Mistral", "https://api.mistral.ai/v1", CompatKind::OpenAI, "MISTRAL_API_KEY", &["mistral-small-latest", "mistral-medium-2508"]),
+        entry("mistral", "Mistral", "https://api.mistral.ai", CompatKind::Mistral, "MISTRAL_API_KEY", &["mistral-small-latest", "mistral-medium-2508"]),
         entry("ollama-cloud", "Ollama Cloud", "https://ollama.com/v1", CompatKind::OpenAI, "OLLAMA_API_KEY", &["deepseek-v4-flash", "kimi-k3"]),
         // Local providers — no API key, models discovered from endpoint
-        entry(LOCAL_OLLAMA, "Ollama", "http://localhost:11434/v1", CompatKind::OpenAI, "", &[]),
+        entry(LOCAL_OLLAMA, "Ollama", "http://localhost:11434", CompatKind::Ollama, "", &[]),
         entry(LOCAL_VLLM, "vLLM", "http://localhost:8000/v1", CompatKind::OpenAI, "", &[]),
         entry(LOCAL_LLAMA_CPP, "llama.cpp", "http://localhost:8080/v1", CompatKind::OpenAI, "", &[]),
     ]
@@ -240,6 +258,11 @@ pub static RECOMMENDED: &[RecommendedInfo] = &[
         id: "kilo",
         docs_url: "https://kilo.ai/docs/getting-started/setup-authentication#kilo-gateway-api-key",
         description: "A gateway that aggregates many different models behind a single API. It offers free models that you can try without providing any credit card information, which makes it the easiest option for first-time testing.",
+    },
+    RecommendedInfo {
+        id: "google",
+        docs_url: "https://ai.google.dev/gemini-api/docs/api-key#getting-started",
+        description: "Delivers the best translation quality in testing and offers a free tier with no credit card required. The free tier has strict rate limits and models are frequently busy or temporarily unavailable on the free tier, so expect occasional retries.",
     },
     RecommendedInfo {
         id: "mistral",
@@ -277,11 +300,21 @@ pub fn catalog_provider(id: &str) -> Option<&'static Provider> {
 }
 
 /// The connection id of a custom endpoint matching `kind`, or `None` when
-/// `id` is a built-in gateway.
+/// `id` is a built-in gateway. Native providers (`Gemini`, `Xai`, `Mistral`,
+/// …) have no custom slot — they are singletons with a dedicated rig client.
 pub fn custom_id(kind: CompatKind) -> &'static str {
     match kind {
         CompatKind::OpenAI => CUSTOM_OPENAI,
         CompatKind::Anthropic => CUSTOM_ANTHROPIC,
+        CompatKind::Gemini
+        | CompatKind::Xai
+        | CompatKind::Mistral
+        | CompatKind::DeepSeek
+        | CompatKind::OpenRouter
+        | CompatKind::Moonshot
+        | CompatKind::Zai
+        | CompatKind::MiniMax
+        | CompatKind::Ollama => CUSTOM_OPENAI,
     }
 }
 
@@ -465,6 +498,41 @@ fn normalize_base_url(base: &str) -> String {
     base.trim().trim_end_matches('/').to_string()
 }
 
+/// Canonical base URL for a provider kind. Older stored configs and the
+/// `models.pileofthings.top` mirror historically used `…/v1` suffixes for
+/// xAI/Mistral/Ollama and `…/anthropic/v1` for MiniMax, while the native rig
+/// clients expect the bare host (`https://api.x.ai`, `https://api.mistral.ai`,
+/// `http://localhost:11434`, `https://api.minimax.io/anthropic`). This
+/// normalizes on the fly so existing user configs keep working after the
+/// migration to native clients.
+fn canonical_base_url(kind: CompatKind, base: &str) -> String {
+    let base = normalize_base_url(base);
+    if base.is_empty() {
+        return base;
+    }
+    match kind {
+        CompatKind::Xai | CompatKind::Mistral | CompatKind::Ollama => {
+            if base.ends_with("/v1") {
+                return base.trim_end_matches("/v1").trim_end_matches('/').to_string();
+            }
+            base
+        }
+        CompatKind::MiniMax => {
+            // mirror used ".../anthropic/v1" — native expects ".../anthropic"
+            if base.ends_with("/anthropic/v1") {
+                return base.trim_end_matches("/v1").trim_end_matches('/').to_string();
+            }
+            base
+        }
+        _ => base,
+    }
+}
+
+/// Effective base URL for the request: canonicalizes the stored `provider.api`.
+fn effective_api(provider: &Provider) -> String {
+    canonical_base_url(provider.kind, &provider.api)
+}
+
 fn openai_models_urls(base: &str) -> Vec<String> {
     let base = normalize_base_url(base);
     if base.is_empty() {
@@ -565,11 +633,12 @@ pub async fn fetch_local_provider(id: &str, base_url: &str) -> Provider {
         Some(c) => c.clone(),
         None => local_fallback_provider(id, base_url),
     };
+    let canonical_api = canonical_base_url(catalog.kind, base_url);
     match fetch_local_models(base_url, id).await {
         Ok(models) => Provider {
             id: catalog.id.clone(),
             name: catalog.name.clone(),
-            api: normalize_base_url(base_url),
+            api: canonical_api,
             kind: catalog.kind,
             api_key_env: catalog.api_key_env.clone(),
             models,
@@ -578,7 +647,9 @@ pub async fn fetch_local_provider(id: &str, base_url: &str) -> Provider {
             eprintln!("[translation] {id} local fetch failed: {e}; using fallback");
             let mut fallback = catalog;
             if !base_url.trim().is_empty() {
-                fallback.api = normalize_base_url(base_url);
+                fallback.api = canonical_base_url(fallback.kind, base_url);
+            } else {
+                fallback.api = canonical_base_url(fallback.kind, &fallback.api);
             }
             fallback
         }
@@ -638,13 +709,14 @@ pub async fn fetch_provider(id: &str) -> Provider {
     };
     let models = usable_models(&listing);
     eprintln!("[translation] {} model(s) loaded from {url}", models.len());
+    let raw_api = listing
+        .api
+        .filter(|api| !api.is_empty())
+        .unwrap_or_else(|| catalog.api.to_string());
     Provider {
         id: catalog.id.to_string(),
         name: catalog.name.to_string(),
-        api: listing
-            .api
-            .filter(|api| !api.is_empty())
-            .unwrap_or_else(|| catalog.api.to_string()),
+        api: canonical_base_url(catalog.kind, &raw_api),
         kind: catalog.kind,
         api_key_env: listing
             .env
@@ -692,17 +764,17 @@ fn custom_fallback_provider(id: &str) -> Provider {
 }
 
 fn local_fallback_provider(id: &str, base_url: &str) -> Provider {
-    let name = match id {
-        LOCAL_OLLAMA => "Ollama",
-        LOCAL_VLLM => "vLLM",
-        LOCAL_LLAMA_CPP => "llama.cpp",
-        _ => id,
+    let (name, kind) = match id {
+        LOCAL_OLLAMA => ("Ollama", CompatKind::Ollama),
+        LOCAL_VLLM => ("vLLM", CompatKind::OpenAI),
+        LOCAL_LLAMA_CPP => ("llama.cpp", CompatKind::OpenAI),
+        _ => (id, CompatKind::OpenAI),
     };
     Provider {
         id: id.to_string(),
         name: name.to_string(),
-        api: normalize_base_url(base_url),
-        kind: CompatKind::OpenAI,
+        api: canonical_base_url(kind, base_url),
+        kind,
         api_key_env: String::new(),
         models: Vec::new(),
     }
@@ -719,11 +791,13 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
         Some(catalog) => catalog.clone(),
         None => custom_fallback_provider(id),
     };
+    // Ensure catalog api is canonical (handles legacy mirror suffixes)
+    provider.api = canonical_base_url(provider.kind, &provider.api);
     if is_local(id) {
         provider.api = connection
             .base_url
             .clone()
-            .map(|u| normalize_base_url(&u))
+            .map(|u| canonical_base_url(provider.kind, &u))
             .unwrap_or_else(|| provider.api.clone());
         // If the connection carries a pinned model (legacy manual entry),
         // surface it as a single model so translation still works before
@@ -737,7 +811,7 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
         return provider;
     }
     if is_custom(id) {
-        provider.api = connection.base_url.clone().unwrap_or_default();
+        provider.api = connection.base_url.clone().map(|u| normalize_base_url(&u)).unwrap_or_default();
         let model = connection
             .model
             .clone()
@@ -1150,7 +1224,9 @@ pub async fn translate_one(
 /// Resolves the API key for a request: `api_key` overrides the provider's
 /// environment variable when set (in-memory only; never persisted).
 /// Local providers (`ollama`/`vllm`/`llama cpp`) do not need an API key; a
-/// dummy `provider.id` is used when none is supplied.
+/// dummy `provider.id` is used when none is supplied. For native Ollama
+/// (`CompatKind::Ollama`) an empty key is valid and returned as-is so the
+/// caller can build the client without auth.
 fn resolve_credentials(
     api_key: Option<String>,
     provider: &Provider,
@@ -1159,7 +1235,7 @@ fn resolve_credentials(
         let key = api_key
             .filter(|key| !key.is_empty())
             .unwrap_or_else(|| provider.id.clone());
-        if provider.api.is_empty() {
+        if effective_api(provider).is_empty() {
             return Err(format!(
                 "Translation init failed: no base URL for {}; enter one in Settings.",
                 provider.name
@@ -1177,7 +1253,7 @@ fn resolve_credentials(
             provider.name, provider.api_key_env
         ));
     }
-    if provider.api.is_empty() {
+    if effective_api(provider).is_empty() {
         return Err(format!(
             "Translation init failed: no base URL for {}; enter one in Settings.",
             provider.name
@@ -1194,11 +1270,12 @@ async fn complete(
     model: &str,
     key: &str,
 ) -> Result<String, String> {
+    let api = effective_api(provider);
     match provider.kind {
         CompatKind::OpenAI => {
             let client = openai::CompletionsClient::builder()
                 .api_key(key)
-                .base_url(&provider.api)
+                .base_url(&api)
                 .build()
                 .map_err(|e| format!("Translation init failed: {e}"))?;
             let completion = client.completion_model(model);
@@ -1214,7 +1291,7 @@ async fn complete(
         CompatKind::Anthropic => {
             let client = rig::providers::anthropic::Client::builder()
                 .api_key(key)
-                .base_url(&provider.api)
+                .base_url(&api)
                 .build()
                 .map_err(|e| format!("Translation init failed: {e}"))?;
             let completion = client.completion_model(model);
@@ -1222,6 +1299,168 @@ async fn complete(
                 .completion_request(prompt)
                 .preamble(SYSTEM.to_string())
                 .max_tokens(ANTHROPIC_MAX_TOKENS)
+                .temperature(1.0)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(choice_text(&response))
+        }
+        CompatKind::Gemini => {
+            let client = rig::providers::gemini::Client::builder()
+                .api_key(key)
+                .base_url(&api)
+                .build()
+                .map_err(|e| format!("Translation init failed: {e}"))?;
+            let completion = client.completion_model(model);
+            let response = completion
+                .completion_request(prompt)
+                .preamble(SYSTEM.to_string())
+                .temperature(1.0)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(choice_text(&response))
+        }
+        CompatKind::Xai => {
+            let client = rig::providers::xai::Client::builder()
+                .api_key(key)
+                .base_url(&api)
+                .build()
+                .map_err(|e| format!("Translation init failed: {e}"))?;
+            let completion = client.completion_model(model);
+            let response = completion
+                .completion_request(prompt)
+                .preamble(SYSTEM.to_string())
+                .temperature(1.0)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(choice_text(&response))
+        }
+        CompatKind::Mistral => {
+            let client = rig::providers::mistral::Client::builder()
+                .api_key(key)
+                .base_url(&api)
+                .build()
+                .map_err(|e| format!("Translation init failed: {e}"))?;
+            let completion = client.completion_model(model);
+            let response = completion
+                .completion_request(prompt)
+                .preamble(SYSTEM.to_string())
+                .temperature(1.0)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(choice_text(&response))
+        }
+        CompatKind::DeepSeek => {
+            let client = rig::providers::deepseek::Client::builder()
+                .api_key(key)
+                .base_url(&api)
+                .build()
+                .map_err(|e| format!("Translation init failed: {e}"))?;
+            let completion = client.completion_model(model);
+            let response = completion
+                .completion_request(prompt)
+                .preamble(SYSTEM.to_string())
+                .temperature(1.0)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(choice_text(&response))
+        }
+        CompatKind::OpenRouter => {
+            let client = rig::providers::openrouter::Client::builder()
+                .api_key(key)
+                .base_url(&api)
+                .build()
+                .map_err(|e| format!("Translation init failed: {e}"))?;
+            let completion = client.completion_model(model);
+            let response = completion
+                .completion_request(prompt)
+                .preamble(SYSTEM.to_string())
+                .temperature(1.0)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(choice_text(&response))
+        }
+        CompatKind::Moonshot => {
+            let client = rig::providers::moonshot::Client::builder()
+                .api_key(key)
+                .base_url(&api)
+                .build()
+                .map_err(|e| format!("Translation init failed: {e}"))?;
+            let completion = client.completion_model(model);
+            let response = completion
+                .completion_request(prompt)
+                .preamble(SYSTEM.to_string())
+                .temperature(1.0)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(choice_text(&response))
+        }
+        CompatKind::Zai => {
+            let client = rig::providers::zai::Client::builder()
+                .api_key(key)
+                .base_url(&api)
+                .build()
+                .map_err(|e| format!("Translation init failed: {e}"))?;
+            let completion = client.completion_model(model);
+            let response = completion
+                .completion_request(prompt)
+                .preamble(SYSTEM.to_string())
+                .temperature(1.0)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(choice_text(&response))
+        }
+        CompatKind::MiniMax => {
+            // MiniMax's Anthropic-compatible endpoint (api.minimax.io/anthropic)
+            // mirrors the Anthropic Messages API shape, so it requires max_tokens
+            // just like the Anthropic native client.
+            let client = rig::providers::minimax::AnthropicClient::builder()
+                .api_key(key)
+                .base_url(&api)
+                .build()
+                .map_err(|e| format!("Translation init failed: {e}"))?;
+            let completion = client.completion_model(model);
+            let response = completion
+                .completion_request(prompt)
+                .preamble(SYSTEM.to_string())
+                .max_tokens(ANTHROPIC_MAX_TOKENS)
+                .temperature(1.0)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(choice_text(&response))
+        }
+        CompatKind::Ollama => {
+            // Local Ollama uses its own `api/chat` protocol, not OpenAI compat.
+            // Auth is optional (bare `ollama` daemon needs no key); a dummy
+            // `provider.id` key from `resolve_credentials` is treated as no-auth.
+            // The builder requires an explicit `api_key` even for no-auth (the
+            // `OllamaApiKey` wraps `Option<String>` and `""` → `None`).
+            let is_dummy = key.is_empty() || key == provider.id;
+            let client = if is_dummy {
+                rig::providers::ollama::Client::builder()
+                    .api_key("")
+                    .base_url(&api)
+                    .build()
+                    .map_err(|e| format!("Translation init failed: {e}"))?
+            } else {
+                rig::providers::ollama::Client::builder()
+                    .api_key(key)
+                    .base_url(&api)
+                    .build()
+                    .map_err(|e| format!("Translation init failed: {e}"))?
+            };
+            let completion = client.completion_model(model);
+            let response = completion
+                .completion_request(prompt)
+                .preamble(SYSTEM.to_string())
                 .temperature(1.0)
                 .send()
                 .await
@@ -1958,16 +2197,28 @@ mod tests {
 
     #[test]
     fn catalog_metadata_matches_the_models_dev_mirror() {
-        assert_eq!(catalog_provider("minimax").unwrap().kind, CompatKind::Anthropic);
+        assert_eq!(catalog_provider("minimax").unwrap().kind, CompatKind::MiniMax);
         assert_eq!(catalog_provider("anthropic").unwrap().kind, CompatKind::Anthropic);
+        assert_eq!(catalog_provider("google").unwrap().kind, CompatKind::Gemini);
+        assert_eq!(catalog_provider("xai").unwrap().kind, CompatKind::Xai);
+        assert_eq!(catalog_provider("mistral").unwrap().kind, CompatKind::Mistral);
+        assert_eq!(catalog_provider("deepseek").unwrap().kind, CompatKind::DeepSeek);
+        assert_eq!(catalog_provider("openrouter").unwrap().kind, CompatKind::OpenRouter);
+        assert_eq!(catalog_provider("moonshotai").unwrap().kind, CompatKind::Moonshot);
+        assert_eq!(catalog_provider("zai").unwrap().kind, CompatKind::Zai);
+        assert_eq!(catalog_provider(LOCAL_OLLAMA).unwrap().kind, CompatKind::Ollama);
         assert_eq!(
             catalog_provider("minimax").unwrap().api,
-            "https://api.minimax.io/anthropic/v1"
+            "https://api.minimax.io/anthropic"
         );
+        assert_eq!(catalog_provider("xai").unwrap().api, "https://api.x.ai");
+        assert_eq!(catalog_provider("mistral").unwrap().api, "https://api.mistral.ai");
+        assert_eq!(catalog_provider(LOCAL_OLLAMA).unwrap().api, "http://localhost:11434");
         assert_eq!(
             catalog_provider("google").unwrap().api,
-            "https://generativelanguage.googleapis.com/v1beta/openai/"
+            "https://generativelanguage.googleapis.com"
         );
+        assert_eq!(catalog_provider("google").unwrap().name, "Google (Gemini AI Studio)");
         assert_eq!(catalog_provider("ollama-cloud").unwrap().api_key_env, "OLLAMA_API_KEY");
         assert_eq!(catalog_provider("moonshotai").unwrap().api_key_env, "MOONSHOT_API_KEY");
     }
@@ -1976,6 +2227,13 @@ mod tests {
     fn custom_ids_resolve_kinds_and_names() {
         assert_eq!(custom_id(CompatKind::OpenAI), CUSTOM_OPENAI);
         assert_eq!(custom_id(CompatKind::Anthropic), CUSTOM_ANTHROPIC);
+        assert_eq!(custom_id(CompatKind::Gemini), CUSTOM_OPENAI);
+        // Native providers have no custom slot — map to OpenAI slot
+        assert_eq!(custom_id(CompatKind::Xai), CUSTOM_OPENAI);
+        assert_eq!(custom_id(CompatKind::Mistral), CUSTOM_OPENAI);
+        assert_eq!(custom_id(CompatKind::DeepSeek), CUSTOM_OPENAI);
+        assert_eq!(custom_id(CompatKind::MiniMax), CUSTOM_OPENAI);
+        assert_eq!(custom_id(CompatKind::Ollama), CUSTOM_OPENAI);
         assert!(is_custom(CUSTOM_OPENAI));
         assert!(is_custom(CUSTOM_ANTHROPIC));
         assert!(!is_custom("openai"));
@@ -2005,10 +2263,26 @@ mod tests {
         let provider = provider_for_connection(CUSTOM_OPENAI, &empty);
         assert_eq!(provider.models[0].id, CUSTOM_OPENAI_MODELS[0]);
 
-        // A built-in connection keeps the catalog api/kind.
+        // A built-in connection keeps the catalog api/kind (now native).
         let provider = provider_for_connection("deepseek", &empty);
         assert_eq!(provider.api, "https://api.deepseek.com");
-        assert_eq!(provider.kind, CompatKind::OpenAI);
+        assert_eq!(provider.kind, CompatKind::DeepSeek);
+        // Legacy stored base_url with trailing /v1 is canonicalized.
+        let legacy = Connection {
+            api_key: String::new(),
+            base_url: Some("https://api.x.ai/v1".to_string()),
+            model: None,
+        };
+        // provider_for_connection for built-ins ignores connection base_url, so
+        // canonicalization is via effective_api / fetch_provider; we test the
+        // helper directly.
+        assert_eq!(canonical_base_url(CompatKind::Xai, "https://api.x.ai/v1"), "https://api.x.ai");
+        assert_eq!(canonical_base_url(CompatKind::Mistral, "https://api.mistral.ai/v1"), "https://api.mistral.ai");
+        assert_eq!(canonical_base_url(CompatKind::Ollama, "http://localhost:11434/v1"), "http://localhost:11434");
+        assert_eq!(canonical_base_url(CompatKind::MiniMax, "https://api.minimax.io/anthropic/v1"), "https://api.minimax.io/anthropic");
+        // Non-native kinds keep /v1
+        assert_eq!(canonical_base_url(CompatKind::OpenAI, "https://api.openai.com/v1"), "https://api.openai.com/v1");
+        let _ = legacy;
     }
 
     #[test]

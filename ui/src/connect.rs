@@ -70,10 +70,10 @@ pub fn view<'a, S: UiState + ?Sized>(
     if modal.is_custom || is_local {
         let placeholder = if is_local {
             match modal.provider_id.as_str() {
-                crate::translation::LOCAL_OLLAMA => "http://localhost:11434/v1",
+                crate::translation::LOCAL_OLLAMA => "http://localhost:11434",
                 crate::translation::LOCAL_VLLM => "http://localhost:8000/v1",
                 crate::translation::LOCAL_LLAMA_CPP => "http://localhost:8080/v1",
-                _ => "http://localhost:11434/v1",
+                _ => "http://localhost:11434",
             }
         } else {
             "http://localhost:11434/v1"
