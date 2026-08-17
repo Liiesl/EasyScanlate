@@ -8,6 +8,17 @@ use scanlateit_model::EntryId;
 
 use crate::Engine;
 
+/// Pending manual single-entry auto-detect requested while the engine was
+/// still building. Stored so `handle_styling_ready` can run the *original*
+/// entry (not whatever is selected at ready time).
+#[derive(Debug, Clone)]
+pub struct PendingSingle {
+    pub index: usize,
+    pub id: EntryId,
+    pub path: String,
+    pub quad: scanlateit_model::Quad,
+}
+
 /// The auto-detect job state the app owns: the lazily-built engine, whether
 /// an engine build task is in flight, and the `(image index, entry id)` pairs
 /// already classified. Generic over the engine so the bookkeeping rules are
@@ -17,6 +28,7 @@ pub struct JobTracker<E = Engine> {
     engine: Option<E>,
     building: bool,
     done: HashSet<(usize, EntryId)>,
+    pending_single: Option<PendingSingle>,
 }
 
 impl<E> Default for JobTracker<E> {
@@ -25,6 +37,7 @@ impl<E> Default for JobTracker<E> {
             engine: None,
             building: false,
             done: HashSet::new(),
+            pending_single: None,
         }
     }
 }
@@ -61,6 +74,7 @@ impl<E> JobTracker<E> {
     /// Clears the building flag after a failed build.
     pub fn fail_build(&mut self) {
         self.building = false;
+        self.pending_single = None;
     }
 
     pub fn is_done(&self, index: usize, id: EntryId) -> bool {
@@ -79,6 +93,21 @@ impl<E> JobTracker<E> {
     /// The number of classified entries (for tests).
     pub fn done_count(&self) -> usize {
         self.done.len()
+    }
+
+    /// Store a pending single-entry job (overwrites any prior pending).
+    pub fn set_pending_single(&mut self, pending: PendingSingle) {
+        self.pending_single = Some(pending);
+    }
+
+    /// Take the pending single-entry job if any.
+    pub fn take_pending_single(&mut self) -> Option<PendingSingle> {
+        self.pending_single.take()
+    }
+
+    /// Clear any pending single-entry job (e.g. on build failure).
+    pub fn clear_pending_single(&mut self) {
+        self.pending_single = None;
     }
 }
 
@@ -143,6 +172,33 @@ mod tests {
         tracker.mark_done(1, EntryId(1));
         tracker.mark_done(0, EntryId(2));
         assert_eq!(tracker.done_count(), 3);
+    }
+
+    #[test]
+    fn pending_single_round_trips_and_clears_on_fail() {
+        let mut tracker = JobTracker::<()>::new();
+        assert!(tracker.take_pending_single().is_none());
+        tracker.set_pending_single(PendingSingle {
+            index: 1,
+            id: EntryId(2),
+            path: "p".to_string(),
+            quad: scanlateit_model::Quad { points: [[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]] },
+        });
+        let pending = tracker.take_pending_single().unwrap();
+        assert_eq!(pending.index, 1);
+        assert_eq!(pending.id, EntryId(2));
+        assert!(tracker.take_pending_single().is_none(), "taken is consumed");
+        // set again then fail_build clears
+        tracker.set_pending_single(PendingSingle {
+            index: 0,
+            id: EntryId(5),
+            path: "q".to_string(),
+            quad: scanlateit_model::Quad { points: [[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]] },
+        });
+        tracker.mark_building();
+        tracker.fail_build();
+        assert!(tracker.take_pending_single().is_none());
+        assert!(!tracker.is_building());
     }
 
     // NOTE: `Engine::classify_entry` needs the ONNX model file, so it is

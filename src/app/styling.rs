@@ -150,24 +150,44 @@ pub fn handle_styling_ready(app: &mut App, result: Result<StylingEngine, String>
                 #[cfg(not(all(feature = "styling", feature = "inpaint", feature = "segment")))]
                 { false }
             };
+            // `set_engine` returns true when a build was pending and clears the flag.
+            let was_building = app.styling.set_engine(engine.clone());
+            if !was_building {
+                return Task::none();
+            }
+            // Manual single-entry request while the engine was building takes
+            // precedence over pipeline/bulk: it was the original cause.
+            if let Some(pending) = app.styling.take_pending_single() {
+                let pending_index = pending.index;
+                let pending_id = pending.id;
+                let pending_path = pending.path;
+                let pending_quad = pending.quad;
+                app.styling.mark_done(pending_index, pending_id);
+                let engine_clone = engine.clone();
+                return Task::perform(
+                    async move {
+                        let classified = tokio::task::spawn_blocking(move || {
+                            engine_clone.classify_entry(&pending_path, &pending_quad)
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
+                        (pending_index, pending_id, classified)
+                    },
+                    |(index, id, result)| Message::StyleDetected(index, id, result),
+                );
+            }
             if is_pipeline {
                 #[cfg(all(feature = "styling", feature = "inpaint"))]
                 {
-                    if app.styling.set_engine(engine.clone()) {
-                        start_pipeline_style_jobs(app, engine)
-                    } else {
-                        Task::none()
-                    }
+                    start_pipeline_style_jobs(app, engine)
                 }
                 #[cfg(not(all(feature = "styling", feature = "inpaint")))]
                 {
                     let _ = engine;
                     Task::none()
                 }
-            } else if app.styling.set_engine(engine.clone()) {
-                start_style_jobs(app, engine)
             } else {
-                Task::none()
+                start_style_jobs(app, engine)
             }
         }
         Err(e) => {
@@ -409,9 +429,50 @@ pub fn handle_preset_remove(app: &mut App, preset: usize) -> Task<Message> {
 pub fn handle_auto_detect(app: &mut App) -> Task<Message> {
     #[cfg(feature = "styling")]
     {
+        use scanlateit_styling::tracker::PendingSingle;
         let Some((index, id)) = app.selected else { return Task::none() };
+        // Validate entry still exists and get its view quad.
+        let entry = match app.project.entry(id) {
+            Some(e) => e,
+            None => return Task::none(),
+        };
+        let image_id = match app.images.get(index) {
+            Some(img) => img.image_id,
+            None => return Task::none(),
+        };
+        let path = app
+            .project
+            .image(image_id)
+            .map(|m| m.path.clone())
+            .unwrap_or_default();
+        let quad = app.project.view_quad(entry);
         app.styling.reopen(index, id);
-        classify_entries(app)
+        // If engine already loaded, classify exactly this entry.
+        if let Some(engine) = app.styling.engine().cloned() {
+            app.styling.mark_done(index, id);
+            let engine_clone = engine.clone();
+            return Task::perform(
+                async move {
+                    let classified = tokio::task::spawn_blocking(move || {
+                        engine_clone.classify_entry(&path, &quad)
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
+                    (index, id, classified)
+                },
+                |(idx, eid, result)| Message::StyleDetected(idx, eid, result),
+            );
+        }
+        // Engine not yet built: remember the *original* request so ready resumes single entry.
+        app.styling.set_pending_single(PendingSingle {
+            index,
+            id,
+            path,
+            quad,
+        });
+        app.styling.mark_building();
+        app.status = "Loading the styling model...".to_string();
+        return Task::perform(async move { StylingEngine::build() }, Message::StylingEngineReady);
     }
     #[cfg(not(feature = "styling"))]
     {
