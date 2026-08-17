@@ -113,7 +113,7 @@ pub fn save_mmtl(
         let mut buf = Vec::new();
         {
             use image::ImageEncoder;
-            let mut enc = image::codecs::png::PngEncoder::new(&mut buf);
+            let enc = image::codecs::png::PngEncoder::new(&mut buf);
             let rgba = image::RgbaImage::from_raw(patch.width, patch.height, patch.rgba.clone())
                 .ok_or_else(|| "invalid rgba size".to_string())?;
             enc.write_image(
@@ -235,7 +235,6 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
     }
     // Rebuild project with updated paths
     let mut new_images = Vec::new();
-    let mut dims_updated = false;
     for meta in project.images().iter() {
         let new_path = id_to_path.get(&meta.id).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| meta.path.clone());
         // optionally re-read dimensions from extracted file
@@ -246,7 +245,6 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
                 } else { (meta.width, meta.height) }
             } else { (meta.width, meta.height) }
         } else { (meta.width, meta.height) };
-        if w != meta.width || h != meta.height { dims_updated = true; }
         new_images.push(ImageMeta { id: meta.id, path: new_path, width: w, height: h });
     }
     if !new_images.is_empty() {
@@ -256,7 +254,6 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
         let styles = std::mem::replace(&mut project.styles().clone(), HashMap::new());
         // need mutable access to private fields via from_raw
         // Instead use Project::from_raw
-        let images_clone = new_images.clone();
         // we need to extract all fields
         let extras = std::mem::replace(&mut project.extras, scanlateit_model::Extras::default());
         let view_quads = project.view_quads().clone();
@@ -267,8 +264,7 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
         // Let's build new project correctly by using from_raw with collected data
         // We lost next_image_id, so recompute
         let next_image_id = new_images.iter().map(|m| m.id.0+1).max().unwrap_or(0);
-        let mut rebuilt = Project::from_raw(new_images, next_image_id, ocr, profiles, styles_map, view_quads, extras);
-        // if dims_updated we keep new dims already
+        let rebuilt = Project::from_raw(new_images, next_image_id, ocr, profiles, styles_map, view_quads, extras);
         project = rebuilt;
     }
 

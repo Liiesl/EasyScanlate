@@ -3,7 +3,6 @@ use iced::{Rectangle, Task};
 use scanlateit_model::EntryId;
 use scanlateit_ui::event::{EditOrigin, ToolbarAction};
 use scanlateit_ui::panel::results::scroll_to_row;
-use scanlateit_ui::event::UiEvent;
 
 use super::layout::{EDIT_INPUT_ID, PANEL_EDIT_INPUT_ID};
 use super::{App, Message};

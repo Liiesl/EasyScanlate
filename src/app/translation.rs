@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use iced::Task;
 use scanlateit_model::EntryId;
 use scanlateit_ui::translation as translation;
+#[allow(unused_imports)]
 pub use scanlateit_ui::translation::{
     catalog_provider, default_hidden_ids, default_hidden_ids_for_models, fetch_local_provider,
     fetch_local_providers, fetch_providers, file_tag, is_custom, is_local, profile_name,

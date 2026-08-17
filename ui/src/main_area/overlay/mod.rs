@@ -9,6 +9,7 @@ pub mod warp;
 
 pub use entry::OverlayEntry;
 pub(crate) use circle::fit_circle_metrics;
+#[allow(unused_imports)]
 pub(crate) use fit::{fit_font_metrics, fit_font_size};
 pub(crate) use style::styled_font;
 pub use crate::main_area::geometry::order_quad;

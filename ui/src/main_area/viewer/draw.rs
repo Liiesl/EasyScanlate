@@ -14,7 +14,7 @@ use super::constants::{
 use super::hit_test::{hit_inpaint_toolbar_button, hit_toolbar_button};
 use super::interaction::Interaction;
 use super::motion::{
-    button_width, handle_anchors, handle_rect, inpaint_toolbar_button_rect, inpaint_toolbar_buttons,
+    handle_anchors, handle_rect, inpaint_toolbar_button_rect, inpaint_toolbar_buttons,
     inpaint_toolbar_rect, toolbar_buttons, toolbar_rect, top_decor_geometry,
 };
 use super::scroll::{thumb_rect, track_rect};

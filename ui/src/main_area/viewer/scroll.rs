@@ -3,7 +3,7 @@ use std::ops::Range;
 use iced::advanced::Shell;
 use iced::{Point, Rectangle, Size};
 
-use super::constants::{MIN_THUMB_HEIGHT, SCROLLBAR_MARGIN, SCROLLBAR_WIDTH, SCROLLBAR_THUMB, SCROLLBAR_TRACK};
+use super::constants::{MIN_THUMB_HEIGHT, SCROLLBAR_MARGIN, SCROLLBAR_WIDTH};
 use super::hit_test::editing_rect;
 use super::layout::tile_layout;
 use super::state::TileViewState;

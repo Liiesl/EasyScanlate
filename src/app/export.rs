@@ -111,7 +111,7 @@ fn into_stroke(stroke: &Stroke<'_>) -> tiny_skia::Stroke {
         dash: if stroke.line_dash.segments.is_empty() {
             None
         } else {
-            tiny_skia::StrokeDash::new(stroke.line_dash.segments.clone().into(), stroke.line_dash.offset as f32)
+            tiny_skia::StrokeDash::new(stroke.line_dash.segments.into(), stroke.line_dash.offset as f32)
         },
         ..Default::default()
     }
@@ -156,7 +156,7 @@ impl ExportFrame {
         let rh = (clip.height).min(h as f32 - y).max(0.0);
         if rw <= 0.0 || rh <= 0.0 {
             // empty clip -> fully masked (nothing draws)
-            let mut m = Mask::new(w, h)?;
+            let m = Mask::new(w, h)?;
             // leave all zero
             return Some(m);
         }

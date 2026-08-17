@@ -11,7 +11,7 @@ use iced::{Border, Color, Element, Fill as FillLength, Length, Padding};
 use lucide_icons::Icon;
 
 use crate::event::UiEvent;
-use crate::panel::{MUTED_FG, PANEL_BG};
+use crate::panel::MUTED_FG;
 use crate::scale;
 use crate::state::UiState;
 
@@ -20,8 +20,6 @@ use crate::state::UiState;
 /// aurora → outer PANEL_BG (0.78) → inner list (0.32) → row (0.48).
 const ROW_BG: Color = Color::from_rgba8(34, 36, 44, 0.48);
 const ROW_BG_DIMMED: Color = Color::from_rgba8(34, 36, 44, 0.26);
-const ROW_BORDER: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const SELECTED_BORDER: Color = Color::from_rgba8(92, 190, 255, 0.9);
 const SELECTED_BG: Color = Color::from_rgba8(52, 58, 76, 0.70);
 /// Inner scrollable inset – even more transparent than the row so the
 /// row floats over it and the aurora layers clearly.
@@ -99,7 +97,7 @@ fn layer_row<'a>(
     // patch without runtime pixels) we fall back to a muted placeholder.
     let thumb: Element<'a, UiEvent> = if let Some(hdl) = handle {
         // Dim the preview when the global inpaint layer is hidden, like PS eye off.
-        let opacity = if global_visible { 1.0 } else { 0.45 };
+        let opacity = if global_visible { 1.0_f32 } else { 0.45_f32 };
         container(
             image::Image::new(hdl)
                 .width(FillLength)

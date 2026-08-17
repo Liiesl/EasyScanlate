@@ -17,7 +17,6 @@
 //! selected entry; right-clicking opens a context menu to replace the
 //! slot with the current style or to remove the preset (emptying it).
 
-use iced::font::Weight;
 use iced::widget::button::Status;
 use iced::widget::image::{self, Handle};
 use iced::widget::{
@@ -36,7 +35,7 @@ use scanlateit_model::{EntryStyle, TextAlign, TextGradientDir};
 
 use crate::event::{StyleField, UiEvent};
 use crate::main_area::overlay::styled_font;
-use crate::segmented::{segment, segment_icon, segmented_group, ACCENT, BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
+use crate::segmented::{segment_icon, segmented_group, ACCENT, BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
 use crate::scale;
 use crate::state::UiState;
 use lucide_icons::Icon;

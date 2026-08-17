@@ -4,7 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use iced::{Font, Size};
 
 use super::cache::{fit_key, FitKey, FIT_CACHE_CAP};
-use super::text::{measure_text, LINE_HEIGHT};
+use super::text::measure_text;
 
 const MIN_FONT_SIZE: f32 = 1.0;
 const FIT_ITERATIONS: u32 = 14;
@@ -40,6 +40,7 @@ fn with_fit_cache<R>(f: impl FnOnce(&mut FitCache) -> R) -> R {
 }
 
 /// Largest font size at which `text` fits inside `bounds` (word wrapping at box width).
+#[allow(dead_code)]
 pub(crate) fn fit_font_size(text: &str, font: Font, bounds: Size) -> f32 {
     fit_font_metrics(text, font, bounds).0
 }

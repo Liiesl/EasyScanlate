@@ -421,7 +421,7 @@ pub struct TranslateItem {
 
 /// Model listing wire format (models.dev schema, served by the mirror).
 #[derive(Debug, Deserialize)]
-struct ProviderListing {
+pub struct ProviderListing {
     #[serde(default)]
     api: Option<String>,
     #[serde(default)]
@@ -433,6 +433,7 @@ struct ProviderListing {
 #[derive(Debug, Deserialize)]
 struct ModelInfo {
     #[serde(default)]
+    #[allow(dead_code)]
     id: Option<String>,
     #[serde(default)]
     name: Option<String>,
@@ -866,6 +867,7 @@ pub fn usable_models(listing: &ProviderListing) -> Vec<Model> {
 /// each family stay visible. Deprecated and non-text models are never usable
 /// and never counted as hidden. `is_newer` drives the latest-per-family
 /// choice, `*-latest` and free are always exempt.
+#[allow(dead_code)]
 pub fn default_hidden_ids(listing: &ProviderListing) -> std::collections::BTreeSet<String> {
     let usable = usable_models(listing);
     // Compute latest paid, non-free, non-*-latest per family.
@@ -946,16 +948,6 @@ pub fn default_hidden_ids_for_models(models: &[Model]) -> std::collections::BTre
         .collect()
 }
 
-/// Applies the listing filters: drops deprecated models and any model that
-/// outputs something other than text. **No family de-duplication** – older
-/// family members are kept and hidden by default via `default_hidden_ids()`/
-/// `hidden_models` instead of being filtered out, so the user can unhide them
-/// in Manage Models. `*-latest` models are never hidden by default either.
-/// This now behaves identically to `usable_models`.
-fn select_models(listing: &ProviderListing) -> Vec<Model> {
-    usable_models(listing)
-}
-
 /// A model whose input or output cost is zero is free and always listed.
 fn is_free(info: &ModelInfo) -> bool {
     matches!(&info.cost, Some(cost) if cost.input == Some(0.0) || cost.output == Some(0.0))
@@ -977,6 +969,7 @@ fn outputs_text_only(info: &ModelInfo) -> bool {
 
 /// Whether `info` is a newer release than `current`; release date first,
 /// then last-updated. Ties keep the existing entry.
+#[allow(dead_code)]
 fn is_newer(info: &ModelInfo, current: &ModelInfo) -> bool {
     match (info.release_date.as_deref(), current.release_date.as_deref()) {
         (Some(a), Some(b)) if a != b => return a > b,

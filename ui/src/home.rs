@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, row, scrollable, text, space};
+use iced::widget::{button, column, container, row, scrollable, text};
 use iced::{Color, Element, Length, Fill as FillLength};
 
 use crate::event::UiEvent;

@@ -181,17 +181,6 @@ fn item_separator<'a>() -> Element<'a, UiEvent> {
         .into()
 }
 
-fn section_separator<'a>() -> Element<'a, UiEvent> {
-    rule::horizontal(1)
-        .style(|_theme| rule::Style {
-            color: Color::from_rgba8(255, 255, 255, 0.10),
-            radius: 0.0.into(),
-            fill_mode: rule::FillMode::Full,
-            snap: true,
-        })
-        .into()
-}
-
 /// One row of the supported-provider list: name, connection status and the
 /// Connect/Disconnect button. When `connected` is `Some` the row shows the
 /// masked key / local base URL, otherwise "Not connected".
@@ -570,11 +559,6 @@ fn appearance_tab_filtered(query: String) -> Element<'static, UiEvent> {
     let content = column(outer).spacing(scale::s(16.0)).width(FillLength);
     let padded = container(content).width(FillLength).padding(scale::s(8.0));
     scrollable(padded).height(Length::Fill).into()
-}
-
-/// Backwards-compatible wrapper (no filter)
-fn appearance_tab() -> Element<'static, UiEvent> {
-    appearance_tab_filtered(String::new())
 }
 
 // ---------------------------------------------------------------------------

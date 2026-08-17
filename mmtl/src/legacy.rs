@@ -6,7 +6,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use scanlateit_model::{
-    EntrySource, ImageId, ImageMeta, NewEntry, OcrResult, ProfileId, Project, Quad,
+    EntrySource, ImageId, NewEntry, OcrResult, ProfileId, Project, Quad,
 };
 
 fn natural_cmp(a: &str, b: &str) -> Ordering {
@@ -388,7 +388,6 @@ pub fn project_to_legacy_master(project: &Project) -> Vec<serde_json::Value> {
     // need mapping image_id -> filename
     let id_to_file: HashMap<ImageId, String> = project.images().iter().map(|m| (m.id, m.path.clone())).collect();
     // for filename, use basename only (like legacy)
-    let mut row = 1u64;
     for entry in project.ocr.entries() {
         // use entry.id.0+1 as row_number to keep uniqueness, but mimic legacy row_number sequential
         let row_number = entry.id.0 + 1;
@@ -421,7 +420,6 @@ pub fn project_to_legacy_master(project: &Project) -> Vec<serde_json::Value> {
             obj.insert("is_manual".into(), serde_json::Value::Bool(true));
         }
         out.push(serde_json::Value::Object(obj));
-        row += 1;
     }
     out
 }

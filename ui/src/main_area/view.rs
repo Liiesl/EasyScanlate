@@ -2,7 +2,6 @@ use iced::widget::{container, row, text};
 use iced::{Element, Font, Length};
 
 use crate::event::UiEvent;
-use crate::main_area::overlay::OverlayEntry;
 use crate::main_area::viewer::{TileSpec, TileView};
 use crate::state::UiState;
 

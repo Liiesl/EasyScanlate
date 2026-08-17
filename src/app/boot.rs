@@ -1,11 +1,13 @@
-use std::collections::HashMap;
+#[cfg(feature = "test-ui")]
 use std::sync::Arc;
 use iced::Task;
 use neverliie_iced_widgets::title_bar::NativeFrame;
 use scanlateit_model::{EntrySource, NewEntry, Quad};
+#[cfg(feature = "test-ui")]
 use scanlateit_ui::main_area::decode::{DecodedPage, PageDecode, Tier};
+#[allow(unused_imports)]
 use scanlateit_ui::{KOREAN_FONT_PATH, LoadedImage};
-#[cfg(any(feature = "inpaint", feature = "test-ui"))]
+#[cfg(feature = "test-ui")]
 use iced::widget::image::Handle;
 
 use super::{App, Message};

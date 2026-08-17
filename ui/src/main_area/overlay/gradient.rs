@@ -116,9 +116,9 @@ fn fill_gradient_glyphs<F>(
     F: geometry::frame::Backend,
 {
     use iced::advanced::graphics::text::{self as gfx_text, cosmic_text, Paragraph as GfxParagraph};
-    use iced::advanced::text::{LineHeight, Paragraph as _, Wrapping};
+    use iced::advanced::text::{Paragraph as _, Wrapping};
     use iced::advanced::text::Text as ParagraphText;
-    use iced::{alignment, Font, Pixels, Size};
+    use iced::{alignment, Size};
     use iced::advanced::text::Alignment as TextAlignment;
 
     let paragraph = GfxParagraph::with_text(ParagraphText {

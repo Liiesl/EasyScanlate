@@ -7,9 +7,8 @@ use crate::main_area::geometry::order_quad;
 use crate::scale;
 
 use super::constants::{
-    HANDLE_SIZE, MIN_BOX_EDGE, ROTATE_STEM, TOOLBAR_BTN_PAD, TOOLBAR_GAP, TOOLBAR_HEIGHT,
+    HANDLE_SIZE, MIN_BOX_EDGE, ROTATE_STEM, TOOLBAR_GAP, TOOLBAR_HEIGHT,
 };
-use super::hit_test::selected_quad_view;
 use super::interaction::{ResizeHandle, TopDecor};
 use super::layout::tile_layout;
 use super::state::TileViewState;

@@ -49,10 +49,6 @@ const ROW_PADDING: Padding = Padding {
 };
 /// Shaded background of the two input boxes inside a row.
 const BOX_BG: Color = Color::from_rgb8(28, 30, 38);
-/// Idle row border.
-const ROW_BORDER: Color = Color::from_rgba8(255, 255, 255, 0.14);
-/// Border of the selected row, matching the overlay's selection handles.
-const SELECTED_BORDER: Color = Color::from_rgba8(92, 190, 255, 1.0);
 /// Highlight behind a selected row — slightly lighter and more opaque than `PANEL_BG`
 /// so selection is obvious without a border.
 const SELECTED_BG: Color = Color::from_rgba8(52, 58, 76, 0.90);
@@ -157,7 +153,7 @@ fn entry_row<'a, S: UiState + ?Sized>(
         tooltip(retranslate_btn, tip_label("Retranslate"), tooltip::Position::Top)
             .gap(scale::s(4.0))
             .into();
-    let mut buttons: Vec<Element<'_, UiEvent>> = vec![retranslate_tip, delete_tip];
+    let buttons: Vec<Element<'_, UiEvent>> = vec![retranslate_tip, delete_tip];
 
     let project = state.project();
     let content: Element<'_, UiEvent> = match mode {

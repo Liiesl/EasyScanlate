@@ -200,8 +200,8 @@ fn decode_koharu(
     r: f32,
     dx: i32,
     dy: i32,
-    orig_w: u32,
-    orig_h: u32,
+    _orig_w: u32,
+    _orig_h: u32,
 ) -> Vec<SegDet> {
     if outputs.len() < 2 {
         return Vec::new();

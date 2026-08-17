@@ -9,7 +9,7 @@ use iced::advanced::text::Alignment as TextAlignment;
 
 use scanlateit_model::TextGradientDir;
 
-use super::cache::{fit_key, FitKey, FIT_CACHE_CAP, font_hash, fnv1a};
+use super::cache::{FitKey, FIT_CACHE_CAP, font_hash, fnv1a};
 use super::gradient::{gradient_t, lerp_color};
 use crate::main_area::geometry::{fit_affine, quad_bounds, svd2};
 
@@ -54,21 +54,6 @@ fn with_warp_cache<R>(f: impl FnOnce(&mut WarpCache) -> R) -> R {
             .expect("warp cache holds an incompatible type");
         f(cache)
     })
-}
-
-fn measure_text(text: &str, font: Font, size: f32, max_width: f32) -> Size {
-    let paragraph = iced::advanced::graphics::text::Paragraph::with_text(ParagraphText {
-        content: text,
-        bounds: Size::new(max_width, f32::INFINITY),
-        size: Pixels(size),
-        line_height: LineHeight::Relative(1.2),
-        font,
-        align_x: TextAlignment::Default,
-        align_y: alignment::Vertical::Top,
-        shaping: iced::advanced::text::Shaping::Auto,
-        wrapping: Wrapping::WordOrGlyph,
-    });
-    paragraph.min_bounds()
 }
 
 pub(crate) fn shape_warp_layout(text: &str, font: Font, size: f32, wrap_width: f32) -> WarpLayout {

@@ -6,7 +6,7 @@
 //! `overlay` and `viewer` never re-implement it.
 
 use iced::advanced::graphics::geometry::{self, Path};
-use iced::{Point, Rectangle, Size, Vector};
+use iced::{Point, Vector};
 
 use scanlateit_model::Quad;
 
@@ -150,12 +150,6 @@ pub fn svd2(m00: f32, m01: f32, m10: f32, m11: f32) -> (f32, f32, f32, f32) {
     let alpha = v1y.atan2(v1x);
     let u1x = (m00 * v1x + m01 * v1y) / s1;
     let u1y = (m10 * v1x + m11 * v1y) / s1;
-    let mut u2x = (-m00 * v1y + m01 * v1x) / s2;
-    let mut u2y = (-m10 * v1y + m11 * v1x) / s2;
-    if u1x * u2y - u1y * u2x < 0.0 {
-        u2x = -u2x;
-        u2y = -u2y;
-    }
     let beta = u1y.atan2(u1x);
     (s1, s2, beta, alpha)
 }

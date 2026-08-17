@@ -7,8 +7,6 @@ use scanlateit_settings::InpaintBackend;
 #[cfg(feature = "inpaint")]
 use scanlateit_ui::loaded::InpaintLayer;
 #[cfg(feature = "inpaint")]
-use scanlateit_model::InpaintPatch;
-#[cfg(feature = "inpaint")]
 use image::RgbaImage;
 
 use super::{App, AutoInpaintJob, Message};
@@ -496,7 +494,6 @@ fn run_stitched_inpaint(
     engine: &InpaintEngine,
     spans: Vec<(usize, String, [f32; 4], Vec<Quad>)>,
 ) -> Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4])>)>, String> {
-    use image::GenericImageView;
     if spans.is_empty() {
         return Err("no spans".to_string());
     }
@@ -612,7 +609,6 @@ fn run_stitched_inpaint(
             if remaining > 0 && avail_bottom1 > extra1 {
                 let add = remaining.min(avail_bottom1 - extra1);
                 extra1 += add;
-                remaining -= add;
             }
             // If still remaining, will be padded with mirror later
             h0 = raw_h0 + extra0;
@@ -630,7 +626,7 @@ fn run_stitched_inpaint(
         let y_src1 = raws[1].orig[1] as i32; // top stuck
         // Width 512 centered per piece (align centers to keep seam vertical aligned)
         for (i, r) in raws.iter().enumerate() {
-            let [ox, oy, ow, oh] = r.orig;
+            let [ox, _oy, ow, _oh] = r.orig;
             let w_src = STITCH_W.min(r.img_w);
             let center_x = ox as f32 + ow as f32 * 0.5;
             let mut x_src = (center_x - w_src as f32 * 0.5).round() as i32;
@@ -676,7 +672,6 @@ fn run_stitched_inpaint(
         // Fill remaining rows with mirrored edge of last piece's bottom
         let gap = STITCH_H - total_h;
         if gap > 0 {
-            let last = pieces.last().unwrap();
             // Mirror bottom edge of stitched's existing content
             for y in 0..gap {
                 let src_y = (total_h as i32 -1 - (y as i32 % total_h as i32)).max(0) as u32;
@@ -1287,8 +1282,11 @@ pub fn handle_inpaint_delete(app: &mut App, image_index: usize, patch_idx: usize
     if patch_idx < image.inpaint.len() {
         image.inpaint.remove(patch_idx);
     }
-    if let Some(ev) = app.project.remove_inpaint_patch_by_image_index(image_id, patch_idx) {
-        crate::app::handle_model_event(app, ev);
+    let patch_id = app.project.extras.inpaint_patches.iter().filter(|p| p.image_id == image_id).nth(patch_idx).map(|p| p.id);
+    if let Some(id) = patch_id {
+        if let Some(ev) = app.project.remove_inpaint_patch(id) {
+            crate::app::handle_model_event(app, ev);
+        }
     }
     if app.selected_inpaint == Some((image_index, patch_idx)) {
         app.selected_inpaint = None;
@@ -1347,11 +1345,14 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
     };
     if let Some(image) = app.images.get_mut(image_index) {
         let image_id = image.image_id;
+        let patch_id = app.project.extras.inpaint_patches.iter().filter(|p| p.image_id == image_id).nth(patch_idx).map(|p| p.id);
         if patch_idx < image.inpaint.len() {
             image.inpaint.remove(patch_idx);
         }
-        if let Some(ev) = app.project.remove_inpaint_patch_by_image_index(image_id, patch_idx) {
-            crate::app::handle_model_event(app, ev);
+        if let Some(id) = patch_id {
+            if let Some(ev) = app.project.remove_inpaint_patch(id) {
+                crate::app::handle_model_event(app, ev);
+            }
         }
         if app.selected_inpaint == Some((image_index, patch_idx)) {
             app.selected_inpaint = None;

@@ -301,7 +301,7 @@ pub fn to_xml_string(project: &Project) -> Result<String, String> {
 
     // styles
     {
-        let mut el = BytesStart::new("styles");
+        let el = BytesStart::new("styles");
         writer
             .write_event(Event::Start(el))
             .map_err(|e| e.to_string())?;
@@ -367,7 +367,7 @@ pub fn to_xml_string(project: &Project) -> Result<String, String> {
 
     // view_quads
     {
-        let mut el = BytesStart::new("view_quads");
+        let el = BytesStart::new("view_quads");
         writer
             .write_event(Event::Start(el))
             .map_err(|e| e.to_string())?;
@@ -413,7 +413,7 @@ pub fn to_xml_string(project: &Project) -> Result<String, String> {
 
     // extras
     {
-        let mut el = BytesStart::new("extras");
+        let el = BytesStart::new("extras");
         writer
             .write_event(Event::Start(el))
             .map_err(|e| e.to_string())?;
@@ -594,7 +594,6 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
     let mut stack: Vec<String> = Vec::new();
     // current entry being built
     let mut cur_entry: Option<OcrEntry> = None;
-    let mut cur_entry_text: Option<String> = None;
     let mut cur_quad_points: Vec<[f32; 2]> = Vec::new();
     let mut cur_profile: Option<Profile> = None;
     let mut cur_delta_entry: Option<EntryId> = None;
@@ -834,7 +833,7 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                 }
             }
             Ok(Event::Text(e)) => {
-                if let Some(tag) = &collecting {
+                if collecting.is_some() {
                     if let Ok(txt) = e.unescape() {
                         text_buf.push_str(&txt);
                     }

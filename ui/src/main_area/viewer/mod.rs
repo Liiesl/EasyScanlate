@@ -13,43 +13,34 @@ use std::ops::Range;
 use std::time::Instant;
 
 use iced::advanced::graphics::geometry::frame::Backend as _;
-use iced::advanced::graphics::geometry::{self, Fill, Path, Stroke, Text};
+use iced::advanced::graphics::geometry::{self};
 use iced::advanced::layout::{self as iced_layout, Layout};
 use iced::advanced::mouse;
 use iced::advanced::renderer;
 use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::widget::Widget;
 use iced::advanced::{Clipboard, Shell};
-use iced::border::Radius;
 use iced::keyboard;
 use iced::touch::Event as TouchEvent;
-use iced::{Color, Element, Event, Font, Length, Pixels, Point, Rectangle, Size, Vector};
+use iced::{Element, Event, Font, Length, Point, Rectangle, Size, Vector};
 
 use crate::event::{InpaintToolbarAction, ToolbarAction};
-use crate::main_area::decode::PageDecode;
-use crate::main_area::overlay::OverlayEntry;
 use scanlateit_model::{EntryId, Quad};
 
 use self::constants::{
-    DOUBLE_CLICK_DELAY, DRAG_THRESHOLD, HANDLE_SIZE, MIN_BOX_EDGE, MIN_INPAINT_EDGE,
-    MIN_OCR_EDGE, SCROLL_LINE_HEIGHT,
+    DOUBLE_CLICK_DELAY, DRAG_THRESHOLD, MIN_INPAINT_EDGE, MIN_OCR_EDGE, SCROLL_LINE_HEIGHT,
 };
 use self::draw::{
     draw_inpaint_decorations, draw_inpaint_marquee, draw_ocr_marquee, draw_overlay_buttons,
     draw_placeholder, draw_scrollbar, draw_selection_decorations,
 };
 use self::hit_test::{
-    editing_rect, entry_quad, entry_rect, hit_entry, hit_handle, hit_inpaint_toolbar,
-    hit_overlay_button, hit_tile, hit_toolbar, hit_top_decor, inpaint_reveal_offset, local_point,
-    overlay_button_rects, point_in_quad, reveal_offset, selected_quad_view, selected_rect,
-    tile_local_point,
+    editing_rect, hit_entry, hit_handle, hit_inpaint_toolbar, hit_overlay_button, hit_tile,
+    hit_toolbar, hit_top_decor, inpaint_reveal_offset, local_point, tile_local_point,
 };
-use self::interaction::{Interaction, OverlayButton, ResizeHandle, TopDecorHit};
+use self::interaction::{Interaction, OverlayButton, TopDecorHit};
 use self::layout::{content_width, tile_layout};
-use self::motion::{
-    distort_quad, drag_grab, drag_quad, handle_anchors, handle_rect, quad_centroid, resize_quad,
-    rotate_quad, toolbar_buttons,
-};
+use self::motion::{distort_quad, drag_grab, drag_quad, resize_quad, rotate_quad};
 use self::scroll::{
     anchor_from_state, offset_from_anchor, publish_anchor, publish_edit_rect, publish_visible,
     scroll_by, thumb_rect, track_rect,

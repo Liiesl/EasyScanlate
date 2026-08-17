@@ -64,24 +64,16 @@ fn natural_cmp(a: &str, b: &str) -> Ordering {
     }
 }
 
-#[cfg(any(feature = "inpaint", feature = "test-ui"))]
-use iced::widget::image::Handle;
 use iced::widget::{pane_grid, text_editor};
-#[cfg(feature = "ocr")]
-use iced::futures::{SinkExt, StreamExt};
-use iced::{Color, Element, Font, Length, Rectangle, Subscription, Task, Theme};
+use iced::{Color, Element, Font, Rectangle, Subscription, Task, Theme};
 use neverliie_iced_widgets::title_bar::{FrameAction, NativeFrame};
 
 #[cfg(feature = "inpaint")]
 use scanlateit_inpaint::Engine as InpaintEngine;
-use scanlateit_model::{EntryId, EntryStyle, ModelEvent, NewEntry, Project, Quad, TextAlign, TextGradientDir};
+use scanlateit_model::{EntryId, EntryStyle, ModelEvent, NewEntry, Project, Quad};
 use scanlateit_settings::StylePresets;
 #[cfg(feature = "inpaint")]
 use scanlateit_settings::InpaintBackend;
-#[cfg(feature = "inpaint")]
-use scanlateit_model::InpaintPatch;
-#[cfg(feature = "inpaint")]
-use scanlateit_settings::AutoInpaintModel;
 #[cfg(feature = "ocr")]
 use scanlateit_ocr::{self as ocr_engine, OcrCancellationToken, ParallelEngine};
 #[cfg(feature = "styling")]
@@ -91,7 +83,7 @@ use scanlateit_segment::Engine as SegmentEngine;
 use scanlateit_ui::translation as ui_translation;
 use scanlateit_ui::main_area::decode::{DecodedPage, PageDecode, Scheduler, Tier};
 use scanlateit_ui::{
-    event::{EditOrigin, MainAreaMode, SettingsTab, StyleField, TargetProfileSelection, ToolbarAction, TranslationPanelMode, UiEvent},
+    event::{EditOrigin, MainAreaMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode, UiEvent},
     ConnectModal, LoadedImage,
 };
 
@@ -139,6 +131,7 @@ pub(crate) struct AutoInpaintJob {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum Message {
     /// Frame actions from the custom title bar.
     Frame(FrameAction),
