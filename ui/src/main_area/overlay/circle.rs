@@ -96,10 +96,24 @@ fn layout_circle_lines(text: &str, font: Font, size: f32, bounds: Size) -> Optio
     if line_height <= 0.0 {
         return None;
     }
-    let tokens = circle_tokens(text, font, size, bounds.width);
-    if tokens.is_empty() {
+    // Split hard breaks on '\n' first, keeping empty segments for blank gaps.
+    // Each segment is tokenized independently; empty segments produce a blank line.
+    let paras: Vec<Vec<String>> = text
+        .split('\n')
+        .map(|seg| {
+            if seg.trim().is_empty() {
+                Vec::new()
+            } else {
+                circle_tokens(seg, font, size, bounds.width)
+            }
+        })
+        .collect();
+
+    // Pure whitespace without newline -> no visible lines (match previous behaviour).
+    if paras.iter().all(|p| p.is_empty()) && !text.contains('\n') {
         return Some(Vec::new());
     }
+
     let max_lines = (bounds.height / line_height).floor() as usize;
     if max_lines == 0 {
         return None;
@@ -112,26 +126,38 @@ fn layout_circle_lines(text: &str, font: Font, size: f32, bounds: Size) -> Optio
             })
             .collect();
         let mut lines: Vec<CircleLine> = Vec::with_capacity(n);
-        let mut idx = 0usize;
+        let mut para_idx = 0usize;
+        let mut tok_idx = 0usize;
         let mut ok = true;
         for (i, &chord) in chords.iter().enumerate() {
-            if idx >= tokens.len() {
+            if para_idx >= paras.len() {
                 break;
+            }
+            // Empty paragraph => blank gap line (respect newline). Chord size not checked for empty.
+            if paras[para_idx].is_empty() {
+                lines.push(CircleLine {
+                    content: String::new(),
+                    y: i as f32 * line_height,
+                    chord,
+                });
+                para_idx += 1;
+                tok_idx = 0;
+                continue;
             }
             if chord <= 1.0 {
                 ok = false;
                 break;
             }
             let mut content = String::new();
-            while idx < tokens.len() {
+            while tok_idx < paras[para_idx].len() {
                 let candidate = if content.is_empty() {
-                    tokens[idx].clone()
+                    paras[para_idx][tok_idx].clone()
                 } else {
-                    format!("{} {}", content, tokens[idx])
+                    format!("{} {}", content, paras[para_idx][tok_idx])
                 };
                 if line_fits(&candidate, font, size, chord) {
                     content = candidate;
-                    idx += 1;
+                    tok_idx += 1;
                 } else if content.is_empty() {
                     ok = false;
                     break;
@@ -147,14 +173,22 @@ fn layout_circle_lines(text: &str, font: Font, size: f32, bounds: Size) -> Optio
                 y: i as f32 * line_height,
                 chord,
             });
-            if idx >= tokens.len() {
+            // Hard break: if this paragraph is fully consumed, advance to next paragraph
+            // for the next chord (never merge across '\n').
+            if tok_idx >= paras[para_idx].len() {
+                para_idx += 1;
+                tok_idx = 0;
+            }
+            if para_idx >= paras.len() {
+                // All paragraphs consumed; remaining chords (if any) are not needed.
+                // Break early to keep lines.len() minimal (original behaviour).
                 break;
             }
         }
         if !ok {
             continue;
         }
-        if idx >= tokens.len() {
+        if para_idx >= paras.len() {
             return Some(lines);
         }
     }
