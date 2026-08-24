@@ -157,17 +157,17 @@ pub enum Message {
     #[cfg(feature = "inpaint")]
     InpaintEngineReady(Result<InpaintEngine, String>),
     #[cfg(feature = "inpaint")]
-    InpaintFinished(usize, Result<Vec<(image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>),
+    InpaintFinished(usize, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>),
     #[cfg(feature = "inpaint")]
     InpaintSpanFinished(Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>)>, String>),
     #[cfg(feature = "inpaint")]
     AutoInpaintEngineReady(InpaintBackend, Result<InpaintEngine, String>),
     #[cfg(feature = "inpaint")]
-    AutoInpaintFinished(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>),
+    AutoInpaintFinished(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>),
     #[cfg(feature = "inpaint")]
-    AutoInpaintLamaBatchFinished(Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>)>),
+    AutoInpaintLamaBatchFinished(Vec<(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>)>),
     #[cfg(feature = "inpaint")]
-    AutoInpaintAotBatchFinished(Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>)>),
+    AutoInpaintAotBatchFinished(Vec<(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>)>),
     #[cfg(all(feature = "styling", feature = "inpaint"))]
     PipelineStyleDetected(usize, EntryId, Result<(EntryStyle, scanlateit_styling::StylePrediction), String>),
     #[cfg(feature = "styling")]
@@ -228,6 +228,8 @@ pub struct App {
     pending_inpaint: Option<(usize, String, [f32; 4], Vec<Quad>)>,
     #[cfg(feature = "inpaint")]
     pending_inpaint_span: Option<Vec<(usize, String, [f32; 4], Vec<Quad>)>>,
+    #[cfg(feature = "inpaint")]
+    pending_background_stitch: Option<(AutoInpaintJob, f32, Option<String>, Option<String>)>,
     pub(crate) inpainting: bool,
     pub(crate) inpaint_mode: bool,
     pub(crate) ocr_mode: bool,
@@ -417,6 +419,8 @@ impl App {
             pending_auto_lama_jobs: None,
             #[cfg(feature = "inpaint")]
             pending_auto_aot_jobs: None,
+            #[cfg(feature = "inpaint")]
+            pending_background_stitch: None,
             running: false,
             font: None,
             status: "Idle - open images to begin.".to_string(),
