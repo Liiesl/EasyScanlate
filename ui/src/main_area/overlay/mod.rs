@@ -86,32 +86,91 @@ pub fn draw_entries<'a, I, F>(
             }
         };
 
-        let path = match layout_transform {
-            Some(_) => quad_path(quad),
-            None => Path::rounded_rectangle(
-                layout_position,
-                Size::new(layout_width, layout_height),
-                iced::border::Radius::from(entry.style.bg_radius * scale),
-            ),
-        };
-        frame.fill(&path, Fill::from(rgba_to_color(entry.style.bg_color)));
-        if entry.selected {
-            frame.stroke(
-                &path,
-                Stroke::default()
-                    .with_color(SELECTED_COLOR)
-                    .with_width(SELECTED_WIDTH),
-            );
+        let bg_radius = entry.style.bg_radius * scale;
+        let radius = iced::border::Radius::from(bg_radius);
+        let has_radius = bg_radius > 0.5;
+        let box_rect = Rectangle::new(layout_position, Size::new(layout_width, layout_height));
+        let warp = rotated.is_none()
+            && layout_transform.is_some()
+            && affine_error(quad, layout_width, layout_height) > warp::warp_threshold();
+        if has_radius {
+            if warp {
+                let bg = crate::main_area::geometry::perspective_rounded_rect_path(
+                    quad, box_rect, bg_radius,
+                );
+                frame.fill(&bg, Fill::from(rgba_to_color(entry.style.bg_color)));
+                if entry.selected {
+                    frame.stroke(
+                        &bg,
+                        Stroke::default()
+                            .with_color(SELECTED_COLOR)
+                            .with_width(SELECTED_WIDTH),
+                    );
+                }
+            } else if let Some(transform) = &layout_transform {
+                frame.push_transform();
+                apply_quad_transform(
+                    frame,
+                    transform,
+                    layout_position,
+                    layout_width,
+                    layout_height,
+                );
+                let bg = Path::rounded_rectangle(
+                    layout_position,
+                    Size::new(layout_width, layout_height),
+                    radius,
+                );
+                frame.fill(&bg, Fill::from(rgba_to_color(entry.style.bg_color)));
+                if entry.selected {
+                    frame.stroke(
+                        &bg,
+                        Stroke::default()
+                            .with_color(SELECTED_COLOR)
+                            .with_width(SELECTED_WIDTH),
+                    );
+                }
+                frame.pop_transform();
+            } else {
+                let bg = Path::rounded_rectangle(
+                    layout_position,
+                    Size::new(layout_width, layout_height),
+                    radius,
+                );
+                frame.fill(&bg, Fill::from(rgba_to_color(entry.style.bg_color)));
+                if entry.selected {
+                    frame.stroke(
+                        &bg,
+                        Stroke::default()
+                            .with_color(SELECTED_COLOR)
+                            .with_width(SELECTED_WIDTH),
+                    );
+                }
+            }
+        } else {
+            let bg = match layout_transform {
+                Some(_) => quad_path(quad),
+                None => Path::rounded_rectangle(
+                    layout_position,
+                    Size::new(layout_width, layout_height),
+                    radius,
+                ),
+            };
+            frame.fill(&bg, Fill::from(rgba_to_color(entry.style.bg_color)));
+            if entry.selected {
+                frame.stroke(
+                    &bg,
+                    Stroke::default()
+                        .with_color(SELECTED_COLOR)
+                        .with_width(SELECTED_WIDTH),
+                );
+            }
         }
         let wrap_width = layout_width.max(8.0);
         if entry.hide_text {
             continue;
         }
         let styled = styled_font(font, &entry.style);
-        let box_rect = Rectangle::new(layout_position, Size::new(layout_width, layout_height));
-        let warp = rotated.is_none()
-            && layout_transform.is_some()
-            && affine_error(quad, layout_width, layout_height) > warp::warp_threshold();
         let stroke = (entry.style.stroke_width > 0.0).then(|| {
             (rgba_to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
         });

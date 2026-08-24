@@ -6,7 +6,7 @@
 //! `overlay` and `viewer` never re-implement it.
 
 use iced::advanced::graphics::geometry::{self, Path};
-use iced::{Point, Vector};
+use iced::{Point, Rectangle, Vector};
 
 use scanlateit_model::Quad;
 
@@ -152,6 +152,117 @@ pub fn svd2(m00: f32, m01: f32, m10: f32, m11: f32) -> (f32, f32, f32, f32) {
     let u1y = (m10 * v1x + m11 * v1y) / s1;
     let beta = u1y.atan2(u1x);
     (s1, s2, beta, alpha)
+}
+
+/// Perspective map from `box_rect` (uv) onto `quad`, identical to warp::perspective_map.
+/// Maps a point in `box_rect` coordinates to its perspective position on `quad`.
+pub fn perspective_map(quad: [[f32; 2]; 4], box_rect: Rectangle, p: Point) -> Point {
+    let u = ((p.x - box_rect.x) / box_rect.width.max(1.0)).clamp(0.0, 1.0);
+    let v = ((p.y - box_rect.y) / box_rect.height.max(1.0)).clamp(0.0, 1.0);
+    let [x0, y0] = quad[0];
+    let [x1, y1] = quad[1];
+    let [x2, y2] = quad[2];
+    let [x3, y3] = quad[3];
+    let dx1 = x1 - x2;
+    let dx2 = x3 - x2;
+    let dy1 = y1 - y2;
+    let dy2 = y3 - y2;
+    let denom = dx1 * dy2 - dy1 * dx2;
+    let (a, b, c, d, e, f, g, h) = if denom.abs() < 1e-7 {
+        (x1 - x0, x3 - x0, x0, y1 - y0, y3 - y0, y0, 0.0, 0.0)
+    } else {
+        let sx = x0 - x1 + x2 - x3;
+        let sy = y0 - y1 + y2 - y3;
+        let g = (sx * dy2 - sy * dx2) / denom;
+        let h = (dx1 * sy - dy1 * sx) / denom;
+        (
+            x1 - x0 + g * x1,
+            x3 - x0 + h * x3,
+            x0,
+            y1 - y0 + g * y1,
+            y3 - y0 + h * y3,
+            y0,
+            g,
+            h,
+        )
+    };
+    let w = g * u + h * v + 1.0;
+    Point::new((a * u + b * v + c) / w, (d * u + e * v + f) / w)
+}
+
+/// Perspective-correct rounded rectangle path: a `radius`-rounded `rect`
+/// projected onto `quad` via the homography. Straight edges stay straight;
+/// quarter-circle corners are tessellated into line segments (8 per corner)
+/// before projection, so the curve is perspective-correct.
+pub fn perspective_rounded_rect_path(
+    quad: [[f32; 2]; 4],
+    rect: Rectangle,
+    radius: f32,
+) -> Path {
+    let w = rect.width;
+    let h = rect.height;
+    if w <= 0.0 || h <= 0.0 {
+        return quad_path(quad);
+    }
+    let r = radius.clamp(0.0, w.min(h) / 2.0);
+    if r <= 0.5 {
+        return quad_path(quad);
+    }
+    let x = rect.x;
+    let y = rect.y;
+    let cx1 = x + r;
+    let cx2 = x + w - r;
+    let cy1 = y + r;
+    let cy2 = y + h - r;
+    const SEGMENTS: usize = 8;
+    Path::new(|builder| {
+        let map = |p: Point| perspective_map(quad, rect, p);
+        // Helper to emit mapped point: first point uses move_to.
+        let mut first = true;
+        let mut push = |pt: Point| {
+            let mp = map(pt);
+            if first {
+                builder.move_to(mp);
+                first = false;
+            } else {
+                builder.line_to(mp);
+            }
+        };
+        // Top edge
+        push(Point::new(x + r, y));
+        push(Point::new(x + w - r, y));
+        // Top-right arc: center (cx2, cy1), angle -90° -> 0°
+        for i in 1..=SEGMENTS {
+            let t = i as f32 / SEGMENTS as f32;
+            let ang = -std::f32::consts::FRAC_PI_2 + t * std::f32::consts::FRAC_PI_2;
+            push(Point::new(cx2 + r * ang.cos(), cy1 + r * ang.sin()));
+        }
+        // Right edge
+        push(Point::new(x + w, y + h - r));
+        // Bottom-right arc: center (cx2, cy2), 0° -> 90°
+        for i in 1..=SEGMENTS {
+            let t = i as f32 / SEGMENTS as f32;
+            let ang = t * std::f32::consts::FRAC_PI_2;
+            push(Point::new(cx2 + r * ang.cos(), cy2 + r * ang.sin()));
+        }
+        // Bottom edge
+        push(Point::new(x + r, y + h));
+        // Bottom-left arc: center (cx1, cy2), 90° -> 180°
+        for i in 1..=SEGMENTS {
+            let t = i as f32 / SEGMENTS as f32;
+            let ang = std::f32::consts::FRAC_PI_2 + t * std::f32::consts::FRAC_PI_2;
+            push(Point::new(cx1 + r * ang.cos(), cy2 + r * ang.sin()));
+        }
+        // Left edge
+        push(Point::new(x, y + r));
+        // Top-left arc: center (cx1, cy1), 180° -> 270°
+        for i in 1..=SEGMENTS {
+            let t = i as f32 / SEGMENTS as f32;
+            let ang = std::f32::consts::PI + t * std::f32::consts::FRAC_PI_2;
+            push(Point::new(cx1 + r * ang.cos(), cy1 + r * ang.sin()));
+        }
+        builder.close();
+    })
 }
 
 /// Affine transform mapping `width x height` rect onto `quad`.
