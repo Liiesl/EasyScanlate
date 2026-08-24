@@ -231,4 +231,8 @@ impl UiState for App {
             project_location: np.project_location.clone(),
         })
     }
+
+    fn translation_anim_phase(&self) -> f32 {
+        self.translate_anim_phase
+    }
 }

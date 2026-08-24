@@ -125,4 +125,5 @@ pub trait UiState {
     fn app_view(&self) -> AppView;
     fn recent_projects(&self) -> &[scanlateit_settings::RecentProject];
     fn new_project_overlay(&self) -> Option<NewProjectOverlay>;
+    fn translation_anim_phase(&self) -> f32;
 }

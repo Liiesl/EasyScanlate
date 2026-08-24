@@ -8,6 +8,7 @@ pub mod background;
 pub mod color;
 pub mod connect;
 pub mod event;
+pub mod loading_bar;
 pub mod home;
 pub mod loaded;
 pub mod main_area;

@@ -143,6 +143,7 @@ pub fn handle_translate(app: &mut App) -> Task<Message> {
         return Task::none();
     }
     app.translating = true;
+    app.translate_anim_phase = 0.0;
     let items: Vec<translation::TranslateItem> = jobs
         .iter()
         .map(|(_, id, filename, text)| translation::TranslateItem {
@@ -184,6 +185,7 @@ pub fn handle_translate_finished(
     result: Result<Vec<String>, String>,
 ) -> Task<Message> {
     app.translating = false;
+    app.translate_anim_phase = 0.0;
     match result {
         Ok(translations) => {
             let is_translate_mode = app.translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate;
@@ -261,6 +263,7 @@ pub fn handle_retranslate_finished(
     result: Result<String, String>,
 ) -> Task<Message> {
     app.translating = false;
+    app.translate_anim_phase = 0.0;
     match result {
         Ok(mut text) => {
             if text.len() >= 2 {
@@ -394,6 +397,7 @@ pub fn handle_retranslate_entry(app: &mut App, index: usize, entry_id: EntryId) 
     };
     let model = app.tx.selected_model.clone();
     app.translating = true;
+    app.translate_anim_phase = 0.0;
     app.status = format!(
         "Retranslating 1 line to {} via {model} ({})...",
         app.translate_lang, provider.name

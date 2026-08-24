@@ -154,6 +154,7 @@ pub enum Message {
     OcrStreamFailed(String),
     #[cfg(feature = "ocr")]
     OcrTick,
+    TranslateTick,
     #[cfg(feature = "inpaint")]
     InpaintEngineReady(Result<InpaintEngine, String>),
     #[cfg(feature = "inpaint")]
@@ -289,6 +290,7 @@ pub struct App {
     #[cfg(feature = "ocr")]
     held_boundary: Option<ocr_engine::BoundaryState>,
     pub(crate) translating: bool,
+    pub(crate) translate_anim_phase: f32,
     pub(crate) tx: ui_translation::Session,
     pub(crate) translate_lang: String,
     pub(crate) translation_panel_mode: TranslationPanelMode,
@@ -437,6 +439,7 @@ impl App {
             #[cfg(feature = "ocr")]
             held_boundary: None,
             translating: false,
+            translate_anim_phase: 0.0,
             tx: ui_translation::Session::default(),
             translate_lang: ui_translation::LANGUAGES[0].to_string(),
             translation_panel_mode: TranslationPanelMode::Edit,
@@ -922,6 +925,15 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::OcrStreamFailed(e) => ocr::handle_ocr_stream_failed(app, e),
         #[cfg(feature = "ocr")]
         Message::OcrTick => Task::none(),
+        Message::TranslateTick => {
+            if app.translating {
+                // 60fps → ~16ms per tick, matches subscription interval
+                app.translate_anim_phase = (app.translate_anim_phase + 0.016) % 6.0;
+            } else {
+                app.translate_anim_phase = 0.0;
+            }
+            Task::none()
+        }
         Message::FontLoaded => {
             app.font = Some(Font::with_name(scanlateit_ui::KOREAN_FONT_NAME));
             app.status = format!(
@@ -1353,15 +1365,15 @@ pub fn subscription(app: &App) -> Subscription<Message> {
             None
         }
     });
+    let mut subs = vec![frame_sub, keys];
     #[cfg(feature = "ocr")]
     if app.running {
-        return Subscription::batch([
-            frame_sub,
-            keys,
-            iced::time::every(Duration::from_millis(16)).map(|_| Message::OcrTick),
-        ]);
+        subs.push(iced::time::every(Duration::from_millis(16)).map(|_| Message::OcrTick));
     }
-    Subscription::batch([frame_sub, keys])
+    if app.translating {
+        subs.push(iced::time::every(Duration::from_millis(16)).map(|_| Message::TranslateTick));
+    }
+    Subscription::batch(subs)
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {

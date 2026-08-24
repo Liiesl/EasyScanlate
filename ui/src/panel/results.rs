@@ -610,6 +610,9 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .height(FillLength)
             .width(FillLength),
     );
+    if state.translating() {
+        col = col.push(crate::loading_bar::LoadingBar::new(state.translation_anim_phase()).view());
+    }
     if let Some(b) = bar {
         col = col.push(b);
     }
