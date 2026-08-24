@@ -235,6 +235,12 @@ pub enum UiEvent {
     /// `Rectangle` is `(x, y, w, h)` in image pixels. No padding is added
     /// (unlike inpaint's expanded canvas).
     ManualOcrSelection((usize, Rectangle)),
+    /// The user finished dragging a manual OCR range that spans two tiles
+    /// (global drag across the seam), same payload shape as `InpaintSelectionSpan`.
+    /// Each entry is `(image_index, rect_in_image_pixels)`. Rendering is identical
+    /// to inpaint span (green marquee on both tiles), but synthesis is auto-OCR
+    /// style: crops stacked at first page's width, no 512 centering/mirror.
+    ManualOcrSelectionSpan(Vec<(usize, Rectangle)>),
     EditAction(text_editor::Action),
     EditRect(Rectangle),
     EditSubmit,

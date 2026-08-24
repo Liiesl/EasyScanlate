@@ -554,6 +554,9 @@ pub fn handle_manual_ocr_engine_ready(app: &mut App, result: Result<ocr::Engine,
     match result {
         Ok(engine) => {
             app.manual_ocr_engine = Some(engine.clone());
+            if let Some(spans) = app.pending_manual_ocr_span.take() {
+                return start_manual_ocr_span(app, spans, engine.clone());
+            }
             if let Some((index, rect)) = app.pending_manual_ocr.take() {
                 return start_manual_ocr(app, index, rect, engine);
             }
@@ -561,6 +564,7 @@ pub fn handle_manual_ocr_engine_ready(app: &mut App, result: Result<ocr::Engine,
         }
         Err(e) => {
             app.pending_manual_ocr = None;
+            app.pending_manual_ocr_span = None;
             app.status = format!("Manual OCR engine failed: {e}");
             Task::none()
         }
@@ -601,5 +605,334 @@ pub fn handle_manual_ocr_finished(app: &mut App, index: usize, result: Result<Ve
             app.status = format!("Manual OCR failed: {e}");
         }
     }
+    Task::none()
+}
+
+// ---------------------------------------------------------------------------
+// Manual OCR span (across two pages) – auto-OCR style stitch
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "ocr")]
+fn start_manual_ocr_span(
+    app: &mut App,
+    spans: Vec<(usize, iced::Rectangle)>,
+    engine: ocr::Engine,
+) -> Task<Message> {
+    // spans are already sorted and trimmed to 2 consecutive by the viewer; enforce again.
+    let mut spans = spans;
+    spans.sort_by_key(|(idx, _)| *idx);
+    if spans.len() > 2 {
+        spans.truncate(2);
+    }
+    if spans.is_empty() {
+        return Task::none();
+    }
+    if spans.len() == 1 {
+        let (idx, r) = spans.into_iter().next().unwrap();
+        return start_manual_ocr(app, idx, r, engine);
+    }
+    app.manual_ocring = true;
+    app.status = format!(
+        "Manual OCR on images {} & {} (stitched)…",
+        spans[0].0 + 1,
+        spans[1].0 + 1
+    );
+    // Resolve paths and keep rect copies.
+    let mut items: Vec<(usize, String, iced::Rectangle)> = Vec::new();
+    for (idx, rect) in spans {
+        if idx >= app.images.len() {
+            continue;
+        }
+        let path = app
+            .project
+            .image(app.images[idx].image_id)
+            .map(|m| m.path.clone())
+            .unwrap_or_default();
+        if path.is_empty() {
+            continue;
+        }
+        items.push((idx, path, rect));
+    }
+    if items.len() < 2 {
+        // fallback to single if one path missing
+        if let Some((idx, _, rect)) = items.into_iter().next() {
+            // need rect; reconstruct from original spans fallback
+            return start_manual_ocr(app, idx, rect, engine);
+        }
+        app.manual_ocring = false;
+        return Task::none();
+    }
+    let merge_cfg = scanlateit_settings::get(|s| ocr::MergeConfig::from_threshold_str(&s.ocr_merge_threshold));
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || -> Result<Vec<(usize, Vec<NewEntry>)>, String> {
+                // Decode and crop each selection exactly (no padding), like single manual OCR.
+                struct PieceMeta {
+                    idx: usize,
+                    x0: u32,
+                    y0: u32,
+                    cw: u32,
+                    ch: u32,
+                    crop: image::RgbaImage,
+                }
+                let mut pieces: Vec<PieceMeta> = Vec::new();
+                for (idx, path, rect) in items {
+                    let dyn_img = image::ImageReader::open(&path)
+                        .map_err(|e| format!("Failed to open {path}: {e}"))?
+                        .with_guessed_format()
+                        .map_err(|e| format!("Failed to decode {path}: {e}"))?
+                        .decode()
+                        .map_err(|e| format!("Failed to decode {path}: {e}"))?;
+                    let rgba = dyn_img.into_rgba8();
+                    let (img_w, img_h) = rgba.dimensions();
+                    let x0f = rect.x.floor().max(0.0);
+                    let y0f = rect.y.floor().max(0.0);
+                    let x1f = (rect.x + rect.width).ceil().max(x0f + 1.0);
+                    let y1f = (rect.y + rect.height).ceil().max(y0f + 1.0);
+                    let x0 = (x0f as u32).min(img_w.saturating_sub(1));
+                    let y0 = (y0f as u32).min(img_h.saturating_sub(1));
+                    let x1 = (x1f as u32).min(img_w);
+                    let y1 = (y1f as u32).min(img_h);
+                    let cw = x1.saturating_sub(x0).max(1);
+                    let ch = y1.saturating_sub(y0).max(1);
+                    // Clamp cw/ch to image bounds and respect MIN_OCR_EDGE already filtered
+                    let crop = image::imageops::crop_imm(&rgba, x0, y0, cw, ch).to_image();
+                    pieces.push(PieceMeta { idx, x0, y0, cw, ch, crop });
+                }
+                if pieces.len() < 2 {
+                    return Err("manual OCR span: not enough valid pieces".to_string());
+                }
+                pieces.sort_by_key(|p| p.idx);
+                // Auto-OCR style: common width = first piece's width (first page width).
+                let common_w = pieces[0].cw;
+                if common_w == 0 {
+                    return Err("manual OCR span: zero width".to_string());
+                }
+                // Build scaled pieces for stitching.
+                struct ScaledPiece {
+                    idx: usize,
+                    x0: u32,
+                    y0: u32,
+                    cw: u32,
+                    #[allow(dead_code)]
+                    ch: u32,
+                    #[allow(dead_code)]
+                    scaled_w: u32,
+                    scaled_h: u32,
+                    off_y: u32,
+                    image: image::RgbaImage,
+                }
+                let mut scaled: Vec<ScaledPiece> = Vec::new();
+                let mut total_h: u32 = 0;
+                for p in pieces {
+                    let scaled_h = if p.cw == common_w {
+                        p.ch
+                    } else {
+                        ((p.ch as f32 * common_w as f32 / p.cw as f32).round().max(1.0)) as u32
+                    };
+                    let scaled_img = if p.cw == common_w {
+                        p.crop
+                    } else {
+                        image::imageops::resize(&p.crop, common_w, scaled_h, image::imageops::FilterType::Triangle)
+                    };
+                    let off_y = total_h;
+                    total_h += scaled_h;
+                    scaled.push(ScaledPiece {
+                        idx: p.idx,
+                        x0: p.x0,
+                        y0: p.y0,
+                        cw: p.cw,
+                        ch: p.ch,
+                        scaled_w: common_w,
+                        scaled_h,
+                        off_y,
+                        image: scaled_img,
+                    });
+                }
+                // Stitch vertically.
+                let mut stitched_rgba = image::RgbaImage::new(common_w, total_h);
+                for s in &scaled {
+                    image::imageops::replace(&mut stitched_rgba, &s.image, 0, s.off_y as i64);
+                }
+                let stitched_rgb = image::DynamicImage::ImageRgba8(stitched_rgba).to_rgb8();
+                let token = ocr::OcrCancellationToken::new();
+                let lines = engine
+                    .run_image_cancellable(&stitched_rgb, &token)
+                    .map_err(|e| format!("Manual OCR span failed: {e}"))?;
+                let mut entries = ocr::to_entries_with(lines, merge_cfg);
+                // Map stitched-local quads back to per-image original coordinates.
+                // Use common_w as stitched width; for each entry decide piece by centroid y.
+                let h0 = scaled[0].scaled_h as f32;
+                let mut per_image: std::collections::HashMap<usize, Vec<NewEntry>> = std::collections::HashMap::new();
+                for mut entry in entries.drain(..) {
+                    // Compute centroid y in stitched space.
+                    let ys: Vec<f32> = entry.quad.points.iter().map(|p| p[1]).collect();
+                    let y_centroid = ys.iter().sum::<f32>() / ys.len() as f32;
+                    let mut target_idx = 0usize;
+                    if y_centroid >= h0 && scaled.len() > 1 {
+                        target_idx = 1;
+                    } else if scaled.len() > 1 {
+                        // Check straddle: bbox crosses seam
+                        let y0 = ys.iter().cloned().fold(f32::INFINITY, f32::min);
+                        let y1 = ys.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                        if y0 < h0 && y1 > h0 {
+                            // Straddles seam – assign to side with larger overlap.
+                            let above_h = h0 - y0;
+                            let below_h = y1 - h0;
+                            if below_h > above_h {
+                                target_idx = 1;
+                            } else {
+                                target_idx = 0;
+                            }
+                            // Clip points that lie beyond target piece's range to avoid cross-piece mapping artifacts.
+                            // For above choice, clamp y1 to h0; for below, clamp y0 to h0 before mapping.
+                            // We'll map after clamping.
+                        }
+                    }
+                    // Determine piece for mapping
+                    let piece = if target_idx == 0 { &scaled[0] } else { &scaled[1 % scaled.len()] };
+                    let factor = piece.cw as f32 / common_w as f32; // uniform scale inverse
+                    let off_y = piece.off_y as f32;
+                    // Map each point; also handle straddle clamp: if point y is outside piece's stitched range, clamp to edge.
+                    for p in &mut entry.quad.points {
+                        let y_s = p[1];
+                        let is_in_piece = if target_idx == 0 { y_s < h0 } else { y_s >= h0 };
+                        // For points outside target piece (straddle case), clamp y_s to seam before mapping to keep quad inside target image.
+                        let y_clamped = if !is_in_piece {
+                            if target_idx == 0 { (h0 - 0.5).min(y_s).max(0.0) } else { h0.max(y_s) }
+                        } else {
+                            y_s
+                        };
+                        let x_mapped = piece.x0 as f32 + p[0] * factor;
+                        let y_mapped = piece.y0 as f32 + (y_clamped - off_y) * factor;
+                        *p = [x_mapped, y_mapped];
+                    }
+                    per_image.entry(piece.idx).or_default().push(entry);
+                }
+                let mut out: Vec<(usize, Vec<NewEntry>)> = per_image.into_iter().collect();
+                out.sort_by_key(|(idx, _)| *idx);
+                // Ensure at least an entry per original span even if OCR found nothing? No – return as is, caller will show "no text".
+                Ok(out)
+            })
+            .await
+            .unwrap_or_else(|e| Err(format!("Manual OCR span task cancelled: {e}")))
+        },
+        Message::ManualOcrSpanFinished,
+    )
+}
+
+#[cfg(feature = "ocr")]
+pub fn handle_manual_ocr_span(app: &mut App, spans: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
+    if app.manual_ocring || app.running || app.translating || app.inpainting {
+        return Task::none();
+    }
+    if spans.is_empty() {
+        return Task::none();
+    }
+    let mut spans = spans;
+    spans.sort_by_key(|(idx, _)| *idx);
+    if spans.len() > 2 {
+        spans.truncate(2);
+    }
+    // Require consecutive seam only.
+    if spans.len() == 2 && spans[1].0 != spans[0].0 + 1 {
+        app.status = "Manual OCR span: images must be consecutive.".to_string();
+        return Task::none();
+    }
+    // Validate per-piece size (keep MIN_OCR_EDGE per piece as requested)
+    for (_, r) in &spans {
+        if r.width < 4.0 || r.height < 4.0 {
+            app.status = "Manual OCR: selection too small.".to_string();
+            return Task::none();
+        }
+        if r.width < 4.0 || r.height < 4.0 {
+            return Task::none();
+        }
+    }
+    if spans.len() == 1 {
+        let (idx, rect) = spans.into_iter().next().unwrap();
+        return handle_manual_ocr_selection(app, idx, rect);
+    }
+    // Build engine config same as single
+    let cfg = scanlateit_settings::get(|s| {
+        ocr::config_with(
+            0.0,
+            s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000),
+        )
+    });
+    let cached = app.manual_ocr_engine.clone();
+    if let Some(engine) = cached {
+        return start_manual_ocr_span(app, spans, engine);
+    }
+    app.pending_manual_ocr_span = Some(spans);
+    app.status = "Loading OCR engine for manual OCR…".to_string();
+    Task::perform(async move { ocr::Engine::build_with_config(cfg) }, Message::ManualOcrEngineReady)
+}
+
+#[cfg(feature = "ocr")]
+pub fn handle_manual_ocr_span_finished(
+    app: &mut App,
+    result: Result<Vec<(usize, Vec<NewEntry>)>, String>,
+) -> Task<Message> {
+    app.manual_ocring = false;
+    app.ocr_mode = false;
+    match result {
+        Ok(per_image) => {
+            if per_image.is_empty() {
+                app.status = "Manual OCR span: no text found.".to_string();
+                return Task::none();
+            }
+            let image_count = per_image.len();
+            let mut total_added = 0usize;
+            let mut total_detected = 0usize;
+            for (idx, entries) in per_image {
+                let cnt = entries.len();
+                total_detected += cnt;
+                if idx >= app.images.len() {
+                    continue;
+                }
+                let image_id = app.images[idx].image_id;
+                let added = if let Some(ev) = app.project.append_ocr_for_image_with_event(image_id, entries) {
+                    let n = if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev {
+                        ids.len()
+                    } else {
+                        cnt
+                    };
+                    crate::app::handle_model_event(app, ev);
+                    let rev = app.project.reorder_entries_for_image_with_event(image_id);
+                    crate::app::handle_model_event(app, rev);
+                    n
+                } else {
+                    0
+                };
+                total_added += added;
+            }
+            if total_added == 0 && total_detected == 0 {
+                app.status = "Manual OCR span: no text found.".to_string();
+            } else {
+                app.status = format!(
+                    "Manual OCR span: {total_added} line(s) added across {image_count} image(s) ({total_detected} detected)."
+                );
+            }
+        }
+        Err(e) => {
+            app.status = format!("Manual OCR span failed: {e}");
+        }
+    }
+    Task::none()
+}
+
+#[cfg(not(feature = "ocr"))]
+pub fn handle_manual_ocr_span(app: &mut App, _spans: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
+    app.status = "OCR is not available in this build.".to_string();
+    Task::none()
+}
+
+#[cfg(not(feature = "ocr"))]
+pub fn handle_manual_ocr_span_finished(
+    app: &mut App,
+    _result: Result<Vec<(usize, Vec<NewEntry>)>, String>,
+) -> Task<Message> {
+    app.status = "OCR is not available in this build.".to_string();
     Task::none()
 }

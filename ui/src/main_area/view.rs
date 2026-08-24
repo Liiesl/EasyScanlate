@@ -68,6 +68,7 @@ fn build_viewer<'a, S: UiState + ?Sized>(state: &'a S, tiles: Vec<TileSpec<'a>>,
             .on_inpaint_span(UiEvent::InpaintSelectionSpan)
             .on_inpaint_toolbar(UiEvent::InpaintToolbar)
             .on_ocr_selection(UiEvent::ManualOcrSelection)
+            .on_ocr_span(UiEvent::ManualOcrSelectionSpan)
             .inpaint_mode(state.inpaint_mode())
             .ocr_mode(state.ocr_mode())
             .show_inpaint(state.show_inpaint())

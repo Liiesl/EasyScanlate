@@ -64,6 +64,7 @@ pub struct TileView<
     T = fn((usize, Rectangle)) -> Message,
     U = fn(Vec<(usize, Rectangle)>) -> Message,
     V = fn() -> Message,
+    W = fn(Vec<(usize, Rectangle)>) -> Message,
 > where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -78,6 +79,7 @@ pub struct TileView<
     T: Fn((usize, Rectangle)) -> Message,
     U: Fn(Vec<(usize, Rectangle)>) -> Message,
     V: Fn() -> Message,
+    W: Fn(Vec<(usize, Rectangle)>) -> Message,
 {
     tiles: Vec<TileSpec<'a>>,
     font: Font,
@@ -107,10 +109,11 @@ pub struct TileView<
     on_inpaint_toolbar: Option<S>,
     inpaint_reveal: Option<(usize, usize)>,
     on_ocr_selection: Option<T>,
+    on_ocr_span: Option<W>,
     on_export: Option<V>,
 }
 
-impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V> TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W> TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -125,6 +128,7 @@ where
     T: Fn((usize, Rectangle)) -> Message,
     U: Fn(Vec<(usize, Rectangle)>) -> Message,
     V: Fn() -> Message,
+    W: Fn(Vec<(usize, Rectangle)>) -> Message,
 {
     pub fn new(tiles: Vec<TileSpec<'a>>, font: Font) -> Self {
         Self {
@@ -153,6 +157,7 @@ where
             on_inpaint_toolbar: None,
             inpaint_reveal: None,
             on_ocr_selection: None,
+            on_ocr_span: None,
             on_export: None,
         }
     }
@@ -221,6 +226,11 @@ where
         self
     }
 
+    pub fn on_ocr_span(mut self, f: W) -> Self {
+        self.on_ocr_span = Some(f);
+        self
+    }
+
     pub fn inpaint_mode(mut self, inpaint_mode: bool) -> Self {
         self.inpaint_mode = inpaint_mode;
         self
@@ -286,8 +296,8 @@ where
 // Widget impl - delegates geometry/hit-testing/drawing to submodules
 // ---------------------------------------------------------------------------
 
-impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -302,6 +312,7 @@ where
     T: Fn((usize, Rectangle)) -> Message,
     U: Fn(Vec<(usize, Rectangle)>) -> Message,
     V: Fn() -> Message,
+    W: Fn(Vec<(usize, Rectangle)>) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
     fn size(&self) -> Size<Length> {
@@ -937,7 +948,7 @@ where
                         let gy0_raw = sel_y + start.y.min(current.y);
                         let gy1_raw = sel_y + start.y.max(current.y);
                         let (gy0, gy1) = (gy0_raw.min(gy1_raw), gy0_raw.max(gy1_raw));
-                        let mut spans: Vec<(usize, Rectangle, f32)> = Vec::new();
+                        let mut spans: Vec<(usize, Rectangle)> = Vec::new();
                         for (i, (y, h)) in layout.iter().enumerate() {
                             if gy1 <= *y || gy0 >= y + h { continue; }
                             let y0_tile = (gy0.max(*y) - y).max(0.0);
@@ -952,16 +963,28 @@ where
                                 Size::new((x1 - x0) / scale, (y1_tile - y0_tile) / scale),
                             );
                             if rect.width >= MIN_OCR_EDGE && rect.height >= MIN_OCR_EDGE {
-                                let area = rect.width * rect.height;
-                                spans.push((i, rect, area));
+                                spans.push((i, rect));
                             }
                         }
-                        if !spans.is_empty() {
-                            // For OCR keep single-image behavior: pick largest piece.
-                            spans.sort_by(|a, b| b.2.total_cmp(&a.2));
-                            let (best_idx, best_rect, _) = spans[0];
+                        if spans.is_empty() {
+                            // nothing
+                        } else if spans.len() == 1 {
                             if let Some(callback) = self.on_ocr_selection.as_ref() {
-                                shell.publish(callback((best_idx, best_rect)));
+                                shell.publish(callback(spans[0]));
+                                shell.request_redraw();
+                            }
+                        } else {
+                            spans.sort_by_key(|(idx, _)| *idx);
+                            // seam only: limit to 2 consecutive images
+                            let trimmed = if spans.len() > 2 { spans[..2].to_vec() } else { spans };
+                            if let Some(callback) = self.on_ocr_span.as_ref() {
+                                shell.publish(callback(trimmed));
+                                shell.request_redraw();
+                            } else if let Some(callback) = self.on_ocr_selection.as_ref() {
+                                // fallback: emit largest
+                                let mut by_area: Vec<_> = trimmed.into_iter().map(|(idx, r)| (idx, r, r.width * r.height)).collect();
+                                by_area.sort_by(|a, b| b.2.total_cmp(&a.2));
+                                shell.publish(callback((by_area[0].0, by_area[0].1)));
                                 shell.request_redraw();
                             }
                         }
@@ -1251,8 +1274,8 @@ where
     }
 }
 
-impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Q: 'a, R: 'a, S: 'a, T: 'a, U: 'a, V: 'a, Theme, Renderer>
-    From<TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V>> for Element<'a, Message, Theme, Renderer>
+impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Q: 'a, R: 'a, S: 'a, T: 'a, U: 'a, V: 'a, W: 'a, Theme, Renderer>
+    From<TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W>> for Element<'a, Message, Theme, Renderer>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -1267,9 +1290,10 @@ where
     T: Fn((usize, Rectangle)) -> Message,
     U: Fn(Vec<(usize, Rectangle)>) -> Message,
     V: Fn() -> Message,
+    W: Fn(Vec<(usize, Rectangle)>) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
-    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V>) -> Self {
+    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W>) -> Self {
         Self::new(view)
     }
 }

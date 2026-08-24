@@ -147,6 +147,8 @@ pub enum Message {
     #[cfg(feature = "ocr")]
     ManualOcrFinished(usize, Result<Vec<NewEntry>, String>),
     #[cfg(feature = "ocr")]
+    ManualOcrSpanFinished(Result<Vec<(usize, Vec<NewEntry>)>, String>),
+    #[cfg(feature = "ocr")]
     OcrStreamRun(Result<ocr_engine::RunEvent, String>),
     #[cfg(feature = "ocr")]
     OcrStreamFailed(String),
@@ -235,6 +237,8 @@ pub struct App {
     manual_ocr_engine: Option<scanlateit_ocr::Engine>,
     #[cfg(feature = "ocr")]
     pending_manual_ocr: Option<(usize, Rectangle)>,
+    #[cfg(feature = "ocr")]
+    pending_manual_ocr_span: Option<Vec<(usize, Rectangle)>>,
     pub(crate) show_overlay_text: bool,
     pub(crate) show_inpaint: bool,
     pub(crate) view_mode: MainAreaMode,
@@ -381,6 +385,8 @@ impl App {
             manual_ocr_engine: None,
             #[cfg(feature = "ocr")]
             pending_manual_ocr: None,
+            #[cfg(feature = "ocr")]
+            pending_manual_ocr_span: None,
             show_overlay_text: true,
             show_inpaint: true,
             view_mode: MainAreaMode::View,
@@ -868,6 +874,8 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::ManualOcrEngineReady(result) => ocr::handle_manual_ocr_engine_ready(app, result),
         #[cfg(feature = "ocr")]
         Message::ManualOcrFinished(index, result) => ocr::handle_manual_ocr_finished(app, index, result),
+        #[cfg(feature = "ocr")]
+        Message::ManualOcrSpanFinished(result) => ocr::handle_manual_ocr_span_finished(app, result),
         #[cfg(feature = "inpaint")]
         Message::InpaintEngineReady(result) => inpaint::handle_inpaint_engine_ready(app, result),
         #[cfg(feature = "styling")]
@@ -1238,6 +1246,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::InpaintSelection((index, rect))) => inpaint::handle_inpaint_selection(app, index, rect),
         Message::Ui(UiEvent::InpaintSelectionSpan(spans)) => inpaint::handle_inpaint_span(app, spans),
         Message::Ui(UiEvent::ManualOcrSelection((index, rect))) => ocr::handle_manual_ocr_selection(app, index, rect),
+        Message::Ui(UiEvent::ManualOcrSelectionSpan(spans)) => ocr::handle_manual_ocr_span(app, spans),
         Message::Ui(UiEvent::EditAction(action)) => edit::handle_edit_action(app, action),
         Message::Ui(UiEvent::EditRect(rect)) => edit::handle_edit_rect(app, rect),
         Message::Ui(UiEvent::EditSubmit) => edit::handle_edit_submit(app),

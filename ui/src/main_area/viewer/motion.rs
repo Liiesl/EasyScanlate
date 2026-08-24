@@ -257,21 +257,96 @@ pub fn resize_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, 
     let img_x = local.x / scale;
     let img_y = (local.y + state.offset - y) / scale;
     let min_edge = MIN_BOX_EDGE / scale;
-    let start = quad.bounds();
-    let [mut min_x, mut min_y, mut max_x, mut max_y] = start;
+
+    // Order to TL/TR/BR/BL so geometry is deterministic even if stored order drifted.
+    let ordered = order_quad(quad.points);
+
+    // Pick a rotation angle that maps the quad to an axis-aligned local space.
+    // For a true rotated rectangle we get the exact angle, for a skewed / free-transformed
+    // quad we fall back to the average direction of top+bottom edges (keeps resize stable).
+    let angle = if let Some((_, _, _, a)) = crate::main_area::geometry::rotated_rect_geometry(ordered) {
+        a
+    } else {
+        let top_dx = ordered[1][0] - ordered[0][0];
+        let top_dy = ordered[1][1] - ordered[0][1];
+        let bot_dx = ordered[2][0] - ordered[3][0];
+        let bot_dy = ordered[2][1] - ordered[3][1];
+        let avg_dx = (top_dx + bot_dx) * 0.5;
+        let avg_dy = (top_dy + bot_dy) * 0.5;
+        if avg_dx.abs() < f32::EPSILON && avg_dy.abs() < f32::EPSILON {
+            top_dy.atan2(top_dx)
+        } else {
+            avg_dy.atan2(avg_dx)
+        }
+    };
+
+    let center = quad_centroid(ordered);
+    let (sin, cos) = angle.sin_cos();
+
+    // Rotate point `p` around `center` by `angle` (positive = CCW).
+    let rotate = |p: Point, s: f32, c: f32| -> Point {
+        let dx = p.x - center.x;
+        let dy = p.y - center.y;
+        Point::new(center.x + dx * c - dy * s, center.y + dx * s + dy * c)
+    };
+
+    // World -> local (rotate by -angle)
+    let local_points: [[f32; 2]; 4] = std::array::from_fn(|i| {
+        let p = Point::new(ordered[i][0], ordered[i][1]);
+        let lp = rotate(p, -sin, cos);
+        [lp.x, lp.y]
+    });
+
+    // Local AABB (tight in local space, not the world AABB that was causing the bug)
+    let mut min_lx = f32::INFINITY;
+    let mut min_ly = f32::INFINITY;
+    let mut max_lx = f32::NEG_INFINITY;
+    let mut max_ly = f32::NEG_INFINITY;
+    for p in local_points {
+        min_lx = min_lx.min(p[0]);
+        min_ly = min_ly.min(p[1]);
+        max_lx = max_lx.max(p[0]);
+        max_ly = max_ly.max(p[1]);
+    }
+    let old_local = [min_lx, min_ly, max_lx, max_ly];
+    // Degenerate quad (should not happen) - fall back to old world refit
+    if (max_lx - min_lx) < f32::EPSILON || (max_ly - min_ly) < f32::EPSILON {
+        let start = quad.bounds();
+        let [mut min_x, mut min_y, mut max_x, mut max_y] = start;
+        if handle.left { min_x = img_x.min(max_x - min_edge); }
+        if handle.right { max_x = img_x.max(min_x + min_edge); }
+        if handle.top { min_y = img_y.min(max_y - min_edge); }
+        if handle.bottom { max_y = img_y.max(min_y + min_edge); }
+        return Some(quad.refit(start, [min_x, min_y, max_x, max_y]));
+    }
+
+    let cursor_local = rotate(Point::new(img_x, img_y), -sin, cos);
+    let mut new_local = old_local;
     if handle.left {
-        min_x = img_x.min(max_x - min_edge);
+        new_local[0] = cursor_local.x.min(new_local[2] - min_edge);
     }
     if handle.right {
-        max_x = img_x.max(min_x + min_edge);
+        new_local[2] = cursor_local.x.max(new_local[0] + min_edge);
     }
     if handle.top {
-        min_y = img_y.min(max_y - min_edge);
+        new_local[1] = cursor_local.y.min(new_local[3] - min_edge);
     }
     if handle.bottom {
-        max_y = img_y.max(min_y + min_edge);
+        new_local[3] = cursor_local.y.max(new_local[1] + min_edge);
     }
-    Some(quad.refit(start, [min_x, min_y, max_x, max_y]))
+
+    let sx = (new_local[2] - new_local[0]) / (old_local[2] - old_local[0]).max(f32::EPSILON);
+    let sy = (new_local[3] - new_local[1]) / (old_local[3] - old_local[1]).max(f32::EPSILON);
+
+    let new_local_points: [[f32; 2]; 4] = std::array::from_fn(|i| {
+        let [x, y] = local_points[i];
+        let nx = new_local[0] + (x - old_local[0]) * sx;
+        let ny = new_local[1] + (y - old_local[1]) * sy;
+        let wp = rotate(Point::new(nx, ny), sin, cos);
+        [wp.x, wp.y]
+    });
+
+    Some(Quad { points: new_local_points })
 }
 
 pub fn distort_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, corner: usize, quad: Quad, local: Point) -> Option<Quad> {
