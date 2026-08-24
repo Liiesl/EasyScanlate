@@ -467,9 +467,44 @@ pub fn to_xml_string(project: &Project) -> Result<String, String> {
             p.push_attribute(("y", patch.bounds[1].to_string().as_str()));
             p.push_attribute(("w", patch.bounds[2].to_string().as_str()));
             p.push_attribute(("h", patch.bounds[3].to_string().as_str()));
-            writer
-                .write_event(Event::Empty(p))
-                .map_err(|e| e.to_string())?;
+            if let Some(quad) = patch.quad {
+                writer
+                    .write_event(Event::Start(p))
+                    .map_err(|e| e.to_string())?;
+                writer
+                    .write_event(Event::Text(BytesText::from_escaped("\n        ")))
+                    .map_err(|e| e.to_string())?;
+                writer
+                    .write_event(Event::Start(BytesStart::new("quad")))
+                    .map_err(|e| e.to_string())?;
+                for pt in &quad.points {
+                    writer
+                        .write_event(Event::Text(BytesText::from_escaped("\n          ")))
+                        .map_err(|e| e.to_string())?;
+                    let mut pt_el = BytesStart::new("point");
+                    pt_el.push_attribute(("x", pt[0].to_string().as_str()));
+                    pt_el.push_attribute(("y", pt[1].to_string().as_str()));
+                    writer
+                        .write_event(Event::Empty(pt_el))
+                        .map_err(|e| e.to_string())?;
+                }
+                writer
+                    .write_event(Event::Text(BytesText::from_escaped("\n        ")))
+                    .map_err(|e| e.to_string())?;
+                writer
+                    .write_event(Event::End(BytesStart::new("quad").to_end()))
+                    .map_err(|e| e.to_string())?;
+                writer
+                    .write_event(Event::Text(BytesText::from_escaped("\n      ")))
+                    .map_err(|e| e.to_string())?;
+                writer
+                    .write_event(Event::End(BytesStart::new("patch").to_end()))
+                    .map_err(|e| e.to_string())?;
+            } else {
+                writer
+                    .write_event(Event::Empty(p))
+                    .map_err(|e| e.to_string())?;
+            }
         }
         writer
             .write_event(Event::Text(BytesText::from_escaped("\n    ")))
@@ -605,6 +640,8 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
     let mut cur_note: Option<(EntryId, String)> = None;
     let mut cur_shape: Option<Shape> = None;
     let mut cur_shape_points: Vec<[f32;2]> = Vec::new();
+    let mut cur_inpaint_patch: Option<InpaintPatch> = None;
+    let mut cur_inpaint_quad_points: Vec<[f32; 2]> = Vec::new();
     // accumulate text content
     let mut text_buf = String::new();
     let mut collecting: Option<String> = None; // tag name whose text we collect
@@ -652,22 +689,29 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                         cur_quad_points.clear();
                     }
                     "quad" => {
-                        cur_quad_points.clear();
-                        cur_view_points.clear();
+                        // If this quad belongs to an inpaint patch, handle separately
+                        let parent_is_patch = stack.len() >= 2 && stack[stack.len() - 2] == "patch" && cur_inpaint_patch.is_some();
+                        if parent_is_patch {
+                            cur_inpaint_quad_points.clear();
+                        } else {
+                            cur_quad_points.clear();
+                            cur_view_points.clear();
+                        }
                         // distinguish entry quad vs view_quad: based on stack parent
                         // we'll just collect points; assignment on End
                     }
                     "point" => {
                         let x = attr(&e, b"x").map(|v| parse_f32(&v)).unwrap_or(0.0);
                         let y = attr(&e, b"y").map(|v| parse_f32(&v)).unwrap_or(0.0);
-                        // determine where to push: if inside entry's quad or view_quad or shape
-                        // Look at stack: top is point, second top is quad or shape etc
-                        // Check parent name
+                        // determine where to push: if inside entry's quad or view_quad or shape or patch quad
                         if stack.len() >= 2 {
                             let parent = &stack[stack.len()-2];
                             if parent=="quad" {
-                                // if cur_view_quad is Some and we are inside view_quads, else cur_entry
-                                if stack.iter().any(|s| s=="view_quads") && cur_view_quad.is_some() {
+                                // check if this quad belongs to an inpaint patch
+                                let is_patch_quad = stack.len() >= 3 && stack[stack.len()-3] == "patch" && cur_inpaint_patch.is_some();
+                                if is_patch_quad {
+                                    cur_inpaint_quad_points.push([x,y]);
+                                } else if stack.iter().any(|s| s=="view_quads") && cur_view_quad.is_some() {
                                     cur_view_points.push([x,y]);
                                 } else if cur_entry.is_some() && cur_shape.is_none() {
                                     cur_quad_points.push([x,y]);
@@ -750,8 +794,13 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                             let y = attr(&e, b"y").map(|v| parse_f32(&v)).unwrap_or(0.0);
                             let w = attr(&e, b"w").map(|v| parse_f32(&v)).unwrap_or(0.0);
                             let h = attr(&e, b"h").map(|v| parse_f32(&v)).unwrap_or(0.0);
-                            ctx.inpaint_patches.push(InpaintPatch{ id, image_id, bounds:[x,y,w,h]});
-                            stack.pop();
+                            // New format with nested <quad> will be handled on End; defer push.
+                            // To detect empty vs container, we peek if next event is quad start — but in Start event we can't know.
+                            // Heuristic: store pending and only push on End. For backward compat, if this Start has no children,
+                            // it will be closed via Empty event, not Start. This Start branch only for new container patches.
+                            cur_inpaint_patch = Some(InpaintPatch{ id, image_id, bounds:[x,y,w,h], quad: None});
+                            cur_inpaint_quad_points.clear();
+                            // Do NOT pop stack here — keep patch on stack for child quad
                         }
                     }
                     "shapes" => {},
@@ -785,12 +834,22 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                         // infer parent from current stack top (since Empty doesn't push)
                         if let Some(parent) = stack.last().map(|s| s.as_str()) {
                             if parent=="quad" {
-                                if stack.iter().any(|s| s=="view_quads") && cur_view_quad.is_some() {
+                                // check if this quad belongs to a patch
+                                let is_patch_quad = cur_inpaint_patch.is_some() && stack.len() >= 1 && stack.iter().any(|s| s=="patch");
+                                // More precise: if stack contains patch and quad parent is patch quad
+                                if is_patch_quad && cur_inpaint_patch.is_some() {
+                                    // Heuristic: if we are inside inpaint_patches/patch/quad, push to patch quad points
+                                    // Detect by checking if top of stack before quad was patch
+                                    // Since stack is [..., inpaint_patches, patch, quad], the presence of patch indicates patch quad
+                                    cur_inpaint_quad_points.push([x,y]);
+                                } else if stack.iter().any(|s| s=="view_quads") && cur_view_quad.is_some() {
                                     cur_view_points.push([x,y]);
                                 } else if cur_entry.is_some() && cur_shape.is_none() {
                                     cur_quad_points.push([x,y]);
                                 } else if cur_shape.is_some() {
                                     cur_shape_points.push([x,y]);
+                                } else if cur_inpaint_patch.is_some() {
+                                    cur_inpaint_quad_points.push([x,y]);
                                 }
                             } else if parent=="view_quad" {
                                 cur_view_points.push([x,y]);
@@ -801,6 +860,8 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                             // fallback: if cur_entry exists push there
                             if cur_entry.is_some() {
                                 cur_quad_points.push([x,y]);
+                            } else if cur_inpaint_patch.is_some() {
+                                cur_inpaint_quad_points.push([x,y]);
                             }
                         }
                     }
@@ -820,7 +881,7 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                             let y = attr(&e, b"y").map(|v| parse_f32(&v)).unwrap_or(0.0);
                             let w = attr(&e, b"w").map(|v| parse_f32(&v)).unwrap_or(0.0);
                             let h = attr(&e, b"h").map(|v| parse_f32(&v)).unwrap_or(0.0);
-                            ctx.inpaint_patches.push(InpaintPatch{ id, image_id, bounds:[x,y,w,h]});
+                            ctx.inpaint_patches.push(InpaintPatch{ id, image_id, bounds:[x,y,w,h], quad: None});
                         }
                     }
                     "profile" => {
@@ -875,13 +936,23 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                         }
                     }
                     "quad" => {
-                        // assign points to entry if cur_entry
-                        if let Some(entry) = cur_entry.as_mut() {
+                        // If this quad belongs to an inpaint patch, assign to pending patch
+                        let is_patch_quad = cur_inpaint_patch.is_some() && stack.len() >= 2 && stack[stack.len() - 2] == "patch";
+                        if is_patch_quad {
+                            if cur_inpaint_quad_points.len() == 4 {
+                                if let Some(p) = cur_inpaint_patch.as_mut() {
+                                    p.quad = Some(Quad{ points: [cur_inpaint_quad_points[0], cur_inpaint_quad_points[1], cur_inpaint_quad_points[2], cur_inpaint_quad_points[3]] });
+                                }
+                            }
+                            cur_inpaint_quad_points.clear();
+                        } else if let Some(entry) = cur_entry.as_mut() {
                             if cur_quad_points.len() == 4 {
                                 entry.quad.points = [cur_quad_points[0], cur_quad_points[1], cur_quad_points[2], cur_quad_points[3]];
                             }
+                            cur_quad_points.clear();
+                        } else {
+                            cur_quad_points.clear();
                         }
-                        cur_quad_points.clear();
                     }
                     "entry" => {
                         if let Some(entry) = cur_entry.take() {
@@ -945,6 +1016,12 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                             shape.points = cur_shape_points.clone();
                             ctx.shapes.push(shape);
                             cur_shape_points.clear();
+                        }
+                    }
+                    "patch" => {
+                        if let Some(patch) = cur_inpaint_patch.take() {
+                            ctx.inpaint_patches.push(patch);
+                            cur_inpaint_quad_points.clear();
                         }
                     }
                     _ => {}
@@ -1025,5 +1102,27 @@ mod tests {
         let back = from_xml_str(&xml).unwrap();
         assert_eq!(back.images().len(), 0);
         assert_eq!(back.ocr.entries().len(), 0);
+    }
+
+    #[test]
+    fn roundtrip_inpaint_quad() {
+        let mut project = Project::new();
+        let img = project.add_image("a.jpg", 100.0, 100.0);
+        let quad = Quad { points: [[10.0,20.0],[80.0,0.0],[90.0,30.0],[20.0,50.0]] };
+        let ev = project.add_inpaint_patch_with_quad(img, quad);
+        assert!(matches!(ev, scanlateit_model::ModelEvent::InpaintAdded { quad: Some(_), .. }));
+        let xml = to_xml_string(&project).unwrap();
+        assert!(xml.contains("<quad>"), "xml should contain quad for inpaint patch");
+        let back = from_xml_str(&xml).unwrap();
+        assert_eq!(back.extras.inpaint_patches.len(), 1);
+        let patch = &back.extras.inpaint_patches[0];
+        assert!(patch.quad.is_some(), "quad should be preserved");
+        let q = patch.quad.unwrap();
+        assert_eq!(q.points[0], [10.0,20.0]);
+        assert_eq!(q.points[2], [90.0,30.0]);
+        // legacy compat: loading old xml without quad should give None
+        let legacy_xml = r#"<?xml version="1.0" encoding="UTF-8"?><project version="1"><images next_image_id="1"><image id="0" path="a.jpg" width="100" height="100"/></images><ocr next_id="0"></ocr><profiles selected="0" next_id="1"><profile id="0" name="Default"/></profiles><styles></styles><view_quads></view_quads><extras><notes></notes><inpaint_patches><patch id="0" image_id="0" x="10" y="20" w="70" h="30"/></inpaint_patches><shapes></shapes></extras></project>"#;
+        let legacy = from_xml_str(legacy_xml).unwrap();
+        assert_eq!(legacy.extras.inpaint_patches[0].quad, None);
     }
 }

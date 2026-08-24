@@ -53,6 +53,8 @@ pub enum ModelEvent {
         id: InpaintId,
         image_id: ImageId,
         bounds: [f32; 4],
+        /// The actual quad when available (new patches). `None` for legacy.
+        quad: Option<Quad>,
     },
     InpaintRemoved {
         id: InpaintId,

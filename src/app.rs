@@ -157,17 +157,17 @@ pub enum Message {
     #[cfg(feature = "inpaint")]
     InpaintEngineReady(Result<InpaintEngine, String>),
     #[cfg(feature = "inpaint")]
-    InpaintFinished(usize, Result<Vec<(image::RgbaImage, [f32; 4])>, String>),
+    InpaintFinished(usize, Result<Vec<(image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>),
     #[cfg(feature = "inpaint")]
-    InpaintSpanFinished(Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4])>)>, String>),
+    InpaintSpanFinished(Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>)>, String>),
     #[cfg(feature = "inpaint")]
     AutoInpaintEngineReady(InpaintBackend, Result<InpaintEngine, String>),
     #[cfg(feature = "inpaint")]
-    AutoInpaintFinished(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4])>, String>),
+    AutoInpaintFinished(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>),
     #[cfg(feature = "inpaint")]
-    AutoInpaintLamaBatchFinished(Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4])>, String>)>),
+    AutoInpaintLamaBatchFinished(Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>)>),
     #[cfg(feature = "inpaint")]
-    AutoInpaintAotBatchFinished(Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4])>, String>)>),
+    AutoInpaintAotBatchFinished(Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>)>),
     #[cfg(all(feature = "styling", feature = "inpaint"))]
     PipelineStyleDetected(usize, EntryId, Result<(EntryStyle, scanlateit_styling::StylePrediction), String>),
     #[cfg(feature = "styling")]
@@ -604,7 +604,18 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                             let img = image::load_from_memory(&data).map_err(|e| e.to_string())?.to_rgba8();
                             let (w, h) = (img.width(), img.height());
                             let handle = iced::widget::image::Handle::from_rgba(w, h, bytes::Bytes::from(img.into_raw()));
-                            inpaint_map.entry(*img_id).or_default().push(scanlateit_ui::loaded::InpaintLayer { bounds: *bounds, handle, width: w, height: h });
+                            let quad = res
+                                .project
+                                .inpaint_for(*img_id)
+                                .find(|p| p.bounds == *bounds)
+                                .and_then(|p| p.quad)
+                                .or_else(|| {
+                                    res.project
+                                        .inpaint_for(*img_id)
+                                        .find(|p| p.bounds[2] as u32 == w && p.bounds[3] as u32 == h)
+                                        .and_then(|p| p.quad)
+                                });
+                            inpaint_map.entry(*img_id).or_default().push(scanlateit_ui::loaded::InpaintLayer { bounds: *bounds, quad, handle, width: w, height: h });
                         }
                         let mut out_images = Vec::new();
                         for meta in res.project.images() {

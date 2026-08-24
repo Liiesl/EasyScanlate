@@ -506,10 +506,44 @@ impl Project {
     // Inpaint patches — first-class with stable InpaintId
     // -----------------------------------------------------------------------
     pub fn add_inpaint_patch(&mut self, image_id: ImageId, bounds: [f32; 4]) -> ModelEvent {
+        // Legacy path: no quad, derive quad None. Prefer add_inpaint_patch_with_quad.
         let id = InpaintId(self.next_inpaint_id);
         self.next_inpaint_id += 1;
-        self.extras.inpaint_patches.push(InpaintPatch { id, image_id, bounds });
-        ModelEvent::InpaintAdded { id, image_id, bounds }
+        self.extras
+            .inpaint_patches
+            .push(InpaintPatch { id, image_id, bounds, quad: None });
+        ModelEvent::InpaintAdded { id, image_id, bounds, quad: None }
+    }
+
+    /// Add a patch with its actual quad (rotated/skewed). `bounds` must be
+    /// `quad.bounds()` as `[x,y,w,h]`; helper computes it if you pass only quad.
+    pub fn add_inpaint_patch_with_quad(&mut self, image_id: ImageId, quad: Quad) -> ModelEvent {
+        let [min_x, min_y, max_x, max_y] = quad.bounds();
+        let bounds = [min_x, min_y, max_x - min_x, max_y - min_y];
+        let id = InpaintId(self.next_inpaint_id);
+        self.next_inpaint_id += 1;
+        self.extras.inpaint_patches.push(InpaintPatch {
+            id,
+            image_id,
+            bounds,
+            quad: Some(quad),
+        });
+        ModelEvent::InpaintAdded { id, image_id, bounds, quad: Some(quad) }
+    }
+
+    /// Add a patch where both bounds and quad are known (e.g. from engine that
+    /// already computed a clipped quad). If `quad` is `None`, falls back to
+    /// legacy behavior.
+    pub fn add_inpaint_patch_with_bounds_and_quad(
+        &mut self,
+        image_id: ImageId,
+        bounds: [f32; 4],
+        quad: Option<Quad>,
+    ) -> ModelEvent {
+        let id = InpaintId(self.next_inpaint_id);
+        self.next_inpaint_id += 1;
+        self.extras.inpaint_patches.push(InpaintPatch { id, image_id, bounds, quad });
+        ModelEvent::InpaintAdded { id, image_id, bounds, quad }
     }
 
     pub fn remove_inpaint_patch(&mut self, id: InpaintId) -> Option<ModelEvent> {

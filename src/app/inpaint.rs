@@ -116,7 +116,7 @@ pub fn dispatch_auto_lama_jobs(app: &mut App, jobs: Vec<AutoInpaintJob>) -> Task
         Task::perform(
             async move {
                 tokio::task::spawn_blocking(move || {
-                    let mut out: Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4])>, String>)> = Vec::new();
+                    let mut out: Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>, String>)> = Vec::new();
                     for (job, prev_path, next_path) in enriched {
                         let r = run_auto_job_with_stitch(&engine, &job, pad, prev_path.as_deref(), next_path.as_deref());
                         out.push((job.index, job.id, r));
@@ -161,7 +161,7 @@ pub fn dispatch_auto_aot_jobs(app: &mut App, jobs: Vec<AutoInpaintJob>) -> Task<
         Task::perform(
             async move {
                 tokio::task::spawn_blocking(move || {
-                    let mut out: Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4])>, String>)> = Vec::new();
+                    let mut out: Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>, String>)> = Vec::new();
                     for (job, prev_path, next_path) in enriched {
                         let r = run_auto_job_with_stitch(&engine, &job, pad, prev_path.as_deref(), next_path.as_deref());
                         out.push((job.index, job.id, r));
@@ -286,7 +286,7 @@ pub fn handle_auto_engine_ready(app: &mut App, backend: InpaintBackend, result: 
 }
 
 #[cfg(feature = "inpaint")]
-pub fn handle_auto_finished(app: &mut App, index: usize, id: EntryId, result: Result<Vec<(image::RgbaImage, [f32; 4])>, String>) -> Task<Message> {
+pub fn handle_auto_finished(app: &mut App, index: usize, id: EntryId, result: Result<Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>, String>) -> Task<Message> {
     app.auto_inpaint_pending = app.auto_inpaint_pending.saturating_sub(1);
     let pending = app.auto_inpaint_pending;
     match result {
@@ -299,16 +299,17 @@ pub fn handle_auto_finished(app: &mut App, index: usize, id: EntryId, result: Re
                 let Some(image) = app.images.get_mut(index) else {
                     return Task::none();
                 };
-                for (patch, bounds) in patches {
+                for (patch, bounds, quad) in patches {
                     let (width, height) = (patch.width(), patch.height());
                     let layer = InpaintLayer {
                         bounds,
+                        quad,
                         handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())),
                         width,
                         height,
                     };
                     image.inpaint.push(layer);
-                    pending_evs.push(app.project.add_inpaint_patch(image_id, bounds));
+                    pending_evs.push(app.project.add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad));
                 }
             }
             for ev in pending_evs {
@@ -337,7 +338,7 @@ pub fn handle_auto_finished(app: &mut App, index: usize, id: EntryId, result: Re
 }
 
 #[cfg(feature = "inpaint")]
-pub fn handle_auto_lama_batch(app: &mut App, batch: Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4])>, String>)>) -> Task<Message> {
+pub fn handle_auto_lama_batch(app: &mut App, batch: Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>, String>)>) -> Task<Message> {
     for (index, id, result) in batch {
         app.auto_inpaint_pending = app.auto_inpaint_pending.saturating_sub(1);
         match result {
@@ -346,16 +347,17 @@ pub fn handle_auto_lama_batch(app: &mut App, batch: Vec<(usize, EntryId, Result<
                 let mut pending_evs = Vec::new();
                 {
                     if let Some(image) = app.images.get_mut(index) {
-                        for (patch, bounds) in patches {
+                        for (patch, bounds, quad) in patches {
                             let (width, height) = (patch.width(), patch.height());
                             let layer = InpaintLayer {
                                 bounds,
+                                quad,
                                 handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())),
                                 width,
                                 height,
                             };
                             image.inpaint.push(layer);
-                            pending_evs.push(app.project.add_inpaint_patch(image_id, bounds));
+                            pending_evs.push(app.project.add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad));
                         }
                     }
                 }
@@ -378,7 +380,7 @@ pub fn handle_auto_lama_batch(app: &mut App, batch: Vec<(usize, EntryId, Result<
 }
 
 #[cfg(feature = "inpaint")]
-pub fn handle_auto_aot_batch(app: &mut App, batch: Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4])>, String>)>) -> Task<Message> {
+pub fn handle_auto_aot_batch(app: &mut App, batch: Vec<(usize, EntryId, Result<Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>, String>)>) -> Task<Message> {
     for (index, id, result) in batch {
         app.auto_inpaint_pending = app.auto_inpaint_pending.saturating_sub(1);
         match result {
@@ -387,16 +389,17 @@ pub fn handle_auto_aot_batch(app: &mut App, batch: Vec<(usize, EntryId, Result<V
                 let mut pending_evs = Vec::new();
                 {
                     if let Some(image) = app.images.get_mut(index) {
-                        for (patch, bounds) in patches {
+                        for (patch, bounds, quad) in patches {
                             let (width, height) = (patch.width(), patch.height());
                             let layer = InpaintLayer {
                                 bounds,
+                                quad,
                                 handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())),
                                 width,
                                 height,
                             };
                             image.inpaint.push(layer);
-                            pending_evs.push(app.project.add_inpaint_patch(image_id, bounds));
+                            pending_evs.push(app.project.add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad));
                         }
                     }
                 }
@@ -419,7 +422,7 @@ pub fn handle_auto_aot_batch(app: &mut App, batch: Vec<(usize, EntryId, Result<V
 }
 
 #[cfg(feature = "inpaint")]
-pub fn handle_inpaint_finished(app: &mut App, index: usize, result: Result<Vec<(image::RgbaImage, [f32; 4])>, String>) -> Task<Message> {
+pub fn handle_inpaint_finished(app: &mut App, index: usize, result: Result<Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>, String>) -> Task<Message> {
     app.inpainting = false;
     match result {
         Ok(patches) => {
@@ -432,10 +435,11 @@ pub fn handle_inpaint_finished(app: &mut App, index: usize, result: Result<Vec<(
                 let Some(image) = app.images.get_mut(index) else {
                     return Task::none();
                 };
-                for (patch, bounds) in patches {
+                for (patch, bounds, quad) in patches {
                     let (width, height) = (patch.width(), patch.height());
                     let layer = InpaintLayer {
                         bounds,
+                        quad,
                         handle: iced::widget::image::Handle::from_rgba(
                             width,
                             height,
@@ -445,7 +449,7 @@ pub fn handle_inpaint_finished(app: &mut App, index: usize, result: Result<Vec<(
                         height,
                     };
                     image.inpaint.push(layer);
-                    pending_evs.push(app.project.add_inpaint_patch(image_id, bounds));
+                    pending_evs.push(app.project.add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad));
                 }
             }
             for ev in pending_evs { crate::app::handle_model_event(app, ev); }
@@ -493,7 +497,7 @@ pub fn start_inpaint_span(
 fn run_stitched_inpaint(
     engine: &InpaintEngine,
     spans: Vec<(usize, String, [f32; 4], Vec<Quad>)>,
-) -> Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4])>)>, String> {
+) -> Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>)>, String> {
     if spans.is_empty() {
         return Err("no spans".to_string());
     }
@@ -701,10 +705,10 @@ fn run_stitched_inpaint(
     let rect_stitched = [0.0, 0.0, STITCH_W as f32, STITCH_H as f32];
     let patches = engine.run_on_image(&stitched, rect_stitched, &quads_stitched)?;
     // Map patches back - fixed 512 scale=1, no resize
-    let mut per_image: std::collections::HashMap<usize, Vec<(image::RgbaImage, [f32; 4])>> = std::collections::HashMap::new();
+    let mut per_image: std::collections::HashMap<usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>> = std::collections::HashMap::new();
     let is_empty_single = quads_stitched.is_empty() && patches.len() == 1 && patches[0].0.dimensions() == (STITCH_W, STITCH_H);
     if is_empty_single {
-        let (img_patch, _) = &patches[0];
+        let (img_patch, _, _) = &patches[0];
         for p in &pieces {
             let [ox, oy, ow, oh] = p.orig;
             // For empty, extract selection sub-crop from the 512 strip
@@ -724,10 +728,10 @@ fn run_stitched_inpaint(
             let sel_x_clamped = sel_x.min(STITCH_W - ow);
             let sub = image::imageops::crop_imm(&slice_full, sel_x_clamped, sel_y, ow, oh).to_image();
             let bounds = [ox as f32, oy as f32, ow as f32, oh as f32];
-            per_image.entry(p.idx).or_default().push((sub, bounds));
+            per_image.entry(p.idx).or_default().push((sub, bounds, None));
         }
     } else {
-        for (idx, (patch_img, bounds_stitched)) in patches.into_iter().enumerate() {
+        for (idx, (patch_img, bounds_stitched, quad_opt)) in patches.into_iter().enumerate() {
             let [bx, by, bw, bh] = bounds_stitched;
             // Map by quad index (preserves origin) - fallback to center if len mismatch
             let p: &Piece = if idx < quad_piece.len() {
@@ -769,8 +773,25 @@ fn run_stitched_inpaint(
                     let bot_patch = image::imageops::crop_imm(&patch_img, 0, top_h as u32, bw as u32, bot_h as u32).to_image();
                     let bounds_top = [bx + p.x_src as f32, by + p.y_src as f32, bw, top_h];
                     let bounds_bot = [bx + other.x_src as f32, (py1 - p.off_y as f32) + other.y_src as f32, bw, bot_h];
-                    per_image.entry(p.idx).or_default().push((top_patch, bounds_top));
-                    per_image.entry(other.idx).or_default().push((bot_patch, bounds_bot));
+                    let quad_top = quad_opt.map(|q| {
+                        let mut nq = q;
+                        for pt in &mut nq.points {
+                            pt[0] += p.x_src as f32;
+                            pt[1] += p.y_src as f32 - p.off_y as f32;
+                        }
+                        nq
+                    });
+                    let quad_bot = quad_opt.map(|q| {
+                        let mut nq = q;
+                        for pt in &mut nq.points {
+                            pt[0] += other.x_src as f32;
+                            pt[1] += other.y_src as f32 - other.off_y as f32;
+                        }
+                        nq
+                    });
+                    // For split, keep same quad but translated; patch image is already split, so still representative
+                    per_image.entry(p.idx).or_default().push((top_patch, bounds_top, quad_top));
+                    per_image.entry(other.idx).or_default().push((bot_patch, bounds_bot, quad_bot));
                     continue;
                 }
             }
@@ -800,10 +821,18 @@ fn run_stitched_inpaint(
                 image::imageops::crop_imm(&patch_img, crop_x, crop_y, cw, ch).to_image()
             } else { patch_img };
             let bounds = [clip_x0, clip_y0, new_w, new_h];
-            per_image.entry(p.idx).or_default().push((clipped_patch, bounds));
+            let orig_quad = quad_opt.map(|q| {
+                let mut nq = q;
+                for pt in &mut nq.points {
+                    pt[0] += p.x_src as f32;
+                    pt[1] += p.y_src as f32 - p.off_y as f32;
+                }
+                nq
+            });
+            per_image.entry(p.idx).or_default().push((clipped_patch, bounds, orig_quad));
         }
     }
-    let mut out: Vec<(usize, Vec<(image::RgbaImage, [f32; 4])>)> = Vec::new();
+    let mut out: Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>)> = Vec::new();
     for p in &pieces {
         if let Some(v) = per_image.remove(&p.idx) {
             out.push((p.idx, v));
@@ -888,7 +917,7 @@ pub fn handle_inpaint_span(app: &mut App, spans: Vec<(usize, iced::Rectangle)>) 
 }
 
 #[cfg(feature = "inpaint")]
-pub fn handle_inpaint_span_finished(app: &mut App, result: Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4])>)>, String>) -> Task<Message> {
+pub fn handle_inpaint_span_finished(app: &mut App, result: Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>)>, String>) -> Task<Message> {
     app.inpainting = false;
     match result {
         Ok(per_image_patches) => {
@@ -897,16 +926,16 @@ pub fn handle_inpaint_span_finished(app: &mut App, result: Result<Vec<(usize, Ve
             for (idx, patches) in per_image_patches {
                 let Some(image_id) = app.images.get(idx).map(|i| i.image_id) else { continue; };
                 let Some(image) = app.images.get_mut(idx) else { continue; };
-                for (patch, bounds) in patches {
+                for (patch, bounds, quad) in patches {
                     total += 1;
                     let (width, height) = (patch.width(), patch.height());
-                    let layer = InpaintLayer { bounds, handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())), width, height };
+                    let layer = InpaintLayer { bounds, quad, handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())), width, height };
                     image.inpaint.push(layer);
-                    pending_evs.push((image_id, bounds));
+                    pending_evs.push((image_id, bounds, quad));
                 }
             }
-            for (image_id, bounds) in pending_evs {
-                let ev = app.project.add_inpaint_patch(image_id, bounds);
+            for (image_id, bounds, quad) in pending_evs {
+                let ev = app.project.add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad);
                 crate::app::handle_model_event(app, ev);
             }
             app.inpaint_mode = false;
@@ -935,7 +964,7 @@ fn run_auto_job_with_stitch(
     pad: f32,
     prev_path: Option<&str>,
     next_path: Option<&str>,
-) -> Result<Vec<(RgbaImage, [f32; 4])>, String> {
+) -> Result<Vec<(RgbaImage, [f32; 4], Option<Quad>)>, String> {
     let [x0, y0, x1, y1] = job.quad.bounds();
     let rect = [x0, y0, x1 - x0, y1 - y0];
     // Quick check: if not near top/bottom seam, use normal path
@@ -1043,8 +1072,8 @@ fn run_auto_job_with_stitch(
     // Map patches back: patches bounds are in stitched coordinates of the expanded main region? For Telea, bbox_crops will return per-quad bbox within stitched's patched area.
     // The returned bounds are in stitched pixel space of the original rect? Actually engine returns bounds in stitched image coords of the quad's bbox.
     // We need to map back to original main image coords: subtract need_top and add exp offsets.
-    let mut out: Vec<(RgbaImage, [f32; 4])> = Vec::new();
-    for (img, b) in patches {
+    let mut out: Vec<(RgbaImage, [f32; 4], Option<Quad>)> = Vec::new();
+    for (img, b, quad_opt) in patches {
         let [bx, by, bw, bh] = b;
         // Only keep patches that lie within middle section (original image's expanded area) to avoid returning neighbor strips
         // Check if patch overlaps middle section
@@ -1057,8 +1086,16 @@ fn run_auto_job_with_stitch(
         // Map back
         let orig_x = bx + exp_x0;
         let orig_y = by - need_top_h as f32 + exp_y0;
+        // Translate quad back as well
+        let orig_quad = quad_opt.map(|mut q| {
+            for pt in &mut q.points {
+                pt[0] += exp_x0;
+                pt[1] += exp_y0 - need_top_h as f32;
+            }
+            q
+        });
         // Patch image may need no resize as common_w == exp_w
-        out.push((img, [orig_x, orig_y, bw, bh]));
+        out.push((img, [orig_x, orig_y, bw, bh], orig_quad));
     }
     if out.is_empty() {
         // Fallback to normal if stitching produced no middle patches

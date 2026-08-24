@@ -141,12 +141,16 @@ impl Engine {
     /// crop of one mask quad (`[x, y, w, h]` in image pixels), with the
     /// text reconstructed by the engine's backend. For an empty quad list
     /// the single returned patch covers the (clamped) `rect` itself.
+    /// The patch image has `alpha=0` outside the actual rotated quad so
+    /// only the quad interior is composited. The third element is the
+    /// corresponding quad (`Some` when input quads non-empty, `None` for
+    /// empty-list whole-rect case).
     pub fn run_blocking(
         &self,
         path: &str,
         rect: [f32; 4],
         quads: &[Quad],
-    ) -> Result<Vec<(RgbaImage, [f32; 4])>, String> {
+    ) -> Result<Vec<(RgbaImage, [f32; 4], Option<Quad>)>, String> {
         let image = image::ImageReader::open(path)
             .map_err(|e| format!("Failed to open {path}: {e}"))?
             .with_guessed_format()
@@ -188,7 +192,7 @@ impl Engine {
         image: &RgbaImage,
         rect: [f32; 4],
         quads: &[Quad],
-    ) -> Result<Vec<(RgbaImage, [f32; 4])>, String> {
+    ) -> Result<Vec<(RgbaImage, [f32; 4], Option<Quad>)>, String> {
         match self.backend {
             InpaintBackend::Telea => telea_inpaint_crop(image, rect, quads, self.radius),
             InpaintBackend::Lama => {
@@ -306,26 +310,26 @@ fn window_dim(crop: i64, center: f32, edge: i64) -> (i64, i64, i64) {
 }
 
 /// The center of the combined mask boxes in crop-local coordinates; the
-/// whole crop's center when nothing is masked.
+/// whole crop's center when nothing is masked. Uses the actual quad
+/// centroids (mean of points) so rotated/skewed quads are centered correctly,
+/// not their axis-aligned bounding boxes.
 fn mask_center(crop_w: u32, crop_h: u32, quads: &[Quad], origin: [f32; 2]) -> [f32; 2] {
-    let mut min_x = f32::INFINITY;
-    let mut min_y = f32::INFINITY;
-    let mut max_x = f32::NEG_INFINITY;
-    let mut max_y = f32::NEG_INFINITY;
-    for quad in quads {
-        let [bx0, by0, bx1, by1] = quad.bounds();
-        min_x = min_x.min(bx0);
-        min_y = min_y.min(by0);
-        max_x = max_x.max(bx1);
-        max_y = max_y.max(by1);
-    }
-    if min_x.is_infinite() {
+    if quads.is_empty() {
         return [crop_w as f32 / 2.0, crop_h as f32 / 2.0];
     }
-    [
-        (min_x + max_x) / 2.0 - origin[0],
-        (min_y + max_y) / 2.0 - origin[1],
-    ]
+    // For a single quad, use its centroid. For multiple, use the average
+    // centroid (center of mass) — more stable than AABB for skewed quads.
+    let mut sum_x = 0.0f32;
+    let mut sum_y = 0.0f32;
+    for quad in quads {
+        let cx = (quad.points[0][0] + quad.points[1][0] + quad.points[2][0] + quad.points[3][0]) * 0.25;
+        let cy = (quad.points[0][1] + quad.points[1][1] + quad.points[2][1] + quad.points[3][1]) * 0.25;
+        sum_x += cx;
+        sum_y += cy;
+    }
+    let avg_x = sum_x / quads.len() as f32;
+    let avg_y = sum_y / quads.len() as f32;
+    [avg_x - origin[0], avg_y - origin[1]]
 }
 
 /// The model canvas window over the area crop, as `(src_x, src_y, w, h,
@@ -524,15 +528,46 @@ fn extract_window(
     fitted
 }
 
+/// Helper: set alpha=0 for pixels outside `quad` inside `crop` (which is at `crop_origin` in image coords).
+fn apply_quad_alpha_mask(crop: &mut RgbaImage, quad: &Quad, crop_origin: [f32; 2]) {
+    let (w, h) = crop.dimensions();
+    if w == 0 || h == 0 {
+        return;
+    }
+    // Build mask of quad inside crop: white where inside, black outside.
+    let mut mask = image::GrayImage::from_pixel(w, h, image::Luma([0]));
+    let poly: Vec<imageproc::point::Point<i32>> = quad
+        .points
+        .iter()
+        .map(|[px, py]| {
+            imageproc::point::Point::new(
+                (px - crop_origin[0]).round() as i32,
+                (py - crop_origin[1]).round() as i32,
+            )
+        })
+        .collect();
+    draw_polygon_mut(&mut mask, &poly, image::Luma([255]));
+    for (x, y, pixel) in crop.enumerate_pixels_mut() {
+        if mask.get_pixel(x, y)[0] == 0 {
+            pixel[3] = 0; // transparent outside quad
+        }
+    }
+}
+
 /// Splits an inpainted area patch into per-mask-box crops: one `(crop,
 /// rect)` pair per quad, where `rect` is `[x, y, w, h]` in image pixels and
 /// the crop covers the quad's bounding box clipped to the area. Boxes that
 /// lie entirely outside the area are skipped; an empty quad list returns the
 /// whole area patch (it was fully masked and cleaned).
-fn bbox_crops(patch: RgbaImage, origin: [f32; 2], quads: &[Quad]) -> Vec<(RgbaImage, [f32; 4])> {
+///
+/// For rotated/skewed quads the returned crop keeps the AABB dimensions but
+/// pixels outside the actual quad polygon are made transparent (`alpha=0`),
+/// so overlaying the patch only affects the true quad shape. Also returns
+/// the quad for storage.
+fn bbox_crops(patch: RgbaImage, origin: [f32; 2], quads: &[Quad]) -> Vec<(RgbaImage, [f32; 4], Option<Quad>)> {
     if quads.is_empty() {
         let (width, height) = patch.dimensions();
-        return vec![(patch, [origin[0], origin[1], width as f32, height as f32])];
+        return vec![(patch, [origin[0], origin[1], width as f32, height as f32], None)];
     }
     let ox = origin[0] as i64;
     let oy = origin[1] as i64;
@@ -561,7 +596,7 @@ fn bbox_crops(patch: RgbaImage, origin: [f32; 2], quads: &[Quad]) -> Vec<(RgbaIm
         let cy1 = (iy1.ceil() as i64).clamp(cy0 + 1, max_y);
         let w = (cx1 - cx0) as u32;
         let h = (cy1 - cy0) as u32;
-        let crop = image::imageops::crop_imm(
+        let mut crop = image::imageops::crop_imm(
             &patch,
             (cx0 - ox) as u32,
             (cy0 - oy) as u32,
@@ -569,7 +604,9 @@ fn bbox_crops(patch: RgbaImage, origin: [f32; 2], quads: &[Quad]) -> Vec<(RgbaIm
             h,
         )
         .to_image();
-        crops.push((crop, [cx0 as f32, cy0 as f32, w as f32, h as f32]));
+        // Make outside-quad pixels transparent so only the actual rotated quad is patched
+        apply_quad_alpha_mask(&mut crop, quad, [cx0 as f32, cy0 as f32]);
+        crops.push((crop, [cx0 as f32, cy0 as f32, w as f32, h as f32], Some(*quad)));
     }
     crops
 }
@@ -586,7 +623,7 @@ pub fn telea_inpaint_crop(
     rect: [f32; 4],
     quads: &[Quad],
     radius: i32,
-) -> Result<Vec<(RgbaImage, [f32; 4])>, String> {
+) -> Result<Vec<(RgbaImage, [f32; 4], Option<Quad>)>, String> {
     let radius = radius.max(1);
     let pad = radius as f32;
     let [rx, ry, rw, rh] = rect;
@@ -630,7 +667,7 @@ pub fn telea_inpaint_crop(
             oh,
         )
         .to_image();
-        return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32])]);
+        return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32], None)]);
     }
     let out = bbox_crops(crop, exp_origin, quads);
     eprintln!("[inpaint::telea] quads={} -> {} bbox crops", quads.len(), out.len());
@@ -651,7 +688,7 @@ pub fn inpaint_crop(
     image: &RgbaImage,
     rect: [f32; 4],
     quads: &[Quad],
-) -> Result<Vec<(RgbaImage, [f32; 4])>, String> {
+) -> Result<Vec<(RgbaImage, [f32; 4], Option<Quad>)>, String> {
     let [rx, ry, rw, rh] = rect;
     let pad = LAMA_CONTEXT_PAD;
     let [ex, ey, exp_w, exp_h] = crop_spec(
@@ -825,7 +862,7 @@ pub fn inpaint_crop(
             "[inpaint::lama] empty quads -> returning sub [{},{},{},{}] from patch {}x{}",
             ox, oy, ow, oh, patch.width(), patch.height()
         );
-        return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32])]);
+        return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32], None)]);
     }
     let out = bbox_crops(patch, exp_origin, quads);
     eprintln!("[inpaint::lama] quads={} -> {} bbox crops", quads.len(), out.len());
@@ -868,7 +905,7 @@ pub fn aot_inpaint_crop(
     image: &RgbaImage,
     rect: [f32; 4],
     quads: &[Quad],
-) -> Result<Vec<(RgbaImage, [f32; 4])>, String> {
+) -> Result<Vec<(RgbaImage, [f32; 4], Option<Quad>)>, String> {
     let [rx, ry, rw, rh] = rect;
     let pad = AOT_CONTEXT_PAD;
     let [ex, ey, exp_w, exp_h] = crop_spec(
@@ -901,7 +938,7 @@ pub fn aot_inpaint_crop(
         if quads.is_empty() {
             let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
             let sub = image::imageops::crop_imm(&crop, (ox - ex) as u32, (oy - ey) as u32, ow, oh).to_image();
-            return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32])]);
+            return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32], None)]);
         }
         return Ok(bbox_crops(crop, exp_origin, quads));
     }
@@ -993,7 +1030,7 @@ pub fn aot_inpaint_crop(
             "[inpaint::aot] empty quads -> returning sub [{},{},{},{}] from patch {}x{}",
             ox, oy, ow, oh, patch.width(), patch.height()
         );
-        return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32])]);
+        return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32], None)]);
     }
     let out = bbox_crops(patch, exp_origin, quads);
     eprintln!("[inpaint::aot] quads={} -> {} bbox crops", quads.len(), out.len());
@@ -1020,9 +1057,10 @@ mod tests {
         let quads = [quad([[20.0, 20.0], [40.0, 20.0], [40.0, 40.0], [20.0, 40.0]])];
         let patches = telea_inpaint_crop(&image, [0.0, 0.0, 64.0, 64.0], &quads, 5).unwrap();
         assert_eq!(patches.len(), 1);
-        let (patch, bounds) = &patches[0];
+        let (patch, bounds, q) = &patches[0];
         assert_eq!(bounds, &[20.0, 20.0, 20.0, 20.0]);
         assert_eq!(patch.dimensions(), (20, 20));
+        assert!(q.is_some(), "quad should be stored");
         let in_patch = |px: u32, py: u32| {
             let x = (px - 20).clamp(0, 19);
             let y = (py - 20).clamp(0, 19);
@@ -1053,6 +1091,7 @@ mod tests {
         let patches = telea_inpaint_crop(&image, [0.0, 0.0, 32.0, 32.0], &[], 3).unwrap();
         assert_eq!(patches.len(), 1, "an empty quad list returns one whole-rect patch");
         assert_eq!(patches[0].1, [0.0, 0.0, 32.0, 32.0]);
+        assert!(patches[0].2.is_none(), "empty quads should have no quad");
     }
 
     #[test]
@@ -1215,6 +1254,7 @@ mod tests {
         assert_eq!(crops.len(), 1);
         assert_eq!(crops[0].1, [10.0, 20.0, 8.0, 6.0]);
         assert_eq!(crops[0].0.dimensions(), (8, 6));
+        assert!(crops[0].2.is_none());
     }
 
     #[test]
@@ -1230,6 +1270,10 @@ mod tests {
         assert_eq!(crops[0].0.dimensions(), (60, 30));
         assert_eq!(crops[1].1, [10.0, 30.0, 20.0, 15.0]);
         assert_eq!(crops[1].0.dimensions(), (20, 15));
+        assert!(crops[0].2.is_some());
+        assert!(crops[1].2.is_some());
+        // axis-aligned quads should remain fully opaque
+        assert!(crops[0].0.pixels().all(|p| p[3] == 255));
     }
 
     #[test]
@@ -1243,6 +1287,38 @@ mod tests {
         assert_eq!(crops.len(), 1, "the outside box must be dropped");
         assert_eq!(crops[0].1, [95.0, 30.0, 5.0, 20.0]);
         assert_eq!(crops[0].0.dimensions(), (5, 20));
+    }
+
+    #[test]
+    fn bbox_crops_makes_outside_rotated_quad_transparent() {
+        let patch = RgbaImage::from_pixel(100, 100, Rgba([9, 9, 9, 255]));
+        // diamond rotated 45° centered at 50,50
+        let quad = quad([[50.0, 20.0], [80.0, 50.0], [50.0, 80.0], [20.0, 50.0]]);
+        let crops = bbox_crops(patch, [0.0, 0.0], &[quad]);
+        assert_eq!(crops.len(), 1);
+        assert_eq!(crops[0].1, [20.0, 20.0, 60.0, 60.0]);
+        assert_eq!(crops[0].0.dimensions(), (60, 60));
+        assert!(crops[0].2.is_some());
+        // corners of AABB should be transparent
+        assert_eq!(crops[0].0.get_pixel(0, 0)[3], 0, "top-left corner outside diamond must be transparent");
+        assert_eq!(crops[0].0.get_pixel(59, 0)[3], 0);
+        assert_eq!(crops[0].0.get_pixel(0, 59)[3], 0);
+        assert_eq!(crops[0].0.get_pixel(59, 59)[3], 0);
+        // center should be opaque
+        assert_eq!(crops[0].0.get_pixel(30, 30)[3], 255);
+    }
+
+    #[test]
+    fn bbox_crops_handles_skewed_quad_transparency() {
+        // skewed quad like Fig2: slanted
+        let patch = RgbaImage::from_pixel(200, 100, Rgba([9, 9, 9, 255]));
+        let quad = quad([[10.0, 20.0], [180.0, 0.0], [190.0, 30.0], [20.0, 50.0]]);
+        let crops = bbox_crops(patch, [0.0, 0.0], &[quad]);
+        assert_eq!(crops.len(), 1);
+        // top-left corner of AABB should be transparent for slanted quad
+        let (img, _, _) = &crops[0];
+        assert_eq!(img.get_pixel(0, 0)[3], 0);
+        assert_eq!(img.get_pixel(img.width() - 1, 0)[3], 0);
     }
 
     #[test]

@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use super::{EntryId, ImageId};
+use super::{EntryId, ImageId, Quad};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct InpaintId(pub u64);
@@ -45,8 +45,30 @@ pub struct InpaintPatch {
     pub id: InpaintId,
     /// Which image the patch belongs to (chapter-wide `Project`).
     pub image_id: ImageId,
-    /// Pixel bounds `[x, y, w, h]` of the patched region.
+    /// Pixel bounds `[x, y, w, h]` of the patched region (AABB). Kept for
+    /// backward compat and for quick positioning; when `quad` is `Some`,
+    /// `bounds` should equal `quad.bounds()` converted to `[x,y,w,h]`.
     pub bounds: [f32; 4],
+    /// The actual rotated/skewed quad in image pixels. `Some` for new patches
+    /// (view quad, not OCR quad); `None` for legacy patches loaded from old
+    /// `.mmtl`/`project.xml` where only AABB was stored.
+    pub quad: Option<Quad>,
+}
+
+impl InpaintPatch {
+    /// The quad that should be used for masking/compositing. Returns the stored
+    /// `quad` if present, otherwise reconstructs an axis-aligned quad from
+    /// `bounds`.
+    pub fn quad_or_bounds(&self) -> Quad {
+        if let Some(q) = self.quad {
+            q
+        } else {
+            let [x, y, w, h] = self.bounds;
+            Quad {
+                points: [[x, y], [x + w, y], [x + w, y + h], [x, y + h]],
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

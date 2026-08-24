@@ -1,6 +1,6 @@
 use iced::widget::image::Handle;
 
-use scanlateit_model::ImageId;
+use scanlateit_model::{ImageId, Quad};
 
 use crate::main_area::decode::PageDecode;
 
@@ -9,9 +9,13 @@ use crate::main_area::decode::PageDecode;
 /// to disk.
 #[derive(Debug, Clone)]
 pub struct InpaintLayer {
-    /// The covered range `[x, y, w, h]` in image pixels.
+    /// The covered range `[x, y, w, h]` in image pixels (AABB).
     pub bounds: [f32; 4],
-    /// The reconstructed patch, cached as a GPU handle.
+    /// The actual quad in image pixels, if known (for rotated/skewed patches).
+    /// `None` for legacy upright patches.
+    pub quad: Option<Quad>,
+    /// The reconstructed patch, cached as a GPU handle. Pixels outside `quad`
+    /// are transparent (`alpha=0`) for rotated patches.
     pub handle: Handle,
     pub width: u32,
     pub height: u32,

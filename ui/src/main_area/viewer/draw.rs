@@ -322,18 +322,40 @@ pub fn draw_inpaint_decorations<'a, F>(
         return;
     };
     let scale = frame.width() / tile.source_width.max(1) as f32;
-    let [x, y, w, h] = layer.bounds;
-    let rect = Rectangle::new(
-        Point::new(x * scale, y * scale),
-        Size::new(w * scale, h * scale),
-    );
+    // Use quad polygon when available, otherwise fallback to AABB rectangle
+    let (rect, quad_path) = if let Some(quad) = layer.quad {
+        let [x, y, w, h] = layer.bounds;
+        let r = Rectangle::new(Point::new(x * scale, y * scale), Size::new(w * scale, h * scale));
+        let pts = quad.points.map(|p| Point::new(p[0] * scale, p[1] * scale));
+        let path = Path::new(|b| {
+            b.move_to(pts[0]);
+            b.line_to(pts[1]);
+            b.line_to(pts[2]);
+            b.line_to(pts[3]);
+            b.close();
+        });
+        (r, Some(path))
+    } else {
+        let [x, y, w, h] = layer.bounds;
+        let r = Rectangle::new(Point::new(x * scale, y * scale), Size::new(w * scale, h * scale));
+        (r, None)
+    };
     // Border highlight – same color as overlay selection.
-    frame.stroke(
-        &Path::rectangle(rect.position(), rect.size()),
-        Stroke::default()
-            .with_color(Color::from_rgba8(92, 190, 255, 1.0))
-            .with_width(scale::s(2.0)),
-    );
+    if let Some(path) = quad_path {
+        frame.stroke(
+            &path,
+            Stroke::default()
+                .with_color(Color::from_rgba8(92, 190, 255, 1.0))
+                .with_width(scale::s(2.0)),
+        );
+    } else {
+        frame.stroke(
+            &Path::rectangle(rect.position(), rect.size()),
+            Stroke::default()
+                .with_color(Color::from_rgba8(92, 190, 255, 1.0))
+                .with_width(scale::s(2.0)),
+        );
+    }
     // Floating toolbar below (like OCR). No move/resize.
     let toolbar = inpaint_toolbar_rect(rect, frame.width(), flip_at);
     let hover = cursor_local.and_then(|local| hit_inpaint_toolbar_button(toolbar, local));

@@ -126,7 +126,19 @@ pub fn handle_open_picked(app: &mut App, picked: Option<String>) -> Task<Message
                     let img = image::load_from_memory(&data).map_err(|e| e.to_string())?.to_rgba8();
                     let (w, h) = (img.width(), img.height());
                     let handle = iced::widget::image::Handle::from_rgba(w, h, bytes::Bytes::from(img.into_raw()));
-                    inpaint_map.entry(*img_id).or_default().push(scanlateit_ui::loaded::InpaintLayer { bounds: *bounds, handle, width: w, height: h });
+                    // Try to find corresponding patch quad from project
+                    let quad = project
+                        .inpaint_for(*img_id)
+                        .find(|p| p.bounds == *bounds)
+                        .and_then(|p| p.quad)
+                        .or_else(|| {
+                            // fallback: match by dimensions
+                            project
+                                .inpaint_for(*img_id)
+                                .find(|p| p.bounds[2] as u32 == w && p.bounds[3] as u32 == h)
+                                .and_then(|p| p.quad)
+                        });
+                    inpaint_map.entry(*img_id).or_default().push(scanlateit_ui::loaded::InpaintLayer { bounds: *bounds, quad, handle, width: w, height: h });
                 }
                 let mut out_images = Vec::new();
                 for meta in project.images() {
@@ -172,7 +184,18 @@ pub fn load_created_project(path_str: String) -> Result<(scanlateit_model::Proje
         let img = image::load_from_memory(&data).map_err(|e| e.to_string())?.to_rgba8();
         let (w, h) = (img.width(), img.height());
         let handle = iced::widget::image::Handle::from_rgba(w, h, bytes::Bytes::from(img.into_raw()));
-        inpaint_map.entry(*img_id).or_default().push(scanlateit_ui::loaded::InpaintLayer { bounds: *bounds, handle, width: w, height: h });
+        let quad = res
+            .project
+            .inpaint_for(*img_id)
+            .find(|p| p.bounds == *bounds)
+            .and_then(|p| p.quad)
+            .or_else(|| {
+                res.project
+                    .inpaint_for(*img_id)
+                    .find(|p| p.bounds[2] as u32 == w && p.bounds[3] as u32 == h)
+                    .and_then(|p| p.quad)
+            });
+        inpaint_map.entry(*img_id).or_default().push(scanlateit_ui::loaded::InpaintLayer { bounds: *bounds, quad, handle, width: w, height: h });
     }
     let mut out_images = Vec::new();
     for meta in res.project.images() {
