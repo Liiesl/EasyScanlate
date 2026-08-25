@@ -13,6 +13,43 @@ use iced::widget::image::Handle;
 use super::{App, Message};
 use super::translation;
 
+/// CJK families that provide Hangul/Han/Kana coverage on at least one OS.
+/// Mirrors `scanlateit_ui::main_area::overlay::fallback::CJK_FALLBACK_FAMILIES`
+/// to avoid a UI→app cycle at boot; keep both lists in sync.
+const CJK_FALLBACK_FAMILIES: &[&str] = &[
+    "Apple SD Gothic Neo",
+    "AppleGothic",
+    "Batang",
+    "Dotum",
+    "Gulim",
+    "Hiragino Kaku Gothic Pro",
+    "Hiragino Kaku Gothic ProN",
+    "Hiragino Mincho ProN",
+    "Hiragino Sans",
+    "Hiragino Sans GB",
+    "Malgun Gothic",
+    "Meiryo",
+    "MS Gothic",
+    "MS Mincho",
+    "MS PGothic",
+    "Nanum Gothic",
+    "Noto Sans CJK",
+    "Noto Sans CJK JP",
+    "Noto Sans CJK KR",
+    "Noto Sans CJK SC",
+    "Noto Sans JP",
+    "Noto Sans KR",
+    "Noto Sans SC",
+    "Yu Gothic",
+    "Yu Mincho",
+];
+
+fn is_cjk_fallback_family(name: &str) -> bool {
+    CJK_FALLBACK_FAMILIES
+        .iter()
+        .any(|f| f.eq_ignore_ascii_case(name))
+}
+
 pub fn boot(frame: NativeFrame) -> (App, Task<Message>) {
     scanlateit_settings::init();
     let font_task = match std::fs::read(KOREAN_FONT_PATH) {
@@ -134,7 +171,8 @@ pub fn boot(frame: NativeFrame) -> (App, Task<Message>) {
     }
     let fonts_task =
         Task::perform(async move { enumerate_system_fonts() }, Message::SystemFonts);
-    (app, Task::batch([font_task, models_task, fonts_task]))
+    let cjk_task = Task::perform(async move { load_cjk_fallbacks() }, Message::CjkFallbackLoaded);
+    (app, Task::batch([font_task, models_task, fonts_task, cjk_task]))
 }
 
 /// Fake OCR entries for TEST builds: a small batch of Korean bubbles spread
@@ -189,4 +227,51 @@ pub fn enumerate_system_fonts() -> Vec<(String, String)> {
         }
     }
     out
+}
+
+/// Loads only CJK-covering system fonts into iced's `cosmic_text` DB,
+/// off the UI thread. Runs concurrently with `enumerate_system_fonts()`.
+/// Returns the number of font files loaded (for status reporting).
+/// Filtering by `CJK_FALLBACK_FAMILIES` keeps boot fast — not a full
+/// `load_system_fonts` mirror into the renderer (issue #24).
+pub fn load_cjk_fallbacks() -> usize {
+    use std::borrow::Cow;
+    use std::collections::HashSet;
+
+    let mut db = fontdb::Database::new();
+    db.load_system_fonts();
+    // Distinct file paths whose family matches the CJK allow-list.
+    let mut paths: HashSet<String> = HashSet::new();
+    for face in db.faces() {
+        let mut matched = false;
+        for (name, _lang) in &face.families {
+            if is_cjk_fallback_family(name) {
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
+            continue;
+        }
+        let path = match &face.source {
+            fontdb::Source::File(p) => p.to_string_lossy().into_owned(),
+            fontdb::Source::SharedFile(p, _) => p.to_string_lossy().into_owned(),
+            fontdb::Source::Binary(_) => continue,
+        };
+        paths.insert(path);
+    }
+    let mut loaded = 0usize;
+    for path in paths {
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        // `load_font` bumps the global version so `Paragraph`s relayout.
+        let cow: Cow<'static, [u8]> = Cow::Owned(bytes);
+        if let Ok(mut fs) = iced::advanced::graphics::text::font_system().write() {
+            fs.load_font(cow);
+            loaded += 1;
+        }
+    }
+    loaded
 }

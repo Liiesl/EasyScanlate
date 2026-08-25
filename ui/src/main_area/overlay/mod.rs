@@ -1,6 +1,7 @@
 pub mod cache;
 pub mod circle;
 pub mod entry;
+pub mod fallback;
 pub mod fit;
 pub mod gradient;
 pub mod style;
@@ -11,7 +12,7 @@ pub use entry::OverlayEntry;
 pub(crate) use circle::fit_circle_metrics;
 #[allow(unused_imports)]
 pub(crate) use fit::{fit_font_metrics, fit_font_size};
-pub(crate) use style::styled_font;
+pub(crate) use style::{styled_font, styled_font_for_text};
 pub use crate::main_area::geometry::order_quad;
 
 use iced::advanced::graphics::geometry::{self, Fill, Path, Stroke, Text};
@@ -170,7 +171,7 @@ pub fn draw_entries<'a, I, F>(
         if entry.hide_text {
             continue;
         }
-        let styled = styled_font(font, &entry.style);
+        let styled = styled_font_for_text(font, &entry.style, entry.text);
         let stroke = (entry.style.stroke_width > 0.0).then(|| {
             (rgba_to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
         });

@@ -182,6 +182,7 @@ pub enum Message {
     FontLoaded,
     SystemFonts(Vec<(String, String)>),
     StyleFontLoaded(String),
+    CjkFallbackLoaded(usize),
     ThumbDecoded(usize, Result<Arc<DecodedPage>, String>),
     FullDecoded(usize, Result<Arc<DecodedPage>, String>),
     SettleElapsed(u64),
@@ -973,6 +974,12 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         }
         Message::StyleFontLoaded(name) => {
             app.status = format!("Font \"{name}\" loaded.");
+            Task::none()
+        }
+        Message::CjkFallbackLoaded(count) => {
+            if count > 0 {
+                app.status = format!("Loaded {count} CJK fallback font(s).");
+            }
             Task::none()
         }
         Message::Ui(UiEvent::ProfileSelect(id)) => {

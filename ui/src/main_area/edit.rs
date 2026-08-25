@@ -6,7 +6,7 @@ use scanlateit_model::EntryStyle;
 
 use crate::color::rgba_to_color;
 use crate::event::{EditOrigin, UiEvent};
-use crate::main_area::overlay::{fit::fit_font_metrics, style::styled_font};
+use crate::main_area::overlay::{fit::fit_font_metrics, style::styled_font_for_text};
 use crate::state::UiState;
 
 /// Widget id of the floating inline editor; must match the app's focus id.
@@ -30,7 +30,7 @@ pub fn edit_overlay<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         }
         _ => (String::new(), EntryStyle::default()),
     };
-    let font = styled_font(state.font().unwrap_or(Font::DEFAULT), &style);
+    let font = styled_font_for_text(state.font().unwrap_or(Font::DEFAULT), &style, &text);
     let wrap_width = rect.width.max(8.0);
     let (size, fitted_height) = fit_font_metrics(&text, font, Size::new(wrap_width, rect.height));
     let size = size.max(8.0);
