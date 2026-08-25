@@ -16,17 +16,25 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .height(Length::Fill)
             .into()
     } else {
-        match state.view_mode() {
+        // Persistent manual mode forces View and hides overlay save buttons
+        let manual_active = state.manual_mode() != crate::event::ManualMode::None;
+        let effective_mode = if manual_active {
+            crate::event::MainAreaMode::View
+        } else {
+            state.view_mode()
+        };
+        let show_overlay = !manual_active;
+        match effective_mode {
             crate::event::MainAreaMode::View => {
                 let viewer = build_viewer(state, tiles(state, false), false)
-                    .show_overlay_buttons(true)
+                    .show_overlay_buttons(show_overlay)
                     .on_export(|| UiEvent::ExportAll);
                 iced::widget::stack![viewer, edit_overlay(state), mode_switcher(state)].into()
             }
             crate::event::MainAreaMode::Compare => {
                 let left = build_viewer(state, tiles(state, true), true).show_overlay_buttons(false);
                 let right = build_viewer(state, tiles(state, false), false)
-                    .show_overlay_buttons(true)
+                    .show_overlay_buttons(show_overlay)
                     .on_export(|| UiEvent::ExportAll);
                 iced::widget::stack![
                     row![left, iced::widget::stack![right, edit_overlay(state)]].spacing(2),
@@ -58,19 +66,32 @@ fn build_viewer<'a, S: UiState + ?Sized>(state: &'a S, tiles: Vec<TileSpec<'a>>,
             .show_overlay_text(false)
             .show_scrollbar(false);
     } else {
+        // Manual multi-select routes through unified ManualSelection events
+        let manual_mode = state.manual_mode();
+        let (manual_sels, use_manual) = if manual_mode != crate::event::ManualMode::None {
+            (state.manual_selections(), true)
+        } else {
+            (&[][..], false)
+        };
         viewer = viewer
             .on_entry_clicked(UiEvent::EntryClicked)
             .on_entry_double_clicked(|(index, id)| UiEvent::EntryDoubleClicked((index, id)))
             .on_edit_rect(UiEvent::EditRect)
             .on_entry_moved(UiEvent::EntryMoved)
             .on_toolbar_action(UiEvent::EntryToolbar)
+            // Legacy single-selection paths (kept for non-manual builds)
             .on_inpaint_selection(UiEvent::InpaintSelection)
             .on_inpaint_span(UiEvent::InpaintSelectionSpan)
             .on_inpaint_toolbar(UiEvent::InpaintToolbar)
             .on_ocr_selection(UiEvent::ManualOcrSelection)
             .on_ocr_span(UiEvent::ManualOcrSelectionSpan)
-            .inpaint_mode(state.inpaint_mode())
-            .ocr_mode(state.ocr_mode())
+            // New manual multi-select paths
+            .on_manual_selection(UiEvent::ManualSelectionAdded)
+            .on_manual_span(UiEvent::ManualSelectionSpan)
+            .manual_mode(manual_mode)
+            .manual_selections(manual_sels.to_vec())
+            .inpaint_mode(if use_manual { manual_mode == crate::event::ManualMode::Inpaint } else { state.inpaint_mode() })
+            .ocr_mode(if use_manual { manual_mode == crate::event::ManualMode::Ocr } else { state.ocr_mode() })
             .show_inpaint(state.show_inpaint())
             .show_overlay_text(state.show_overlay_text())
             .editing(state.editing())

@@ -2,7 +2,7 @@ use iced::{Color, Font, Rectangle};
 use iced::widget::text_editor;
 use scanlateit_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
 use scanlateit_ui::color::rgba_to_color;
-use scanlateit_ui::event::{EditOrigin, MainAreaMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
+use scanlateit_ui::event::{EditOrigin, MainAreaMode, ManualMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
 use scanlateit_ui::{ConnectModal, LoadedImage, UiState};
 
 use super::App;
@@ -138,6 +138,25 @@ impl UiState for App {
 
     fn ocr_mode(&self) -> bool {
         self.ocr_mode
+    }
+
+    fn manual_mode(&self) -> ManualMode {
+        self.manual_mode
+    }
+
+    fn manual_selections(&self) -> &[(usize, Rectangle)] {
+        &self.manual_selections
+    }
+
+    fn is_inpainting(&self) -> bool {
+        self.inpainting
+    }
+
+    fn is_manual_ocring(&self) -> bool {
+        #[cfg(feature = "ocr")]
+        { self.manual_ocring }
+        #[cfg(not(feature = "ocr"))]
+        { false }
     }
 
     fn show_overlay_text(&self) -> bool {

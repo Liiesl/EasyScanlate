@@ -61,7 +61,9 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .gap(scale::s(4.0))
             .into();
 
-    let inpaint_active = state.inpaint_mode();
+    let inpaint_active = state.manual_mode() == crate::event::ManualMode::Inpaint;
+    let busy = state.running() || state.translating() || state.is_inpainting() || state.is_manual_ocring();
+    // legacy inpaint_mode is now only used when not in manual mode; toolbar reflects manual
     let inpaint_btn = button(
         crate::icon::lucide(if inpaint_active {
             Icon::X
@@ -76,15 +78,19 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     .padding(scale::s(0.0))
     .style(crate::panel::button_style)
     .on_press_maybe(
-        (!state.images().is_empty() && !state.running() && !state.translating())
-            .then_some(UiEvent::Inpaint),
+        (!state.images().is_empty() && !busy)
+            .then_some(if inpaint_active {
+                UiEvent::ManualModeCancel
+            } else {
+                UiEvent::ManualModeEnter(crate::event::ManualMode::Inpaint)
+            }),
     );
     let inpaint: Element<'_, UiEvent> =
-        tooltip(inpaint_btn, tip(if inpaint_active { "Exit inpaint" } else { "Inpaint" }), tooltip::Position::Right)
+        tooltip(inpaint_btn, tip(if inpaint_active { "Exit inpaint" } else { "Inpaint (multi-select)" }), tooltip::Position::Right)
             .gap(scale::s(4.0))
             .into();
 
-    let ocr_active = state.ocr_mode();
+    let ocr_active = state.manual_mode() == crate::event::ManualMode::Ocr;
     let ocr_btn = button(
         crate::icon::lucide(if ocr_active {
             Icon::X
@@ -99,11 +105,15 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     .padding(scale::s(0.0))
     .style(crate::panel::button_style)
     .on_press_maybe(
-        (!state.images().is_empty() && !state.running() && !state.translating())
-            .then_some(UiEvent::ManualOcr),
+        (!state.images().is_empty() && !busy)
+            .then_some(if ocr_active {
+                UiEvent::ManualModeCancel
+            } else {
+                UiEvent::ManualModeEnter(crate::event::ManualMode::Ocr)
+            }),
     );
     let manual_ocr: Element<'_, UiEvent> =
-        tooltip(ocr_btn, tip(if ocr_active { "Exit manual OCR" } else { "Manual OCR" }), tooltip::Position::Right)
+        tooltip(ocr_btn, tip(if ocr_active { "Exit manual OCR" } else { "Manual OCR (multi-select)" }), tooltip::Position::Right)
             .gap(scale::s(4.0))
             .into();
 

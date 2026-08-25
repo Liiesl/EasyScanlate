@@ -24,7 +24,7 @@ use iced::keyboard;
 use iced::touch::Event as TouchEvent;
 use iced::{Element, Event, Font, Length, Point, Rectangle, Size, Vector};
 
-use crate::event::{InpaintToolbarAction, ToolbarAction};
+use crate::event::{InpaintToolbarAction, ManualMode, ToolbarAction};
 use scanlateit_model::{EntryId, Quad};
 
 use self::constants::{
@@ -65,6 +65,8 @@ pub struct TileView<
     U = fn(Vec<(usize, Rectangle)>) -> Message,
     V = fn() -> Message,
     W = fn(Vec<(usize, Rectangle)>) -> Message,
+    X = fn((usize, Rectangle)) -> Message,
+    Y = fn(Vec<(usize, Rectangle)>) -> Message,
 > where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -80,6 +82,8 @@ pub struct TileView<
     U: Fn(Vec<(usize, Rectangle)>) -> Message,
     V: Fn() -> Message,
     W: Fn(Vec<(usize, Rectangle)>) -> Message,
+    X: Fn((usize, Rectangle)) -> Message,
+    Y: Fn(Vec<(usize, Rectangle)>) -> Message,
 {
     tiles: Vec<TileSpec<'a>>,
     font: Font,
@@ -111,9 +115,13 @@ pub struct TileView<
     on_ocr_selection: Option<T>,
     on_ocr_span: Option<W>,
     on_export: Option<V>,
+    manual_mode: ManualMode,
+    manual_selections: Vec<(usize, Rectangle)>,
+    on_manual_selection: Option<X>,
+    on_manual_span: Option<Y>,
 }
 
-impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W> TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y> TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -129,6 +137,8 @@ where
     U: Fn(Vec<(usize, Rectangle)>) -> Message,
     V: Fn() -> Message,
     W: Fn(Vec<(usize, Rectangle)>) -> Message,
+    X: Fn((usize, Rectangle)) -> Message,
+    Y: Fn(Vec<(usize, Rectangle)>) -> Message,
 {
     pub fn new(tiles: Vec<TileSpec<'a>>, font: Font) -> Self {
         Self {
@@ -159,6 +169,10 @@ where
             on_ocr_selection: None,
             on_ocr_span: None,
             on_export: None,
+            manual_mode: ManualMode::None,
+            manual_selections: Vec::new(),
+            on_manual_selection: None,
+            on_manual_span: None,
         }
     }
 
@@ -231,6 +245,26 @@ where
         self
     }
 
+    pub fn on_manual_selection(mut self, f: X) -> Self {
+        self.on_manual_selection = Some(f);
+        self
+    }
+
+    pub fn on_manual_span(mut self, f: Y) -> Self {
+        self.on_manual_span = Some(f);
+        self
+    }
+
+    pub fn manual_mode(mut self, mode: ManualMode) -> Self {
+        self.manual_mode = mode;
+        self
+    }
+
+    pub fn manual_selections(mut self, s: Vec<(usize, Rectangle)>) -> Self {
+        self.manual_selections = s;
+        self
+    }
+
     pub fn inpaint_mode(mut self, inpaint_mode: bool) -> Self {
         self.inpaint_mode = inpaint_mode;
         self
@@ -296,8 +330,8 @@ where
 // Widget impl - delegates geometry/hit-testing/drawing to submodules
 // ---------------------------------------------------------------------------
 
-impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -313,6 +347,8 @@ where
     U: Fn(Vec<(usize, Rectangle)>) -> Message,
     V: Fn() -> Message,
     W: Fn(Vec<(usize, Rectangle)>) -> Message,
+    X: Fn((usize, Rectangle)) -> Message,
+    Y: Fn(Vec<(usize, Rectangle)>) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
     fn size(&self) -> Size<Length> {
@@ -347,6 +383,8 @@ where
         state.width = new_width;
         state.inpaint_mode = self.inpaint_mode;
         state.ocr_mode = self.ocr_mode;
+        state.manual_mode = self.manual_mode;
+        state.manual_selections_snapshot = self.manual_selections.clone();
         state.content_height = new_content_height;
         state.viewport_height = new_viewport;
         if let Some(anchor) = self.scroll_to {
@@ -488,6 +526,11 @@ where
                     if is_selecting && tile_visible {
                         return Some(index);
                     }
+                    // Persistent manual selections keep tiles visible for their marquees
+                    let has_manual = self.manual_selections.iter().any(|(idx, _)| *idx == index);
+                    if has_manual && tile_visible {
+                        return Some(index);
+                    }
                     let scale = state.width / tile.source_width.max(1) as f32;
                     let has_visible_entry = tile.overlays.iter().any(|entry| {
                         let [min_x, min_y, max_x, max_y] = entry.bounds;
@@ -523,6 +566,29 @@ where
                     for (idx, (y, height)) in layout.iter().enumerate() {
                         if gy1 > *y && gy0 < *y + *height && *y + *height > visible_top && *y < visible_bottom {
                             if !visible_tiles.contains(&idx) { visible_tiles.push(idx); }
+                        }
+                    }
+                }
+                // also for persistent manual selections when otherwise empty
+                if !self.manual_selections.is_empty() {
+                    for (sel_idx, _) in &self.manual_selections {
+                        if !visible_tiles.contains(sel_idx) {
+                            if let Some((y, height)) = layout.get(*sel_idx).copied() {
+                                if y + height > visible_top && y < visible_bottom {
+                                    visible_tiles.push(*sel_idx);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Even when we have visible_tiles, ensure manual tiles are included
+                for (sel_idx, _) in &self.manual_selections {
+                    if !visible_tiles.contains(sel_idx) {
+                        if let Some((y, height)) = layout.get(*sel_idx).copied() {
+                            if y + height > visible_top && y < visible_bottom {
+                                visible_tiles.push(*sel_idx);
+                            }
                         }
                     }
                 }
@@ -606,6 +672,26 @@ where
                                         let y1 = (global_y1.min(y_tile + h_tile) - y_tile).max(0.0);
                                         let a = Point::new(x0, y0);
                                         let b = Point::new(x1, y1);
+                                        draw_ocr_marquee(&mut overlay_frame, a, b, tile_bounds.size());
+                                    }
+                                }
+                            }
+                            // Persistent manual multi-select rubber bands (kept after drag release)
+                            if !self.manual_selections.is_empty() {
+                                let scale = self.tiles[index].source_width.max(1) as f32;
+                                let tile_scale = state.width / scale;
+                                let is_inpaint = self.manual_mode == crate::event::ManualMode::Inpaint;
+                                for (sel_idx, rect) in &self.manual_selections {
+                                    if *sel_idx != index { continue; }
+                                    let x0 = rect.x * tile_scale;
+                                    let y0 = rect.y * tile_scale;
+                                    let x1 = (rect.x + rect.width) * tile_scale;
+                                    let y1 = (rect.y + rect.height) * tile_scale;
+                                    let a = Point::new(x0, y0);
+                                    let b = Point::new(x1, y1);
+                                    if is_inpaint {
+                                        draw_inpaint_marquee(&mut overlay_frame, a, b, tile_bounds.size());
+                                    } else {
                                         draw_ocr_marquee(&mut overlay_frame, a, b, tile_bounds.size());
                                     }
                                 }
@@ -694,6 +780,33 @@ where
                             shell.capture_event();
                             return;
                         }
+                    }
+                    // Persistent manual mode has priority over inpaint patch toolbar
+                    if self.manual_mode != ManualMode::None {
+                        if let Some(hover_index) = hit_tile(&self.tiles, state, local) {
+                            if !track_rect(bounds).contains(local) {
+                                let (layout, _) = tile_layout(&self.tiles, state.width);
+                                let content = tile_local_point(&layout, hover_index, local, state.offset);
+                                match self.manual_mode {
+                                    ManualMode::Inpaint => {
+                                        state.interaction = Interaction::InpaintSelecting { index: hover_index, start: content, current: content };
+                                    }
+                                    ManualMode::Ocr => {
+                                        state.interaction = Interaction::OcrSelecting { index: hover_index, start: content, current: content };
+                                    }
+                                    ManualMode::None => {}
+                                }
+                                shell.capture_event();
+                                return;
+                            }
+                        }
+                        if self.show_scrollbar && track_rect(bounds).contains(local) {
+                            state.interaction = Interaction::ScrollerGrabbed { grab_offset: local.y - thumb_rect(bounds, state).y };
+                            shell.capture_event();
+                        } else {
+                            shell.capture_event();
+                        }
+                        return;
                     }
                     // Inpaint selection has its own floating toolbar (no handles). It is drawn
                     // like the result border but must not be movable/resizable.
@@ -891,101 +1004,205 @@ where
                         }
                     }
                 }
-                if let Interaction::InpaintSelecting { index, start, current } = state.interaction {
-                    let (layout, _) = tile_layout(&self.tiles, state.width);
-                    let x0 = start.x.min(current.x).clamp(0.0, state.width);
-                    let x1 = start.x.max(current.x).clamp(0.0, state.width);
-                    if x1 > x0 {
-                        let sel_y = layout[index].0;
-                        let gy0_raw = sel_y + start.y.min(current.y);
-                        let gy1_raw = sel_y + start.y.max(current.y);
-                        let (gy0, gy1) = (gy0_raw.min(gy1_raw), gy0_raw.max(gy1_raw));
-                        let mut spans: Vec<(usize, Rectangle)> = Vec::new();
-                        for (i, (y, h)) in layout.iter().enumerate() {
-                            if gy1 <= *y || gy0 >= y + h { continue; }
-                            let y0_tile = (gy0.max(*y) - y).max(0.0);
-                            let y1_tile = (gy1.min(y + h) - y).max(0.0);
-                            if y1_tile <= y0_tile { continue; }
-                            let tile = &self.tiles[i];
-                            if tile.source_width == 0 { continue; }
-                            let scale = state.width / tile.source_width as f32;
-                            if scale <= 0.0 { continue; }
-                            let rect = Rectangle::new(
-                                Point::new(x0 / scale, y0_tile / scale),
-                                Size::new((x1 - x0) / scale, (y1_tile - y0_tile) / scale),
-                            );
-                            if rect.width >= MIN_INPAINT_EDGE && rect.height >= MIN_INPAINT_EDGE {
-                                spans.push((i, rect));
+                let manual_active = self.manual_mode != ManualMode::None;
+                if manual_active {
+                    // In manual mode every drag is accumulated as persistent selections
+                    if let Interaction::InpaintSelecting { index, start, current } = state.interaction {
+                        let (layout, _) = tile_layout(&self.tiles, state.width);
+                        let x0 = start.x.min(current.x).clamp(0.0, state.width);
+                        let x1 = start.x.max(current.x).clamp(0.0, state.width);
+                        if x1 > x0 {
+                            let sel_y = layout[index].0;
+                            let gy0_raw = sel_y + start.y.min(current.y);
+                            let gy1_raw = sel_y + start.y.max(current.y);
+                            let (gy0, gy1) = (gy0_raw.min(gy1_raw), gy0_raw.max(gy1_raw));
+                            let mut spans: Vec<(usize, Rectangle)> = Vec::new();
+                            for (i, (y, h)) in layout.iter().enumerate() {
+                                if gy1 <= *y || gy0 >= y + h { continue; }
+                                let y0_tile = (gy0.max(*y) - y).max(0.0);
+                                let y1_tile = (gy1.min(y + h) - y).max(0.0);
+                                if y1_tile <= y0_tile { continue; }
+                                let tile = &self.tiles[i];
+                                if tile.source_width == 0 { continue; }
+                                let scale = state.width / tile.source_width as f32;
+                                if scale <= 0.0 { continue; }
+                                let rect = Rectangle::new(
+                                    Point::new(x0 / scale, y0_tile / scale),
+                                    Size::new((x1 - x0) / scale, (y1_tile - y0_tile) / scale),
+                                );
+                                if rect.width >= MIN_INPAINT_EDGE && rect.height >= MIN_INPAINT_EDGE {
+                                    spans.push((i, rect));
+                                }
                             }
-                        }
-                        if spans.is_empty() {
-                            // nothing
-                        } else if spans.len() == 1 {
-                            if let Some(callback) = self.on_inpaint_selection.as_ref() {
-                                shell.publish(callback(spans[0]));
-                                shell.request_redraw();
-                            }
-                        } else {
-                            spans.sort_by_key(|(idx, _)| *idx);
-                            // limit to 2 consecutive images (span across seam only)
-                            let trimmed = if spans.len() > 2 { spans[..2].to_vec() } else { spans };
-                            if let Some(callback) = self.on_inpaint_span.as_ref() {
-                                shell.publish(callback(trimmed));
-                                shell.request_redraw();
-                            } else if let Some(callback) = self.on_inpaint_selection.as_ref() {
-                                shell.publish(callback(trimmed[0]));
-                                shell.request_redraw();
+                            if spans.is_empty() {
+                            } else if spans.len() == 1 {
+                                if let Some(cb) = self.on_manual_selection.as_ref() {
+                                    shell.publish(cb(spans[0]));
+                                    shell.request_redraw();
+                                } else if let Some(cb) = self.on_inpaint_selection.as_ref() {
+                                    shell.publish(cb(spans[0]));
+                                    shell.request_redraw();
+                                }
+                            } else {
+                                spans.sort_by_key(|(idx, _)| *idx);
+                                // For manual we keep all spans (multi-select). No 2-limit.
+                                if let Some(cb) = self.on_manual_span.as_ref() {
+                                    shell.publish(cb(spans));
+                                    shell.request_redraw();
+                                } else if let Some(cb) = self.on_inpaint_span.as_ref() {
+                                    let trimmed = if spans.len() > 2 { spans[..2].to_vec() } else { spans };
+                                    shell.publish(cb(trimmed));
+                                    shell.request_redraw();
+                                }
                             }
                         }
                     }
-                }
-                if let Interaction::OcrSelecting { index, start, current } = state.interaction {
-                    let (layout, _) = tile_layout(&self.tiles, state.width);
-                    let x0 = start.x.min(current.x).clamp(0.0, state.width);
-                    let x1 = start.x.max(current.x).clamp(0.0, state.width);
-                    if x1 > x0 {
-                        let sel_y = layout[index].0;
-                        let gy0_raw = sel_y + start.y.min(current.y);
-                        let gy1_raw = sel_y + start.y.max(current.y);
-                        let (gy0, gy1) = (gy0_raw.min(gy1_raw), gy0_raw.max(gy1_raw));
-                        let mut spans: Vec<(usize, Rectangle)> = Vec::new();
-                        for (i, (y, h)) in layout.iter().enumerate() {
-                            if gy1 <= *y || gy0 >= y + h { continue; }
-                            let y0_tile = (gy0.max(*y) - y).max(0.0);
-                            let y1_tile = (gy1.min(y + h) - y).max(0.0);
-                            if y1_tile <= y0_tile { continue; }
-                            let tile = &self.tiles[i];
-                            if tile.source_width == 0 { continue; }
-                            let scale = state.width / tile.source_width as f32;
-                            if scale <= 0.0 { continue; }
-                            let rect = Rectangle::new(
-                                Point::new(x0 / scale, y0_tile / scale),
-                                Size::new((x1 - x0) / scale, (y1_tile - y0_tile) / scale),
-                            );
-                            if rect.width >= MIN_OCR_EDGE && rect.height >= MIN_OCR_EDGE {
-                                spans.push((i, rect));
+                    if let Interaction::OcrSelecting { index, start, current } = state.interaction {
+                        let (layout, _) = tile_layout(&self.tiles, state.width);
+                        let x0 = start.x.min(current.x).clamp(0.0, state.width);
+                        let x1 = start.x.max(current.x).clamp(0.0, state.width);
+                        if x1 > x0 {
+                            let sel_y = layout[index].0;
+                            let gy0_raw = sel_y + start.y.min(current.y);
+                            let gy1_raw = sel_y + start.y.max(current.y);
+                            let (gy0, gy1) = (gy0_raw.min(gy1_raw), gy0_raw.max(gy1_raw));
+                            let mut spans: Vec<(usize, Rectangle)> = Vec::new();
+                            for (i, (y, h)) in layout.iter().enumerate() {
+                                if gy1 <= *y || gy0 >= y + h { continue; }
+                                let y0_tile = (gy0.max(*y) - y).max(0.0);
+                                let y1_tile = (gy1.min(y + h) - y).max(0.0);
+                                if y1_tile <= y0_tile { continue; }
+                                let tile = &self.tiles[i];
+                                if tile.source_width == 0 { continue; }
+                                let scale = state.width / tile.source_width as f32;
+                                if scale <= 0.0 { continue; }
+                                let rect = Rectangle::new(
+                                    Point::new(x0 / scale, y0_tile / scale),
+                                    Size::new((x1 - x0) / scale, (y1_tile - y0_tile) / scale),
+                                );
+                                if rect.width >= MIN_OCR_EDGE && rect.height >= MIN_OCR_EDGE {
+                                    spans.push((i, rect));
+                                }
+                            }
+                            if spans.is_empty() {
+                            } else if spans.len() == 1 {
+                                if let Some(cb) = self.on_manual_selection.as_ref() {
+                                    shell.publish(cb(spans[0]));
+                                    shell.request_redraw();
+                                } else if let Some(cb) = self.on_ocr_selection.as_ref() {
+                                    shell.publish(cb(spans[0]));
+                                    shell.request_redraw();
+                                }
+                            } else {
+                                spans.sort_by_key(|(idx, _)| *idx);
+                                if let Some(cb) = self.on_manual_span.as_ref() {
+                                    shell.publish(cb(spans));
+                                    shell.request_redraw();
+                                } else if let Some(cb) = self.on_ocr_span.as_ref() {
+                                    let trimmed = if spans.len() > 2 { spans[..2].to_vec() } else { spans };
+                                    shell.publish(cb(trimmed));
+                                    shell.request_redraw();
+                                }
                             }
                         }
-                        if spans.is_empty() {
-                            // nothing
-                        } else if spans.len() == 1 {
-                            if let Some(callback) = self.on_ocr_selection.as_ref() {
-                                shell.publish(callback(spans[0]));
-                                shell.request_redraw();
+                    }
+                } else {
+                    if let Interaction::InpaintSelecting { index, start, current } = state.interaction {
+                        let (layout, _) = tile_layout(&self.tiles, state.width);
+                        let x0 = start.x.min(current.x).clamp(0.0, state.width);
+                        let x1 = start.x.max(current.x).clamp(0.0, state.width);
+                        if x1 > x0 {
+                            let sel_y = layout[index].0;
+                            let gy0_raw = sel_y + start.y.min(current.y);
+                            let gy1_raw = sel_y + start.y.max(current.y);
+                            let (gy0, gy1) = (gy0_raw.min(gy1_raw), gy0_raw.max(gy1_raw));
+                            let mut spans: Vec<(usize, Rectangle)> = Vec::new();
+                            for (i, (y, h)) in layout.iter().enumerate() {
+                                if gy1 <= *y || gy0 >= y + h { continue; }
+                                let y0_tile = (gy0.max(*y) - y).max(0.0);
+                                let y1_tile = (gy1.min(y + h) - y).max(0.0);
+                                if y1_tile <= y0_tile { continue; }
+                                let tile = &self.tiles[i];
+                                if tile.source_width == 0 { continue; }
+                                let scale = state.width / tile.source_width as f32;
+                                if scale <= 0.0 { continue; }
+                                let rect = Rectangle::new(
+                                    Point::new(x0 / scale, y0_tile / scale),
+                                    Size::new((x1 - x0) / scale, (y1_tile - y0_tile) / scale),
+                                );
+                                if rect.width >= MIN_INPAINT_EDGE && rect.height >= MIN_INPAINT_EDGE {
+                                    spans.push((i, rect));
+                                }
                             }
-                        } else {
-                            spans.sort_by_key(|(idx, _)| *idx);
-                            // seam only: limit to 2 consecutive images
-                            let trimmed = if spans.len() > 2 { spans[..2].to_vec() } else { spans };
-                            if let Some(callback) = self.on_ocr_span.as_ref() {
-                                shell.publish(callback(trimmed));
-                                shell.request_redraw();
-                            } else if let Some(callback) = self.on_ocr_selection.as_ref() {
-                                // fallback: emit largest
-                                let mut by_area: Vec<_> = trimmed.into_iter().map(|(idx, r)| (idx, r, r.width * r.height)).collect();
-                                by_area.sort_by(|a, b| b.2.total_cmp(&a.2));
-                                shell.publish(callback((by_area[0].0, by_area[0].1)));
-                                shell.request_redraw();
+                            if spans.is_empty() {
+                                // nothing
+                            } else if spans.len() == 1 {
+                                if let Some(callback) = self.on_inpaint_selection.as_ref() {
+                                    shell.publish(callback(spans[0]));
+                                    shell.request_redraw();
+                                }
+                            } else {
+                                spans.sort_by_key(|(idx, _)| *idx);
+                                // limit to 2 consecutive images (span across seam only)
+                                let trimmed = if spans.len() > 2 { spans[..2].to_vec() } else { spans };
+                                if let Some(callback) = self.on_inpaint_span.as_ref() {
+                                    shell.publish(callback(trimmed));
+                                    shell.request_redraw();
+                                } else if let Some(callback) = self.on_inpaint_selection.as_ref() {
+                                    shell.publish(callback(trimmed[0]));
+                                    shell.request_redraw();
+                                }
+                            }
+                        }
+                    }
+                    if let Interaction::OcrSelecting { index, start, current } = state.interaction {
+                        let (layout, _) = tile_layout(&self.tiles, state.width);
+                        let x0 = start.x.min(current.x).clamp(0.0, state.width);
+                        let x1 = start.x.max(current.x).clamp(0.0, state.width);
+                        if x1 > x0 {
+                            let sel_y = layout[index].0;
+                            let gy0_raw = sel_y + start.y.min(current.y);
+                            let gy1_raw = sel_y + start.y.max(current.y);
+                            let (gy0, gy1) = (gy0_raw.min(gy1_raw), gy0_raw.max(gy1_raw));
+                            let mut spans: Vec<(usize, Rectangle)> = Vec::new();
+                            for (i, (y, h)) in layout.iter().enumerate() {
+                                if gy1 <= *y || gy0 >= y + h { continue; }
+                                let y0_tile = (gy0.max(*y) - y).max(0.0);
+                                let y1_tile = (gy1.min(y + h) - y).max(0.0);
+                                if y1_tile <= y0_tile { continue; }
+                                let tile = &self.tiles[i];
+                                if tile.source_width == 0 { continue; }
+                                let scale = state.width / tile.source_width as f32;
+                                if scale <= 0.0 { continue; }
+                                let rect = Rectangle::new(
+                                    Point::new(x0 / scale, y0_tile / scale),
+                                    Size::new((x1 - x0) / scale, (y1_tile - y0_tile) / scale),
+                                );
+                                if rect.width >= MIN_OCR_EDGE && rect.height >= MIN_OCR_EDGE {
+                                    spans.push((i, rect));
+                                }
+                            }
+                            if spans.is_empty() {
+                                // nothing
+                            } else if spans.len() == 1 {
+                                if let Some(callback) = self.on_ocr_selection.as_ref() {
+                                    shell.publish(callback(spans[0]));
+                                    shell.request_redraw();
+                                }
+                            } else {
+                                spans.sort_by_key(|(idx, _)| *idx);
+                                // seam only: limit to 2 consecutive images
+                                let trimmed = if spans.len() > 2 { spans[..2].to_vec() } else { spans };
+                                if let Some(callback) = self.on_ocr_span.as_ref() {
+                                    shell.publish(callback(trimmed));
+                                    shell.request_redraw();
+                                } else if let Some(callback) = self.on_ocr_selection.as_ref() {
+                                    // fallback: emit largest
+                                    let mut by_area: Vec<_> = trimmed.into_iter().map(|(idx, r)| (idx, r, r.width * r.height)).collect();
+                                    by_area.sort_by(|a, b| b.2.total_cmp(&a.2));
+                                    shell.publish(callback((by_area[0].0, by_area[0].1)));
+                                    shell.request_redraw();
+                                }
                             }
                         }
                     }

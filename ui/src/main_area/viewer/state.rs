@@ -6,6 +6,8 @@ use iced::Rectangle;
 
 use scanlateit_model::EntryId;
 
+use crate::event::ManualMode;
+
 use super::interaction::Interaction;
 
 #[derive(Debug, Clone)]
@@ -26,6 +28,10 @@ pub struct TileViewState {
     pub inpaint_mode: bool,
     /// Whether manual OCR range drags are enabled.
     pub ocr_mode: bool,
+    /// Persistent manual mode (when Some, draws multi-selection chrome).
+    pub manual_mode: ManualMode,
+    /// Snapshot of pending selections for drawing (mirrors App.manual_selections).
+    pub manual_selections_snapshot: Vec<(usize, iced::Rectangle)>,
     /// The last `reveal` request consumed in `layout()`.
     pub last_revealed: Option<(usize, EntryId)>,
     /// The last inpaint reveal consumed in `layout()`.
@@ -42,10 +48,13 @@ pub struct TileViewState {
 
 impl TileViewState {
     pub fn inpaint_mode(&self) -> bool {
-        self.inpaint_mode
+        self.inpaint_mode || self.manual_mode == ManualMode::Inpaint
     }
     pub fn ocr_mode(&self) -> bool {
-        self.ocr_mode
+        self.ocr_mode || self.manual_mode == ManualMode::Ocr
+    }
+    pub fn manual_active(&self) -> bool {
+        self.manual_mode != ManualMode::None
     }
 }
 
@@ -63,6 +72,8 @@ impl Default for TileViewState {
             keyboard_modifiers: keyboard::Modifiers::default(),
             inpaint_mode: false,
             ocr_mode: false,
+            manual_mode: ManualMode::None,
+            manual_selections_snapshot: Vec::new(),
             last_revealed: None,
             last_inpaint_revealed: None,
             last_published_offset: None,

@@ -258,6 +258,9 @@ pub fn handle_inpaint_engine_ready(app: &mut App, result: Result<InpaintEngine, 
     match result {
         Ok(engine) => {
             app.inpaint_engine = Some(engine.clone());
+            if let Some(data) = app.pending_manual_multi.take() {
+                return start_manual_multi(app, engine, data);
+            }
             if let Some(spans) = app.pending_inpaint_span.take() {
                 return start_inpaint_span(app, engine, spans);
             }
@@ -274,6 +277,7 @@ pub fn handle_inpaint_engine_ready(app: &mut App, result: Result<InpaintEngine, 
         Err(e) => {
             app.pending_inpaint = None;
             app.pending_inpaint_span = None;
+            app.pending_manual_multi = None;
             app.pending_background_stitch = None;
             app.status = e;
             Task::none()
@@ -1873,6 +1877,720 @@ pub fn handle_inpaint_toggle(app: &mut App) -> Task<Message> {
             .to_string();
     } else {
         app.status = "Inpaint mode cancelled.".to_string();
+    }
+    Task::none()
+}
+
+#[cfg(feature = "inpaint")]
+pub fn handle_manual_multi_inpaint(app: &mut App, selections: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
+    eprintln!("[manual::inpaint] handle_manual_multi_inpaint selections={} cached_engine={} running={} translating={} inpainting={}", selections.len(), app.inpaint_engine.is_some(), app.running, app.translating, app.inpainting);
+    for (i, (idx, r)) in selections.iter().enumerate() {
+        eprintln!("[manual::inpaint]   sel {}: idx={} rect=[{:.1},{:.1},{:.1},{:.1}] w={:.1} h={:.1}", i, idx, r.x, r.y, r.width, r.height, r.width, r.height);
+    }
+    if selections.is_empty() {
+        eprintln!("[manual::inpaint] no selections -> none");
+        return Task::none();
+    }
+    if app.inpainting || app.running || app.translating {
+        eprintln!("[manual::inpaint] busy -> none (inpainting={} running={} translating={})", app.inpainting, app.running, app.translating);
+        return Task::none();
+    }
+    #[cfg(feature = "ocr")]
+    if app.manual_ocring {
+        eprintln!("[manual::inpaint] manual_ocring busy -> none");
+        return Task::none();
+    }
+    // Build per-selection data: (idx, path, rect, quads)
+    let mut data: Vec<(usize, String, [f32; 4], Vec<Quad>)> = Vec::new();
+    for (idx, rect) in selections {
+        if idx >= app.images.len() {
+            eprintln!("[manual::inpaint] skip idx={} out of range images.len={}", idx, app.images.len());
+            continue;
+        }
+        let image_id = app.images[idx].image_id;
+        let path = app.project.image(image_id).map(|m| m.path.clone()).unwrap_or_default();
+        if path.is_empty() {
+            eprintln!("[manual::inpaint] skip idx={} empty path", idx);
+            continue;
+        }
+        let rect_arr = [rect.x, rect.y, rect.width, rect.height];
+        let all_count = app.project.all_for(image_id).count();
+        let quads: Vec<Quad> = app.project.all_for(image_id)
+            .map(|e| app.project.view_quad(e))
+            .filter(|q| q.intersects_rect(rect_arr))
+            .collect();
+        eprintln!("[manual::inpaint] idx={} path={} rect={:?} all_for={} quads_intersect={} quad_bounds={:?}", idx, path, rect_arr, all_count, quads.len(), quads.iter().map(|q| q.bounds()).collect::<Vec<_>>());
+        // keep even empty (will synthesize later if mixed)
+        data.push((idx, path, rect_arr, quads));
+    }
+    if data.is_empty() {
+        eprintln!("[manual::inpaint] data empty after filtering -> no valid selections");
+        app.status = "No valid selections.".to_string();
+        return Task::none();
+    }
+    data.sort_by_key(|(idx, _, _, _)| *idx);
+    eprintln!("[manual::inpaint] data sorted len={} idxs={:?} rects={:?}", data.len(), data.iter().map(|(idx,_,_,_)| *idx).collect::<Vec<_>>(), data.iter().map(|(_,_,r,_)| *r).collect::<Vec<_>>());
+    let (backend, radius) = scanlateit_settings::get(|s| (s.inpaint_backend, s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1)));
+    eprintln!("[manual::inpaint] backend={:?} radius={} cached_match={}", backend, radius, app.inpaint_engine.as_ref().map(|e| e.backend()==backend && e.radius()==radius).unwrap_or(false));
+    let cached = app.inpaint_engine.clone().filter(|e| e.backend() == backend && e.radius() == radius);
+    // Store pending for engine build path
+    if let Some(engine) = cached {
+        eprintln!("[manual::inpaint] using cached engine -> start_manual_multi");
+        return start_manual_multi(app, engine, data);
+    } else {
+        eprintln!("[manual::inpaint] no cached engine -> pending_manual_multi len={} status loading", data.len());
+        app.pending_manual_multi = Some(data);
+        app.status = match backend {
+            InpaintBackend::Lama => "Loading LaMa model...".to_string(),
+            InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
+            InpaintBackend::Telea => "Inpainting...".to_string(),
+        };
+        return Task::perform(async move { scanlateit_inpaint::Engine::build(backend, radius) }, Message::InpaintEngineReady);
+    }
+}
+
+#[cfg(feature = "inpaint")]
+fn start_manual_multi(app: &mut App, engine: InpaintEngine, data: Vec<(usize, String, [f32; 4], Vec<Quad>)>) -> Task<Message> {
+    eprintln!("[manual::multi] start_manual_multi data={} backend={:?} radius={}", data.len(), engine.backend(), engine.radius());
+    for (i, (idx, path, rect, quads)) in data.iter().enumerate() {
+        eprintln!("[manual::multi]   data {}: idx={} path={} rect={:?} quads={}", i, idx, path, rect, quads.len());
+    }
+    app.inpainting = true;
+    app.status = format!("Inpainting {} selection(s) (multi)...", data.len());
+    Task::perform(
+        async move {
+            eprintln!("[manual::multi] spawn_blocking run_manual_multi_inpaint");
+            let r = tokio::task::spawn_blocking(move || run_manual_multi_inpaint(&engine, data))
+                .await
+                .unwrap_or_else(|e| Err(format!("inpaint multi task cancelled: {e}")));
+            eprintln!("[manual::multi] spawn_blocking done is_ok={}", r.is_ok());
+            if let Err(e) = &r { eprintln!("[manual::multi] error: {}", e); }
+            r
+        },
+        Message::ManualMultiInpaintFinished,
+    )
+}
+
+#[cfg(feature = "inpaint")]
+fn run_manual_multi_inpaint(engine: &InpaintEngine, data: Vec<(usize, String, [f32; 4], Vec<Quad>)>) -> Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>)>, String> {
+    eprintln!("[manual::multi] run_manual_multi_inpaint enter data={} backend={:?} radius={}", data.len(), engine.backend(), engine.radius());
+    for (i, (idx, path, rect, quads)) in data.iter().enumerate() {
+        eprintln!("[manual::multi]   data {}: idx={} path={} rect={:?} quads={} bounds={:?}", i, idx, path, rect, quads.len(), quads.iter().map(|q| q.bounds()).collect::<Vec<_>>());
+        for (qi, q) in quads.iter().enumerate() {
+            eprintln!("[manual::multi]     quad {}: {:?}", qi, q.points);
+        }
+    }
+    if data.is_empty() { return Err("no selections".to_string()); }
+    use std::collections::HashMap;
+    // Per-spec: selection as mask, drop OCR quads entirely (q2)
+    // Sel holds raw selection in image pixels, with image dims
+    #[derive(Clone)]
+    struct Sel {
+        idx: usize,
+        path: String,
+        rect: [f32;4],
+        x0: u32,
+        y0: u32,
+        w: u32,
+        h: u32,
+        img_w: u32,
+        img_h: u32,
+    }
+    let mut image_cache: HashMap<String, (image::RgbaImage, u32, u32)> = HashMap::new();
+    let mut sels: Vec<Sel> = Vec::new();
+    for (idx, path, rect_arr, _quads) in data {
+        let need_decode = !image_cache.contains_key(&path);
+        if need_decode {
+            eprintln!("[manual::multi] decode path={}", path);
+            let rgba = image::ImageReader::open(&path)
+                .map_err(|e| format!("Failed to open {path}: {e}"))?
+                .with_guessed_format().map_err(|e| format!("Failed to decode {path}: {e}"))?
+                .decode().map_err(|e| format!("Failed to decode {path}: {e}"))?
+                .into_rgba8();
+            let (w,h)=rgba.dimensions();
+            eprintln!("[manual::multi]   decoded {}x{}", w, h);
+            image_cache.insert(path.clone(), (rgba,w,h));
+        }
+        let (_full, img_w, img_h) = image_cache.get(&path).unwrap();
+        let [rx, ry, rw, rh] = rect_arr;
+        eprintln!("[manual::multi] rect_arr idx={} [{:.1},{:.1},{:.1},{:.1}] img={}x{}", idx, rx, ry, rw, rh, img_w, img_h);
+        let x0 = rx.floor().clamp(0.0, *img_w as f32 -1.0) as u32;
+        let y0 = ry.floor().clamp(0.0, *img_h as f32 -1.0) as u32;
+        let x1 = (rx+rw).ceil().clamp(x0 as f32 +1.0, *img_w as f32) as u32;
+        let y1 = (ry+rh).ceil().clamp(y0 as f32 +1.0, *img_h as f32) as u32;
+        let cw = x1.saturating_sub(x0);
+        let ch = y1.saturating_sub(y0);
+        eprintln!("[manual::multi]   -> x0={} y0={} x1={} y1={} cw={} ch={} ", x0, y0, x1, y1, cw, ch);
+        if cw==0 || ch==0 {
+            eprintln!("[manual::multi]   skip zero cw/ch");
+            continue;
+        }
+        sels.push(Sel { idx, path: path.clone(), rect: rect_arr, x0, y0, w: cw, h: ch, img_w: *img_w, img_h: *img_h });
+    }
+    eprintln!("[manual::multi] sels built len={}", sels.len());
+    for (i, s) in sels.iter().enumerate() {
+        eprintln!("[manual::multi]   sel {}: idx={} x0={} y0={} w={} h={} img={}x{} rect={:?}", i, s.idx, s.x0, s.y0, s.w, s.h, s.img_w, s.img_h, s.rect);
+    }
+    if sels.is_empty() { return Err("no valid pieces".to_string()); }
+    // sort by image idx then y then x deterministically
+    sels.sort_by(|a,b| a.idx.cmp(&b.idx).then(a.y0.cmp(&b.y0)).then(a.x0.cmp(&b.x0)));
+    eprintln!("[manual::multi] sels sorted");
+    for (i, s) in sels.iter().enumerate() {
+        eprintln!("[manual::multi]   sorted {}: idx={} x0={} y0={} w={} h={}", i, s.idx, s.x0, s.y0, s.w, s.h);
+    }
+    const CANVAS: u32 = 512;
+    // Helper to compute group metrics: per-image bbox and total stitched height
+    // Returns (max_w_span, total_h_span, oversized_present)
+    let metrics = |group: &[Sel]| -> (u32, u32, bool) {
+        use std::collections::HashMap;
+        let mut per: HashMap<usize, (u32,u32,u32,u32)> = HashMap::new(); // minX,maxX,minY,maxY per idx
+        let mut oversized = false;
+        for s in group {
+            // individual oversized already flagged, but also check combined
+            if s.w > CANVAS || s.h > CANVAS { oversized = true; }
+            let e = per.entry(s.idx).or_insert((s.x0, s.x0+s.w, s.y0, s.y0+s.h));
+            e.0 = e.0.min(s.x0);
+            e.1 = e.1.max(s.x0+s.w);
+            e.2 = e.2.min(s.y0);
+            e.3 = e.3.max(s.y0+s.h);
+        }
+        let mut max_w = 0u32;
+        let mut total_h = 0u32;
+        for (_idx, (minx, maxx, miny, maxy)) in per {
+            let w = maxx - minx;
+            let h = maxy - miny;
+            if w > CANVAS || h > CANVAS { oversized = true; }
+            max_w = max_w.max(w);
+            total_h = total_h.saturating_add(h);
+        }
+        (max_w, total_h, oversized)
+    };
+    // Group nearby that fit without resizing inside 512x512 (bbox span)
+    // Arbitrary N stitch: sum h_spans <=512 and max w <=512
+    let mut groups: Vec<Vec<Sel>> = Vec::new();
+    let mut cur: Vec<Sel> = Vec::new();
+    for s in sels {
+        if s.w > CANVAS || s.h > CANVAS {
+            eprintln!("[manual::multi] grouping sel idx={} {}x{} > 512 -> solo oversized group", s.idx, s.w, s.h);
+            if !cur.is_empty() { groups.push(std::mem::take(&mut cur)); }
+            groups.push(vec![s]);
+            continue;
+        }
+        if cur.is_empty() {
+            cur.push(s);
+            continue;
+        }
+        let mut hypo = cur.clone();
+        hypo.push(s.clone());
+        let (max_w, total_h, oversized) = metrics(&hypo);
+        eprintln!("[manual::multi] grouping try add idx={} w={} h={} to cur len={} -> hypo max_w={} total_h={} oversized={}", s.idx, s.w, s.h, cur.len(), max_w, total_h, oversized);
+        if oversized || max_w > CANVAS || total_h > CANVAS {
+            eprintln!("[manual::multi]   would exceed 512 -> flush cur len={} and start new", cur.len());
+            groups.push(std::mem::take(&mut cur));
+            cur.push(s);
+        } else {
+            eprintln!("[manual::multi]   fits -> push cur");
+            cur = hypo;
+        }
+    }
+    if !cur.is_empty() { groups.push(cur); }
+    eprintln!("[manual::multi] groups built len={}", groups.len());
+    for (gi, g) in groups.iter().enumerate() {
+        let (max_w, total_h, _) = metrics(g);
+        eprintln!("[manual::multi]   group {}: sels={} max_w={} total_h={} member={:?}", gi, g.len(), max_w, total_h, g.iter().map(|s| (s.idx, s.x0, s.y0, s.w, s.h)).collect::<Vec<_>>());
+    }
+    let mut per_image: HashMap<usize, Vec<(image::RgbaImage, [f32;4], Option<Quad>)>> = HashMap::new();
+    // helpers
+    let reflect_index = |x: i64, len: i64| -> i64 {
+        let period = len*2;
+        let mut v = x % period;
+        if v < 0 { v += period; }
+        if v >= len { period - v -1 } else { v }
+    };
+    for (group_idx, group) in groups.into_iter().enumerate() {
+        if group.is_empty() { continue; }
+        eprintln!("[manual::multi] group {} processing sels={} ", group_idx, group.len());
+        // Oversized solo: square crop + resize to 512 (spec q3)
+        if group.len()==1 && (group[0].w > CANVAS || group[0].h > CANVAS) {
+            let s = &group[0];
+            eprintln!("[manual::multi] group {} oversized solo idx={} {}x{} img={}x{} rect={:?}", group_idx, s.idx, s.w, s.h, s.img_w, s.img_h, s.rect);
+            // per spec: take full width or height based on larger side, crop square, resize to 512 (q3)
+            // Use shared helper from inpaint crate for consistency with tests
+            let (side, sx_u, sy_u) = scanlateit_inpaint::manual_square_params(s.x0, s.y0, s.w, s.h, s.img_w, s.img_h);
+            let sx = sx_u as i32;
+            let sy = sy_u as i32;
+            let larger_is_w = s.w >= s.h;
+            let side_full = if larger_is_w { s.img_w } else { s.img_h };
+            let min_dim = s.img_w.min(s.img_h);
+            eprintln!("[manual::multi]   oversized side computed larger_is_w={} side_full={} side={} min_dim={} sx={} sy={}", larger_is_w, side_full, side, min_dim, sx, sy);
+            let full = &image_cache.get(&s.path).unwrap().0;
+            let square_rgba = image::imageops::crop_imm(full, sx as u32, sy as u32, side, side).to_image();
+            let canvas_rgba = image::DynamicImage::ImageRgba8(square_rgba).resize(CANVAS, CANVAS, image::imageops::FilterType::Lanczos3).to_rgba8();
+            let scale = CANVAS as f32 / side as f32;
+            // mask quad in canvas coords (selection rect scaled)
+            let qx = (s.x0 as i32 - sx) as f32 * scale;
+            let qy = (s.y0 as i32 - sy) as f32 * scale;
+            let qw = s.w as f32 * scale;
+            let qh = s.h as f32 * scale;
+            let quad = Quad { points: [[qx, qy], [qx+qw, qy], [qx+qw, qy+qh], [qx, qy+qh]] };
+            eprintln!("[manual::multi]   canvas 512 mask quad {:?} scale={:.4} sx,sy={},{} side={}", quad.points, scale, sx, sy, side);
+            let rect = [0.0, 0.0, CANVAS as f32, CANVAS as f32];
+            let patches = match engine.run_on_image(&canvas_rgba, rect, &[quad]) {
+                Ok(v) => { eprintln!("[manual::multi]   oversized patches={}", v.len()); v },
+                Err(e) => { eprintln!("[manual::multi]   oversized run_on_image failed: {}", e); return Err(e); }
+            };
+            for (pi, (patch_img, bounds_canvas, quad_opt)) in patches.into_iter().enumerate() {
+                let [bx, by, bw, bh] = bounds_canvas;
+                eprintln!("[manual::multi]   oversized patch {}: bounds_canvas=[{:.1},{:.1},{:.1},{:.1}] patch={}x{} quad={:?}", pi, bx, by, bw, bh, patch_img.width(), patch_img.height(), quad_opt.map(|q| q.points));
+                // map bounds back to original image coords via inverse scale
+                let orig_x = sx as f32 + bx / scale;
+                let orig_y = sy as f32 + by / scale;
+                let orig_w = bw / scale;
+                let orig_h = bh / scale;
+                // resize patch back to orig size (inverse scale)
+                let pw = (orig_w.round() as u32).max(1).min(patch_img.width());
+                let ph = (orig_h.round() as u32).max(1).min(patch_img.height());
+                // patch_img is bounds size in canvas coords; resize to orig_w/h
+                let resized = if (orig_w as u32) != patch_img.width() || (orig_h as u32) != patch_img.height() {
+                    let ow = orig_w.round().clamp(1.0, 5000.0) as u32;
+                    let oh = orig_h.round().clamp(1.0, 5000.0) as u32;
+                    eprintln!("[manual::multi]     resizing patch {}x{} -> {}x{} (scale 1/{:.4})", patch_img.width(), patch_img.height(), ow, oh, scale);
+                    image::DynamicImage::ImageRgba8(patch_img).resize(ow, oh, image::imageops::FilterType::Lanczos3).to_rgba8()
+                } else { patch_img };
+                let bounds = [orig_x, orig_y, orig_w, orig_h];
+                let orig_quad = quad_opt.map(|q| {
+                    let mut nq = q;
+                    for pt in &mut nq.points {
+                        pt[0] = pt[0] / scale + sx as f32;
+                        pt[1] = pt[1] / scale + sy as f32;
+                    }
+                    nq
+                });
+                eprintln!("[manual::multi]     -> orig_bounds={:?} quad={:?} resized_patch={}x{}", bounds, orig_quad.map(|q| q.points), resized.width(), resized.height());
+                per_image.entry(s.idx).or_default().push((resized, bounds, orig_quad));
+            }
+            continue;
+        }
+        // Normal group: build raw window canvas 512x512 with surrounding pixels
+        // Compute per distinct image bbox
+        // We need distinct images sorted by idx (and for same idx, aggregated bbox already)
+        // Build map distinct idx -> list of sels for that idx
+        let mut per_idx_sels: HashMap<usize, Vec<&Sel>> = HashMap::new();
+        for s in &group { per_idx_sels.entry(s.idx).or_default().push(s); }
+        let mut distinct: Vec<usize> = per_idx_sels.keys().cloned().collect();
+        distinct.sort();
+        eprintln!("[manual::multi] group {} distinct images {:?} per_idx_counts {:?}", group_idx, distinct, per_idx_sels.iter().map(|(k,v)| (*k, v.len())).collect::<Vec<_>>());
+        // For each distinct, compute bbox
+        struct ImgGroup {
+            idx: usize,
+            path: String,
+            img_w: u32,
+            img_h: u32,
+            min_x: u32,
+            max_x: u32,
+            min_y: u32,
+            max_y: u32,
+            w_span: u32,
+            h_span: u32,
+            cx: f32,
+            cy: f32,
+        }
+        let mut img_groups: Vec<ImgGroup> = Vec::new();
+        for didx in &distinct {
+            let list = &per_idx_sels[didx];
+            let min_x = list.iter().map(|s| s.x0).min().unwrap();
+            let max_x = list.iter().map(|s| s.x0 + s.w).max().unwrap();
+            let min_y = list.iter().map(|s| s.y0).min().unwrap();
+            let max_y = list.iter().map(|s| s.y0 + s.h).max().unwrap();
+            let w_span = max_x - min_x;
+            let h_span = max_y - min_y;
+            let cx = (min_x as f32 + max_x as f32)*0.5;
+            let cy = (min_y as f32 + max_y as f32)*0.5;
+            let img_w = list[0].img_w;
+            let img_h = list[0].img_h;
+            let path = list[0].path.clone();
+            img_groups.push(ImgGroup { idx:*didx, path, img_w, img_h, min_x, max_x, min_y, max_y, w_span, h_span, cx, cy });
+            eprintln!("[manual::multi]   img_group idx={} bbox [{},{},{},{}] w_span={} h_span={} cx={:.1} cy={:.1} img={}x{}", didx, min_x, min_y, max_x, max_y, w_span, h_span, cx, cy, img_w, img_h);
+        }
+        // Allocate window heights to fill 512 if stitch multiple
+        // For single distinct, window is single 512 window centered on bbox
+        // For multiple, need to allocate h_src per image
+        // Use strategy: sum h_span = total_h, extra = 512 - total_h
+        // Distribute extra based on avail_top/bottom per image
+        if img_groups.len()==1 {
+            let ig = &img_groups[0];
+            let w_src = CANVAS.min(ig.img_w);
+            let h_src = CANVAS.min(ig.img_h);
+            let mut x_src = (ig.cx - w_src as f32 *0.5).round() as i32;
+            let mut y_src = (ig.cy - h_src as f32 *0.5).round() as i32;
+            x_src = x_src.clamp(0, ig.img_w as i32 - w_src as i32).max(0);
+            y_src = y_src.clamp(0, ig.img_h as i32 - h_src as i32).max(0);
+            eprintln!("[manual::multi]   single-img window x_src={} y_src={} w_src={} h_src={} cx={:.1} cy={:.1}", x_src, y_src, w_src, h_src, ig.cx, ig.cy);
+            let full = &image_cache.get(&ig.path).unwrap().0;
+            let region = image::imageops::crop_imm(full, x_src as u32, y_src as u32, w_src, h_src).to_image();
+            // Build canvas 512x512 with region centered and mirror pad
+            let mut canvas = image::RgbaImage::new(CANVAS, CANVAS);
+            // compute dx, dy to center small region (when img smaller than 512)
+            let dx = if w_src < CANVAS { (CANVAS - w_src)/2 } else { 0 };
+            let dy = if h_src < CANVAS { (CANVAS - h_src)/2 } else { 0 };
+            // dx/dy placement for centering; but if w_src==512 then dx 0 (x_src already centered)
+            // For w_src==512 case, dx 0 and region exactly fills width
+            // For w_src<512 (narrow image), region centered, mirror both sides via reflect
+            // Use reflect logic to fill canvas:
+            // If w_src==CANVAS && h_src==CANVAS => canvas = region
+            // Else reflect
+            if w_src==CANVAS && h_src==CANVAS {
+                canvas = region.clone();
+            } else {
+                // Place region at dx,dy then reflect
+                // First fill canvas with reflected region
+                for cy in 0..CANVAS as i64 {
+                    let sy = reflect_index(cy - dy as i64, h_src as i64);
+                    for cx in 0..CANVAS as i64 {
+                        let sx = reflect_index(cx - dx as i64, w_src as i64);
+                        let px = region.get_pixel(sx as u32, sy as u32).clone();
+                        canvas.put_pixel(cx as u32, cy as u32, px);
+                    }
+                }
+            }
+            eprintln!("[manual::multi]   canvas built {}x{} region {}x{} at dx={},dy={} x_src={},y_src={}", canvas.width(), canvas.height(), region.width(), region.height(), dx, dy, x_src, y_src);
+            // Build mask quads: each sel in group as quad in canvas coords
+            let mut quads_canvas: Vec<Quad> = Vec::new();
+            for s in &group {
+                let qx = s.x0 as f32 - x_src as f32 + dx as f32;
+                let qy = s.y0 as f32 - y_src as f32 + dy as f32;
+                let quad = Quad { points: [[qx, qy],[qx+s.w as f32, qy],[qx+s.w as f32, qy+s.h as f32],[qx, qy+s.h as f32]] };
+                eprintln!("[manual::multi]   sel idx={} orig [{},{},{}x{}] -> canvas quad {:?}", s.idx, s.x0, s.y0, s.w, s.h, quad.points);
+                quads_canvas.push(quad);
+            }
+            let rect = [0.0,0.0,CANVAS as f32, CANVAS as f32];
+            let patches = match engine.run_on_image(&canvas, rect, &quads_canvas) {
+                Ok(v) => { eprintln!("[manual::multi]   single window patches={}", v.len()); v },
+                Err(e) => { eprintln!("[manual::multi]   single window run_on_image failed: {}", e); return Err(e); }
+            };
+            for (pi, (patch_img, bounds_canvas, quad_opt)) in patches.into_iter().enumerate() {
+                let [bx,by,bw,bh] = bounds_canvas;
+                eprintln!("[manual::multi]   patch {}: bounds_canvas [{:.1},{:.1},{:.1},{:.1}] patch {}x{} quad={:?}", pi, bx,by,bw,bh, patch_img.width(), patch_img.height(), quad_opt.map(|q| q.points));
+                // Map canvas bounds back to image coords
+                let orig_x = bx - dx as f32 + x_src as f32;
+                let orig_y = by - dy as f32 + y_src as f32;
+                // clip to image bounds
+                let img_w_f = ig.img_w as f32;
+                let img_h_f = ig.img_h as f32;
+                let clip_x0 = orig_x.max(0.0);
+                let clip_y0 = orig_y.max(0.0);
+                let clip_x1 = (orig_x + bw).min(img_w_f);
+                let clip_y1 = (orig_y + bh).min(img_h_f);
+                if clip_x1 <= clip_x0 || clip_y1 <= clip_y0 { eprintln!("[manual::multi]     skip zero clip"); continue; }
+                let new_w = clip_x1 - clip_x0;
+                let new_h = clip_y1 - clip_y0;
+                let crop_x = (clip_x0 - orig_x).round().max(0.0) as u32;
+                let crop_y = (clip_y0 - orig_y).round().max(0.0) as u32;
+                let clipped = if crop_x!=0 || crop_y!=0 || new_w as u32 != patch_img.width() || new_h as u32 != patch_img.height() {
+                    let cw = (new_w as u32).min(patch_img.width().saturating_sub(crop_x));
+                    let ch = (new_h as u32).min(patch_img.height().saturating_sub(crop_y));
+                    if cw==0||ch==0 { continue; }
+                    image::imageops::crop_imm(&patch_img, crop_x, crop_y, cw, ch).to_image()
+                } else { patch_img };
+                let bounds = [clip_x0, clip_y0, new_w, new_h];
+                let orig_quad = quad_opt.map(|q| {
+                    let mut nq = q;
+                    for pt in &mut nq.points { pt[0] += x_src as f32 - dx as f32; pt[1] += y_src as f32 - dy as f32; }
+                    nq
+                });
+                eprintln!("[manual::multi]     -> per_image idx={} bounds={:?} quad={:?} clipped {}x{}", ig.idx, bounds, orig_quad.map(|q| q.points), clipped.width(), clipped.height());
+                // For single distinct, all sels share same idx, but we push per patch with that idx
+                // Use bounds to decide which sel? Actually per_image should be per distinct idx, but patches may correspond to each sel quad
+                // We'll assign to ig.idx (since all same)
+                per_image.entry(ig.idx).or_default().push((clipped, bounds, orig_quad));
+            }
+        } else {
+            // Multi-image stitch arbitrary N
+            eprintln!("[manual::multi]   multi-img stitch N={}", img_groups.len());
+            // Compute per-image h_span already, sum = total_h
+            let total_span: u32 = img_groups.iter().map(|g| g.h_span).sum();
+            let extra_needed = if total_span < CANVAS { CANVAS - total_span } else { 0 };
+            eprintln!("[manual::multi]   total_span={} extra_needed={}", total_span, extra_needed);
+            // Distribute extra_needed based on avail per image
+            // avail per image: top = min_y, bottom = img_h - max_y
+            let mut extra_alloc: Vec<u32> = vec![0; img_groups.len()];
+            if extra_needed > 0 {
+                // Simple distribution: split extra_needed equally, capped by avail
+                // First compute total avail
+                let avails: Vec<u32> = img_groups.iter().map(|g| (g.min_y + (g.img_h - g.max_y)) ).collect();
+                let total_avail: u32 = avails.iter().sum();
+                eprintln!("[manual::multi]   avails {:?} total_avail {}", avails, total_avail);
+                if total_avail >= extra_needed {
+                    // Proportional to avail
+                    let mut remaining = extra_needed;
+                    for (i, avail) in avails.iter().enumerate() {
+                        let share = if i == avails.len()-1 { remaining } else { (extra_needed as f32 * *avail as f32 / total_avail as f32).round() as u32 };
+                        let take = share.min(*avail).min(remaining);
+                        extra_alloc[i] = take;
+                        remaining = remaining.saturating_sub(take);
+                    }
+                    // if still remaining due to rounding, distribute left
+                    let mut idx = 0;
+                    while remaining > 0 {
+                        let avail_left = avails[idx] - extra_alloc[idx];
+                        if avail_left > 0 {
+                            let take = 1.min(avail_left).min(remaining);
+                            extra_alloc[idx] += take;
+                            remaining -= take;
+                        }
+                        idx = (idx+1)%avails.len();
+                        if idx==0 && extra_alloc.iter().zip(&avails).all(|(a, av)| *a==*av) { break; }
+                    }
+                } else {
+                    // Not enough avail to fill, will need mirror gap after
+                    for (i, avail) in avails.iter().enumerate() {
+                        extra_alloc[i] = *avail;
+                    }
+                }
+            }
+            eprintln!("[manual::multi]   extra_alloc per img {:?}", extra_alloc);
+            // Now compute h_src per image = h_span + extra_alloc
+            // and y_src per image
+            struct PieceWin {
+                idx: usize,
+                path: String,
+                img_w: u32,
+                img_h: u32,
+                x_src: i32,
+                y_src: i32,
+                w_src: u32,
+                h_src: u32,
+                off_y: u32,
+                // for mapping sels
+                min_x: u32,
+                max_x: u32,
+                min_y: u32,
+                max_y: u32,
+                cx: f32,
+                cy: f32,
+            }
+            let mut pieces_win: Vec<PieceWin> = Vec::new();
+            let mut off_y: u32 = 0;
+            for (i, ig) in img_groups.iter().enumerate() {
+                let extra = extra_alloc[i];
+                let h_src = ig.h_span + extra;
+                // split extra into top/bottom: for first image, extra comes from top (min_y), for last from bottom, middle split
+                let (top_extra, bottom_extra) = if img_groups.len()==1 {
+                    // already handled
+                    (0,0)
+                } else if i==0 {
+                    // first: expand upward as much as possible (up to min_y)
+                    let top = extra.min(ig.min_y);
+                    let bottom = extra - top; // should be 0 but if top capped, remainder from bottom? but first bottom is at seam, shouldn't expand downward beyond max_y? Actually extra for first should be top only, so bottom stays 0. If avail_top insufficient, we already limited extra to avail, so bottom 0.
+                    (top, bottom)
+                } else if i==img_groups.len()-1 {
+                    let bottom = extra.min(ig.img_h - ig.max_y);
+                    let top = extra - bottom;
+                    (top, bottom)
+                } else {
+                    // middle: split equally
+                    let top = (extra/2).min(ig.min_y);
+                    let bottom = (extra - top).min(ig.img_h - ig.max_y);
+                    let top2 = extra - bottom; // adjust if bottom capped
+                    let top2 = top2.min(ig.min_y);
+                    (top2, bottom)
+                };
+                let y_src = (ig.min_y as i32 - top_extra as i32).max(0);
+                // Ensure y_src + h_src <= img_h
+                let y_src = y_src.clamp(0, ig.img_h as i32 - h_src as i32).max(0);
+                let w_src = CANVAS.min(ig.img_w);
+                let mut x_src = (ig.cx - w_src as f32*0.5).round() as i32;
+                x_src = x_src.clamp(0, ig.img_w as i32 - w_src as i32).max(0);
+                eprintln!("[manual::multi]   piece win idx={} h_span={} extra={} top={} bottom={} y_src={} h_src={} x_src={} w_src={} off_y={} min/max [{},{}] [{},{}]", ig.idx, ig.h_span, extra, top_extra, bottom_extra, y_src, h_src, x_src, w_src, off_y, ig.min_x, ig.max_x, ig.min_y, ig.max_y);
+                pieces_win.push(PieceWin { idx: ig.idx, path: ig.path.clone(), img_w: ig.img_w, img_h: ig.img_h, x_src, y_src, w_src, h_src, off_y, min_x: ig.min_x, max_x: ig.max_x, min_y: ig.min_y, max_y: ig.max_y, cx: ig.cx, cy: ig.cy });
+                off_y += h_src;
+            }
+            let total_h_stitched: u32 = pieces_win.iter().map(|p| p.h_src).sum();
+            eprintln!("[manual::multi]   total_h_stitched={} off_y final {}", total_h_stitched, off_y);
+            // Build stitched canvas 512x512
+            let mut stitched = image::RgbaImage::new(CANVAS, CANVAS);
+            // Vertical offset to center if total <512 (mirror pad needed)
+            let vert_offset = if total_h_stitched < CANVAS { (CANVAS - total_h_stitched)/2 } else { 0 };
+            eprintln!("[manual::multi]   vert_offset for centering stitched block {} total {} <512 {}", vert_offset, total_h_stitched, total_h_stitched < CANVAS);
+            for pw in &pieces_win {
+                let full = &image_cache.get(&pw.path).unwrap().0;
+                let region = image::imageops::crop_imm(full, pw.x_src as u32, pw.y_src as u32, pw.w_src, pw.h_src).to_image();
+                // Horizontal pad to 512 if w_src <512 via reflect both sides centered
+                let mut region_padded = image::RgbaImage::new(CANVAS, pw.h_src);
+                if pw.w_src < CANVAS {
+                    let dx = (CANVAS - pw.w_src)/2;
+                    // reflect fill
+                    for y in 0..pw.h_src as i64 {
+                        for x in 0..CANVAS as i64 {
+                            let sx = reflect_index(x - dx as i64, pw.w_src as i64);
+                            let px = region.get_pixel(sx as u32, y as u32).clone();
+                            region_padded.put_pixel(x as u32, y as u32, px);
+                        }
+                    }
+                } else {
+                    region_padded = region;
+                }
+                let dst_y = vert_offset + pw.off_y;
+                image::imageops::replace(&mut stitched, &region_padded, 0, dst_y as i64);
+                eprintln!("[manual::multi]   placed piece idx={} w_src={} h_src={} x_src={} y_src={} off_y={} dst_y={} -> stitched", pw.idx, pw.w_src, pw.h_src, pw.x_src, pw.y_src, pw.off_y, dst_y);
+            }
+            if total_h_stitched < CANVAS {
+                // Create a temporary copy of the stitched block region for reflection
+                // First, we have stitched with block at vert_offset..vert_offset+total_h, gaps zero. We'll fill gaps by reflecting the block.
+                // Use approach: for each y in 0..CANVAS, sy = reflect_index(y - vert_offset, total_h)
+                let mut filled = image::RgbaImage::new(CANVAS, CANVAS);
+                // Extract block as image for reflection?
+                // For each canvas y, compute sy mirrored
+                for y in 0..CANVAS as i64 {
+                    let sy = reflect_index(y - vert_offset as i64, total_h_stitched as i64);
+                    let src_y = vert_offset as i64 + sy;
+                    for x in 0..CANVAS {
+                        let px = stitched.get_pixel(x, src_y as u32).clone();
+                        filled.put_pixel(x, y as u32, px);
+                    }
+                }
+                stitched = filled;
+                eprintln!("[manual::multi]   vertical mirror filled gaps total {} vert_offset {}", total_h_stitched, vert_offset);
+            }
+            // Build mask quads: each sel in group as quad in stitched coords
+            let mut quads_canvas: Vec<Quad> = Vec::new();
+            // Need mapping from sel to its piece window to compute canvas position
+            for s in &group {
+                // find piece win for this sel's idx
+                let pw = pieces_win.iter().find(|p| p.idx == s.idx).unwrap();
+                // For x: sel x0 - pw.x_src + dx where dx = (512 - pw.w_src)/2 if w_src<512 else 0
+                let dx = if pw.w_src < CANVAS { (CANVAS - pw.w_src)/2 } else { 0 };
+                let qx = s.x0 as f32 - pw.x_src as f32 + dx as f32;
+                let qy = s.y0 as f32 - pw.y_src as f32 + vert_offset as f32 + pw.off_y as f32;
+                let quad = Quad { points: [[qx, qy],[qx+s.w as f32, qy],[qx+s.w as f32, qy+s.h as f32],[qx, qy+s.h as f32]] };
+                eprintln!("[manual::multi]   sel idx={} [{},{},{}x{}] -> canvas quad {:?} (x_src {}, y_src {}, off_y {}, dx {}, vert_offset {})", s.idx, s.x0, s.y0, s.w, s.h, quad.points, pw.x_src, pw.y_src, pw.off_y, dx, vert_offset);
+                quads_canvas.push(quad);
+            }
+            let rect = [0.0,0.0,CANVAS as f32, CANVAS as f32];
+            let patches = match engine.run_on_image(&stitched, rect, &quads_canvas) {
+                Ok(v) => { eprintln!("[manual::multi]   stitch patches={}", v.len()); v },
+                Err(e) => { eprintln!("[manual::multi]   stitch run_on_image failed: {}", e); return Err(e); }
+            };
+            for (pi, (patch_img, bounds_canvas, quad_opt)) in patches.into_iter().enumerate() {
+                let [bx,by,bw,bh] = bounds_canvas;
+                eprintln!("[manual::multi]   patch {}: bounds_canvas [{:.1},{:.1},{:.1},{:.1}] patch {}x{} quad={:?}", pi, bx,by,bw,bh, patch_img.width(), patch_img.height(), quad_opt.map(|q| q.points));
+                // Map bounds_canvas back to original image: find which piece win contains the patch center or overlap
+                // Use quad_piece mapping via pi index if available, else by center
+                // Since we built quads_canvas in group order (same as group sels order), pi corresponds to group[pi] sel
+                let s_opt = if pi < group.len() { Some(&group[pi]) } else { None };
+                let target_pw: &PieceWin = if let Some(s) = s_opt {
+                    pieces_win.iter().find(|p| p.idx == s.idx).unwrap()
+                } else {
+                    // fallback by cy
+                    let cy = by + bh*0.5;
+                    let mut found: Option<&PieceWin> = None;
+                    for pw in &pieces_win {
+                        let y0 = vert_offset as f32 + pw.off_y as f32;
+                        let y1 = y0 + pw.h_src as f32;
+                        if cy >= y0 && cy < y1 { found = Some(pw); break; }
+                    }
+                    match found {
+                        Some(v)=>v,
+                        None=> {
+                            let mut best: Option<&PieceWin>=None;
+                            let mut best_overlap=0.0;
+                            for pw in &pieces_win {
+                                let y0 = vert_offset as f32 + pw.off_y as f32;
+                                let y1 = y0 + pw.h_src as f32;
+                                let overlap = (by+bh).min(y1) - by.max(y0);
+                                if overlap > best_overlap { best_overlap=overlap; best=Some(pw); }
+                            }
+                            match best { Some(v)=>v, None=>continue }
+                        }
+                    }
+                };
+                let dx = if target_pw.w_src < CANVAS { (CANVAS - target_pw.w_src)/2 } else { 0 };
+                let orig_x = bx - dx as f32 + target_pw.x_src as f32;
+                let orig_y = by - vert_offset as f32 - target_pw.off_y as f32 + target_pw.y_src as f32;
+                let img_w_f = target_pw.img_w as f32;
+                let img_h_f = target_pw.img_h as f32;
+                let clip_x0 = orig_x.max(0.0);
+                let clip_y0 = orig_y.max(0.0);
+                let clip_x1 = (orig_x + bw).min(img_w_f);
+                let clip_y1 = (orig_y + bh).min(img_h_f);
+                if clip_x1 <= clip_x0 || clip_y1 <= clip_y0 { eprintln!("[manual::multi]     skip zero clip orig [{:.1},{:.1}] clip [{:.1},{:.1}]-[{:.1},{:.1}]", orig_x, orig_y, clip_x0, clip_y0, clip_x1, clip_y1); continue; }
+                let new_w = clip_x1 - clip_x0;
+                let new_h = clip_y1 - clip_y0;
+                let crop_x = (clip_x0 - orig_x).round().max(0.0) as u32;
+                let crop_y = (clip_y0 - orig_y).round().max(0.0) as u32;
+                let clipped = if crop_x!=0 || crop_y!=0 || new_w as u32 != patch_img.width() || new_h as u32 != patch_img.height() {
+                    let cw = (new_w as u32).min(patch_img.width().saturating_sub(crop_x));
+                    let ch = (new_h as u32).min(patch_img.height().saturating_sub(crop_y));
+                    if cw==0||ch==0 { continue; }
+                    image::imageops::crop_imm(&patch_img, crop_x, crop_y, cw, ch).to_image()
+                } else { patch_img };
+                let bounds = [clip_x0, clip_y0, new_w, new_h];
+                let orig_quad = quad_opt.map(|q| {
+                    let mut nq = q;
+                    for pt in &mut nq.points {
+                        pt[0] = pt[0] - dx as f32 + target_pw.x_src as f32;
+                        pt[1] = pt[1] - vert_offset as f32 - target_pw.off_y as f32 + target_pw.y_src as f32;
+                    }
+                    nq
+                });
+                eprintln!("[manual::multi]     -> per_image idx={} bounds={:?} quad={:?} clipped {}x{} (orig_x {:.1} orig_y {:.1} dx {} vert_offset {})", target_pw.idx, bounds, orig_quad.map(|q| q.points), clipped.width(), clipped.height(), orig_x, orig_y, dx, vert_offset);
+                per_image.entry(target_pw.idx).or_default().push((clipped, bounds, orig_quad));
+            }
+        }
+    }
+    let mut out: Vec<(usize, Vec<(image::RgbaImage, [f32;4], Option<Quad>)>)> = Vec::new();
+    for (idx, v) in per_image { out.push((idx, v)); }
+    out.sort_by_key(|(idx,_)| *idx);
+    Ok(out)
+}
+
+#[cfg(feature = "inpaint")]
+pub fn handle_manual_multi_finished(app: &mut App, result: Result<Vec<(usize, Vec<(image::RgbaImage, [f32;4], Option<Quad>)>)>, String>) -> Task<Message> {
+    eprintln!("[manual::multi] handle_manual_multi_finished result.is_ok={} inpainting was {}", result.is_ok(), app.inpainting);
+    app.inpainting = false;
+    match result {
+        Ok(per_image_patches) => {
+            eprintln!("[manual::multi] finished per_image len={}", per_image_patches.len());
+            for (idx, patches) in &per_image_patches {
+                eprintln!("[manual::multi]   idx={} patches={}", idx, patches.len());
+                for (pi, (patch, bounds, quad)) in patches.iter().enumerate() {
+                    eprintln!("[manual::multi]     patch {}: bounds={:?} patch={}x{} quad={:?}", pi, bounds, patch.width(), patch.height(), quad.map(|q| q.points));
+                }
+            }
+            let mut total=0usize;
+            let mut pending_evs = Vec::new();
+            for (idx, patches) in per_image_patches {
+                let Some(image_id) = app.images.get(idx).map(|i| i.image_id) else {
+                    eprintln!("[manual::multi]   idx {} no image_id -> skip", idx);
+                    continue;
+                };
+                let Some(image) = app.images.get_mut(idx) else {
+                    eprintln!("[manual::multi]   idx {} no image -> skip", idx);
+                    continue;
+                };
+                for (patch, bounds, quad) in patches {
+                    total+=1;
+                    eprintln!("[manual::multi]   pushing layer idx={} bounds={:?} quad={:?} patch={}x{}", idx, bounds, quad.map(|q| q.points), patch.width(), patch.height());
+                    let (width,height)=(patch.width(), patch.height());
+                    let layer = InpaintLayer { bounds, quad, handle: iced::widget::image::Handle::from_rgba(width,height, bytes::Bytes::from(patch.into_raw())), width, height };
+                    image.inpaint.push(layer);
+                    pending_evs.push((image_id, bounds, quad));
+                }
+            }
+            for (image_id, bounds, quad) in pending_evs {
+                eprintln!("[manual::multi]   add_inpaint_patch image_id={:?} bounds={:?} quad={:?}", image_id, bounds, quad.map(|q| q.points));
+                let ev = app.project.add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad);
+                crate::app::handle_model_event(app, ev);
+            }
+            app.show_inpaint = true;
+            // keep manual mode active but selections already cleared; status update
+            app.status = format!("Inpainted {total} region(s) (multi).");
+            eprintln!("[manual::multi] done total={} show_inpaint=true status={}", total, app.status);
+        }
+        Err(e) => {
+            eprintln!("[manual::multi] failed: {}", e);
+            app.status = format!("Multi inpaint failed: {e}");
+        }
     }
     Task::none()
 }

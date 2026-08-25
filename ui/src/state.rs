@@ -4,7 +4,7 @@ use iced::{Color, Font, Rectangle};
 use scanlateit_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
 
 use crate::connect::ConnectModal;
-use crate::event::{EditOrigin, MainAreaMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
+use crate::event::{EditOrigin, MainAreaMode, ManualMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
 use crate::loaded::LoadedImage;
 use scanlateit_model::{ProfileId, Project};
 
@@ -85,6 +85,14 @@ pub trait UiState {
     /// Whether manual OCR range drags are enabled; when `true` a drag on
     /// any tile selects the region to OCR (same UX as inpaint, but without padding).
     fn ocr_mode(&self) -> bool;
+    /// Persistent manual mode (None → no mode, Inpaint/Ocr → multi-select banner).
+    fn manual_mode(&self) -> ManualMode;
+    /// Pending rubber bands while a manual mode is active, in image pixels.
+    fn manual_selections(&self) -> &[(usize, Rectangle)];
+    /// True while an inpaint job is running (blocks Start).
+    fn is_inpainting(&self) -> bool;
+    /// True while a manual OCR job is running.
+    fn is_manual_ocring(&self) -> bool;
     /// Whether the overlay text is drawn over the pages in the main area.
     fn show_overlay_text(&self) -> bool;
     /// Whether applied inpainting patches are drawn over the pages.

@@ -896,6 +896,42 @@ fn aot_infer_dims(w: u32, h: u32, pad: u32, max_size: Option<u32>) -> (u32, u32)
     (next_multiple(w, pad), next_multiple(h, pad))
 }
 
+/// Manual multi oversized: square crop per spec Q3.
+/// Larger side decides full image dim, square centered on selection.
+/// If selection is full width/height, expands other direction to make square of that full side (600x135 full width on 600x1600 -> 600x600).
+/// Side is clamped to `min(img_w, img_h)` to fit without excessive mirror, otherwise mirror pad will be used.
+/// Returns `(side, sx, sy)` where `side` is square side and `sx,sy` is top-left in image.
+pub fn manual_square_params(sel_x0: u32, sel_y0: u32, sel_w: u32, sel_h: u32, img_w: u32, img_h: u32) -> (u32, u32, u32) {
+    let larger_is_w = sel_w >= sel_h;
+    let side_full = if larger_is_w { img_w } else { img_h };
+    let mut side = side_full;
+    let min_dim = img_w.min(img_h);
+    if side > min_dim {
+        side = min_dim;
+    }
+    // If side still smaller than selection's larger side (e.g., 400x700 on 600x1600 -> side 600 <700), expand to selection's larger side and allow mirror.
+    let sel_larger = sel_w.max(sel_h);
+    if side < sel_larger {
+        side = sel_larger;
+    }
+    let cx = sel_x0 as f32 + sel_w as f32 * 0.5;
+    let cy = sel_y0 as f32 + sel_h as f32 * 0.5;
+    let mut sx = (cx - side as f32 * 0.5).round() as i32;
+    let mut sy = (cy - side as f32 * 0.5).round() as i32;
+    // Clamp, but if side > img dim, keep 0 (mirror will pad)
+    if side <= img_w {
+        sx = sx.clamp(0, img_w as i32 - side as i32).max(0);
+    } else {
+        sx = 0;
+    }
+    if side <= img_h {
+        sy = sy.clamp(0, img_h as i32 - side as i32).max(0);
+    } else {
+        sy = 0;
+    }
+    (side, sx as u32, sy as u32)
+}
+
 /// Inpaints `rect` with the AOT-GAN ONNX model. Variable resolution:
 /// `exp` crop (rect + `AOT_CONTEXT_PAD`) is resized to `AOT_PAD`-aligned
 /// `AOT_MAX_SIZE`-capped dimensions for inference, normalized to `[-1,1]`,
@@ -1385,5 +1421,68 @@ mod tests {
         // 2000*0.512=1024 -> 1024 pad 8 => 1024, 1000*0.512=512 -> 512
         assert_eq!(aot_infer_dims(2048, 2048, 8, Some(1024)), (1024, 1024));
         assert_eq!(aot_infer_dims(100, 200, 8, None), (104, 200));
+    }
+
+    #[test]
+    fn manual_square_full_width_expands_to_square() {
+        // Q3: 600x1600 image, selection 600x135 full width at (0,700) -> square 600x600
+        let (side, sx, sy) = manual_square_params(0, 700, 600, 135, 600, 1600);
+        assert_eq!(side, 600, "full width 600 -> square side 600");
+        assert_eq!(sx, 0, "full width -> sx 0");
+        // center cy = 700+67.5=767.5, side 600 => sy 467.5 round 468, clamped to 0..1000
+        assert_eq!(sy, 468);
+        // Selection at top edge should clamp sy 0
+        let (side2, sx2, sy2) = manual_square_params(0, 0, 600, 135, 600, 1600);
+        assert_eq!(side2, 600);
+        assert_eq!(sy2, 0, "top edge selection clamped to 0");
+        // Selection at bottom edge
+        let (side3, _, sy3) = manual_square_params(0, 1465, 600, 135, 600, 1600);
+        assert_eq!(sy3, 1000, "bottom edge clamped to 1600-600=1000");
+    }
+
+    #[test]
+    fn manual_square_oversized_larger_side_takes_full_dim() {
+        // 690x1600 image, selection 400x550 (h larger) -> full dim based on h is 1600 -> side min 690 -> side 690
+        let (side, _, _) = manual_square_params(100, 500, 400, 550, 690, 1600);
+        assert_eq!(side, 690, "larger is h, full h 1600 -> clamped to min 690");
+        // 1000x1000 square image, selection 600x400 larger w 600 -> full w 1000 -> side 1000
+        let (side2, sx2, sy2) = manual_square_params(200, 300, 600, 400, 1000, 1000);
+        assert_eq!(side2, 1000);
+        assert_eq!(sx2, 0, "centered square 1000 on 1000x1000 -> 0");
+        assert_eq!(sy2, 0);
+        // Small image 300x300, selection 100x80 -> side full w 300 -> side 300
+        let (side3, _, _) = manual_square_params(50, 50, 100, 80, 300, 300);
+        assert_eq!(side3, 300);
+    }
+
+    #[test]
+    fn manual_canvas_mirror_pad_small_image_needs_reflect() {
+        // 300x300 image smaller than 512, any window will need mirror pad
+        // Verify that reflect_index correctly mirrors and that manual window would be centered
+        let img_w = 300;
+        let img_h = 300;
+        let w_src = MODEL_EDGE.min(img_w); // 300
+        let h_src = MODEL_EDGE.min(img_h); // 300
+        assert_eq!(w_src, 300);
+        assert_eq!(h_src, 300);
+        // view_window for small image should center with pad 106 each side (512-300)/2=106
+        let (sx, sy, sw, sh, dx, dy) = view_window(img_w, img_h, &[], [0.0, 0.0]);
+        assert_eq!(sw, 300);
+        assert_eq!(sh, 300);
+        assert_eq!(dx, 106);
+        assert_eq!(dy, 106);
+        // Verify reflect place fills 512x512 via mirror
+        let mut region = RgbImage::new(300, 300);
+        for y in 0..300 {
+            for x in 0..300 {
+                region[(x, y)] = Rgb([x as u8, y as u8, 0]);
+            }
+        }
+        let mut canvas = RgbImage::new(MODEL_EDGE, MODEL_EDGE);
+        reflect_place_rgb(&mut canvas, &region, dx, dy);
+        // Center pixel should be from region center
+        assert_eq!(canvas[(256, 256)], region[(150, 150)]);
+        // Corner top-left should be mirrored from region via reflect_index(-106,300)=105
+        assert_eq!(canvas[(0, 0)], region[(105, 105)], "top-left mirrors correctly via reflect_index");
     }
 }

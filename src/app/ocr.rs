@@ -554,6 +554,9 @@ pub fn handle_manual_ocr_engine_ready(app: &mut App, result: Result<ocr::Engine,
     match result {
         Ok(engine) => {
             app.manual_ocr_engine = Some(engine.clone());
+            if let Some(multi) = app.pending_manual_multi_ocr.take() {
+                return start_manual_multi_ocr(app, multi, engine.clone());
+            }
             if let Some(spans) = app.pending_manual_ocr_span.take() {
                 return start_manual_ocr_span(app, spans, engine.clone());
             }
@@ -565,6 +568,7 @@ pub fn handle_manual_ocr_engine_ready(app: &mut App, result: Result<ocr::Engine,
         Err(e) => {
             app.pending_manual_ocr = None;
             app.pending_manual_ocr_span = None;
+            app.pending_manual_multi_ocr = None;
             app.status = format!("Manual OCR engine failed: {e}");
             Task::none()
         }
@@ -934,5 +938,208 @@ pub fn handle_manual_ocr_span_finished(
     _result: Result<Vec<(usize, Vec<NewEntry>)>, String>,
 ) -> Task<Message> {
     app.status = "OCR is not available in this build.".to_string();
+    Task::none()
+}
+
+#[cfg(feature = "ocr")]
+pub fn handle_manual_multi_ocr(app: &mut App, selections: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
+    if selections.is_empty() { return Task::none(); }
+    if app.manual_ocring || app.running || app.translating || app.inpainting { return Task::none(); }
+    // validate
+    let mut valid: Vec<(usize, iced::Rectangle)> = Vec::new();
+    for (idx, r) in selections {
+        if idx >= app.images.len() { continue; }
+        if r.width < 4.0 || r.height < 4.0 { continue; }
+        valid.push((idx, r));
+    }
+    if valid.is_empty() {
+        app.status = "Manual OCR: no valid selections.".to_string();
+        return Task::none();
+    }
+    let cfg = scanlateit_settings::get(|s| {
+        ocr::config_with(0.0, s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000))
+    });
+    let cached = app.manual_ocr_engine.clone();
+    if let Some(engine) = cached {
+        return start_manual_multi_ocr(app, valid, engine);
+    }
+    app.pending_manual_multi_ocr = Some(valid);
+    app.status = "Loading OCR engine for manual OCR…".to_string();
+    Task::perform(async move { ocr::Engine::build_with_config(cfg) }, Message::ManualOcrEngineReady)
+}
+
+#[cfg(feature = "ocr")]
+fn start_manual_multi_ocr(app: &mut App, selections: Vec<(usize, iced::Rectangle)>, engine: ocr::Engine) -> Task<Message> {
+    app.manual_ocring = true;
+    app.status = format!("Manual OCR on {} selection(s)...", selections.len());
+    // Build per-image paths
+    let mut items: Vec<(usize, String, iced::Rectangle)> = Vec::new();
+    for (idx, rect) in selections {
+        if idx >= app.images.len() { continue; }
+        let path = app.project.image(app.images[idx].image_id).map(|m| m.path.clone()).unwrap_or_default();
+        if path.is_empty() { continue; }
+        items.push((idx, path, rect));
+    }
+    if items.is_empty() { app.manual_ocring=false; return Task::none(); }
+    let merge_cfg = scanlateit_settings::get(|s| ocr::MergeConfig::from_threshold_str(&s.ocr_merge_threshold));
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || run_manual_multi_ocr(engine, items, merge_cfg))
+                .await
+                .unwrap_or_else(|e| Err(format!("Manual multi OCR task cancelled: {e}")))
+        },
+        Message::ManualOcrMultiFinished,
+    )
+}
+
+#[cfg(feature = "ocr")]
+fn run_manual_multi_ocr(engine: ocr::Engine, items: Vec<(usize, String, iced::Rectangle)>, merge_cfg: ocr::MergeConfig) -> Result<Vec<(usize, Vec<NewEntry>)>, String> {
+    use std::collections::HashMap;
+    // Group by image idx
+    let mut by_image: HashMap<usize, Vec<(String, iced::Rectangle)>> = HashMap::new();
+    for (idx, path, rect) in items {
+        by_image.entry(idx).or_default().push((path, rect));
+    }
+    // For each image, cluster rects by touching (AABB intersect or edge touch)
+    struct Cluster { x0: f32, y0: f32, x1: f32, y1: f32 }
+    let mut jobs: Vec<(usize, String, Cluster)> = Vec::new(); // each job is one OCR crop
+    // Need to also keep path per image (they share same path per idx, but we stored path per rect, should be same)
+    let mut path_by_idx: HashMap<usize, String> = HashMap::new();
+    for (idx, rects) in by_image {
+        if rects.is_empty() { continue; }
+        let path = rects[0].0.clone();
+        path_by_idx.insert(idx, path.clone());
+        // cluster rects
+        let mut clusters: Vec<Cluster> = Vec::new();
+        for (_, r) in rects {
+            let mut cur = Cluster { x0: r.x, y0: r.y, x1: r.x + r.width, y1: r.y + r.height };
+            // try to merge with existing clusters if touching
+            let mut merged_indices: Vec<usize> = Vec::new();
+            for (ci, c) in clusters.iter().enumerate() {
+                let touches = !(cur.x1 < c.x0 - 1e-3 || cur.x0 > c.x1 + 1e-3 || cur.y1 < c.y0 - 1e-3 || cur.y0 > c.y1 + 1e-3);
+                // Actually touching if intervals overlap or just touch (gap <=0)
+                // The condition above checks for separated; if not separated then touching/overlap
+                if touches {
+                    merged_indices.push(ci);
+                }
+            }
+            if merged_indices.is_empty() {
+                clusters.push(cur);
+            } else {
+                // merge all touched clusters plus cur into one
+                let mut nx0 = cur.x0;
+                let mut ny0 = cur.y0;
+                let mut nx1 = cur.x1;
+                let mut ny1 = cur.y1;
+                // sort descending to remove safely
+                merged_indices.sort_by(|a,b| b.cmp(a));
+                for mi in merged_indices {
+                    let c = clusters.remove(mi);
+                    nx0 = nx0.min(c.x0);
+                    ny0 = ny0.min(c.y0);
+                    nx1 = nx1.max(c.x1);
+                    ny1 = ny1.max(c.y1);
+                }
+                clusters.push(Cluster { x0: nx0, y0: ny0, x1: nx1, y1: ny1 });
+            }
+        }
+        for c in clusters {
+            jobs.push((idx, path.clone(), c));
+        }
+    }
+    if jobs.is_empty() { return Err("no OCR jobs".to_string()); }
+    // For each job, decode, crop, run OCR (parallel via spawn_blocking per job? But we are already in blocking thread, so sequential or use rayon)
+    // Since we are in a single blocking task, we can run sequentially but spec says parallel if more than one.
+    // We can use std::thread scope to run parallel within this blocking task.
+    // Simpler: run sequentially and collect; parallelism will be limited but okay. For true parallel, spawn tokio tasks inside?
+    // We'll implement parallel using crossbeam or std::thread::scope with each job cloning engine.
+    // Engine is Arc<Mutex<RapidOcr>> so cloning is cheap but still serializes on lock. We'll just run sequentially for now; the engine lock will serialize anyway.
+    // For demonstration, we run sequentially but spawn blocking per job could be parallel via tokio::join_all from the outer async, but we are already blocking.
+    // Instead, we run jobs sequentially but collect results.
+    let mut per_image: HashMap<usize, Vec<NewEntry>> = HashMap::new();
+    for (idx, path, cluster) in jobs {
+        let dyn_img = image::ImageReader::open(&path)
+            .map_err(|e| format!("Failed to open {path}: {e}"))?
+            .with_guessed_format().map_err(|e| format!("Failed to decode {path}: {e}"))?
+            .decode().map_err(|e| format!("Failed to decode {path}: {e}"))?;
+        let rgba = dyn_img.into_rgba8();
+        let (img_w, img_h) = rgba.dimensions();
+        let x0 = cluster.x0.floor().max(0.0) as u32;
+        let y0 = cluster.y0.floor().max(0.0) as u32;
+        let x1 = cluster.x1.ceil().max(x0 as f32 +1.0) as u32;
+        let y1 = cluster.y1.ceil().max(y0 as f32 +1.0) as u32;
+        let x1 = x1.min(img_w);
+        let y1 = y1.min(img_h);
+        let cw = x1.saturating_sub(x0).max(1);
+        let ch = y1.saturating_sub(y0).max(1);
+        let cropped_rgba = image::imageops::crop_imm(&rgba, x0, y0, cw, ch).to_image();
+        let cropped_rgb = image::DynamicImage::ImageRgba8(cropped_rgba).to_rgb8();
+        let token = ocr::OcrCancellationToken::new();
+        let lines = engine.run_image_cancellable(&cropped_rgb, &token)
+            .map_err(|e| format!("Manual OCR failed: {e}"))?;
+        let mut entries = ocr::to_entries_with(lines, merge_cfg);
+        for entry in &mut entries {
+            for p in &mut entry.quad.points {
+                p[0] += x0 as f32;
+                p[1] += y0 as f32;
+            }
+        }
+        per_image.entry(idx).or_default().extend(entries);
+    }
+    let mut out: Vec<(usize, Vec<NewEntry>)> = per_image.into_iter().collect();
+    out.sort_by_key(|(idx,_)| *idx);
+    Ok(out)
+}
+
+#[cfg(feature = "ocr")]
+pub fn handle_manual_multi_finished(app: &mut App, result: Result<Vec<(usize, Vec<NewEntry>)>, String>) -> Task<Message> {
+    app.manual_ocring = false;
+    // keep manual_mode active? selections already cleared; mode stays
+    match result {
+        Ok(per_image) => {
+            if per_image.is_empty() {
+                app.status = "Manual OCR: no text found.".to_string();
+                return Task::none();
+            }
+            let mut total_added = 0usize;
+            let mut total_detected = 0usize;
+            let mut image_count = 0usize;
+            for (idx, entries) in per_image {
+                let cnt = entries.len();
+                total_detected += cnt;
+                if idx >= app.images.len() { continue; }
+                let image_id = app.images[idx].image_id;
+                let added = if let Some(ev) = app.project.append_ocr_for_image_with_event(image_id, entries) {
+                    let n = if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev { ids.len() } else { cnt };
+                    crate::app::handle_model_event(app, ev);
+                    let rev = app.project.reorder_entries_for_image_with_event(image_id);
+                    crate::app::handle_model_event(app, rev);
+                    n
+                } else { 0 };
+                total_added += added;
+                image_count += 1;
+            }
+            if total_added==0 && total_detected==0 {
+                app.status = "Manual OCR: no text found.".to_string();
+            } else {
+                app.status = format!("Manual OCR: {total_added} line(s) added across {image_count} image(s) ({total_detected} detected).");
+            }
+        }
+        Err(e) => {
+            app.status = format!("Manual OCR multi failed: {e}");
+        }
+    }
+    Task::none()
+}
+
+#[cfg(not(feature = "ocr"))]
+pub fn handle_manual_multi_ocr(app: &mut App, _selections: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
+    app.status = "OCR not available in this build.".to_string();
+    Task::none()
+}
+
+#[cfg(not(feature = "ocr"))]
+pub fn handle_manual_multi_finished(app: &mut App, _result: Result<Vec<(usize, Vec<NewEntry>)>, String>) -> Task<Message> {
+    app.status = "OCR not available in this build.".to_string();
     Task::none()
 }

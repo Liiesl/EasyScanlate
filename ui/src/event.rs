@@ -63,6 +63,16 @@ pub enum MainAreaMode {
     Compare,
 }
 
+/// Persistent manual tool mode (multi-select). When active the main area is
+/// forced to `View` and the `View|Compare` pill is replaced by a mode banner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ManualMode {
+    #[default]
+    None,
+    Inpaint,
+    Ocr,
+}
+
 /// The mode of the translation/results panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TranslationPanelMode {
@@ -213,6 +223,21 @@ pub enum UiEvent {
     /// Toggle manual OCR mode: the next drag on the page selects the region
     /// to OCR. Mutually exclusive with inpaint.
     ManualOcr,
+    // ——— Persistent manual multi-select mode ———
+    /// Enter the persistent manual mode (`Inpaint` or `Ocr`). The next drags
+    /// accumulate rubber bands until `ManualModeStart` / `Reset` / `Cancel`.
+    ManualModeEnter(ManualMode),
+    /// Exit (clear) the persistent manual mode without running.
+    ManualModeCancel,
+    /// Clear all pending rubber bands but stay in the mode.
+    ManualModeReset,
+    /// Run the pending selections (inpaint → multi-canvas stitch, OCR → multi-crop).
+    ManualModeStart,
+    /// A single drag has finished while a manual mode is active. The viewer
+    /// publishes every drag as a rect in image pixels; the app accumulates it.
+    ManualSelectionAdded((usize, Rectangle)),
+    /// Span variant of `ManualSelectionAdded` (drag crossed the seam).
+    ManualSelectionSpan(Vec<(usize, Rectangle)>),
     /// Toggle hiding the overlay text drawn over the pages in the main area.
     ToggleOverlayText,
     /// Toggle showing the applied inpainting patches over the pages.
