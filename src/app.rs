@@ -594,43 +594,9 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             let path_clone = p.clone();
             Task::perform(
                 async move {
-                    let path_for_task = path_clone.clone();
-                    tokio::task::spawn_blocking(move || -> Result<(Project, Vec<LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String> {
-                        let res = scanlateit_mmtl::load_mmtl(&path_for_task)?;
-                        let mut inpaint_map: std::collections::HashMap<scanlateit_model::ImageId, Vec<scanlateit_ui::loaded::InpaintLayer>> = std::collections::HashMap::new();
-                        for (img_id, bounds, png_path) in &res.inpaint_files {
-                            let data = std::fs::read(png_path).map_err(|e| e.to_string())?;
-                            let img = image::load_from_memory(&data).map_err(|e| e.to_string())?.to_rgba8();
-                            let (w, h) = (img.width(), img.height());
-                            let handle = iced::widget::image::Handle::from_rgba(w, h, bytes::Bytes::from(img.into_raw()));
-                            let quad = res
-                                .project
-                                .inpaint_for(*img_id)
-                                .find(|p| p.bounds == *bounds)
-                                .and_then(|p| p.quad)
-                                .or_else(|| {
-                                    res.project
-                                        .inpaint_for(*img_id)
-                                        .find(|p| p.bounds[2] as u32 == w && p.bounds[3] as u32 == h)
-                                        .and_then(|p| p.quad)
-                                });
-                            inpaint_map.entry(*img_id).or_default().push(scanlateit_ui::loaded::InpaintLayer { bounds: *bounds, quad, handle, width: w, height: h });
-                        }
-                        let mut out_images = Vec::new();
-                        for meta in res.project.images() {
-                            let layers = inpaint_map.remove(&meta.id).unwrap_or_default();
-                            out_images.push(LoadedImage {
-                                image_id: meta.id,
-                                decode: PageDecode::default(),
-                                inpaint: layers,
-                            });
-                        }
-                        debug_assert_eq!(res.project.image_count(), out_images.len());
-                        let display = path_for_task.to_string_lossy().to_string();
-                        Ok((res.project, out_images, display, Some(Arc::new(res.temp_dir))))
-                    })
-                    .await
-                    .unwrap_or_else(|e| Err(format!("load task failed: {e}")))
+                    tokio::task::spawn_blocking(move || mmtl::load_created_project(path_clone.to_string_lossy().to_string()))
+                        .await
+                        .unwrap_or_else(|e| Err(format!("load task failed: {e}")))
                 },
                 Message::RecentPickedToLoad,
             )
@@ -897,9 +863,9 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         #[cfg(feature = "inpaint")]
         Message::AutoInpaintFinished(index, id, result) => inpaint::handle_auto_finished(app, index, id, result),
         #[cfg(feature = "inpaint")]
-        Message::AutoInpaintLamaBatchFinished(batch) => inpaint::handle_auto_lama_batch(app, batch),
+        Message::AutoInpaintLamaBatchFinished(batch) => inpaint::handle_auto_batch(app, batch),
         #[cfg(feature = "inpaint")]
-        Message::AutoInpaintAotBatchFinished(batch) => inpaint::handle_auto_aot_batch(app, batch),
+        Message::AutoInpaintAotBatchFinished(batch) => inpaint::handle_auto_batch(app, batch),
         #[cfg(feature = "segment")]
         Message::SegmentEngineReady(result) => segment::handle_engine_ready(app, result),
         #[cfg(feature = "segment")]
@@ -1229,8 +1195,8 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::ManualModeCancel) => manual::handle_cancel(app),
         Message::Ui(UiEvent::ManualModeReset) => manual::handle_reset(app),
         Message::Ui(UiEvent::ManualModeStart) => manual::handle_start(app),
-        Message::Ui(UiEvent::ManualSelectionAdded(pair)) => manual::handle_selection_added(app, pair),
-        Message::Ui(UiEvent::ManualSelectionSpan(spans)) => manual::handle_selection_span(app, spans),
+        Message::Ui(UiEvent::ManualSelectionAdded(pair)) => manual::handle_selection(app, vec![pair]),
+        Message::Ui(UiEvent::ManualSelectionSpan(spans)) => manual::handle_selection(app, spans),
         Message::Ui(UiEvent::ToggleOverlayText) => {
             app.show_overlay_text = !app.show_overlay_text;
             app.status = if app.show_overlay_text {

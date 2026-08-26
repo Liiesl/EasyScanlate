@@ -150,88 +150,67 @@ pub fn finalize_run(app: &mut App) {
     };
 }
 
-#[cfg(feature = "ocr")]
 pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
-    if app.images.is_empty() {
-        app.status = "Open images first.".to_string();
-        return Task::none();
-    }
-    if app.running {
-        return Task::none();
-    }
-    app.running = true;
-    let dims: Vec<(u32, u32)> = app
-        .images
-        .iter()
-        .map(|image| {
-            app.project
-                .image(image.image_id)
-                .map(|m| (m.width as u32, m.height as u32))
-                .unwrap_or((0, 0))
-        })
-        .collect();
-    let runs = ocr::plan_runs(&dims);
-    let run_count = runs.len();
-    app.ocr_plans = runs;
-    app.ocr_dims = dims;
-    app.ocr_runs = run_count;
-    app.pending = run_count;
-    app.ocr_total = 0;
-    app.ocr_failed = 0;
-    app.ocr_cancelled = false;
-    app.held_boundary = None;
-    app.status = format!(
-        "Running OCR on {} run(s) covering {} image(s)...",
-        run_count,
-        app.images.len()
-    );
-    if app.pipeline.is_none() {
-        let (workers, cfg) = scanlateit_settings::get(|s| {
-            let workers = s.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
-            let cfg = ocr::config_from_strings(&s.ocr_text_score, &s.ocr_max_side_len);
-            (workers, cfg)
-        });
-        app.status = format!(
-            "Loading the OCR engine ({workers} detection worker(s))..."
-        );
-        return Task::perform(
-            async move { ParallelEngine::build_with_config(cfg, workers) },
-            Message::ParallelEngineReady,
-        );
-    }
-    maybe_start_ocr(app)
-}
-
-#[cfg(not(feature = "ocr"))]
-pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
-    use super::boot::fake_ocr_entries;
-    if app.images.is_empty() {
-        app.status = "Open images first.".to_string();
-        return Task::none();
-    }
-    if app.running {
-        return Task::none();
-    }
-    app.running = true;
-    let mut added = 0;
-    // Collect ids first to avoid holding an immutable borrow across the mutable
-    // Project mutation + handle_model_event (&mut App).
-    let image_ids: Vec<_> = app.images.iter().map(|i| i.image_id).collect();
-    for image_id in image_ids {
-        let entries = fake_ocr_entries();
-        let cnt = entries.len();
-        if let Some(ev) = app.project.append_ocr_for_image_with_event(image_id, entries) {
-            if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev {
-                added += ids.len();
-            } else {
-                added += cnt;
-            }
-            crate::app::handle_model_event(app, ev);
+    #[cfg(feature = "ocr")]
+    {
+        if app.images.is_empty() {
+            app.status = "Open images first.".to_string();
+            return Task::none();
         }
+        if app.running {
+            return Task::none();
+        }
+        app.running = true;
+        let dims: Vec<(u32, u32)> = app.images.iter().map(|image| {
+            app.project.image(image.image_id).map(|m| (m.width as u32, m.height as u32)).unwrap_or((0, 0))
+        }).collect();
+        let runs = ocr::plan_runs(&dims);
+        let run_count = runs.len();
+        app.ocr_plans = runs;
+        app.ocr_dims = dims;
+        app.ocr_runs = run_count;
+        app.pending = run_count;
+        app.ocr_total = 0;
+        app.ocr_failed = 0;
+        app.ocr_cancelled = false;
+        app.held_boundary = None;
+        app.status = format!("Running OCR on {} run(s) covering {} image(s)...", run_count, app.images.len());
+        if app.pipeline.is_none() {
+            let (workers, cfg) = scanlateit_settings::get(|s| {
+                let workers = s.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
+                let cfg = ocr::config_from_strings(&s.ocr_text_score, &s.ocr_max_side_len);
+                (workers, cfg)
+            });
+            app.status = format!("Loading the OCR engine ({workers} detection worker(s))...");
+            return Task::perform(async move { ParallelEngine::build_with_config(cfg, workers) }, Message::ParallelEngineReady);
+        }
+        return maybe_start_ocr(app);
     }
-    app.running = false;
-    app.status = format!("Fake OCR done: {added} line(s) (no OCR engine in this build).");
-    Task::none()
+    #[cfg(not(feature = "ocr"))]
+    {
+        use super::boot::fake_ocr_entries;
+        if app.images.is_empty() {
+            app.status = "Open images first.".to_string();
+            return Task::none();
+        }
+        if app.running {
+            return Task::none();
+        }
+        app.running = true;
+        let mut added = 0;
+        let image_ids: Vec<_> = app.images.iter().map(|i| i.image_id).collect();
+        for image_id in image_ids {
+            let entries = fake_ocr_entries();
+            let cnt = entries.len();
+            if let Some(ev) = app.project.append_ocr_for_image_with_event(image_id, entries) {
+                if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev { added += ids.len(); } else { added += cnt; }
+                crate::app::handle_model_event(app, ev);
+            }
+        }
+        app.running = false;
+        app.status = format!("Fake OCR done: {added} line(s) (no OCR engine in this build).");
+        return Task::none();
+    }
 }
 
 #[cfg(feature = "ocr")]
@@ -249,20 +228,19 @@ pub fn handle_parallel_ready(app: &mut App, result: Result<ParallelEngine, Strin
     }
 }
 
-#[cfg(feature = "ocr")]
 pub fn handle_stop_ocr(app: &mut App) -> Task<Message> {
-    if let Some(token) = &app.cancel {
-        token.cancel();
+    #[cfg(feature = "ocr")]
+    {
+        if let Some(token) = &app.cancel { token.cancel(); }
+        app.running = false;
+        app.status = "Cancelling OCR...".to_string();
+        return Task::none();
     }
-    app.running = false;
-    app.status = "Cancelling OCR...".to_string();
-    Task::none()
-}
-
-#[cfg(not(feature = "ocr"))]
-pub fn handle_stop_ocr(app: &mut App) -> Task<Message> {
-    app.status = "OCR is not available in this build.".to_string();
-    Task::none()
+    #[cfg(not(feature = "ocr"))]
+    {
+        app.status = "OCR is not available in this build.".to_string();
+        return Task::none();
+    }
 }
 
 #[cfg(feature = "ocr")]
@@ -358,29 +336,29 @@ pub fn handle_ocr_stream_run(app: &mut App, result: Result<ocr::RunEvent, String
                 {
                     #[cfg(feature = "styling")]
                     if do_style && !do_inpaint {
-                        tasks.push(super::styling::classify_entries(app));
+                        tasks.push(super::styling::classify(app));
                     }
                     #[cfg(feature = "inpaint")]
                     if do_inpaint && !do_style {
-                        tasks.push(super::inpaint::dispatch_auto_inpaint_solo(app, effective_model));
+                        tasks.push(super::inpaint::dispatch_auto_solo(app, effective_model));
                     }
                     #[cfg(all(feature = "styling", feature = "inpaint"))]
                     if do_style && do_inpaint {
-                        tasks.push(super::styling::start_pipeline_style_deferred(app));
+                        tasks.push(super::styling::classify(app));
                     }
                 }
             } else {
                 #[cfg(all(feature = "styling", feature = "inpaint"))]
                 if do_style && do_inpaint {
-                    tasks.push(super::styling::start_pipeline_style_deferred(app));
+                    tasks.push(super::styling::classify(app));
                 }
                 #[cfg(feature = "styling")]
                 if do_style && !do_inpaint {
-                    tasks.push(super::styling::classify_entries(app));
+                    tasks.push(super::styling::classify(app));
                 }
                 #[cfg(feature = "inpaint")]
                 if do_inpaint && !do_style {
-                    tasks.push(super::inpaint::dispatch_auto_inpaint_solo(app, effective_model));
+                    tasks.push(super::inpaint::dispatch_auto_solo(app, effective_model));
                 }
             }
         }
@@ -462,31 +440,34 @@ pub fn handle_manual_ocr_engine_ready(app: &mut App, result: Result<ocr::Engine,
 
 
 
-#[cfg(feature = "ocr")]
 pub fn handle_manual_ocr_selection(app: &mut App, selections: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
-    if selections.is_empty() { return Task::none(); }
-    if app.manual_ocring || app.running || app.translating || app.inpainting { return Task::none(); }
-    // validate
-    let mut valid: Vec<(usize, iced::Rectangle)> = Vec::new();
-    for (idx, r) in selections {
-        if idx >= app.images.len() { continue; }
-        if r.width < 4.0 || r.height < 4.0 { continue; }
-        valid.push((idx, r));
+    #[cfg(feature = "ocr")]
+    {
+        if selections.is_empty() { return Task::none(); }
+        if app.manual_ocring || app.running || app.translating || app.inpainting { return Task::none(); }
+        let mut valid: Vec<(usize, iced::Rectangle)> = Vec::new();
+        for (idx, r) in selections {
+            if idx >= app.images.len() { continue; }
+            if r.width < 4.0 || r.height < 4.0 { continue; }
+            valid.push((idx, r));
+        }
+        if valid.is_empty() {
+            app.status = "Manual OCR: no valid selections.".to_string();
+            return Task::none();
+        }
+        let cfg = scanlateit_settings::get(|s| ocr::config_with(0.0, s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000)));
+        let cached = app.manual_ocr_engine.clone();
+        if let Some(engine) = cached { return start_manual_ocr_selection(app, valid, engine); }
+        app.pending_manual_multi_ocr = Some(valid);
+        app.status = "Loading OCR engine for manual OCR…".to_string();
+        return Task::perform(async move { ocr::Engine::build_with_config(cfg) }, Message::ManualOcrEngineReady);
     }
-    if valid.is_empty() {
-        app.status = "Manual OCR: no valid selections.".to_string();
+    #[cfg(not(feature = "ocr"))]
+    {
+        let _ = selections;
+        app.status = "OCR not available in this build.".to_string();
         return Task::none();
     }
-    let cfg = scanlateit_settings::get(|s| {
-        ocr::config_with(0.0, s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000))
-    });
-    let cached = app.manual_ocr_engine.clone();
-    if let Some(engine) = cached {
-        return start_manual_ocr_selection(app, valid, engine);
-    }
-    app.pending_manual_multi_ocr = Some(valid);
-    app.status = "Loading OCR engine for manual OCR…".to_string();
-    Task::perform(async move { ocr::Engine::build_with_config(cfg) }, Message::ManualOcrEngineReady)
 }
 
 #[cfg(feature = "ocr")]
@@ -612,55 +593,48 @@ fn run_manual_ocr_selection(engine: ocr::Engine, items: Vec<(usize, String, iced
     Ok(out)
 }
 
-#[cfg(feature = "ocr")]
 pub fn handle_manual_ocr_finished(app: &mut App, result: Result<Vec<(usize, Vec<NewEntry>)>, String>) -> Task<Message> {
-    app.manual_ocring = false;
-    // keep manual_mode active? selections already cleared; mode stays
-    match result {
-        Ok(per_image) => {
-            if per_image.is_empty() {
-                app.status = "Manual OCR: no text found.".to_string();
-                return Task::none();
+    #[cfg(feature = "ocr")]
+    {
+        app.manual_ocring = false;
+        match result {
+            Ok(per_image) => {
+                if per_image.is_empty() {
+                    app.status = "Manual OCR: no text found.".to_string();
+                    return Task::none();
+                }
+                let mut total_added = 0usize;
+                let mut total_detected = 0usize;
+                let mut image_count = 0usize;
+                for (idx, entries) in per_image {
+                    let cnt = entries.len();
+                    total_detected += cnt;
+                    if idx >= app.images.len() { continue; }
+                    let image_id = app.images[idx].image_id;
+                    let added = if let Some(ev) = app.project.append_ocr_for_image_with_event(image_id, entries) {
+                        let n = if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev { ids.len() } else { cnt };
+                        crate::app::handle_model_event(app, ev);
+                        let rev = app.project.reorder_entries_for_image_with_event(image_id);
+                        crate::app::handle_model_event(app, rev);
+                        n
+                    } else { 0 };
+                    total_added += added;
+                    image_count += 1;
+                }
+                if total_added==0 && total_detected==0 {
+                    app.status = "Manual OCR: no text found.".to_string();
+                } else {
+                    app.status = format!("Manual OCR: {total_added} line(s) added across {image_count} image(s) ({total_detected} detected).");
+                }
             }
-            let mut total_added = 0usize;
-            let mut total_detected = 0usize;
-            let mut image_count = 0usize;
-            for (idx, entries) in per_image {
-                let cnt = entries.len();
-                total_detected += cnt;
-                if idx >= app.images.len() { continue; }
-                let image_id = app.images[idx].image_id;
-                let added = if let Some(ev) = app.project.append_ocr_for_image_with_event(image_id, entries) {
-                    let n = if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev { ids.len() } else { cnt };
-                    crate::app::handle_model_event(app, ev);
-                    let rev = app.project.reorder_entries_for_image_with_event(image_id);
-                    crate::app::handle_model_event(app, rev);
-                    n
-                } else { 0 };
-                total_added += added;
-                image_count += 1;
-            }
-            if total_added==0 && total_detected==0 {
-                app.status = "Manual OCR: no text found.".to_string();
-            } else {
-                app.status = format!("Manual OCR: {total_added} line(s) added across {image_count} image(s) ({total_detected} detected).");
-            }
+            Err(e) => { app.status = format!("Manual OCR multi failed: {e}"); }
         }
-        Err(e) => {
-            app.status = format!("Manual OCR multi failed: {e}");
-        }
+        return Task::none();
     }
-    Task::none()
-}
-
-#[cfg(not(feature = "ocr"))]
-pub fn handle_manual_ocr_selection(app: &mut App, _selections: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
-    app.status = "OCR not available in this build.".to_string();
-    Task::none()
-}
-
-#[cfg(not(feature = "ocr"))]
-pub fn handle_manual_ocr_finished(app: &mut App, _result: Result<Vec<(usize, Vec<NewEntry>)>, String>) -> Task<Message> {
-    app.status = "OCR not available in this build.".to_string();
-    Task::none()
+    #[cfg(not(feature = "ocr"))]
+    {
+        let _ = result;
+        app.status = "OCR not available in this build.".to_string();
+        return Task::none();
+    }
 }

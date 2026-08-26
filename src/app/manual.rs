@@ -84,46 +84,27 @@ pub fn handle_reset(app: &mut App) -> Task<Message> {
     Task::none()
 }
 
-pub fn handle_selection_added(app: &mut App, pair: (usize, Rectangle)) -> Task<Message> {
-    eprintln!("[manual] handle_selection_added mode={:?} pair idx={} rect=[{:.1},{:.1},{:.1},{:.1}] selections_before={}", app.manual_mode, pair.0, pair.1.x, pair.1.y, pair.1.width, pair.1.height, app.manual_selections.len());
+pub fn handle_selection(app: &mut App, sels: Vec<(usize, Rectangle)>) -> Task<Message> {
+    eprintln!("[manual] handle_selection mode={:?} sels={} before={}", app.manual_mode, sels.len(), app.manual_selections.len());
+    for (idx, r) in &sels { eprintln!("[manual]   sel idx={} rect=[{:.1},{:.1},{:.1},{:.1}]", idx, r.x, r.y, r.width, r.height); }
     if app.manual_mode == ManualMode::None {
         eprintln!("[manual] not in manual mode -> none");
         return Task::none();
     }
-    let (idx, rect) = pair;
-    if idx >= app.images.len() {
-        eprintln!("[manual] idx {} out of range len={}", idx, app.images.len());
-        return Task::none();
+    if sels.is_empty() { return Task::none(); }
+    if sels.len() == 1 {
+        let (idx, rect) = sels[0];
+        if idx >= app.images.len() {
+            eprintln!("[manual] idx {} out of range len={}", idx, app.images.len());
+            return Task::none();
+        }
+        if rect.width < 4.0 || rect.height < 4.0 {
+            eprintln!("[manual] selection too small {:.1}x{:.1}", rect.width, rect.height);
+            app.status = "Selection too small.".to_string();
+            return Task::none();
+        }
     }
-    if rect.width < 4.0 || rect.height < 4.0 {
-        eprintln!("[manual] selection too small {:.1}x{:.1}", rect.width, rect.height);
-        app.status = "Selection too small.".to_string();
-        return Task::none();
-    }
-    app.manual_selections.push((idx, rect));
-    // keep sorted for determinism (by image then y then x)
-    app.manual_selections.sort_by(|a, b| {
-        a.0.cmp(&b.0)
-            .then(a.1.y.total_cmp(&b.1.y))
-            .then(a.1.x.total_cmp(&b.1.x))
-    });
-    let n = app.manual_selections.len();
-    eprintln!("[manual] added, now {} selections: {:?}", n, app.manual_selections.iter().map(|(i,r)| (*i, [r.x, r.y, r.width, r.height])).collect::<Vec<_>>());
-    app.status = format!("{n} selection(s). Press Start to run.");
-    Task::none()
-}
-
-pub fn handle_selection_span(app: &mut App, spans: Vec<(usize, Rectangle)>) -> Task<Message> {
-    eprintln!("[manual] handle_selection_span mode={:?} spans={} before={}", app.manual_mode, spans.len(), app.manual_selections.len());
-    for (idx, r) in &spans { eprintln!("[manual]   span idx={} rect=[{:.1},{:.1},{:.1},{:.1}]", idx, r.x, r.y, r.width, r.height); }
-    if app.manual_mode == ManualMode::None {
-        eprintln!("[manual] not in manual mode -> none");
-        return Task::none();
-    }
-    if spans.is_empty() {
-        return Task::none();
-    }
-    for (idx, rect) in spans {
+    for (idx, rect) in sels {
         if idx >= app.images.len() {
             eprintln!("[manual] span idx {} out of range", idx);
             continue;
@@ -132,22 +113,21 @@ pub fn handle_selection_span(app: &mut App, spans: Vec<(usize, Rectangle)>) -> T
             eprintln!("[manual] span too small {:.1}x{:.1} idx={}", rect.width, rect.height, idx);
             continue;
         }
-        eprintln!("[manual]   pushing span idx={} rect=[{:.1},{:.1},{:.1},{:.1}]", idx, rect.x, rect.y, rect.width, rect.height);
+        eprintln!("[manual]   pushing idx={} rect=[{:.1},{:.1},{:.1},{:.1}]", idx, rect.x, rect.y, rect.width, rect.height);
         app.manual_selections.push((idx, rect));
     }
     app.manual_selections.sort_by(|a, b| {
-        a.0.cmp(&b.0)
-            .then(a.1.y.total_cmp(&b.1.y))
-            .then(a.1.x.total_cmp(&b.1.x))
+        a.0.cmp(&b.0).then(a.1.y.total_cmp(&b.1.y)).then(a.1.x.total_cmp(&b.1.x))
     });
-    // deduplicate exact duplicates
-    let before_dedup = app.manual_selections.len();
+    let before = app.manual_selections.len();
     app.manual_selections.dedup_by(|a, b| a.0 == b.0 && a.1.x == b.1.x && a.1.y == b.1.y && a.1.width == b.1.width && a.1.height == b.1.height);
     let n = app.manual_selections.len();
-    eprintln!("[manual] span added, before_dedup={} after={} selections={:?}", before_dedup, n, app.manual_selections.iter().map(|(i,r)| (*i, [r.x, r.y, r.width, r.height])).collect::<Vec<_>>());
+    eprintln!("[manual] added, before_dedup={} after={} selections={:?}", before, n, app.manual_selections.iter().map(|(i,r)| (*i, [r.x, r.y, r.width, r.height])).collect::<Vec<_>>());
     app.status = format!("{n} selection(s). Press Start to run.");
     Task::none()
 }
+
+
 
 pub fn handle_start(app: &mut App) -> Task<Message> {
     eprintln!("[manual] handle_start mode={:?} selections={} inpainting={} running={} translating={}", app.manual_mode, app.manual_selections.len(), app.inpainting, app.running, app.translating);

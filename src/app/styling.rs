@@ -7,30 +7,11 @@ use scanlateit_ui::event::StyleField;
 use super::{App, Message};
 use super::edit::seed_style_inputs;
 
-#[cfg(feature = "styling")]
-pub fn classify_entries(app: &mut App) -> Task<Message> {
-    match app.styling.engine() {
-        Some(engine) => {
-            start_style_jobs(app, engine.clone())
-        },
-        None => {
-            app.styling.mark_building();
-            app.status = "Loading the styling model...".to_string();
-            Task::perform(async move { StylingEngine::build() }, Message::StylingEngineReady)
-        }
-    }
-}
-
-#[cfg(feature = "styling")]
-fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
+fn collect_jobs(app: &App) -> Vec<(usize, EntryId, String, Quad)> {
     let mut jobs: Vec<(usize, EntryId, String, Quad)> = Vec::new();
     for (index, image) in app.images.iter().enumerate() {
         let image_id = image.image_id;
-        let path = app
-            .project
-            .image(image_id)
-            .map(|m| m.path.clone())
-            .unwrap_or_default();
+        let path = app.project.image(image_id).map(|m| m.path.clone()).unwrap_or_default();
         for entry in app.project.visible_for(image_id).collect::<Vec<_>>() {
             if app.styling.is_done(index, entry.id) {
                 continue;
@@ -38,11 +19,63 @@ fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
             jobs.push((index, entry.id, path.clone(), app.project.view_quad(entry)));
         }
     }
+    jobs
+}
+
+#[cfg(feature = "styling")]
+pub fn classify(app: &mut App) -> Task<Message> {
+    let deferred = scanlateit_settings::get(|s| s.auto_inpaint) && cfg!(feature = "inpaint");
+    match app.styling.engine().cloned() {
+        Some(engine) => start_jobs(app, engine, deferred),
+        None => {
+            app.styling.mark_building();
+            if deferred {
+                #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+                { app.pipeline_active = true; }
+            }
+            app.status = "Loading the styling model...".to_string();
+            Task::perform(async move { StylingEngine::build() }, Message::StylingEngineReady)
+        }
+    }
+}
+
+#[cfg(feature = "styling")]
+fn start_jobs(app: &mut App, engine: StylingEngine, deferred: bool) -> Task<Message> {
+    let jobs = collect_jobs(app);
     if jobs.is_empty() {
+        if deferred {
+            #[cfg(all(feature = "styling", feature = "inpaint"))]
+            { return super::pipeline::dispatch_inpaint(app, Vec::new()); }
+        }
         return Task::none();
     }
-    for (index, id, _, _) in &jobs {
-        app.styling.mark_done(*index, *id);
+    for (index, id, _, _) in &jobs { app.styling.mark_done(*index, *id); }
+    if deferred {
+        #[cfg(all(feature = "styling", feature = "inpaint"))]
+        {
+            app.pipeline_style_pending = jobs.len();
+            app.pipeline_style_results = Vec::with_capacity(jobs.len());
+            #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+            { app.pipeline_active = true; }
+            app.status = format!("Classifying {} entries (deferred for bg-aware inpaint)...", jobs.len());
+            let tasks: Vec<Task<Message>> = jobs
+                .into_iter()
+                .map(|(index, id, path, quad)| {
+                    let engine = engine.clone();
+                    let qc = quad;
+                    Task::perform(
+                        async move {
+                            let res = tokio::task::spawn_blocking(move || engine.classify_entry_with_prediction(&path, &qc))
+                                .await
+                                .unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
+                            (index, id, res)
+                        },
+                        |(index, id, result)| Message::PipelineStyleDetected(index, id, result),
+                    )
+                })
+                .collect();
+            return Task::batch(tasks);
+        }
     }
     let tasks: Vec<Task<Message>> = jobs
         .into_iter()
@@ -50,90 +83,12 @@ fn start_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
             let engine = engine.clone();
             Task::perform(
                 async move {
-                    let classified = tokio::task::spawn_blocking(move || {
-                        engine.classify_entry(&path, &quad)
-                    })
-                    .await
-                    .unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
+                    let classified = tokio::task::spawn_blocking(move || engine.classify_entry(&path, &quad))
+                        .await
+                        .unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
                     (index, id, classified)
                 },
                 |(index, id, result)| Message::StyleDetected(index, id, result),
-            )
-        })
-        .collect();
-    Task::batch(tasks)
-}
-
-#[cfg(all(feature = "styling", feature = "inpaint"))]
-pub fn start_pipeline_style_deferred(app: &mut App) -> Task<Message> {
-    let engine_opt = app.styling.engine().cloned();
-    match engine_opt {
-        Some(engine) => {
-            start_pipeline_style_jobs(app, engine)
-        },
-        None => {
-            app.styling.mark_building();
-            #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-            {
-                app.pipeline_active = true;
-            }
-            app.status = "Loading the styling model...".to_string();
-            Task::perform(async move { StylingEngine::build() }, Message::StylingEngineReady)
-        }
-    }
-}
-
-#[cfg(all(feature = "styling", feature = "inpaint"))]
-fn start_pipeline_style_jobs(app: &mut App, engine: StylingEngine) -> Task<Message> {
-    let mut jobs: Vec<(usize, EntryId, String, Quad)> = Vec::new();
-    for (index, image) in app.images.iter().enumerate() {
-        let image_id = image.image_id;
-        let path = app
-            .project
-            .image(image_id)
-            .map(|m| m.path.clone())
-            .unwrap_or_default();
-        for entry in app.project.visible_for(image_id).collect::<Vec<_>>() {
-            if app.styling.is_done(index, entry.id) {
-                continue;
-            }
-            jobs.push((index, entry.id, path.clone(), app.project.view_quad(entry)));
-        }
-    }
-    if jobs.is_empty() {
-        #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-        {
-            if app.pipeline_active {
-                return super::pipeline::dispatch_pipeline_inpaint_after_style(app, Vec::new());
-            }
-        }
-        return super::pipeline::dispatch_pipeline_inpaint_after_style(app, Vec::new());
-    }
-    for (index, id, _, _) in &jobs {
-        app.styling.mark_done(*index, *id);
-    }
-    app.pipeline_style_pending = jobs.len();
-    app.pipeline_style_results = Vec::with_capacity(jobs.len());
-    #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-    {
-        app.pipeline_active = true;
-    }
-    app.status = format!("Classifying {} entries (deferred for bg-aware inpaint)...", jobs.len());
-    let tasks: Vec<Task<Message>> = jobs
-        .into_iter()
-        .map(|(index, id, path, quad)| {
-            let engine = engine.clone();
-            let quad_clone = quad;
-            Task::perform(
-                async move {
-                    let res = tokio::task::spawn_blocking(move || {
-                        engine.classify_entry_with_prediction(&path, &quad_clone)
-                    })
-                    .await
-                    .unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
-                    (index, id, res)
-                },
-                |(index, id, result)| Message::PipelineStyleDetected(index, id, result),
             )
         })
         .collect();
@@ -179,7 +134,7 @@ pub fn handle_styling_ready(app: &mut App, result: Result<StylingEngine, String>
             if is_pipeline {
                 #[cfg(all(feature = "styling", feature = "inpaint"))]
                 {
-                    start_pipeline_style_jobs(app, engine)
+                    start_jobs(app, engine, true)
                 }
                 #[cfg(not(all(feature = "styling", feature = "inpaint")))]
                 {
@@ -187,7 +142,7 @@ pub fn handle_styling_ready(app: &mut App, result: Result<StylingEngine, String>
                     Task::none()
                 }
             } else {
-                start_style_jobs(app, engine)
+                start_jobs(app, engine, false)
             }
         }
         Err(e) => {
@@ -236,7 +191,7 @@ pub fn handle_pipeline_style_detected(app: &mut App, index: usize, id: EntryId, 
     app.pipeline_style_pending = app.pipeline_style_pending.saturating_sub(1);
     if app.pipeline_style_pending == 0 {
         let buffered = std::mem::take(&mut app.pipeline_style_results);
-        return super::pipeline::dispatch_pipeline_inpaint_after_style(app, buffered);
+        return super::pipeline::dispatch_inpaint(app, buffered);
     }
     Task::none()
 }

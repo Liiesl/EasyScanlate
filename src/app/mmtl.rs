@@ -39,20 +39,7 @@ fn extract_inpaint_data(app: &App) -> Vec<scanlateit_mmtl::InpaintImageData> {
 
 pub fn handle_save(app: &mut App) -> Task<Message> {
     if let Some(path) = app.mmtl_path.clone() {
-        let project = app.project.clone();
-        let inpaint = extract_inpaint_data(app);
-        return Task::perform(
-            async move {
-                tokio::task::spawn_blocking(move || {
-                    scanlateit_mmtl::save_mmtl(&project, &inpaint, &path)
-                        .map(|_| path.to_string_lossy().to_string())
-                        .map_err(|e| e.to_string())
-                })
-                .await
-                .unwrap_or_else(|e| Err(format!("save task failed: {e}")))
-            },
-            Message::MmtlSaved,
-        );
+        return do_save(app.project.clone(), extract_inpaint_data(app), path);
     }
     handle_save_as(app)
 }
@@ -90,15 +77,37 @@ pub fn handle_save_picked(app: &mut App, picked: Option<String>) -> Task<Message
         return Task::none();
     };
     let path = PathBuf::from(&path_str);
-    let project = app.project.clone();
-    let inpaint = extract_inpaint_data(app);
     app.mmtl_path = Some(path.clone());
+    do_save(app.project.clone(), extract_inpaint_data(app), path)
+}
+
+fn build_loaded_images(res: scanlateit_mmtl::LoadResult, display: String) -> Result<(scanlateit_model::Project, Vec<scanlateit_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String> {
+    let project = res.project;
+    let mut inpaint_map: std::collections::HashMap<scanlateit_model::ImageId, Vec<scanlateit_ui::loaded::InpaintLayer>> = std::collections::HashMap::new();
+    for (img_id, bounds, png_path) in &res.inpaint_files {
+        let data = std::fs::read(png_path).map_err(|e| e.to_string())?;
+        let img = image::load_from_memory(&data).map_err(|e| e.to_string())?.to_rgba8();
+        let (w, h) = (img.width(), img.height());
+        let handle = iced::widget::image::Handle::from_rgba(w, h, bytes::Bytes::from(img.into_raw()));
+        let quad = project.inpaint_for(*img_id).find(|p| p.bounds == *bounds).and_then(|p| p.quad).or_else(|| {
+            project.inpaint_for(*img_id).find(|p| p.bounds[2] as u32 == w && p.bounds[3] as u32 == h).and_then(|p| p.quad)
+        });
+        inpaint_map.entry(*img_id).or_default().push(scanlateit_ui::loaded::InpaintLayer { bounds: *bounds, quad, handle, width: w, height: h });
+    }
+    let mut out_images = Vec::new();
+    for meta in project.images() {
+        let layers = inpaint_map.remove(&meta.id).unwrap_or_default();
+        out_images.push(scanlateit_ui::LoadedImage { image_id: meta.id, decode: scanlateit_ui::main_area::decode::PageDecode::default(), inpaint: layers });
+    }
+    debug_assert_eq!(project.image_count(), out_images.len());
+    Ok((project, out_images, display, Some(Arc::new(res.temp_dir))))
+}
+
+fn do_save(project: scanlateit_model::Project, inpaint: Vec<scanlateit_mmtl::InpaintImageData>, path: PathBuf) -> Task<Message> {
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
-                scanlateit_mmtl::save_mmtl(&project, &inpaint, &path)
-                    .map(|_| path.to_string_lossy().to_string())
-                    .map_err(|e| e.to_string())
+                scanlateit_mmtl::save_mmtl(&project, &inpaint, &path).map(|_| path.to_string_lossy().to_string()).map_err(|e| e.to_string())
             })
             .await
             .unwrap_or_else(|e| Err(format!("save task failed: {e}")))
@@ -117,45 +126,14 @@ pub fn handle_open_picked(app: &mut App, picked: Option<String>) -> Task<Message
     Task::perform(
         async move {
             let path_clone = path.clone();
-            tokio::task::spawn_blocking(move || -> Result<(scanlateit_model::Project, Vec<scanlateit_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String> {
+            tokio::task::spawn_blocking(move || {
                 let res = scanlateit_mmtl::load_mmtl(&path_clone)?;
-                let project = res.project;
-                let mut inpaint_map: std::collections::HashMap<scanlateit_model::ImageId, Vec<scanlateit_ui::loaded::InpaintLayer>> = std::collections::HashMap::new();
-                for (img_id, bounds, png_path) in &res.inpaint_files {
-                    let data = std::fs::read(png_path).map_err(|e| e.to_string())?;
-                    let img = image::load_from_memory(&data).map_err(|e| e.to_string())?.to_rgba8();
-                    let (w, h) = (img.width(), img.height());
-                    let handle = iced::widget::image::Handle::from_rgba(w, h, bytes::Bytes::from(img.into_raw()));
-                    // Try to find corresponding patch quad from project
-                    let quad = project
-                        .inpaint_for(*img_id)
-                        .find(|p| p.bounds == *bounds)
-                        .and_then(|p| p.quad)
-                        .or_else(|| {
-                            // fallback: match by dimensions
-                            project
-                                .inpaint_for(*img_id)
-                                .find(|p| p.bounds[2] as u32 == w && p.bounds[3] as u32 == h)
-                                .and_then(|p| p.quad)
-                        });
-                    inpaint_map.entry(*img_id).or_default().push(scanlateit_ui::loaded::InpaintLayer { bounds: *bounds, quad, handle, width: w, height: h });
-                }
-                let mut out_images = Vec::new();
-                for meta in project.images() {
-                    let layers = inpaint_map.remove(&meta.id).unwrap_or_default();
-                    out_images.push(scanlateit_ui::LoadedImage {
-                        image_id: meta.id,
-                        decode: scanlateit_ui::main_area::decode::PageDecode::default(),
-                        inpaint: layers,
-                    });
-                }
-                debug_assert_eq!(project.image_count(), out_images.len());
                 let display = path_clone.to_string_lossy().to_string();
-                Ok((project, out_images, display, Some(Arc::new(res.temp_dir))))
+                build_loaded_images(res, display)
             })
             .await
             .unwrap_or_else(|e| Err(format!("load task failed: {e}")))
-            },
+        },
         Message::MmtlLoaded,
     )
 }
@@ -178,37 +156,8 @@ pub fn handle_saved(app: &mut App, result: Result<String, String>) -> Task<Messa
 pub fn load_created_project(path_str: String) -> Result<(scanlateit_model::Project, Vec<scanlateit_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String> {
     let path = PathBuf::from(&path_str);
     let res = scanlateit_mmtl::load_mmtl(&path)?;
-    let mut inpaint_map: std::collections::HashMap<scanlateit_model::ImageId, Vec<scanlateit_ui::loaded::InpaintLayer>> = std::collections::HashMap::new();
-    for (img_id, bounds, png_path) in &res.inpaint_files {
-        let data = std::fs::read(png_path).map_err(|e| e.to_string())?;
-        let img = image::load_from_memory(&data).map_err(|e| e.to_string())?.to_rgba8();
-        let (w, h) = (img.width(), img.height());
-        let handle = iced::widget::image::Handle::from_rgba(w, h, bytes::Bytes::from(img.into_raw()));
-        let quad = res
-            .project
-            .inpaint_for(*img_id)
-            .find(|p| p.bounds == *bounds)
-            .and_then(|p| p.quad)
-            .or_else(|| {
-                res.project
-                    .inpaint_for(*img_id)
-                    .find(|p| p.bounds[2] as u32 == w && p.bounds[3] as u32 == h)
-                    .and_then(|p| p.quad)
-            });
-        inpaint_map.entry(*img_id).or_default().push(scanlateit_ui::loaded::InpaintLayer { bounds: *bounds, quad, handle, width: w, height: h });
-    }
-    let mut out_images = Vec::new();
-    for meta in res.project.images() {
-        let layers = inpaint_map.remove(&meta.id).unwrap_or_default();
-        out_images.push(scanlateit_ui::LoadedImage {
-            image_id: meta.id,
-            decode: scanlateit_ui::main_area::decode::PageDecode::default(),
-            inpaint: layers,
-        });
-    }
-    debug_assert_eq!(res.project.image_count(), out_images.len());
     let display = path.to_string_lossy().to_string();
-    Ok((res.project, out_images, display, Some(Arc::new(res.temp_dir))))
+    build_loaded_images(res, display)
 }
 
 pub fn handle_loaded(

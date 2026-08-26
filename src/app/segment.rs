@@ -5,73 +5,52 @@ use scanlateit_segment::Engine as SegmentEngine;
 
 use super::{App, Message};
 
-#[cfg(feature = "segment")]
 pub fn start_segment_filter(app: &mut App) -> Task<Message> {
-    if app.images.is_empty() {
-        return Task::none();
-    }
-    if !scanlateit_settings::get(|s| s.auto_sfx_filter) {
-        return Task::none();
-    }
-    match &app.segment_engine {
-        Some(engine) => {
-            let engine = engine.clone();
-            let dims: Vec<(u32, u32)> = app
-                .images
-                .iter()
-                .map(|img| {
-                    app.project
-                        .image(img.image_id)
-                        .map(|m| (m.width as u32, m.height as u32))
-                        .unwrap_or((0, 0))
-                })
-                .collect();
-            let paths: Vec<String> = app
-                .images
-                .iter()
-                .map(|img| {
-                    app.project
-                        .image(img.image_id)
-                        .map(|m| m.path.clone())
-                        .unwrap_or_default()
-                })
-                .collect();
-            let ocr_boxes: Vec<Vec<([f32; 4], EntryId)>> = app
-                .images
-                .iter()
-                .map(|img| {
+    #[cfg(feature = "segment")]
+    {
+        if app.images.is_empty() {
+            return Task::none();
+        }
+        if !scanlateit_settings::get(|s| s.auto_sfx_filter) {
+            return Task::none();
+        }
+        match &app.segment_engine {
+            Some(engine) => {
+                let engine = engine.clone();
+                let dims: Vec<(u32, u32)> = app.images.iter().map(|img| {
+                    app.project.image(img.image_id).map(|m| (m.width as u32, m.height as u32)).unwrap_or((0, 0))
+                }).collect();
+                let paths: Vec<String> = app.images.iter().map(|img| {
+                    app.project.image(img.image_id).map(|m| m.path.clone()).unwrap_or_default()
+                }).collect();
+                let ocr_boxes: Vec<Vec<([f32; 4], EntryId)>> = app.images.iter().map(|img| {
                     let image_id = img.image_id;
-                    app.project
-                        .visible_for(image_id)
-                        .map(|e| (app.project.view_quad(e).bounds(), e.id))
-                        .collect()
-                })
-                .collect();
-            app.segment_filtering = true;
-            app.status = "Filtering SFX via segmentation...".to_string();
-            Task::perform(
-                async move {
-                    let res = tokio::task::spawn_blocking(move || {
-                        run_segment_filter_blocking(&engine, &dims, &paths, &ocr_boxes)
-                    })
-                    .await
-                    .unwrap_or_else(|e| Err(format!("segment task cancelled: {e}")));
-                    res
-                },
-                Message::SegmentFiltered,
-            )
-        }
-        None => {
-            app.segment_filtering = true;
-            app.status = "Loading segmentation model...".to_string();
-            Task::perform(async move { SegmentEngine::build() }, Message::SegmentEngineReady)
+                    app.project.visible_for(image_id).map(|e| (app.project.view_quad(e).bounds(), e.id)).collect()
+                }).collect();
+                app.segment_filtering = true;
+                app.status = "Filtering SFX via segmentation...".to_string();
+                return Task::perform(
+                    async move {
+                        let res = tokio::task::spawn_blocking(move || run_segment_filter_blocking(&engine, &dims, &paths, &ocr_boxes))
+                            .await
+                            .unwrap_or_else(|e| Err(format!("segment task cancelled: {e}")));
+                        res
+                    },
+                    Message::SegmentFiltered,
+                );
+            }
+            None => {
+                app.segment_filtering = true;
+                app.status = "Loading segmentation model...".to_string();
+                return Task::perform(async move { SegmentEngine::build() }, Message::SegmentEngineReady);
+            }
         }
     }
-}
-
-#[cfg(not(feature = "segment"))]
-pub fn start_segment_filter(_app: &mut App) -> Task<Message> {
-    Task::none()
+    #[cfg(not(feature = "segment"))]
+    {
+        let _ = app;
+        return Task::none();
+    }
 }
 
 #[cfg(feature = "segment")]
@@ -192,7 +171,7 @@ pub fn handle_filtered(
                 if need_style_inpaint {
                     #[cfg(all(feature = "styling", feature = "inpaint"))]
                     {
-                        return super::styling::start_pipeline_style_deferred(app);
+                        return super::styling::classify(app);
                     }
                 } else if need_inpaint_solo {
                     let eff = scanlateit_settings::get(|s| {
@@ -204,7 +183,7 @@ pub fn handle_filtered(
                     });
                     #[cfg(feature = "inpaint")]
                     {
-                        return super::inpaint::dispatch_auto_inpaint_solo(app, eff);
+                        return super::inpaint::dispatch_auto_solo(app, eff);
                     }
                 } else {
                     #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
@@ -215,7 +194,7 @@ pub fn handle_filtered(
                     if need_style_only {
                         #[cfg(feature = "styling")]
                         {
-                            return super::styling::classify_entries(app);
+                            return super::styling::classify(app);
                         }
                     }
                 }

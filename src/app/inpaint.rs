@@ -110,147 +110,118 @@ fn start_background_stitch(
 }
 
 #[cfg(feature = "inpaint")]
-pub fn dispatch_auto_telea_jobs(app: &mut App, jobs: Vec<AutoInpaintJob>) -> Task<Message> {
+pub fn dispatch_auto(app: &mut App, jobs: Vec<AutoInpaintJob>, backend: InpaintBackend) -> Task<Message> {
     if jobs.is_empty() {
         return Task::none();
     }
     let radius = scanlateit_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
-    let pad = auto_pad_for(InpaintBackend::Telea, radius);
-    let cached = app.auto_telea_engine.clone().filter(|e| e.radius() == radius);
+    let pad = auto_pad_for(backend, radius);
+    let cached: Option<InpaintEngine> = match backend {
+        InpaintBackend::Telea => app.auto_telea_engine.clone().filter(|e| e.radius() == radius),
+        InpaintBackend::Lama => app.auto_lama_engine.clone().filter(|e| e.radius() == radius),
+        InpaintBackend::Aot => app.auto_aot_engine.clone().filter(|e| e.radius() == radius),
+    };
     if let Some(engine) = cached {
         app.auto_inpaint_pending += jobs.len();
-        app.status = format!("Auto-inpaint (Telea) {} regions in parallel...", jobs.len());
-        // Precompute neighbor paths for seam stitching (unified 512)
-        let neighbor_map: std::collections::HashMap<usize, (Option<String>, Option<String>)> = {
-            let mut map = std::collections::HashMap::new();
-            for job in &jobs {
-                map.insert(job.index, neighbor_paths(app, job.index));
+        match backend {
+            InpaintBackend::Telea => {
+                app.status = format!("Auto-inpaint (Telea) {} regions in parallel...", jobs.len());
+                let neighbor_map: std::collections::HashMap<usize, (Option<String>, Option<String>)> = {
+                    let mut map = std::collections::HashMap::new();
+                    for job in &jobs {
+                        map.insert(job.index, neighbor_paths(app, job.index));
+                    }
+                    map
+                };
+                let tasks: Vec<Task<Message>> = jobs
+                    .into_iter()
+                    .map(|job| {
+                        let engine = engine.clone();
+                        let (prev_path, next_path) = neighbor_map.get(&job.index).cloned().unwrap_or((None, None));
+                        let idx = job.index;
+                        let id = job.id;
+                        Task::perform(
+                            async move {
+                                let res = tokio::task::spawn_blocking(move || {
+                                    run_auto_job_with_stitch(&engine, &job, pad, prev_path.as_deref(), next_path.as_deref())
+                                })
+                                .await
+                                .unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")));
+                                (idx, id, res)
+                            },
+                            |(idx, id, res)| Message::AutoInpaintFinished(idx, id, res),
+                        )
+                    })
+                    .collect();
+                Task::batch(tasks)
             }
-            map
-        };
-        let tasks: Vec<Task<Message>> = jobs
-            .into_iter()
-            .map(|job| {
-                let engine = engine.clone();
-                let pad = pad;
-                let (prev_path, next_path) = neighbor_map.get(&job.index).cloned().unwrap_or((None, None));
-                let idx = job.index;
-                let id = job.id;
+            _ => {
+                let label = match backend {
+                    InpaintBackend::Lama => "LaMa",
+                    InpaintBackend::Aot => "AOT-GAN",
+                    _ => unreachable!(),
+                };
+                app.status = format!("Auto-inpaint ({label}) {} regions sequentially...", jobs.len());
+                let enriched: Vec<(AutoInpaintJob, Option<String>, Option<String>)> = jobs
+                    .into_iter()
+                    .map(|job| {
+                        let (prev, next) = neighbor_paths(app, job.index);
+                        (job, prev, next)
+                    })
+                    .collect();
+                let is_lama = backend == InpaintBackend::Lama;
                 Task::perform(
                     async move {
-                        let res = tokio::task::spawn_blocking(move || {
-                            run_auto_job_with_stitch(&engine, &job, pad, prev_path.as_deref(), next_path.as_deref())
+                        tokio::task::spawn_blocking(move || {
+                            let mut out: Vec<(
+                                usize,
+                                EntryId,
+                                Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<Quad>)>, String>,
+                            )> = Vec::new();
+                            for (job, prev_path, next_path) in enriched {
+                                let r = run_auto_job_with_stitch(&engine, &job, pad, prev_path.as_deref(), next_path.as_deref());
+                                out.push((job.index, job.id, r));
+                            }
+                            out
                         })
                         .await
-                        .unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")));
-                        (idx, id, res)
+                        .unwrap_or_else(|e| {
+                            let msg = if is_lama { format!("lama batch cancelled: {e}") } else { format!("aot batch cancelled: {e}") };
+                            vec![(0, EntryId(0), Err(msg))]
+                        })
                     },
-                    |(idx, id, res)| Message::AutoInpaintFinished(idx, id, res),
+                    move |batch| if is_lama {
+                        Message::AutoInpaintLamaBatchFinished(batch)
+                    } else {
+                        Message::AutoInpaintAotBatchFinished(batch)
+                    },
                 )
-            })
-            .collect();
-        Task::batch(tasks)
+            }
+        }
     } else {
-        app.pending_auto_telea_jobs = Some(jobs);
-        app.status = "Loading Telea for auto-inpaint...".to_string();
+        match backend {
+            InpaintBackend::Telea => app.pending_auto_telea_jobs = Some(jobs),
+            InpaintBackend::Lama => app.pending_auto_lama_jobs = Some(jobs),
+            InpaintBackend::Aot => app.pending_auto_aot_jobs = Some(jobs),
+        }
+        app.status = match backend {
+            InpaintBackend::Telea => "Loading Telea for auto-inpaint...".to_string(),
+            InpaintBackend::Lama => "Loading LaMa for auto-inpaint...".to_string(),
+            InpaintBackend::Aot => "Loading AOT-GAN for auto-inpaint...".to_string(),
+        };
         Task::perform(
-            async move { InpaintEngine::build(InpaintBackend::Telea, radius) },
-            move |r| Message::AutoInpaintEngineReady(InpaintBackend::Telea, r),
+            async move { InpaintEngine::build(backend, radius) },
+            move |r| Message::AutoInpaintEngineReady(backend, r),
         )
     }
 }
 
 #[cfg(feature = "inpaint")]
-pub fn dispatch_auto_lama_jobs(app: &mut App, jobs: Vec<AutoInpaintJob>) -> Task<Message> {
-    if jobs.is_empty() {
-        return Task::none();
-    }
-    let radius = scanlateit_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
-    let pad = auto_pad_for(InpaintBackend::Lama, radius);
-    let cached = app.auto_lama_engine.clone().filter(|e| e.radius() == radius);
-    if let Some(engine) = cached {
-        app.auto_inpaint_pending += jobs.len();
-        app.status = format!("Auto-inpaint (LaMa) {} regions sequentially...", jobs.len());
-        // Precompute neighbor paths per job for seam stitching (unified 512)
-        let enriched: Vec<(AutoInpaintJob, Option<String>, Option<String>)> = jobs.into_iter().map(|job| {
-            let (prev, next) = neighbor_paths(app, job.index);
-            (job, prev, next)
-        }).collect();
-        Task::perform(
-            async move {
-                tokio::task::spawn_blocking(move || {
-                    let mut out: Vec<(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<Quad>)>, String>)> = Vec::new();
-                    for (job, prev_path, next_path) in enriched {
-                        let r = run_auto_job_with_stitch(&engine, &job, pad, prev_path.as_deref(), next_path.as_deref());
-                        out.push((job.index, job.id, r));
-                    }
-                    out
-                })
-                .await
-                .unwrap_or_else(|e| vec![(0, EntryId(0), Err(format!("lama batch cancelled: {e}")))])
-            },
-            Message::AutoInpaintLamaBatchFinished,
-        )
-    } else {
-        app.pending_auto_lama_jobs = Some(jobs);
-        app.status = "Loading LaMa for auto-inpaint...".to_string();
-        Task::perform(
-            async move { InpaintEngine::build(InpaintBackend::Lama, radius) },
-            move |r| Message::AutoInpaintEngineReady(InpaintBackend::Lama, r),
-        )
-    }
-}
-
-#[cfg(feature = "inpaint")]
-pub fn dispatch_auto_aot_jobs(app: &mut App, jobs: Vec<AutoInpaintJob>) -> Task<Message> {
-    if jobs.is_empty() {
-        return Task::none();
-    }
-    let radius = scanlateit_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
-    let pad = auto_pad_for(InpaintBackend::Aot, radius);
-    let cached = app.auto_aot_engine.clone().filter(|e| e.radius() == radius);
-    if let Some(engine) = cached {
-        app.auto_inpaint_pending += jobs.len();
-        app.status = format!("Auto-inpaint (AOT-GAN) {} regions sequentially...", jobs.len());
-        let enriched: Vec<(AutoInpaintJob, Option<String>, Option<String>)> = jobs.into_iter().map(|job| {
-            let (prev, next) = neighbor_paths(app, job.index);
-            (job, prev, next)
-        }).collect();
-        Task::perform(
-            async move {
-                tokio::task::spawn_blocking(move || {
-                    let mut out: Vec<(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<Quad>)>, String>)> = Vec::new();
-                    for (job, prev_path, next_path) in enriched {
-                        let r = run_auto_job_with_stitch(&engine, &job, pad, prev_path.as_deref(), next_path.as_deref());
-                        out.push((job.index, job.id, r));
-                    }
-                    out
-                })
-                .await
-                .unwrap_or_else(|e| vec![(0, EntryId(0), Err(format!("aot batch cancelled: {e}")))])
-            },
-            Message::AutoInpaintAotBatchFinished,
-        )
-    } else {
-        app.pending_auto_aot_jobs = Some(jobs);
-        app.status = "Loading AOT-GAN for auto-inpaint...".to_string();
-        Task::perform(
-            async move { InpaintEngine::build(InpaintBackend::Aot, radius) },
-            move |r| Message::AutoInpaintEngineReady(InpaintBackend::Aot, r),
-        )
-    }
-}
-
-#[cfg(feature = "inpaint")]
-pub fn dispatch_auto_inpaint_solo(app: &mut App, effective_model: scanlateit_settings::AutoInpaintModel) -> Task<Message> {
+pub fn dispatch_auto_solo(app: &mut App, effective_model: scanlateit_settings::AutoInpaintModel) -> Task<Message> {
     let mut jobs: Vec<AutoInpaintJob> = Vec::new();
     for (index, image) in app.images.iter().enumerate() {
         let image_id = image.image_id;
-        let path = app
-            .project
-            .image(image_id)
-            .map(|m| m.path.clone())
-            .unwrap_or_default();
+        let path = app.project.image(image_id).map(|m| m.path.clone()).unwrap_or_default();
         for entry in app.project.visible_for(image_id).collect::<Vec<_>>() {
             jobs.push(AutoInpaintJob {
                 index,
@@ -269,12 +240,13 @@ pub fn dispatch_auto_inpaint_solo(app: &mut App, effective_model: scanlateit_set
         let ev = app.project.set_entry_style_with_event(job.id, style);
         crate::app::handle_model_event(app, ev);
     }
-    match effective_model {
-        scanlateit_settings::AutoInpaintModel::Telea => dispatch_auto_telea_jobs(app, jobs),
-        scanlateit_settings::AutoInpaintModel::Lama => dispatch_auto_lama_jobs(app, jobs),
-        scanlateit_settings::AutoInpaintModel::Aot => dispatch_auto_aot_jobs(app, jobs),
-        scanlateit_settings::AutoInpaintModel::Mixed => dispatch_auto_telea_jobs(app, jobs),
-    }
+    let backend = match effective_model {
+        scanlateit_settings::AutoInpaintModel::Telea => InpaintBackend::Telea,
+        scanlateit_settings::AutoInpaintModel::Lama => InpaintBackend::Lama,
+        scanlateit_settings::AutoInpaintModel::Aot => InpaintBackend::Aot,
+        scanlateit_settings::AutoInpaintModel::Mixed => InpaintBackend::Telea,
+    };
+    dispatch_auto(app, jobs, backend)
 }
 
 #[cfg(feature = "inpaint")]
@@ -307,19 +279,19 @@ pub fn handle_auto_engine_ready(app: &mut App, backend: InpaintBackend, result: 
                 InpaintBackend::Telea => {
                     app.auto_telea_engine = Some(engine.clone());
                     if let Some(jobs) = app.pending_auto_telea_jobs.take() {
-                        return dispatch_auto_telea_jobs(app, jobs);
+                        return dispatch_auto(app, jobs, InpaintBackend::Telea);
                     }
                 }
                 InpaintBackend::Lama => {
                     app.auto_lama_engine = Some(engine.clone());
                     if let Some(jobs) = app.pending_auto_lama_jobs.take() {
-                        return dispatch_auto_lama_jobs(app, jobs);
+                        return dispatch_auto(app, jobs, InpaintBackend::Lama);
                     }
                 }
                 InpaintBackend::Aot => {
                     app.auto_aot_engine = Some(engine.clone());
                     if let Some(jobs) = app.pending_auto_aot_jobs.take() {
-                        return dispatch_auto_aot_jobs(app, jobs);
+                        return dispatch_auto(app, jobs, InpaintBackend::Aot);
                     }
                 }
             }
@@ -347,31 +319,7 @@ pub fn handle_auto_finished(app: &mut App, index: usize, id: EntryId, result: Re
     let pending = app.auto_inpaint_pending;
     match result {
         Ok(patches) => {
-            let mut pending_evs: Vec<(scanlateit_model::ImageId, [f32; 4], Option<Quad>)> = Vec::new();
-            let mut affected = std::collections::HashSet::new();
-            for (target_idx, patch, bounds, quad) in patches {
-                let Some(image_id) = app.images.get(target_idx).map(|i| i.image_id) else { continue; };
-                if let Some(image) = app.images.get_mut(target_idx) {
-                    let (width, height) = (patch.width(), patch.height());
-                    let layer = InpaintLayer {
-                        bounds,
-                        quad,
-                        handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())),
-                        width,
-                        height,
-                    };
-                    image.inpaint.push(layer);
-                    pending_evs.push((image_id, bounds, quad));
-                    affected.insert(target_idx);
-                }
-            }
-            for (image_id, bounds, quad) in pending_evs {
-                let ev = app.project.add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad);
-                crate::app::handle_model_event(app, ev);
-            }
-            if !affected.is_empty() {
-                app.show_inpaint = true;
-            }
+            apply_patches(app, patches);
             if pending == 0 {
                 #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
                 {
@@ -394,85 +342,49 @@ pub fn handle_auto_finished(app: &mut App, index: usize, id: EntryId, result: Re
 }
 
 #[cfg(feature = "inpaint")]
-pub fn handle_auto_lama_batch(app: &mut App, batch: Vec<(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<Quad>)>, String>)>) -> Task<Message> {
-    for (_index, id, result) in batch {
-        app.auto_inpaint_pending = app.auto_inpaint_pending.saturating_sub(1);
-        match result {
-            Ok(patches) => {
-                let mut pending_evs: Vec<(scanlateit_model::ImageId, [f32; 4], Option<Quad>)> = Vec::new();
-                let mut affected = std::collections::HashSet::new();
-                for (target_idx, patch, bounds, quad) in patches {
-                    let Some(image_id) = app.images.get(target_idx).map(|i| i.image_id) else { continue; };
-                    if let Some(image) = app.images.get_mut(target_idx) {
-                        let (width, height) = (patch.width(), patch.height());
-                        let layer = InpaintLayer {
-                            bounds,
-                            quad,
-                            handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())),
-                            width,
-                            height,
-                        };
-                        image.inpaint.push(layer);
-                        pending_evs.push((image_id, bounds, quad));
-                        affected.insert(target_idx);
-                    }
-                }
-                for (image_id, bounds, quad) in pending_evs { let ev = app.project.add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad); crate::app::handle_model_event(app, ev); }
-                if !affected.is_empty() {
-                    app.show_inpaint = true;
-                }
-            }
-            Err(e) => {
-                app.status = format!("Auto-inpaint (LaMa) failed for {_index}:{id:?}: {e}");
-            }
+fn apply_patches(app: &mut App, patches: Vec<(usize, image::RgbaImage, [f32; 4], Option<Quad>)>) {
+    let mut pending_evs: Vec<(scanlateit_model::ImageId, [f32; 4], Option<Quad>)> = Vec::new();
+    let mut affected = std::collections::HashSet::new();
+    for (target_idx, patch, bounds, quad) in patches {
+        let Some(image_id) = app.images.get(target_idx).map(|i| i.image_id) else { continue; };
+        if let Some(image) = app.images.get_mut(target_idx) {
+            let (width, height) = (patch.width(), patch.height());
+            let layer = InpaintLayer {
+                bounds,
+                quad,
+                handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())),
+                width,
+                height,
+            };
+            image.inpaint.push(layer);
+            pending_evs.push((image_id, bounds, quad));
+            affected.insert(target_idx);
         }
     }
-    if app.auto_inpaint_pending == 0 {
-        #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-        { app.pipeline_active = false; }
-        app.status = format!("Auto-inpaint (LaMa batch) done. {}", app.status);
+    for (image_id, bounds, quad) in pending_evs {
+        let ev = app.project.add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad);
+        crate::app::handle_model_event(app, ev);
     }
-    Task::none()
+    if !affected.is_empty() {
+        app.show_inpaint = true;
+    }
 }
 
 #[cfg(feature = "inpaint")]
-pub fn handle_auto_aot_batch(app: &mut App, batch: Vec<(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<Quad>)>, String>)>) -> Task<Message> {
+pub fn handle_auto_batch(app: &mut App, batch: Vec<(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<Quad>)>, String>)>) -> Task<Message> {
     for (_index, id, result) in batch {
         app.auto_inpaint_pending = app.auto_inpaint_pending.saturating_sub(1);
         match result {
-            Ok(patches) => {
-                let mut pending_evs: Vec<(scanlateit_model::ImageId, [f32; 4], Option<Quad>)> = Vec::new();
-                let mut affected = std::collections::HashSet::new();
-                for (target_idx, patch, bounds, quad) in patches {
-                    let Some(image_id) = app.images.get(target_idx).map(|i| i.image_id) else { continue; };
-                    if let Some(image) = app.images.get_mut(target_idx) {
-                        let (width, height) = (patch.width(), patch.height());
-                        let layer = InpaintLayer {
-                            bounds,
-                            quad,
-                            handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())),
-                            width,
-                            height,
-                        };
-                        image.inpaint.push(layer);
-                        pending_evs.push((image_id, bounds, quad));
-                        affected.insert(target_idx);
-                    }
-                }
-                for (image_id, bounds, quad) in pending_evs { let ev = app.project.add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad); crate::app::handle_model_event(app, ev); }
-                if !affected.is_empty() {
-                    app.show_inpaint = true;
-                }
-            }
+            Ok(patches) => apply_patches(app, patches),
             Err(e) => {
-                app.status = format!("Auto-inpaint (AOT) failed for {_index}:{id:?}: {e}");
+                app.status = format!("Auto-inpaint batch failed for {_index}:{id:?}: {e}");
             }
         }
     }
     if app.auto_inpaint_pending == 0 {
         #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
         { app.pipeline_active = false; }
-        app.status = format!("Auto-inpaint (AOT batch) done. {}", app.status);
+        app.status = format!("Auto-inpaint batch done. {}", app.status);
     }
     Task::none()
 }
@@ -1019,86 +931,71 @@ fn run_auto_job_with_stitch(
 
 
 
-#[cfg(feature = "inpaint")]
 pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
-    if app.inpainting || app.running || app.translating {
-        return Task::none();
-    }
-    let Some((index, id)) = app.selected else {
-        return Task::none();
-    };
-    if index >= app.images.len() {
-        return Task::none();
-    }
-    let (path, quad) = {
-        let Some(entry) = app.project.entry(id) else {
+    #[cfg(feature = "inpaint")]
+    {
+        if app.inpainting || app.running || app.translating {
+            return Task::none();
+        }
+        let Some((index, id)) = app.selected else {
             return Task::none();
         };
-        let image_id = app.images[index].image_id;
-        if entry.image_id != image_id {
+        if index >= app.images.len() {
             return Task::none();
         }
-        let path = app
-            .project
-            .image(image_id)
-            .map(|m| m.path.clone())
-            .unwrap_or_default();
-        (path, app.project.view_quad(entry))
-    };
-    app.style_working.bg_color = [0, 0, 0, 0];
-    if app.project.entry(id).is_some() {
-        let ev = app.project.set_entry_style_with_event(id, app.style_working.clone());
-        crate::app::handle_model_event(app, ev);
-    }
-    let [x0, y0, x1, y1] = quad.bounds();
-    let rect = [x0, y0, x1 - x0, y1 - y0];
-    if rect[2] <= 0.0 || rect[3] <= 0.0 {
-        app.status = "Inpaint Background: selected box is degenerate.".to_string();
-        return Task::none();
-    }
-    let (backend, radius) = scanlateit_settings::get(|s| {
-        (
-            s.inpaint_backend,
-            s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1),
-        )
-    });
-    let pad = auto_pad_for(backend, radius);
-    let (prev, next) = neighbor_paths(app, index);
-    let job = AutoInpaintJob { index, id, path: path.clone(), quad };
-    let cached = app
-        .inpaint_engine
-        .clone()
-        .filter(|engine| engine.backend() == backend && engine.radius() == radius);
-    match cached {
-        Some(engine) => start_background_stitch(app, engine, job, pad, prev, next),
-        None => {
-            app.pending_background_stitch = Some((job, pad, prev, next));
-            app.status = match backend {
-                InpaintBackend::Lama => "Loading LaMa model...".to_string(),
-                InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
-                InpaintBackend::Telea => "Inpainting background...".to_string(),
+        let (path, quad) = {
+            let Some(entry) = app.project.entry(id) else {
+                return Task::none();
             };
-            Task::perform(
-                async move { scanlateit_inpaint::Engine::build(backend, radius) },
-                Message::InpaintEngineReady,
-            )
+            let image_id = app.images[index].image_id;
+            if entry.image_id != image_id {
+                return Task::none();
+            }
+            let path = app.project.image(image_id).map(|m| m.path.clone()).unwrap_or_default();
+            (path, app.project.view_quad(entry))
+        };
+        app.style_working.bg_color = [0, 0, 0, 0];
+        if app.project.entry(id).is_some() {
+            let ev = app.project.set_entry_style_with_event(id, app.style_working.clone());
+            crate::app::handle_model_event(app, ev);
         }
+        let [x0, y0, x1, y1] = quad.bounds();
+        let rect = [x0, y0, x1 - x0, y1 - y0];
+        if rect[2] <= 0.0 || rect[3] <= 0.0 {
+            app.status = "Inpaint Background: selected box is degenerate.".to_string();
+            return Task::none();
+        }
+        let (backend, radius) = scanlateit_settings::get(|s| (s.inpaint_backend, s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1)));
+        let pad = auto_pad_for(backend, radius);
+        let (prev, next) = neighbor_paths(app, index);
+        let job = AutoInpaintJob { index, id, path: path.clone(), quad };
+        let cached = app.inpaint_engine.clone().filter(|engine| engine.backend() == backend && engine.radius() == radius);
+        return match cached {
+            Some(engine) => start_background_stitch(app, engine, job, pad, prev, next),
+            None => {
+                app.pending_background_stitch = Some((job, pad, prev, next));
+                app.status = match backend {
+                    InpaintBackend::Lama => "Loading LaMa model...".to_string(),
+                    InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
+                    InpaintBackend::Telea => "Inpainting background...".to_string(),
+                };
+                Task::perform(async move { scanlateit_inpaint::Engine::build(backend, radius) }, Message::InpaintEngineReady)
+            }
+        };
     }
-}
-
-#[cfg(not(feature = "inpaint"))]
-pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
-    let Some((_index, id)) = app.selected else {
+    #[cfg(not(feature = "inpaint"))]
+    {
+        let Some((_index, id)) = app.selected else {
+            return Task::none();
+        };
+        app.style_working.bg_color = [0, 0, 0, 0];
+        if app.project.entry(id).is_some() {
+            let ev = app.project.set_entry_style_with_event(id, app.style_working.clone());
+            crate::app::handle_model_event(app, ev);
+        }
+        app.status = "Background made transparent (inpaint not available in this build).".to_string();
         return Task::none();
-    };
-    app.style_working.bg_color = [0, 0, 0, 0];
-    if app.project.entry(id).is_some() {
-        let ev = app.project.set_entry_style_with_event(id, app.style_working.clone());
-        crate::app::handle_model_event(app, ev);
     }
-    app.status =
-        "Background made transparent (inpaint not available in this build).".to_string();
-    Task::none()
 }
 
 pub fn handle_inpaint_clicked(app: &mut App, selection: Option<(usize, usize)>) -> Task<Message> {

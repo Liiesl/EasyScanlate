@@ -6,7 +6,7 @@ use scanlateit_settings::InpaintBackend;
 use super::{App, AutoInpaintJob, Message};
 
 #[cfg(all(feature = "styling", feature = "inpaint"))]
-pub fn dispatch_pipeline_inpaint_after_style(
+pub fn dispatch_inpaint(
     app: &mut App,
     buffered: Vec<(usize, EntryId, Result<(EntryStyle, scanlateit_styling::StylePrediction), String>, Quad, String)>,
 ) -> Task<Message> {
@@ -83,13 +83,13 @@ pub fn dispatch_pipeline_inpaint_after_style(
     app.pipeline_style_pending = 0;
     let mut tasks: Vec<Task<Message>> = Vec::new();
     if !telea_jobs.is_empty() {
-        tasks.push(super::inpaint::dispatch_auto_telea_jobs(app, telea_jobs));
+        tasks.push(super::inpaint::dispatch_auto(app, telea_jobs, InpaintBackend::Telea));
     }
     if !lama_jobs.is_empty() {
-        tasks.push(super::inpaint::dispatch_auto_lama_jobs(app, lama_jobs));
+        tasks.push(super::inpaint::dispatch_auto(app, lama_jobs, InpaintBackend::Lama));
     }
     if !aot_jobs.is_empty() {
-        tasks.push(super::inpaint::dispatch_auto_aot_jobs(app, aot_jobs));
+        tasks.push(super::inpaint::dispatch_auto(app, aot_jobs, InpaintBackend::Aot));
     }
     if tasks.is_empty() {
         #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
