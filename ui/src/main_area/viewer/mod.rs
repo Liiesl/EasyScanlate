@@ -35,10 +35,11 @@ use self::draw::{
     draw_placeholder, draw_scrollbar, draw_selection_decorations,
 };
 use self::hit_test::{
-    editing_rect, hit_entry, hit_handle, hit_inpaint_toolbar, hit_overlay_button, hit_tile,
-    hit_toolbar, hit_top_decor, inpaint_reveal_offset, local_point, tile_local_point,
+    editing_rect, hit_entry, hit_handle, hit_inpaint_toolbar, hit_overlay_button,
+    hit_save_menu_button, hit_tile, hit_toolbar, hit_top_decor, inpaint_reveal_offset,
+    local_point, tile_local_point,
 };
-use self::interaction::{Interaction, OverlayButton, TopDecorHit};
+use self::interaction::{Interaction, OverlayButton, SaveMenuButton, TopDecorHit};
 use self::layout::{content_width, tile_layout};
 use self::motion::{distort_quad, drag_grab, drag_quad, resize_quad, rotate_quad};
 use self::scroll::{
@@ -115,6 +116,7 @@ pub struct TileView<
     on_ocr_selection: Option<T>,
     on_ocr_span: Option<W>,
     on_export: Option<V>,
+    on_save: Option<V>,
     manual_mode: ManualMode,
     manual_selections: Vec<(usize, Rectangle)>,
     on_manual_selection: Option<X>,
@@ -169,6 +171,7 @@ where
             on_ocr_selection: None,
             on_ocr_span: None,
             on_export: None,
+            on_save: None,
             manual_mode: ManualMode::None,
             manual_selections: Vec::new(),
             on_manual_selection: None,
@@ -322,6 +325,11 @@ where
 
     pub fn on_export(mut self, f: V) -> Self {
         self.on_export = Some(f);
+        self
+    }
+
+    pub fn on_save(mut self, f: V) -> Self {
+        self.on_save = Some(f);
         self
     }
 }
@@ -716,9 +724,26 @@ where
                     hit_overlay_button(local_bounds, local)
                 })
                 .unwrap_or(None);
+            let hovered_menu = if state.save_menu_open {
+                cursor
+                    .position_over(bounds)
+                    .map(|position| {
+                        let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        hit_save_menu_button(local_bounds, local)
+                    })
+                    .unwrap_or(None)
+            } else {
+                None
+            };
             renderer.with_layer(local_bounds, |renderer| {
                 let mut frame = renderer.new_frame(local_bounds);
-                draw_overlay_buttons(&mut frame, local_bounds, hovered_button);
+                draw_overlay_buttons(
+                    &mut frame,
+                    local_bounds,
+                    hovered_button,
+                    state.save_menu_open,
+                    hovered_menu,
+                );
                 renderer.draw_geometry(frame.into_geometry());
             });
         }
@@ -733,6 +758,10 @@ where
 
         match event {
             Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                if state.save_menu_open {
+                    state.save_menu_open = false;
+                    shell.request_redraw();
+                }
                 if cursor.position_over(bounds).is_none() {
                     return;
                 }
@@ -773,10 +802,22 @@ where
                 if let Some(position) = cursor.position_over(bounds) {
                     let local = local_point(position, bounds);
                     if self.show_overlay_buttons {
+                        if state.save_menu_open {
+                            if let Some(menu_button) = hit_save_menu_button(bounds, local) {
+                                state.interaction = Interaction::SaveMenuPressed { button: menu_button };
+                                shell.capture_event();
+                                return;
+                            }
+                        }
                         if let Some(button) = hit_overlay_button(bounds, local) {
                             state.interaction = Interaction::OverlayButtonPressed { button };
                             shell.capture_event();
                             return;
+                        }
+                        if state.save_menu_open {
+                            // Click outside menu & overlay while menu is open -> dismiss
+                            state.save_menu_open = false;
+                            shell.request_redraw();
                         }
                     }
                     // Persistent manual mode has priority over inpaint patch toolbar
@@ -1216,6 +1257,11 @@ where
                                         OverlayButton::GoTop => 0.0,
                                         _ => max_offset,
                                     };
+                                    // Any scroll action dismisses save menu
+                                    if state.save_menu_open {
+                                        state.save_menu_open = false;
+                                        shell.request_redraw();
+                                    }
                                     if (target - state.offset).abs() > f32::EPSILON {
                                         state.offset = target;
                                         shell.request_redraw();
@@ -1226,6 +1272,24 @@ where
                                     }
                                 }
                                 OverlayButton::Save => {
+                                    state.save_menu_open = !state.save_menu_open;
+                                    shell.request_redraw();
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Interaction::SaveMenuPressed { button } = state.interaction {
+                    if let Some(position) = cursor.position_over(bounds) {
+                        let local = local_point(position, bounds);
+                        if hit_save_menu_button(bounds, local) == Some(button) {
+                            match button {
+                                SaveMenuButton::Save => {
+                                    if let Some(callback) = self.on_save.as_ref() {
+                                        shell.publish(callback());
+                                    }
+                                }
+                                SaveMenuButton::Image => {
                                     if let Some(callback) = self.on_export.as_ref() {
                                         shell.publish(callback());
                                     }
@@ -1233,6 +1297,8 @@ where
                             }
                         }
                     }
+                    state.save_menu_open = false;
+                    shell.request_redraw();
                 }
                 let ended_scroll = matches!(state.interaction, Interaction::ScrollerGrabbed { .. });
                 if matches!(
@@ -1249,6 +1315,7 @@ where
                         | Interaction::ToolbarPressed { .. }
                         | Interaction::InpaintToolbarPressed { .. }
                         | Interaction::OverlayButtonPressed { .. }
+                        | Interaction::SaveMenuPressed { .. }
                         | Interaction::InpaintSelecting { .. }
                         | Interaction::OcrSelecting { .. }
                 ) {
@@ -1263,6 +1330,9 @@ where
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                if state.save_menu_open && cursor.position_over(bounds).is_some() {
+                    shell.request_redraw();
+                }
                 match state.interaction {
                     Interaction::ScrollerGrabbed { grab_offset } => {
                         let track = track_rect(bounds);
@@ -1402,13 +1472,20 @@ where
                         shell.capture_event();
                     }
                     Interaction::ToolbarPressed { .. }
-                    | Interaction::InpaintToolbarPressed { .. } => {
-                        shell.capture_event();
-                    }
-                    Interaction::OverlayButtonPressed { .. } => {
+                    | Interaction::InpaintToolbarPressed { .. }
+                    | Interaction::OverlayButtonPressed { .. }
+                    | Interaction::SaveMenuPressed { .. } => {
                         shell.capture_event();
                     }
                     Interaction::None | Interaction::TouchScrolling { .. } => {}
+                }
+            }
+            Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) => {
+                if *key == keyboard::Key::Named(keyboard::key::Named::Escape) && state.save_menu_open {
+                    state.save_menu_open = false;
+                    state.interaction = Interaction::None;
+                    shell.request_redraw();
+                    shell.capture_event();
                 }
             }
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
@@ -1439,6 +1516,7 @@ where
             | Interaction::ToolbarPressed { .. }
             | Interaction::InpaintToolbarPressed { .. }
             | Interaction::OverlayButtonPressed { .. }
+            | Interaction::SaveMenuPressed { .. }
             | Interaction::InpaintSelecting { .. }
             | Interaction::OcrSelecting { .. } => mouse::Interaction::Grabbing,
             Interaction::None => {
@@ -1447,6 +1525,9 @@ where
                     let local = local_point(position, bounds);
                     if self.show_overlay_buttons {
                         if hit_overlay_button(bounds, local).is_some() {
+                            return mouse::Interaction::Pointer;
+                        }
+                        if state.save_menu_open && hit_save_menu_button(bounds, local).is_some() {
                             return mouse::Interaction::Pointer;
                         }
                     }

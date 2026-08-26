@@ -1,4 +1,5 @@
 use iced::Task;
+#[cfg(feature = "ocr")]
 use iced::futures::{SinkExt, StreamExt};
 use scanlateit_model::{NewEntry, Quad};
 #[cfg(feature = "ocr")]

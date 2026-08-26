@@ -31,6 +31,35 @@ impl OverlayButton {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveMenuButton {
+    Save,
+    Image,
+}
+
+impl SaveMenuButton {
+    pub fn icon(self) -> Icon {
+        match self {
+            SaveMenuButton::Save => Icon::Download,
+            SaveMenuButton::Image => Icon::Image,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SaveMenuButton::Save => "save",
+            SaveMenuButton::Image => "image",
+        }
+    }
+
+    pub fn all() -> [(SaveMenuButton, Icon); 2] {
+        [
+            (SaveMenuButton::Save, Icon::Download),
+            (SaveMenuButton::Image, Icon::Image),
+        ]
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Interaction {
     None,
@@ -103,6 +132,9 @@ pub enum Interaction {
     },
     OverlayButtonPressed {
         button: OverlayButton,
+    },
+    SaveMenuPressed {
+        button: SaveMenuButton,
     },
     InpaintSelecting {
         index: usize,

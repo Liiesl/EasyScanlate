@@ -205,8 +205,59 @@ where
     draw_action_button(frame, rect, icon, hovered);
 }
 
-pub fn draw_overlay_buttons<F>(frame: &mut F, bounds: Rectangle, hovered: Option<super::interaction::OverlayButton>)
+pub fn draw_save_menu_button<F>(frame: &mut F, rect: Rectangle, icon: Icon, label: &str, hovered: bool)
 where
+    F: geometry::frame::Backend,
+{
+    if hovered {
+        frame.fill(
+            &Path::rounded_rectangle(rect.position(), rect.size(), Radius::from(scale::s(8.0))),
+            Fill::from(TOOLBAR_HOVER_BG),
+        );
+    } else {
+        frame.fill(
+            &Path::rounded_rectangle(rect.position(), rect.size(), Radius::from(scale::s(8.0))),
+            Fill::from(TOOLBAR_BG),
+        );
+    }
+    let glyph = char::from(icon).to_string();
+    let icon_sz = scale::s(14.0);
+    let text_sz = scale::s(12.0);
+    let gap = scale::s(6.0);
+    let label_w = text_sz * 0.6 * label.len() as f32;
+    let icon_w = icon_sz * 0.6;
+    let total_w = icon_w + gap + label_w;
+    let start_x = rect.x + (rect.width - total_w) / 2.0;
+    let icon_x = start_x;
+    let icon_y = rect.y + (rect.height - icon_sz) / 2.0;
+    let text_x = icon_x + icon_w + gap;
+    let text_y = rect.y + (rect.height - text_sz) / 2.0;
+    frame.fill_text(Text {
+        content: glyph,
+        position: Point::new(icon_x, icon_y),
+        max_width: rect.width,
+        size: Pixels(icon_sz),
+        color: TOOLBAR_FG,
+        font: Font::with_name("lucide"),
+        ..Text::default()
+    });
+    frame.fill_text(Text {
+        content: label.to_string(),
+        position: Point::new(text_x, text_y),
+        max_width: rect.width,
+        size: Pixels(text_sz),
+        color: TOOLBAR_FG,
+        ..Text::default()
+    });
+}
+
+pub fn draw_overlay_buttons<F>(
+    frame: &mut F,
+    bounds: Rectangle,
+    hovered: Option<super::interaction::OverlayButton>,
+    save_menu_open: bool,
+    save_menu_hovered: Option<super::interaction::SaveMenuButton>,
+) where
     F: geometry::frame::Backend,
 {
     for (rect, (button, icon)) in super::hit_test::overlay_button_rects(bounds)
@@ -220,6 +271,20 @@ where
             super::interaction::OverlayButton::Save => {
                 draw_save_button(frame, rect, hovered == Some(button));
             }
+        }
+    }
+    if save_menu_open {
+        for (rect, (button, icon)) in super::hit_test::save_menu_button_rects(bounds)
+            .into_iter()
+            .zip(super::interaction::SaveMenuButton::all())
+        {
+            draw_save_menu_button(
+                frame,
+                rect,
+                icon,
+                button.label(),
+                save_menu_hovered == Some(button),
+            );
         }
     }
 }

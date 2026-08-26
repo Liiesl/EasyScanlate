@@ -1289,7 +1289,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::SettingEdit(edit)) => settings::handle_setting_edit(app, edit),
         Message::Ui(UiEvent::OpenUrl(url)) => settings::handle_open_url(app, url),
         Message::Ui(UiEvent::SaveProject) => mmtl::handle_save(app),
-        Message::Ui(UiEvent::SaveProjectAs) => mmtl::handle_save_as(app),
         Message::Ui(UiEvent::OpenProject) => mmtl::handle_open(app),
         Message::Ui(UiEvent::ExportAll) => export::handle_export_all(app),
         Message::MmtlSavePicked(picked) => mmtl::handle_save_picked(app, picked),
@@ -1311,11 +1310,7 @@ pub fn subscription(app: &App) -> Subscription<Message> {
             if modifiers.control() {
                 match key.as_ref() {
                     iced::keyboard::Key::Character(c) if c == "s" || c == "S" => {
-                        if modifiers.shift() {
-                            Some(Message::Ui(UiEvent::SaveProjectAs))
-                        } else {
-                            Some(Message::Ui(UiEvent::SaveProject))
-                        }
+                        Some(Message::Ui(UiEvent::SaveProject))
                     }
                     iced::keyboard::Key::Character(c) if c == "o" || c == "O" => {
                         Some(Message::Ui(UiEvent::OpenProject))

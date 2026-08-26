@@ -5,7 +5,7 @@ use scanlateit_model::EntryId;
 use crate::main_area::geometry::order_quad;
 use crate::scale;
 
-use super::interaction::{OverlayButton, TopDecorHit};
+use super::interaction::{OverlayButton, SaveMenuButton, TopDecorHit};
 use super::layout::tile_layout;
 use super::motion::{
     button_width, handle_anchors, handle_rect, inpaint_toolbar_buttons, inpaint_toolbar_rect,
@@ -350,4 +350,41 @@ pub fn hit_overlay_button(bounds: Rectangle, local: Point) -> Option<OverlayButt
             };
             inside.then_some(button)
         })
+}
+
+pub fn save_menu_button_rects(bounds: Rectangle) -> [Rectangle; 2] {
+    use super::constants::{
+        OVERLAY_BTN_GAP, OVERLAY_BTN_MARGIN, OVERLAY_CIRCLE_DIAMETER, OVERLAY_SAVE_HEIGHT,
+        OVERLAY_SAVE_WIDTH, SAVE_MENU_GAP, SAVE_MENU_HEIGHT, SAVE_MENU_VGAP, SAVE_MENU_WIDTH,
+    };
+    let circle = scale::s(OVERLAY_CIRCLE_DIAMETER);
+    let save_w = scale::s(OVERLAY_SAVE_WIDTH);
+    let save_h = scale::s(OVERLAY_SAVE_HEIGHT);
+    let gap = scale::s(OVERLAY_BTN_GAP);
+    let margin = scale::s(OVERLAY_BTN_MARGIN);
+    let menu_w = scale::s(SAVE_MENU_WIDTH);
+    let menu_h = scale::s(SAVE_MENU_HEIGHT);
+    let menu_gap = scale::s(SAVE_MENU_GAP);
+    let menu_vgap = scale::s(SAVE_MENU_VGAP);
+    let total = circle * 2.0 + save_h + gap * 2.0;
+    let top = (bounds.height - margin - total).max(0.0);
+    let save_y = top + circle + gap;
+    let save_x = margin;
+    let menu_x = save_x + save_w + menu_gap;
+    let mut rects = [Rectangle::new(Point::ORIGIN, Size::ZERO); 2];
+    // First menu button aligned to the right of Save, top-aligned with Save
+    rects[0] = Rectangle::new(Point::new(menu_x, save_y), Size::new(menu_w, menu_h));
+    // Second menu button vertically below first
+    rects[1] = Rectangle::new(
+        Point::new(menu_x, save_y + menu_h + menu_vgap),
+        Size::new(menu_w, menu_h),
+    );
+    rects
+}
+
+pub fn hit_save_menu_button(bounds: Rectangle, local: Point) -> Option<SaveMenuButton> {
+    save_menu_button_rects(bounds)
+        .into_iter()
+        .zip(SaveMenuButton::all())
+        .find_map(|(rect, (button, _))| rect.contains(local).then_some(button))
 }

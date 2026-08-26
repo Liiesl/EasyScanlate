@@ -41,6 +41,12 @@ pub const OVERLAY_SAVE_HEIGHT: f32 = 32.0;
 pub const OVERLAY_BTN_GAP: f32 = 8.0;
 pub const OVERLAY_BTN_MARGIN: f32 = 12.0;
 
+/// Geometry of the vertical save-menu that appears to the right of the Save button.
+pub const SAVE_MENU_WIDTH: f32 = 84.0;
+pub const SAVE_MENU_HEIGHT: f32 = 32.0;
+pub const SAVE_MENU_GAP: f32 = 8.0;
+pub const SAVE_MENU_VGAP: f32 = 6.0;
+
 /// Length of the stem connecting the rotation knob to the box.
 pub const ROTATE_STEM: f32 = 16.0;
 

@@ -7,6 +7,7 @@ use scanlateit_ui::event::StyleField;
 use super::{App, Message};
 use super::edit::seed_style_inputs;
 
+#[cfg(feature = "styling")]
 fn collect_jobs(app: &App) -> Vec<(usize, EntryId, String, Quad)> {
     let mut jobs: Vec<(usize, EntryId, String, Quad)> = Vec::new();
     for (index, image) in app.images.iter().enumerate() {

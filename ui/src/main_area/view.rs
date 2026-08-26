@@ -28,6 +28,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             crate::event::MainAreaMode::View => {
                 let viewer = build_viewer(state, tiles(state, false), false)
                     .show_overlay_buttons(show_overlay)
+                    .on_save(|| UiEvent::SaveProject)
                     .on_export(|| UiEvent::ExportAll);
                 iced::widget::stack![viewer, edit_overlay(state), mode_switcher(state)].into()
             }
@@ -35,6 +36,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                 let left = build_viewer(state, tiles(state, true), true).show_overlay_buttons(false);
                 let right = build_viewer(state, tiles(state, false), false)
                     .show_overlay_buttons(show_overlay)
+                    .on_save(|| UiEvent::SaveProject)
                     .on_export(|| UiEvent::ExportAll);
                 iced::widget::stack![
                     row![left, iced::widget::stack![right, edit_overlay(state)]].spacing(2),

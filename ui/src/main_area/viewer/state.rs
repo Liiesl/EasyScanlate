@@ -40,6 +40,8 @@ pub struct TileViewState {
     /// as `viewer_scroll` so a resize or `View↔Compare` width change restores
     /// the same centered row instead of the same absolute pixel offset.
     pub last_published_anchor: Option<f32>,
+    /// Whether the vertical save-menu (save / image) is expanded to the right of the Save button.
+    pub save_menu_open: bool,
 }
 
 impl TileViewState {
@@ -72,6 +74,7 @@ impl Default for TileViewState {
             last_inpaint_revealed: None,
             last_published_offset: None,
             last_published_anchor: None,
+            save_menu_open: false,
         }
     }
 }
