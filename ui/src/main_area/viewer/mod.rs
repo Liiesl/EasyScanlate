@@ -381,8 +381,6 @@ where
             || (new_viewport - state.viewport_height).abs() > f32::EPSILON
             || (new_content_height - state.content_height).abs() > f32::EPSILON;
         state.width = new_width;
-        state.inpaint_mode = self.inpaint_mode;
-        state.ocr_mode = self.ocr_mode;
         state.manual_mode = self.manual_mode;
         state.manual_selections_snapshot = self.manual_selections.clone();
         state.content_height = new_content_height;

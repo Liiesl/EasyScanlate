@@ -24,10 +24,6 @@ pub struct TileViewState {
     pub last_edit_rect: Option<Rectangle>,
     /// Current keyboard modifiers, cached from `ModifiersChanged`.
     pub keyboard_modifiers: keyboard::Modifiers,
-    /// Whether inpainting range drags are enabled.
-    pub inpaint_mode: bool,
-    /// Whether manual OCR range drags are enabled.
-    pub ocr_mode: bool,
     /// Persistent manual mode (when Some, draws multi-selection chrome).
     pub manual_mode: ManualMode,
     /// Snapshot of pending selections for drawing (mirrors App.manual_selections).
@@ -48,10 +44,10 @@ pub struct TileViewState {
 
 impl TileViewState {
     pub fn inpaint_mode(&self) -> bool {
-        self.inpaint_mode || self.manual_mode == ManualMode::Inpaint
+        self.manual_mode == ManualMode::Inpaint
     }
     pub fn ocr_mode(&self) -> bool {
-        self.ocr_mode || self.manual_mode == ManualMode::Ocr
+        self.manual_mode == ManualMode::Ocr
     }
     pub fn manual_active(&self) -> bool {
         self.manual_mode != ManualMode::None
@@ -70,8 +66,6 @@ impl Default for TileViewState {
             last_click: None,
             last_edit_rect: None,
             keyboard_modifiers: keyboard::Modifiers::default(),
-            inpaint_mode: false,
-            ocr_mode: false,
             manual_mode: ManualMode::None,
             manual_selections_snapshot: Vec::new(),
             last_revealed: None,

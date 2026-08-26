@@ -133,11 +133,11 @@ impl UiState for App {
     }
 
     fn inpaint_mode(&self) -> bool {
-        self.inpaint_mode
+        self.manual_mode == ManualMode::Inpaint
     }
 
     fn ocr_mode(&self) -> bool {
-        self.ocr_mode
+        self.manual_mode == ManualMode::Ocr
     }
 
     fn manual_mode(&self) -> ManualMode {

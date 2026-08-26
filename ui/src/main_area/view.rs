@@ -68,30 +68,20 @@ fn build_viewer<'a, S: UiState + ?Sized>(state: &'a S, tiles: Vec<TileSpec<'a>>,
     } else {
         // Manual multi-select routes through unified ManualSelection events
         let manual_mode = state.manual_mode();
-        let (manual_sels, use_manual) = if manual_mode != crate::event::ManualMode::None {
-            (state.manual_selections(), true)
-        } else {
-            (&[][..], false)
-        };
+        let manual_sels = state.manual_selections();
         viewer = viewer
             .on_entry_clicked(UiEvent::EntryClicked)
             .on_entry_double_clicked(|(index, id)| UiEvent::EntryDoubleClicked((index, id)))
             .on_edit_rect(UiEvent::EditRect)
             .on_entry_moved(UiEvent::EntryMoved)
             .on_toolbar_action(UiEvent::EntryToolbar)
-            // Legacy single-selection paths (kept for non-manual builds)
-            .on_inpaint_selection(UiEvent::InpaintSelection)
-            .on_inpaint_span(UiEvent::InpaintSelectionSpan)
             .on_inpaint_toolbar(UiEvent::InpaintToolbar)
-            .on_ocr_selection(UiEvent::ManualOcrSelection)
-            .on_ocr_span(UiEvent::ManualOcrSelectionSpan)
-            // New manual multi-select paths
             .on_manual_selection(UiEvent::ManualSelectionAdded)
             .on_manual_span(UiEvent::ManualSelectionSpan)
             .manual_mode(manual_mode)
             .manual_selections(manual_sels.to_vec())
-            .inpaint_mode(if use_manual { manual_mode == crate::event::ManualMode::Inpaint } else { state.inpaint_mode() })
-            .ocr_mode(if use_manual { manual_mode == crate::event::ManualMode::Ocr } else { state.ocr_mode() })
+            .inpaint_mode(manual_mode == crate::event::ManualMode::Inpaint)
+            .ocr_mode(manual_mode == crate::event::ManualMode::Ocr)
             .show_inpaint(state.show_inpaint())
             .show_overlay_text(state.show_overlay_text())
             .editing(state.editing())

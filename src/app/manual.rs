@@ -38,9 +38,6 @@ pub fn handle_enter(app: &mut App, mode: ManualMode) -> Task<Message> {
         eprintln!("[manual] entering mode {:?}, stashed view_mode={:?}", mode, app.manual_prev_view_mode);
     }
     app.manual_mode = mode;
-    // keep legacy bools in sync for any non-manual drawing paths
-    app.inpaint_mode = mode == ManualMode::Inpaint;
-    app.ocr_mode = mode == ManualMode::Ocr;
     crate::app::edit::clear_editing(app);
     app.selected = None;
     app.selected_inpaint = None;
@@ -61,8 +58,6 @@ pub fn handle_cancel(app: &mut App) -> Task<Message> {
     let prev = app.manual_prev_view_mode;
     app.manual_mode = ManualMode::None;
     app.manual_selections.clear();
-    app.inpaint_mode = false;
-    app.ocr_mode = false;
     if let Some(prev) = app.manual_prev_view_mode.take() {
         app.view_mode = prev;
         eprintln!("[manual] cancelled, restored view_mode={:?}", prev);
@@ -92,9 +87,8 @@ pub fn handle_reset(app: &mut App) -> Task<Message> {
 pub fn handle_selection_added(app: &mut App, pair: (usize, Rectangle)) -> Task<Message> {
     eprintln!("[manual] handle_selection_added mode={:?} pair idx={} rect=[{:.1},{:.1},{:.1},{:.1}] selections_before={}", app.manual_mode, pair.0, pair.1.x, pair.1.y, pair.1.width, pair.1.height, app.manual_selections.len());
     if app.manual_mode == ManualMode::None {
-        eprintln!("[manual] not in manual mode -> legacy");
-        // fallback to legacy single-selection path for compatibility
-        return handle_legacy_selection(app, vec![pair]);
+        eprintln!("[manual] not in manual mode -> none");
+        return Task::none();
     }
     let (idx, rect) = pair;
     if idx >= app.images.len() {
@@ -123,8 +117,8 @@ pub fn handle_selection_span(app: &mut App, spans: Vec<(usize, Rectangle)>) -> T
     eprintln!("[manual] handle_selection_span mode={:?} spans={} before={}", app.manual_mode, spans.len(), app.manual_selections.len());
     for (idx, r) in &spans { eprintln!("[manual]   span idx={} rect=[{:.1},{:.1},{:.1},{:.1}]", idx, r.x, r.y, r.width, r.height); }
     if app.manual_mode == ManualMode::None {
-        eprintln!("[manual] not in manual mode -> legacy");
-        return handle_legacy_selection(app, spans);
+        eprintln!("[manual] not in manual mode -> none");
+        return Task::none();
     }
     if spans.is_empty() {
         return Task::none();
@@ -152,41 +146,6 @@ pub fn handle_selection_span(app: &mut App, spans: Vec<(usize, Rectangle)>) -> T
     let n = app.manual_selections.len();
     eprintln!("[manual] span added, before_dedup={} after={} selections={:?}", before_dedup, n, app.manual_selections.iter().map(|(i,r)| (*i, [r.x, r.y, r.width, r.height])).collect::<Vec<_>>());
     app.status = format!("{n} selection(s). Press Start to run.");
-    Task::none()
-}
-
-fn handle_legacy_selection(app: &mut App, spans: Vec<(usize, Rectangle)>) -> Task<Message> {
-    // Should not happen in normal flow; route to old single handlers for legacy toolbar
-    // If exactly one, use legacy single. This preserves old behaviour when manual mode not active.
-    if spans.len() == 1 {
-        let (idx, rect) = spans[0];
-        // decide based on which mode would have been active? fallback to inpaint
-        #[cfg(feature = "inpaint")]
-        {
-            if app.inpaint_mode {
-                return super::inpaint::handle_inpaint_selection(app, idx, rect);
-            }
-        }
-        #[cfg(feature = "ocr")]
-        {
-            if app.ocr_mode {
-                return super::ocr::handle_manual_ocr_selection(app, idx, rect);
-            }
-        }
-    } else if spans.len() > 1 {
-        // span across seam legacy
-        #[cfg(feature = "inpaint")]
-        {
-            // heuristic: if either legacy flag true, use it
-            // otherwise prefer inpaint
-            return super::inpaint::handle_inpaint_span(app, spans);
-        }
-        #[cfg(not(feature = "inpaint"))]
-        {
-            #[cfg(feature = "ocr")]
-            return super::ocr::handle_manual_ocr_span(app, spans);
-        }
-    }
     Task::none()
 }
 
@@ -226,8 +185,8 @@ pub fn handle_start(app: &mut App) -> Task<Message> {
         ManualMode::Inpaint => {
             #[cfg(feature = "inpaint")]
             {
-                eprintln!("[manual] -> handle_manual_multi_inpaint with {} sels", sels.len());
-                return super::inpaint::handle_manual_multi_inpaint(app, sels);
+                eprintln!("[manual] -> handle_inpaint_selection with {} sels", sels.len());
+                return super::inpaint::handle_inpaint_selection(app, sels);
             }
             #[cfg(not(feature = "inpaint"))]
             {
@@ -240,8 +199,8 @@ pub fn handle_start(app: &mut App) -> Task<Message> {
         ManualMode::Ocr => {
             #[cfg(feature = "ocr")]
             {
-                eprintln!("[manual] -> handle_manual_multi_ocr with {} sels", sels.len());
-                return super::ocr::handle_manual_multi_ocr(app, sels);
+                eprintln!("[manual] -> handle_manual_ocr_selection with {} sels", sels.len());
+                return super::ocr::handle_manual_ocr_selection(app, sels);
             }
             #[cfg(not(feature = "ocr"))]
             {

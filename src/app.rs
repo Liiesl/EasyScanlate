@@ -146,10 +146,6 @@ pub enum Message {
     #[cfg(feature = "ocr")]
     ManualOcrEngineReady(Result<scanlateit_ocr::Engine, String>),
     #[cfg(feature = "ocr")]
-    ManualOcrFinished(usize, Result<Vec<NewEntry>, String>),
-    #[cfg(feature = "ocr")]
-    ManualOcrSpanFinished(Result<Vec<(usize, Vec<NewEntry>)>, String>),
-    #[cfg(feature = "ocr")]
     ManualOcrMultiFinished(Result<Vec<(usize, Vec<NewEntry>)>, String>),
     #[cfg(feature = "ocr")]
     OcrStreamRun(Result<ocr_engine::RunEvent, String>),
@@ -160,10 +156,6 @@ pub enum Message {
     TranslateTick,
     #[cfg(feature = "inpaint")]
     InpaintEngineReady(Result<InpaintEngine, String>),
-    #[cfg(feature = "inpaint")]
-    InpaintFinished(usize, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>),
-    #[cfg(feature = "inpaint")]
-    InpaintSpanFinished(Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>)>, String>),
     #[cfg(feature = "inpaint")]
     ManualMultiInpaintFinished(Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>)>, String>),
     #[cfg(feature = "inpaint")]
@@ -232,16 +224,10 @@ pub struct App {
     #[cfg(feature = "inpaint")]
     inpaint_engine: Option<InpaintEngine>,
     #[cfg(feature = "inpaint")]
-    pending_inpaint: Option<(usize, String, [f32; 4], Vec<Quad>)>,
-    #[cfg(feature = "inpaint")]
-    pending_inpaint_span: Option<Vec<(usize, String, [f32; 4], Vec<Quad>)>>,
-    #[cfg(feature = "inpaint")]
     pending_manual_multi: Option<Vec<(usize, String, [f32; 4], Vec<Quad>)>>,
     #[cfg(feature = "inpaint")]
     pending_background_stitch: Option<(AutoInpaintJob, f32, Option<String>, Option<String>)>,
     pub(crate) inpainting: bool,
-    pub(crate) inpaint_mode: bool,
-    pub(crate) ocr_mode: bool,
     pub(crate) manual_mode: ManualMode,
     pub(crate) manual_selections: Vec<(usize, Rectangle)>,
     pub(crate) manual_prev_view_mode: Option<MainAreaMode>,
@@ -249,10 +235,6 @@ pub struct App {
     pub(crate) manual_ocring: bool,
     #[cfg(feature = "ocr")]
     manual_ocr_engine: Option<scanlateit_ocr::Engine>,
-    #[cfg(feature = "ocr")]
-    pending_manual_ocr: Option<(usize, Rectangle)>,
-    #[cfg(feature = "ocr")]
-    pending_manual_ocr_span: Option<Vec<(usize, Rectangle)>>,
     #[cfg(feature = "ocr")]
     pending_manual_multi_ocr: Option<Vec<(usize, Rectangle)>>,
     pub(crate) show_overlay_text: bool,
@@ -390,14 +372,8 @@ impl App {
             #[cfg(feature = "inpaint")]
             inpaint_engine: None,
             #[cfg(feature = "inpaint")]
-            pending_inpaint: None,
-            #[cfg(feature = "inpaint")]
-            pending_inpaint_span: None,
-            #[cfg(feature = "inpaint")]
             pending_manual_multi: None,
             inpainting: false,
-            inpaint_mode: false,
-            ocr_mode: false,
             manual_mode: ManualMode::None,
             manual_selections: Vec::new(),
             manual_prev_view_mode: None,
@@ -405,10 +381,6 @@ impl App {
             manual_ocring: false,
             #[cfg(feature = "ocr")]
             manual_ocr_engine: None,
-            #[cfg(feature = "ocr")]
-            pending_manual_ocr: None,
-            #[cfg(feature = "ocr")]
-            pending_manual_ocr_span: None,
             #[cfg(feature = "ocr")]
             pending_manual_multi_ocr: None,
             show_overlay_text: true,
@@ -911,11 +883,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         #[cfg(feature = "ocr")]
         Message::ManualOcrEngineReady(result) => ocr::handle_manual_ocr_engine_ready(app, result),
         #[cfg(feature = "ocr")]
-        Message::ManualOcrFinished(index, result) => ocr::handle_manual_ocr_finished(app, index, result),
-        #[cfg(feature = "ocr")]
-        Message::ManualOcrSpanFinished(result) => ocr::handle_manual_ocr_span_finished(app, result),
-        #[cfg(feature = "ocr")]
-        Message::ManualOcrMultiFinished(result) => ocr::handle_manual_multi_finished(app, result),
+        Message::ManualOcrMultiFinished(result) => ocr::handle_manual_ocr_finished(app, result),
         #[cfg(feature = "inpaint")]
         Message::InpaintEngineReady(result) => inpaint::handle_inpaint_engine_ready(app, result),
         #[cfg(feature = "styling")]
@@ -937,11 +905,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         #[cfg(feature = "segment")]
         Message::SegmentFiltered(result) => segment::handle_filtered(app, result),
         #[cfg(feature = "inpaint")]
-        Message::InpaintFinished(index, result) => inpaint::handle_inpaint_finished(app, index, result),
-        #[cfg(feature = "inpaint")]
-        Message::InpaintSpanFinished(result) => inpaint::handle_inpaint_span_finished(app, result),
-        #[cfg(feature = "inpaint")]
-        Message::ManualMultiInpaintFinished(result) => inpaint::handle_manual_multi_finished(app, result),
+        Message::ManualMultiInpaintFinished(result) => inpaint::handle_inpaint_finished(app, result),
         Message::Ui(UiEvent::StopOcr) => ocr::handle_stop_ocr(app),
         #[cfg(feature = "ocr")]
         Message::OcrStreamRun(result) => ocr::handle_ocr_stream_run(app, result),
@@ -1261,22 +1225,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             );
             Task::none()
         }
-        Message::Ui(UiEvent::Inpaint) => {
-            // Legacy toggle now enters persistent manual mode; keep old handler for fallback
-            if app.manual_mode != ManualMode::None {
-                manual::handle_cancel(app)
-            } else {
-                // use new manual mode instead of legacy
-                manual::handle_enter(app, ManualMode::Inpaint)
-            }
-        },
-        Message::Ui(UiEvent::ManualOcr) => {
-            if app.manual_mode != ManualMode::None {
-                manual::handle_cancel(app)
-            } else {
-                manual::handle_enter(app, ManualMode::Ocr)
-            }
-        },
         Message::Ui(UiEvent::ManualModeEnter(mode)) => manual::handle_enter(app, mode),
         Message::Ui(UiEvent::ManualModeCancel) => manual::handle_cancel(app),
         Message::Ui(UiEvent::ManualModeReset) => manual::handle_reset(app),
@@ -1324,10 +1272,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         }
         Message::Ui(UiEvent::EntryToolbar((index, id, action))) => edit::handle_entry_toolbar(app, index, id, action),
         Message::Ui(UiEvent::EntryMoved((index, id, quad))) => edit::handle_entry_moved(app, index, id, quad),
-        Message::Ui(UiEvent::InpaintSelection((index, rect))) => inpaint::handle_inpaint_selection(app, index, rect),
-        Message::Ui(UiEvent::InpaintSelectionSpan(spans)) => inpaint::handle_inpaint_span(app, spans),
-        Message::Ui(UiEvent::ManualOcrSelection((index, rect))) => ocr::handle_manual_ocr_selection(app, index, rect),
-        Message::Ui(UiEvent::ManualOcrSelectionSpan(spans)) => ocr::handle_manual_ocr_span(app, spans),
         Message::Ui(UiEvent::EditAction(action)) => edit::handle_edit_action(app, action),
         Message::Ui(UiEvent::EditRect(rect)) => edit::handle_edit_rect(app, rect),
         Message::Ui(UiEvent::EditSubmit) => edit::handle_edit_submit(app),

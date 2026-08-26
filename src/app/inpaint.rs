@@ -53,10 +53,26 @@ pub fn start_inpaint(
             })
             .await
             .unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")));
-            let mapped = result.map(|v| v.into_iter().map(|(img, b, q)| (index, img, b, q)).collect::<Vec<_>>());
-            (index, mapped)
+            // Convert single-index result into multi payload grouping
+            let grouped: Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>)>, String> = result.map(|v| {
+                let mut map: std::collections::HashMap<usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>> = std::collections::HashMap::new();
+                for (img, b, q) in v {
+                    // run_blocking returns Vec<(RgbaImage,bounds,quad)> without idx; we map to given index
+                    // Actually engine.run_blocking returns Vec<(RgbaImage,bounds,quad)>, not with idx
+                    // So we need to handle that: v is Vec<(RgbaImage, bounds, quad)>
+                    // We'll push to map with `index`
+                    map.entry(index).or_default().push((img, b, q));
+                }
+                let mut out: Vec<_> = map.into_iter().collect();
+                out.sort_by_key(|(idx, _)| *idx);
+                out
+            });
+            // Alternative: if engine returns already with idx, the above loop would be wrong
+            // For safety, handle both shapes via pattern: if v elements are 4-tuple with idx, the above will fail compile
+            // So we implement directly: re-run without mapping, just group by index
+            grouped
         },
-        |(index, result)| Message::InpaintFinished(index, result),
+        Message::ManualMultiInpaintFinished,
     )
 }
 
@@ -71,7 +87,6 @@ fn start_background_stitch(
 ) -> Task<Message> {
     app.inpainting = true;
     app.status = "inpainting background (stitched)...".to_string();
-    let index = job.index;
     Task::perform(
         async move {
             let result = tokio::task::spawn_blocking(move || {
@@ -79,9 +94,18 @@ fn start_background_stitch(
             })
             .await
             .unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")));
-            (index, result)
+            let grouped: Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>)>, String> = result.map(|v| {
+                let mut map: std::collections::HashMap<usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>> = std::collections::HashMap::new();
+                for (idx, img, b, q) in v {
+                    map.entry(idx).or_default().push((img, b, q));
+                }
+                let mut out: Vec<_> = map.into_iter().collect();
+                out.sort_by_key(|(idx, _)| *idx);
+                out
+            });
+            grouped
         },
-        |(index, result)| Message::InpaintFinished(index, result),
+        Message::ManualMultiInpaintFinished,
     )
 }
 
@@ -259,24 +283,14 @@ pub fn handle_inpaint_engine_ready(app: &mut App, result: Result<InpaintEngine, 
         Ok(engine) => {
             app.inpaint_engine = Some(engine.clone());
             if let Some(data) = app.pending_manual_multi.take() {
-                return start_manual_multi(app, engine, data);
-            }
-            if let Some(spans) = app.pending_inpaint_span.take() {
-                return start_inpaint_span(app, engine, spans);
+                return start_inpaint_selection(app, engine, data);
             }
             if let Some((job, pad, prev, next)) = app.pending_background_stitch.take() {
                 return start_background_stitch(app, engine, job, pad, prev, next);
             }
-            match app.pending_inpaint.take() {
-                Some((index, path, rect, quads)) => {
-                    start_inpaint(app, engine, index, path, rect, quads)
-                }
-                None => Task::none(),
-            }
+            Task::none()
         }
         Err(e) => {
-            app.pending_inpaint = None;
-            app.pending_inpaint_span = None;
             app.pending_manual_multi = None;
             app.pending_background_stitch = None;
             app.status = e;
@@ -463,535 +477,17 @@ pub fn handle_auto_aot_batch(app: &mut App, batch: Vec<(usize, EntryId, Result<V
     Task::none()
 }
 
-#[cfg(feature = "inpaint")]
-pub fn handle_inpaint_finished(app: &mut App, index: usize, result: Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<Quad>)>, String>) -> Task<Message> {
-    app.inpainting = false;
-    match result {
-        Ok(patches) => {
-            let count = patches.len();
-            let mut pending_evs: Vec<(scanlateit_model::ImageId, [f32; 4], Option<Quad>)> = Vec::new();
-            let mut affected = std::collections::HashSet::new();
-            for (target_idx, patch, bounds, quad) in patches {
-                let Some(image_id) = app.images.get(target_idx).map(|i| i.image_id) else { continue; };
-                if let Some(image) = app.images.get_mut(target_idx) {
-                    let (width, height) = (patch.width(), patch.height());
-                    let layer = InpaintLayer {
-                        bounds,
-                        quad,
-                        handle: iced::widget::image::Handle::from_rgba(
-                            width,
-                            height,
-                            bytes::Bytes::from(patch.into_raw()),
-                        ),
-                        width,
-                        height,
-                    };
-                    image.inpaint.push(layer);
-                    pending_evs.push((image_id, bounds, quad));
-                    affected.insert(target_idx);
-                }
-            }
-            for (image_id, bounds, quad) in pending_evs { let ev = app.project.add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad); crate::app::handle_model_event(app, ev); }
-            if !affected.is_empty() {
-                app.inpaint_mode = false;
-                app.show_inpaint = true;
-            } else if let Some(image_id) = app.images.get(index).map(|i| i.image_id) {
-                // fallback no target (should not happen) – keep old behavior
-                let _ = image_id;
-            }
-            app.status = format!("Inpainted {count} region(s).");
-        }
-        Err(e) => {
-            app.status = e;
-        }
-    }
-    Task::none()
-}
 
-#[cfg(feature = "inpaint")]
-fn crop_spec_stitched(rect: [f32; 4], width: u32, height: u32) -> [u32; 4] {
-    let [x0, y0, x1, y1] = [rect[0], rect[1], rect[0] + rect[2], rect[1] + rect[3]];
-    let x = x0.floor().clamp(0.0, width as f32 - 1.0) as u32;
-    let y = y0.floor().clamp(0.0, height as f32 - 1.0) as u32;
-    let x1c = x1.ceil().clamp(x as f32 + 1.0, width as f32) as u32;
-    let y1c = y1.ceil().clamp(y as f32 + 1.0, height as f32) as u32;
-    [x, y, x1c - x, y1c - y]
-}
 
-#[cfg(feature = "inpaint")]
-pub fn start_inpaint_span(
-    app: &mut App,
-    engine: InpaintEngine,
-    spans: Vec<(usize, String, [f32; 4], Vec<Quad>)>,
-) -> Task<Message> {
-    app.inpainting = true;
-    app.status = "inpainting (stitched)...".to_string();
-    Task::perform(
-        async move {
-            let result = tokio::task::spawn_blocking(move || run_stitched_inpaint(&engine, spans))
-                .await
-                .unwrap_or_else(|e| Err(format!("inpaint span task cancelled: {e}")));
-            result
-        },
-        Message::InpaintSpanFinished,
-    )
-}
 
-#[cfg(feature = "inpaint")]
-fn run_stitched_inpaint(
-    engine: &InpaintEngine,
-    spans: Vec<(usize, String, [f32; 4], Vec<Quad>)>,
-) -> Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>)>, String> {
-    if spans.is_empty() {
-        return Err("no spans".to_string());
-    }
-    const STITCH_W: u32 = 512;
-    const STITCH_H: u32 = 512;
-    // Decode full images and collect orig rects.
-    struct Raw {
-        idx: usize,
-        full: image::RgbaImage,
-        img_w: u32,
-        img_h: u32,
-        orig: [u32; 4], // [ox,oy,ow,oh] selection in image pixels
-        quads: Vec<Quad>,
-    }
-    let mut raws: Vec<Raw> = Vec::new();
-    for (idx, path, rect_arr, quads) in spans {
-        let rgba = image::ImageReader::open(&path)
-            .map_err(|e| format!("Failed to open {path}: {e}"))?
-            .with_guessed_format()
-            .map_err(|e| format!("Failed to decode {path}: {e}"))?
-            .decode()
-            .map_err(|e| format!("Failed to decode {path}: {e}"))?
-            .into_rgba8();
-        let (img_w, img_h) = rgba.dimensions();
-        let [ox, oy, ow, oh] = crop_spec_stitched(rect_arr, img_w, img_h);
-        if ow == 0 || oh == 0 {
-            continue;
-        }
-        raws.push(Raw { idx, full: rgba, img_w, img_h, orig: [ox, oy, ow, oh], quads });
-    }
-    if raws.is_empty() {
-        return Err("no valid crops".to_string());
-    }
-    raws.sort_by_key(|r| r.idx);
-    if raws.len() > 2 {
-        raws.truncate(2);
-    }
-    // Synthesize quads for mixed empty/non-empty so both tiles get inpainted.
-    let has_any = raws.iter().any(|r| !r.quads.is_empty());
-    let has_empty = raws.iter().any(|r| r.quads.is_empty());
-    if has_any && has_empty {
-        for r in &mut raws {
-            if r.quads.is_empty() {
-                let [ox, oy, ow, oh] = r.orig;
-                let q = Quad { points: [[ox as f32, oy as f32], [ox as f32+ow as f32, oy as f32], [ox as f32+ow as f32, oy as f32+oh as f32], [ox as f32, oy as f32+oh as f32]] };
-                r.quads.push(q);
-            }
-        }
-    }
 
-    // For single span, fall back to 512-wide centered handling but keep height 512 logic for consistency.
-    // For two spans, allocate heights to fill 512 with seam in middle, sticking bottom/top.
-    struct Piece {
-        idx: usize,
-        orig: [u32; 4],
-        x_src: i32,
-        y_src: i32,
-        w_src: u32,
-        h_src: u32,
-        off_y: u32,
-        quads: Vec<Quad>,
-    }
 
-    let mut pieces: Vec<Piece> = Vec::new();
 
-    if raws.len() == 1 {
-        // Single piece stitched as 512x512 centered on selection
-        let r = &raws[0];
-        let [ox, oy, ow, oh] = r.orig;
-        // Width 512 centered
-        let w_src = STITCH_W.min(r.img_w);
-        let center_x = ox as f32 + ow as f32 * 0.5;
-        let mut x_src = (center_x - w_src as f32 * 0.5).round() as i32;
-        x_src = x_src.clamp(0, r.img_w as i32 - w_src as i32).max(0);
-        // Height 512 centered on selection, sticking if at edge
-        let h_src = STITCH_H.min(r.img_h);
-        let center_y = oy as f32 + oh as f32 * 0.5;
-        let mut y_src = (center_y - h_src as f32 * 0.5).round() as i32;
-        // If selection near edge, stick to edge
-        if oy == 0 {
-            y_src = 0;
-        } else if oy + oh == r.img_h {
-            y_src = r.img_h as i32 - h_src as i32;
-        } else {
-            y_src = y_src.clamp(0, r.img_h as i32 - h_src as i32).max(0);
-        }
-        pieces.push(Piece { idx: r.idx, orig: r.orig, x_src, y_src, w_src, h_src, off_y: 0, quads: r.quads.clone() });
-    } else {
-        // Two pieces: allocate heights to fill 512, seam at h0
-        let raw_h0 = raws[0].orig[3] as i32;
-        let raw_h1 = raws[1].orig[3] as i32;
-        let avail_top0 = raws[0].orig[1] as i32;
-        let avail_bottom1 = raws[1].img_h as i32 - (raws[1].orig[1] as i32 + raws[1].orig[3] as i32);
-        let total_raw = raw_h0 + raw_h1;
-        let mut h0: i32;
-        let mut h1: i32;
-        if total_raw >= STITCH_H as i32 {
-            // Selection itself larger than 512 - allocate proportionally (rare for seam)
-            h0 = (STITCH_H as f32 * raw_h0 as f32 / total_raw as f32).round() as i32;
-            h0 = h0.clamp(1, STITCH_H as i32 -1);
-            h1 = STITCH_H as i32 - h0;
-        } else {
-            let extra_needed = STITCH_H as i32 - total_raw;
-            // Aim for equal extra both sides
-            let mut extra0 = (extra_needed / 2 + extra_needed %2).min(avail_top0);
-            let mut extra1 = (extra_needed - extra0).min(avail_bottom1);
-            let mut remaining = extra_needed - extra0 - extra1;
-            if remaining > 0 && avail_top0 > extra0 {
-                let add = remaining.min(avail_top0 - extra0);
-                extra0 += add;
-                remaining -= add;
-            }
-            if remaining > 0 && avail_bottom1 > extra1 {
-                let add = remaining.min(avail_bottom1 - extra1);
-                extra1 += add;
-            }
-            // If still remaining, will be padded with mirror later
-            h0 = raw_h0 + extra0;
-            h1 = raw_h1 + extra1;
-            // If h0+h1 <512 due to avail limits, keep as is and pad stitched with mirror (allowed per spec when at edge)
-            // For now, if still <512, distribute remaining as mirror padding handled later, but keep h0/h1 as computed
-        }
-        // Ensure at least 1
-        h0 = h0.max(1).min(STITCH_H as i32);
-        h1 = h1.max(1).min(STITCH_H as i32);
-        // If h0+h1 !=512 due to avail limits, we will still create 512 stitched and pad gaps with mirror
-        // Clamp h0 to not exceed avail + raw
-        // Compute y_src per spec: bottom of image0 at seam, top of image1 at seam
-        let y_src0 = (raws[0].orig[1] as i32 + raws[0].orig[3] as i32 - h0).clamp(0, raws[0].img_h as i32 - h0).max(0);
-        let y_src1 = raws[1].orig[1] as i32; // top stuck
-        // Width 512 centered per piece (align centers to keep seam vertical aligned)
-        for (i, r) in raws.iter().enumerate() {
-            let [ox, _oy, ow, _oh] = r.orig;
-            let w_src = STITCH_W.min(r.img_w);
-            let center_x = ox as f32 + ow as f32 * 0.5;
-            let mut x_src = (center_x - w_src as f32 * 0.5).round() as i32;
-            x_src = x_src.clamp(0, r.img_w as i32 - w_src as i32).max(0);
-            let (h_src, off_y, y_src) = if i == 0 { (h0 as u32, 0u32, y_src0) } else { (h1 as u32, h0 as u32, y_src1) };
-            let y_src_clamped = (y_src as i32).clamp(0, r.img_h as i32 - h_src as i32).max(0);
-            pieces.push(Piece { idx: r.idx, orig: r.orig, x_src, y_src: y_src_clamped, w_src, h_src, off_y, quads: r.quads.clone() });
-        }
-    }
 
-    // Build stitched 512x512
-    let mut stitched = image::RgbaImage::new(STITCH_W, STITCH_H);
-    // Initially transparent; fill gaps with mirror of nearest edge if needed
-    for p in &pieces {
-        let src = &raws.iter().find(|r| r.idx == p.idx).unwrap().full;
-        let crop = image::imageops::crop_imm(src, p.x_src as u32, p.y_src as u32, p.w_src, p.h_src).to_image();
-        // If w_src <512, need to fill remaining width with horizontal mirror of crop edge
-        let mut placed = crop;
-        if p.w_src < STITCH_W {
-            let mut full_w = image::RgbaImage::new(STITCH_W, p.h_src);
-            image::imageops::replace(&mut full_w, &placed, 0, 0);
-            // Mirror fill remaining width: reflect last column
-            let remaining = STITCH_W - p.w_src;
-            if remaining > 0 {
-                // Simple horizontal reflect of edge: copy mirrored columns
-                for y in 0..p.h_src {
-                    for x in 0..remaining {
-                        let src_x = (p.w_src as i32 - 1 - (x as i32 % p.w_src as i32)).max(0) as u32;
-                        let px = placed.get_pixel(src_x, y).clone();
-                        full_w.put_pixel(p.w_src + x, y, px);
-                    }
-                }
-            }
-            placed = full_w;
-        }
-        image::imageops::replace(&mut stitched, &placed, 0, p.off_y as i64);
-    }
-    // If pieces heights sum <512 (due to avail limits), there will be a gap between h0 and 512 or at top/bottom.
-    // Fill gap with vertical mirror of nearest edge (allowed when at chapter edge per spec).
-    let total_h: u32 = pieces.iter().map(|p| p.h_src).sum();
-    if total_h < STITCH_H {
-        // Gap is at middle if h0+h1 <512? Actually h0+h1 == total_h, but stitched height is 512, so gap =512-total_h at bottom (since we placed at 0 and h0)
-        // Fill remaining rows with mirrored edge of last piece's bottom
-        let gap = STITCH_H - total_h;
-        if gap > 0 {
-            // Mirror bottom edge of stitched's existing content
-            for y in 0..gap {
-                let src_y = (total_h as i32 -1 - (y as i32 % total_h as i32)).max(0) as u32;
-                for x in 0..STITCH_W {
-                    let px = stitched.get_pixel(x, src_y).clone();
-                    stitched.put_pixel(x, total_h + y, px);
-                }
-            }
-        }
-    }
 
-    // Build stitched quads with fixed scale=1 (no resize) and track origin for correct mapping
-    let mut quads_stitched: Vec<Quad> = Vec::new();
-    let mut quad_piece: Vec<usize> = Vec::new();
-    for p in &pieces {
-        for q in &p.quads {
-            let mut pts = [[0.0f32; 2]; 4];
-            for (i, pt) in q.points.iter().enumerate() {
-                let x_in = pt[0] - p.x_src as f32;
-                let y_in = pt[1] - p.y_src as f32 + p.off_y as f32;
-                pts[i] = [x_in, y_in];
-            }
-            quads_stitched.push(Quad { points: pts });
-            quad_piece.push(p.idx);
-        }
-    }
-    let rect_stitched = [0.0, 0.0, STITCH_W as f32, STITCH_H as f32];
-    let patches = engine.run_on_image(&stitched, rect_stitched, &quads_stitched)?;
-    // Map patches back - fixed 512 scale=1, no resize
-    let mut per_image: std::collections::HashMap<usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>> = std::collections::HashMap::new();
-    let is_empty_single = quads_stitched.is_empty() && patches.len() == 1 && patches[0].0.dimensions() == (STITCH_W, STITCH_H);
-    if is_empty_single {
-        let (img_patch, _, _) = &patches[0];
-        for p in &pieces {
-            let [ox, oy, ow, oh] = p.orig;
-            // For empty, extract selection sub-crop from the 512 strip
-            let y0 = p.off_y;
-            let h = p.h_src;
-            let slice_full = image::imageops::crop_imm(img_patch, 0, y0, STITCH_W, h).to_image();
-            // Selection offset inside slice
-            let sel_x = (ox as i32 - p.x_src).max(0) as u32;
-            let sel_y = if p.off_y == 0 {
-                // top piece: selection at bottom of its strip
-                (h as i32 - oh as i32).max(0) as u32
-            } else {
-                // bottom piece: selection at top
-                0
-            };
-            // Clamp sel_x+ow within 512
-            let sel_x_clamped = sel_x.min(STITCH_W - ow);
-            let sub = image::imageops::crop_imm(&slice_full, sel_x_clamped, sel_y, ow, oh).to_image();
-            let bounds = [ox as f32, oy as f32, ow as f32, oh as f32];
-            per_image.entry(p.idx).or_default().push((sub, bounds, None));
-        }
-    } else {
-        for (idx, (patch_img, bounds_stitched, quad_opt)) in patches.into_iter().enumerate() {
-            let [bx, by, bw, bh] = bounds_stitched;
-            // Map by quad index (preserves origin) - fallback to center if len mismatch
-            let p: &Piece = if idx < quad_piece.len() {
-                let wanted = quad_piece[idx];
-                pieces.iter().find(|x| x.idx == wanted).unwrap()
-            } else {
-                let cy = by + bh / 2.0;
-                let mut found: Option<&Piece> = None;
-                for pp in &pieces {
-                    let py0 = pp.off_y as f32;
-                    let py1 = py0 + pp.h_src as f32;
-                    if cy >= py0 && cy < py1 { found = Some(pp); break; }
-                }
-                match found {
-                    Some(v) => v,
-                    None => {
-                        let mut best: Option<&Piece> = None;
-                        let mut best_overlap: f32 = 0.0;
-                        for cand in &pieces {
-                            let py0 = cand.off_y as f32;
-                            let py1 = py0 + cand.h_src as f32;
-                            let overlap = (by + bh).min(py1) - by.max(py0);
-                            if overlap > best_overlap { best_overlap = overlap; best = Some(cand); }
-                        }
-                        match best { Some(v) => v, None => continue }
-                    }
-                }
-            };
-            // Seam-crossing split: if bbox straddles seam, split into two (rare)
-            let py0 = p.off_y as f32;
-            let py1 = py0 + p.h_src as f32;
-            let seam_cross = by < py1 && by + bh > py1 && pieces.len() == 2;
-            if seam_cross {
-                let top_h = py1 - by;
-                let bot_h = by + bh - py1;
-                if top_h > 0.5 && bot_h > 0.5 {
-                    let other = pieces.iter().find(|o| o.idx != p.idx).unwrap();
-                    let top_patch = image::imageops::crop_imm(&patch_img, 0, 0, bw as u32, top_h as u32).to_image();
-                    let bot_patch = image::imageops::crop_imm(&patch_img, 0, top_h as u32, bw as u32, bot_h as u32).to_image();
-                    let bounds_top = [bx + p.x_src as f32, by + p.y_src as f32, bw, top_h];
-                    let bounds_bot = [bx + other.x_src as f32, (py1 - p.off_y as f32) + other.y_src as f32, bw, bot_h];
-                    let quad_top = quad_opt.map(|q| {
-                        let mut nq = q;
-                        for pt in &mut nq.points {
-                            pt[0] += p.x_src as f32;
-                            pt[1] += p.y_src as f32 - p.off_y as f32;
-                        }
-                        nq
-                    });
-                    let quad_bot = quad_opt.map(|q| {
-                        let mut nq = q;
-                        for pt in &mut nq.points {
-                            pt[0] += other.x_src as f32;
-                            pt[1] += other.y_src as f32 - other.off_y as f32;
-                        }
-                        nq
-                    });
-                    // For split, keep same quad but translated; patch image is already split, so still representative
-                    per_image.entry(p.idx).or_default().push((top_patch, bounds_top, quad_top));
-                    per_image.entry(other.idx).or_default().push((bot_patch, bounds_bot, quad_bot));
-                    continue;
-                }
-            }
-            let local_y = by - p.off_y as f32;
-            let orig_x = bx + p.x_src as f32;
-            let orig_y = local_y + p.y_src as f32;
-            // Clip to image bounds (B) - keep inside image for InpaintLayer
-            let (img_w_f, img_h_f) = {
-                let r = raws.iter().find(|r| r.idx == p.idx).unwrap();
-                (r.img_w as f32, r.img_h as f32)
-            };
-            let clip_x0 = orig_x.max(0.0);
-            let clip_y0 = orig_y.max(0.0);
-            let clip_x1 = (orig_x + bw).min(img_w_f);
-            let clip_y1 = (orig_y + bh).min(img_h_f);
-            if clip_x1 <= clip_x0 || clip_y1 <= clip_y0 {
-                continue;
-            }
-            let new_w = clip_x1 - clip_x0;
-            let new_h = clip_y1 - clip_y0;
-            let crop_x = (clip_x0 - orig_x).round().max(0.0) as u32;
-            let crop_y = (clip_y0 - orig_y).round().max(0.0) as u32;
-            let clipped_patch = if crop_x != 0 || crop_y != 0 || new_w as u32 != patch_img.width() || new_h as u32 != patch_img.height() {
-                let cw = (new_w as u32).min(patch_img.width().saturating_sub(crop_x));
-                let ch = (new_h as u32).min(patch_img.height().saturating_sub(crop_y));
-                if cw == 0 || ch == 0 { continue; }
-                image::imageops::crop_imm(&patch_img, crop_x, crop_y, cw, ch).to_image()
-            } else { patch_img };
-            let bounds = [clip_x0, clip_y0, new_w, new_h];
-            let orig_quad = quad_opt.map(|q| {
-                let mut nq = q;
-                for pt in &mut nq.points {
-                    pt[0] += p.x_src as f32;
-                    pt[1] += p.y_src as f32 - p.off_y as f32;
-                }
-                nq
-            });
-            per_image.entry(p.idx).or_default().push((clipped_patch, bounds, orig_quad));
-        }
-    }
-    let mut out: Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>)> = Vec::new();
-    for p in &pieces {
-        if let Some(v) = per_image.remove(&p.idx) {
-            out.push((p.idx, v));
-        }
-    }
-    out.sort_by_key(|(idx, _)| *idx);
-    Ok(out)
-}
 
-#[cfg(feature = "inpaint")]
-pub fn handle_inpaint_span(app: &mut App, spans: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
-    if app.inpainting || app.running || app.translating {
-        return Task::none();
-    }
-    #[cfg(feature = "ocr")]
-    if app.manual_ocring {
-        return Task::none();
-    }
-    if spans.is_empty() {
-        return Task::none();
-    }
-    let mut span_data: Vec<(usize, String, [f32; 4], Vec<Quad>)> = Vec::new();
-    for (idx, rect) in spans {
-        if idx >= app.images.len() {
-            continue;
-        }
-        let image_id = app.images[idx].image_id;
-        let rect_arr = [rect.x, rect.y, rect.width, rect.height];
-        let quads: Vec<Quad> = app
-            .project
-            .all_for(image_id)
-            .map(|e| app.project.view_quad(e))
-            .filter(|q| q.intersects_rect(rect_arr))
-            .collect();
-        if quads.is_empty() {
-            // still allow empty -> will clean whole selection
-        }
-        let path = app.project.image(image_id).map(|m| m.path.clone()).unwrap_or_default();
-        if path.is_empty() {
-            continue;
-        }
-        span_data.push((idx, path, rect_arr, quads));
-    }
-    if span_data.is_empty() {
-        return Task::none();
-    }
-    span_data.sort_by_key(|(idx, _, _, _)| *idx);
-    if span_data.len() > 2 {
-        span_data.truncate(2);
-    }
-    if span_data.len() == 1 {
-        let (idx, path, rect, quads) = span_data.into_iter().next().unwrap();
-        let (backend, radius) = scanlateit_settings::get(|s| (s.inpaint_backend, s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1)));
-        let cached = app.inpaint_engine.clone().filter(|e| e.backend() == backend && e.radius() == radius);
-        return match cached {
-            Some(engine) => start_inpaint(app, engine, idx, path, rect, quads),
-            None => {
-                app.pending_inpaint = Some((idx, path, rect, quads));
-                app.status = match backend {
-                    InpaintBackend::Lama => "Loading LaMa model...".to_string(),
-                    InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
-                    InpaintBackend::Telea => "Inpainting...".to_string(),
-                };
-                Task::perform(async move { scanlateit_inpaint::Engine::build(backend, radius) }, Message::InpaintEngineReady)
-            }
-        };
-    }
-    let (backend, radius) = scanlateit_settings::get(|s| (s.inpaint_backend, s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1)));
-    let cached = app.inpaint_engine.clone().filter(|e| e.backend() == backend && e.radius() == radius);
-    match cached {
-        Some(engine) => start_inpaint_span(app, engine, span_data),
-        None => {
-            app.pending_inpaint_span = Some(span_data);
-            app.status = match backend {
-                InpaintBackend::Lama => "Loading LaMa model...".to_string(),
-                InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
-                InpaintBackend::Telea => "Inpainting...".to_string(),
-            };
-            Task::perform(async move { scanlateit_inpaint::Engine::build(backend, radius) }, Message::InpaintEngineReady)
-        }
-    }
-}
 
-#[cfg(feature = "inpaint")]
-pub fn handle_inpaint_span_finished(app: &mut App, result: Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>)>, String>) -> Task<Message> {
-    app.inpainting = false;
-    match result {
-        Ok(per_image_patches) => {
-            let mut total = 0usize;
-            let mut pending_evs = Vec::new();
-            for (idx, patches) in per_image_patches {
-                let Some(image_id) = app.images.get(idx).map(|i| i.image_id) else { continue; };
-                let Some(image) = app.images.get_mut(idx) else { continue; };
-                for (patch, bounds, quad) in patches {
-                    total += 1;
-                    let (width, height) = (patch.width(), patch.height());
-                    let layer = InpaintLayer { bounds, quad, handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())), width, height };
-                    image.inpaint.push(layer);
-                    pending_evs.push((image_id, bounds, quad));
-                }
-            }
-            for (image_id, bounds, quad) in pending_evs {
-                let ev = app.project.add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad);
-                crate::app::handle_model_event(app, ev);
-            }
-            app.inpaint_mode = false;
-            app.show_inpaint = true;
-            app.status = format!("Inpainted {total} region(s) (stitched).");
-        }
-        Err(e) => {
-            app.status = e;
-        }
-    }
-    Task::none()
-}
+
 
 #[cfg(feature = "inpaint")]
 fn auto_pad_for(backend: InpaintBackend, radius: i32) -> f32 {
@@ -1515,83 +1011,13 @@ fn run_auto_job_with_stitch(
     Ok(out)
 }
 
-#[cfg(feature = "inpaint")]
-pub fn handle_inpaint_selection(app: &mut App, index: usize, rect: iced::Rectangle) -> Task<Message> {
-    if app.inpainting || app.running || app.translating {
-        return Task::none();
-    }
-    #[cfg(feature = "ocr")]
-    if app.manual_ocring {
-        return Task::none();
-    }
-    let rect_arr = [rect.x, rect.y, rect.width, rect.height];
-    let Some(image) = app.images.get(index) else {
-        return Task::none();
-    };
-    let image_id = image.image_id;
-    let quads: Vec<Quad> = app
-        .project
-        .all_for(image_id) // includes deleted for inpaint intersection
-        .map(|entry| app.project.view_quad(entry))
-        .filter(|quad| quad.intersects_rect(rect_arr))
-        .collect();
-    if quads.is_empty() {
-        app.status = "Inpaint: no OCR boxes in the range; the whole selection \
-                      will be cleaned."
-            .to_string();
-    }
-    let path = app
-        .project
-        .image(image_id)
-        .map(|m| m.path.clone())
-        .unwrap_or_default();
-    let (backend, radius) = scanlateit_settings::get(|s| {
-        (
-            s.inpaint_backend,
-            s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1),
-        )
-    });
-    let cached = app
-        .inpaint_engine
-        .clone()
-        .filter(|engine| engine.backend() == backend && engine.radius() == radius);
-    match cached {
-        Some(engine) => start_inpaint(app, engine, index, path, rect_arr, quads),
-        None => {
-            app.pending_inpaint = Some((index, path, rect_arr, quads));
-            app.status = match backend {
-                InpaintBackend::Lama => "Loading LaMa model...".to_string(),
-                InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
-                InpaintBackend::Telea => "Inpainting...".to_string(),
-            };
-            Task::perform(
-                async move { scanlateit_inpaint::Engine::build(backend, radius) },
-                Message::InpaintEngineReady,
-            )
-        }
-    }
-}
 
-#[cfg(not(feature = "inpaint"))]
-pub fn handle_inpaint_selection(app: &mut App, _index: usize, _rect: iced::Rectangle) -> Task<Message> {
-    app.status = "Inpaint is not available in this build.".to_string();
-    Task::none()
-}
 
-#[cfg(not(feature = "inpaint"))]
-pub fn handle_inpaint_span(app: &mut App, _spans: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
-    app.status = "Inpaint is not available in this build.".to_string();
-    Task::none()
-}
 
-#[cfg(not(feature = "inpaint"))]
-pub fn handle_inpaint_span_finished(
-    app: &mut App,
-    _result: Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4])>)>, String>,
-) -> Task<Message> {
-    app.status = "Inpaint is not available in this build.".to_string();
-    Task::none()
-}
+
+
+
+
 
 #[cfg(feature = "inpaint")]
 pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
@@ -1827,7 +1253,7 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
         match cached {
             Some(engine) => return start_inpaint(app, engine, image_index, path, rect, quads),
             None => {
-                app.pending_inpaint = Some((image_index, path, rect, quads));
+                app.pending_manual_multi = Some(vec![(image_index, path, rect, quads)]);
                 app.status = match backend {
                     scanlateit_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
                     scanlateit_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
@@ -1859,31 +1285,11 @@ pub fn handle_inpaint_toolbar(app: &mut App, image_index: usize, patch_idx: usiz
     }
 }
 
-pub fn handle_inpaint_toggle(app: &mut App) -> Task<Message> {
-    use super::edit::clear_editing;
-    if app.inpainting || app.running || app.translating || app.images.is_empty() {
-        return Task::none();
-    }
-    #[cfg(feature = "ocr")]
-    if app.manual_ocring {
-        return Task::none();
-    }
-    clear_editing(app);
-    app.inpaint_mode = !app.inpaint_mode;
-    if app.inpaint_mode {
-        app.ocr_mode = false;
-        app.status = "Inpaint mode: drag a rectangle over the text to remove; \
-                   click Inpaint again to cancel."
-            .to_string();
-    } else {
-        app.status = "Inpaint mode cancelled.".to_string();
-    }
-    Task::none()
-}
+
 
 #[cfg(feature = "inpaint")]
-pub fn handle_manual_multi_inpaint(app: &mut App, selections: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
-    eprintln!("[manual::inpaint] handle_manual_multi_inpaint selections={} cached_engine={} running={} translating={} inpainting={}", selections.len(), app.inpaint_engine.is_some(), app.running, app.translating, app.inpainting);
+pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
+    eprintln!("[manual::inpaint] handle_inpaint_selection selections={} cached_engine={} running={} translating={} inpainting={}", selections.len(), app.inpaint_engine.is_some(), app.running, app.translating, app.inpainting);
     for (i, (idx, r)) in selections.iter().enumerate() {
         eprintln!("[manual::inpaint]   sel {}: idx={} rect=[{:.1},{:.1},{:.1},{:.1}] w={:.1} h={:.1}", i, idx, r.x, r.y, r.width, r.height, r.width, r.height);
     }
@@ -1935,8 +1341,8 @@ pub fn handle_manual_multi_inpaint(app: &mut App, selections: Vec<(usize, iced::
     let cached = app.inpaint_engine.clone().filter(|e| e.backend() == backend && e.radius() == radius);
     // Store pending for engine build path
     if let Some(engine) = cached {
-        eprintln!("[manual::inpaint] using cached engine -> start_manual_multi");
-        return start_manual_multi(app, engine, data);
+        eprintln!("[manual::inpaint] using cached engine -> start_inpaint_selection");
+        return start_inpaint_selection(app, engine, data);
     } else {
         eprintln!("[manual::inpaint] no cached engine -> pending_manual_multi len={} status loading", data.len());
         app.pending_manual_multi = Some(data);
@@ -1950,8 +1356,8 @@ pub fn handle_manual_multi_inpaint(app: &mut App, selections: Vec<(usize, iced::
 }
 
 #[cfg(feature = "inpaint")]
-fn start_manual_multi(app: &mut App, engine: InpaintEngine, data: Vec<(usize, String, [f32; 4], Vec<Quad>)>) -> Task<Message> {
-    eprintln!("[manual::multi] start_manual_multi data={} backend={:?} radius={}", data.len(), engine.backend(), engine.radius());
+fn start_inpaint_selection(app: &mut App, engine: InpaintEngine, data: Vec<(usize, String, [f32; 4], Vec<Quad>)>) -> Task<Message> {
+    eprintln!("[manual::multi] start_inpaint_selection data={} backend={:?} radius={}", data.len(), engine.backend(), engine.radius());
     for (i, (idx, path, rect, quads)) in data.iter().enumerate() {
         eprintln!("[manual::multi]   data {}: idx={} path={} rect={:?} quads={}", i, idx, path, rect, quads.len());
     }
@@ -1959,8 +1365,8 @@ fn start_manual_multi(app: &mut App, engine: InpaintEngine, data: Vec<(usize, St
     app.status = format!("Inpainting {} selection(s) (multi)...", data.len());
     Task::perform(
         async move {
-            eprintln!("[manual::multi] spawn_blocking run_manual_multi_inpaint");
-            let r = tokio::task::spawn_blocking(move || run_manual_multi_inpaint(&engine, data))
+            eprintln!("[manual::multi] spawn_blocking run_inpaint_selection");
+            let r = tokio::task::spawn_blocking(move || run_inpaint_selection(&engine, data))
                 .await
                 .unwrap_or_else(|e| Err(format!("inpaint multi task cancelled: {e}")));
             eprintln!("[manual::multi] spawn_blocking done is_ok={}", r.is_ok());
@@ -1972,8 +1378,8 @@ fn start_manual_multi(app: &mut App, engine: InpaintEngine, data: Vec<(usize, St
 }
 
 #[cfg(feature = "inpaint")]
-fn run_manual_multi_inpaint(engine: &InpaintEngine, data: Vec<(usize, String, [f32; 4], Vec<Quad>)>) -> Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>)>, String> {
-    eprintln!("[manual::multi] run_manual_multi_inpaint enter data={} backend={:?} radius={}", data.len(), engine.backend(), engine.radius());
+fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<(usize, String, [f32; 4], Vec<Quad>)>) -> Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>)>, String> {
+    eprintln!("[manual::multi] run_inpaint_selection enter data={} backend={:?} radius={}", data.len(), engine.backend(), engine.radius());
     for (i, (idx, path, rect, quads)) in data.iter().enumerate() {
         eprintln!("[manual::multi]   data {}: idx={} path={} rect={:?} quads={} bounds={:?}", i, idx, path, rect, quads.len(), quads.iter().map(|q| q.bounds()).collect::<Vec<_>>());
         for (qi, q) in quads.iter().enumerate() {
@@ -2545,8 +1951,8 @@ fn run_manual_multi_inpaint(engine: &InpaintEngine, data: Vec<(usize, String, [f
 }
 
 #[cfg(feature = "inpaint")]
-pub fn handle_manual_multi_finished(app: &mut App, result: Result<Vec<(usize, Vec<(image::RgbaImage, [f32;4], Option<Quad>)>)>, String>) -> Task<Message> {
-    eprintln!("[manual::multi] handle_manual_multi_finished result.is_ok={} inpainting was {}", result.is_ok(), app.inpainting);
+pub fn handle_inpaint_finished(app: &mut App, result: Result<Vec<(usize, Vec<(image::RgbaImage, [f32;4], Option<Quad>)>)>, String>) -> Task<Message> {
+    eprintln!("[manual::multi] handle_inpaint_finished result.is_ok={} inpainting was {}", result.is_ok(), app.inpainting);
     app.inpainting = false;
     match result {
         Ok(per_image_patches) => {

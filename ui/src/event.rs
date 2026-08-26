@@ -217,12 +217,6 @@ pub enum UiEvent {
     InpaintRepaint((usize, usize)),
     /// A button of the floating inpaint toolbar under the selected patch.
     InpaintToolbar((usize, usize, InpaintToolbarAction)),
-    /// Toggle inpainting mode from the panel: the next drag on the page
-    /// selects the range to clean.
-    Inpaint,
-    /// Toggle manual OCR mode: the next drag on the page selects the region
-    /// to OCR. Mutually exclusive with inpaint.
-    ManualOcr,
     // ——— Persistent manual multi-select mode ———
     /// Enter the persistent manual mode (`Inpaint` or `Ocr`). The next drags
     /// accumulate rubber bands until `ManualModeStart` / `Reset` / `Cancel`.
@@ -250,22 +244,6 @@ pub enum UiEvent {
     /// `View↔Compare` so the same row stays centered instead of the same
     /// absolute pixel offset.
     ViewerScroll(f32),
-    /// The user finished dragging an inpainting range on `index`'s tile;
-    /// `Rectangle` is `(x, y, w, h)` in image pixels.
-    InpaintSelection((usize, Rectangle)),
-    /// The user finished dragging an inpainting range that spans two tiles
-    /// (global drag across the seam). Each entry is `(image_index, rect_in_image_pixels)`.
-    InpaintSelectionSpan(Vec<(usize, Rectangle)>),
-    /// The user finished dragging a manual OCR range on `index`'s tile;
-    /// `Rectangle` is `(x, y, w, h)` in image pixels. No padding is added
-    /// (unlike inpaint's expanded canvas).
-    ManualOcrSelection((usize, Rectangle)),
-    /// The user finished dragging a manual OCR range that spans two tiles
-    /// (global drag across the seam), same payload shape as `InpaintSelectionSpan`.
-    /// Each entry is `(image_index, rect_in_image_pixels)`. Rendering is identical
-    /// to inpaint span (green marquee on both tiles), but synthesis is auto-OCR
-    /// style: crops stacked at first page's width, no 512 centering/mirror.
-    ManualOcrSelectionSpan(Vec<(usize, Rectangle)>),
     EditAction(text_editor::Action),
     EditRect(Rectangle),
     EditSubmit,
