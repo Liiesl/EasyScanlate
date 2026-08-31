@@ -84,7 +84,7 @@ use scanlateit_ui::translation as ui_translation;
 use scanlateit_ui::main_area::decode::{DecodedPage, PageDecode, Scheduler, Tier};
 use scanlateit_ui::{
     event::{EditOrigin, MainAreaMode, ManualMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode, UiEvent},
-    ConnectModal, LoadedImage,
+    ConnectModal, LoadedImage, UiState,
 };
 
 // ---------------------------------------------------------------------------
@@ -1166,6 +1166,10 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::InpaintToolbar((image_index, patch_idx, action))) => inpaint::handle_inpaint_toolbar(app, image_index, patch_idx, action),
         Message::Ui(UiEvent::RetranslateEntry(pair)) => translation::handle_retranslate_entry(app, pair.0, pair.1),
         Message::Ui(UiEvent::ReorderEntries) => {
+            if app.is_bulk_busy() {
+                app.status = "Wait for current task to finish.".to_string();
+                return Task::none();
+            }
             if app.images.is_empty() {
                 app.status = "No images to reorder.".to_string();
                 return Task::none();
@@ -1289,7 +1293,6 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::SettingEdit(edit)) => settings::handle_setting_edit(app, edit),
         Message::Ui(UiEvent::OpenUrl(url)) => settings::handle_open_url(app, url),
         Message::Ui(UiEvent::SaveProject) => mmtl::handle_save(app),
-        Message::Ui(UiEvent::OpenProject) => mmtl::handle_open(app),
         Message::Ui(UiEvent::ExportAll) => export::handle_export_all(app),
         Message::MmtlSavePicked(picked) => mmtl::handle_save_picked(app, picked),
         Message::MmtlOpenPicked(picked) => mmtl::handle_open_picked(app, picked),
@@ -1313,7 +1316,7 @@ pub fn subscription(app: &App) -> Subscription<Message> {
                         Some(Message::Ui(UiEvent::SaveProject))
                     }
                     iced::keyboard::Key::Character(c) if c == "o" || c == "O" => {
-                        Some(Message::Ui(UiEvent::OpenProject))
+                        Some(Message::Ui(UiEvent::HomeOpenProject))
                     }
                     _ => None,
                 }

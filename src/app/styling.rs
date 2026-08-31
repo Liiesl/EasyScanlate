@@ -4,6 +4,8 @@ use scanlateit_model::{EntryId, EntryStyle, Quad, TextAlign, TextGradientDir};
 use scanlateit_styling::Engine as StylingEngine;
 use scanlateit_ui::event::StyleField;
 
+use scanlateit_ui::UiState;
+
 use super::{App, Message};
 use super::edit::seed_style_inputs;
 
@@ -383,6 +385,10 @@ pub fn handle_preset_remove(app: &mut App, preset: usize) -> Task<Message> {
 }
 
 pub fn handle_auto_detect(app: &mut App) -> Task<Message> {
+    if app.is_bulk_busy() {
+        app.status = "Wait for current task to finish.".to_string();
+        return Task::none();
+    }
     #[cfg(feature = "styling")]
     {
         use scanlateit_styling::tracker::PendingSingle;

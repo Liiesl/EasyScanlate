@@ -5,6 +5,8 @@ use scanlateit_model::{NewEntry, Quad};
 #[cfg(feature = "ocr")]
 use scanlateit_ocr::{self as ocr, ParallelEngine};
 
+use scanlateit_ui::UiState;
+
 use super::{App, Message};
 
 #[cfg(feature = "ocr")]
@@ -158,7 +160,11 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
             app.status = "Open images first.".to_string();
             return Task::none();
         }
-        if app.running {
+        if app.running || app.is_bulk_busy() {
+            // is_bulk_busy covers translating / inpainting / pipeline etc; keep Start disabled while any bulk job runs
+            if !app.running {
+                app.status = "Wait for current task to finish.".to_string();
+            }
             return Task::none();
         }
         app.running = true;
@@ -194,7 +200,10 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
             app.status = "Open images first.".to_string();
             return Task::none();
         }
-        if app.running {
+        if app.running || app.is_bulk_busy() {
+            if !app.running {
+                app.status = "Wait for current task to finish.".to_string();
+            }
             return Task::none();
         }
         app.running = true;
@@ -445,7 +454,7 @@ pub fn handle_manual_ocr_selection(app: &mut App, selections: Vec<(usize, iced::
     #[cfg(feature = "ocr")]
     {
         if selections.is_empty() { return Task::none(); }
-        if app.manual_ocring || app.running || app.translating || app.inpainting { return Task::none(); }
+        if app.is_bulk_busy() { return Task::none(); }
         let mut valid: Vec<(usize, iced::Rectangle)> = Vec::new();
         for (idx, r) in selections {
             if idx >= app.images.len() { continue; }

@@ -93,6 +93,27 @@ pub trait UiState {
     fn is_inpainting(&self) -> bool;
     /// True while a manual OCR job is running.
     fn is_manual_ocring(&self) -> bool;
+    /// True while the OCR pipeline (SFX filter / style classify / auto-inpaint staging) is active beyond raw OCR.
+    fn is_pipeline_running(&self) -> bool { false }
+    /// True while any auto-inpaint jobs are pending (Telea/LaMa/AOT).
+    fn is_auto_inpainting(&self) -> bool { false }
+    /// True while SFX segmentation filtering is running.
+    fn is_segment_filtering(&self) -> bool { false }
+    /// True while styling classification jobs are pending/running.
+    fn is_styling_busy(&self) -> bool { false }
+    /// Bulk busy: any job that mutates OCR entries / inpaint patches / translations and conflicts with bulk actions.
+    /// Used to disable Start OCR (re-enable), Translate, Retranslate, AutoDetect, InpaintBackground, manual mode etc.
+    /// Note: main-area text editing and fine-grained style controls are intentionally *not* gated by this.
+    fn is_bulk_busy(&self) -> bool {
+        self.running()
+            || self.translating()
+            || self.is_inpainting()
+            || self.is_manual_ocring()
+            || self.is_pipeline_running()
+            || self.is_auto_inpainting()
+            || self.is_segment_filtering()
+            || self.is_styling_busy()
+    }
     /// Whether the overlay text is drawn over the pages in the main area.
     fn show_overlay_text(&self) -> bool;
     /// Whether applied inpainting patches are drawn over the pages.

@@ -272,8 +272,10 @@ fn tip(label: &str) -> container::Container<'_, UiEvent> {
 }
 
 /// The panel header: title, auto-detect action and the reset button
-/// (visual only — it has no event wired up).
-fn header_row<'a>(selected: bool) -> Element<'a, UiEvent> {
+/// (visual only — it has no event wired up). Auto Detect is a bulk job and
+/// must be disabled while any bulk job (pipeline/translate/inpaint) is active.
+fn header_row<'a, S: UiState + ?Sized>(state: &'a S, selected: bool) -> Element<'a, UiEvent> {
+    let can_auto = selected && !state.is_bulk_busy();
     let auto_btn = button(
         row![
             crate::icon::lucide(Icon::Sparkles).size(scale::s(14.0)).center(),
@@ -283,7 +285,7 @@ fn header_row<'a>(selected: bool) -> Element<'a, UiEvent> {
         .align_y(iced::Alignment::Center),
     )
     .style(crate::panel::button_style)
-    .on_press_maybe(selected.then_some(UiEvent::StyleAutoDetect))
+    .on_press_maybe(can_auto.then_some(UiEvent::StyleAutoDetect))
     .padding(scale::s(6.0));
     let auto: Element<'_, UiEvent> = tooltip(auto_btn, tip("Auto detect style"), tooltip::Position::Top)
         .gap(scale::s(4.0))
@@ -462,7 +464,7 @@ fn background_section<'a, S: UiState + ?Sized>(
             .width(FillLength)
             .padding(scale::s(6.0))
             .style(crate::panel::button_style)
-            .on_press_maybe(selected.then_some(UiEvent::StyleInpaintBackground)),
+            .on_press_maybe((selected && !state.is_bulk_busy()).then_some(UiEvent::StyleInpaintBackground)),
             tip("Inpaint background"),
             tooltip::Position::Top,
         )
@@ -663,7 +665,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let selected = state.selected().is_some();
 
     scrollable(column![
-        header_row(selected),
+        header_row(state, selected),
         font_field(state),
         format_align_row(style, selected),
         fill_section(state, style, selected),

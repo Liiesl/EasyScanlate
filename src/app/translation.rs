@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use iced::Task;
 use scanlateit_model::EntryId;
+use scanlateit_ui::UiState;
 use scanlateit_ui::translation as translation;
 #[allow(unused_imports)]
 pub use scanlateit_ui::translation::{
@@ -98,7 +99,8 @@ fn resolve_target_name(app: &App) -> String {
 }
 
 pub fn handle_translate(app: &mut App) -> Task<Message> {
-    if app.translating || app.running {
+    if app.is_bulk_busy() {
+        app.status = "Wait for current task to finish.".to_string();
         return Task::none();
     }
     if !app.tx.is_connected() {
@@ -328,7 +330,8 @@ pub fn handle_retranslate_finished(
 }
 
 pub fn handle_retranslate_entry(app: &mut App, index: usize, entry_id: EntryId) -> Task<Message> {
-    if app.translating || app.running {
+    if app.is_bulk_busy() {
+        app.status = "Wait for current task to finish.".to_string();
         return Task::none();
     }
     let (text, filename, context_items) = {

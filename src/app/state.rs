@@ -159,6 +159,57 @@ impl UiState for App {
         { false }
     }
 
+    fn is_pipeline_running(&self) -> bool {
+        #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+        { self.pipeline_active }
+        #[cfg(not(all(feature = "styling", feature = "inpaint", feature = "segment")))]
+        {
+            #[cfg(all(feature = "styling", feature = "inpaint"))]
+            { self.pipeline_style_pending > 0 }
+            #[cfg(not(all(feature = "styling", feature = "inpaint")))]
+            { false }
+        }
+    }
+
+    fn is_auto_inpainting(&self) -> bool {
+        #[cfg(feature = "inpaint")]
+        { self.auto_inpaint_pending > 0 }
+        #[cfg(not(feature = "inpaint"))]
+        { false }
+    }
+
+    fn is_segment_filtering(&self) -> bool {
+        #[cfg(feature = "segment")]
+        { self.segment_filtering }
+        #[cfg(not(feature = "segment"))]
+        { false }
+    }
+
+    fn is_styling_busy(&self) -> bool {
+        #[cfg(feature = "styling")]
+        {
+            if self.pipeline_style_pending > 0 { return true; }
+            // Manual single auto-detect or bulk classify sets `building` while the ONNX engine loads.
+            // Treat that as bulk busy so AutoDetect cannot be re-entered.
+            if self.styling.is_building() { return true; }
+            false
+        }
+        #[cfg(not(feature = "styling"))]
+        { false }
+    }
+
+    // is_bulk_busy has default impl in trait that composes the above; override to keep cfg correctness
+    fn is_bulk_busy(&self) -> bool {
+        self.running
+            || self.translating
+            || self.inpainting
+            || self.is_manual_ocring()
+            || self.is_pipeline_running()
+            || self.is_auto_inpainting()
+            || self.is_segment_filtering()
+            || self.is_styling_busy()
+    }
+
     fn show_overlay_text(&self) -> bool {
         self.show_overlay_text
     }

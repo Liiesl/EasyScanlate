@@ -9,6 +9,8 @@ use scanlateit_ui::loaded::InpaintLayer;
 #[cfg(feature = "inpaint")]
 use image::RgbaImage;
 
+use scanlateit_ui::UiState;
+
 use super::{App, AutoInpaintJob, Message};
 
 #[cfg(feature = "inpaint")]
@@ -932,6 +934,10 @@ fn run_auto_job_with_stitch(
 
 
 pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
+    if app.is_bulk_busy() {
+        app.status = "Wait for current task to finish.".to_string();
+        return Task::none();
+    }
     #[cfg(feature = "inpaint")]
     {
         if app.inpainting || app.running || app.translating {
@@ -1037,6 +1043,10 @@ pub fn handle_inpaint_clicked(app: &mut App, selection: Option<(usize, usize)>) 
 }
 
 pub fn handle_inpaint_delete(app: &mut App, image_index: usize, patch_idx: usize) -> Task<Message> {
+    if app.is_bulk_busy() {
+        app.status = "Wait for current task to finish.".to_string();
+        return Task::none();
+    }
     let Some(image) = app.images.get_mut(image_index) else {
         return Task::none();
     };
@@ -1073,6 +1083,10 @@ pub fn handle_inpaint_delete(app: &mut App, image_index: usize, patch_idx: usize
 }
 
 pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usize) -> Task<Message> {
+    if app.is_bulk_busy() {
+        app.status = "Wait for current task to finish.".to_string();
+        return Task::none();
+    }
     if app.inpainting || app.running || app.translating {
         return Task::none();
     }
@@ -1192,6 +1206,10 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
     }
     if selections.is_empty() {
         eprintln!("[manual::inpaint] no selections -> none");
+        return Task::none();
+    }
+    if app.is_bulk_busy() {
+        eprintln!("[manual::inpaint] bulk busy -> none");
         return Task::none();
     }
     if app.inpainting || app.running || app.translating {

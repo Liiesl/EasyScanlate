@@ -319,8 +319,6 @@ pub enum UiEvent {
     OpenUrl(String),
     /// Save the current project to its .mmtl path (or Save As if none).
     SaveProject,
-    /// Open a .mmtl project from disk (native XML or legacy JSON).
-    OpenProject,
     /// Export every page as a baked raster image (original + inpaint + overlay)
     /// to a chosen folder. One click exports the whole chapter.
     ExportAll,

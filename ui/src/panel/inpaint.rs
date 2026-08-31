@@ -88,6 +88,7 @@ fn layer_row<'a>(
     handle: Option<Handle>,
     global_visible: bool,
     is_selected: bool,
+    bulk_busy: bool,
 ) -> Element<'a, UiEvent> {
     let [x, y, w, h] = bounds;
     let title = format!("Inpaint  {}", index_in_image + 1);
@@ -152,14 +153,15 @@ fn layer_row<'a>(
 
     // Right-side actions: only when selected, mirroring the results row's
     // Delete / Retranslate but for inpaint: Delete / Repaint (exact rect).
+    // Bulk busy (pipeline/translate/inpaint) disables these to prevent conflicts.
     let actions: Element<'a, UiEvent> = if is_selected {
         row![
             tooltip(
                 button(crate::icon::lucide(Icon::Trash2).size(scale::s(12.0)).center())
                     .padding(scale::s(4.0))
                     .style(crate::panel::button_style)
-                    .on_press(UiEvent::InpaintDelete((image_index, index_in_image))),
-                container(text("Delete patch").size(scale::s(11.0)))
+                    .on_press_maybe((!bulk_busy).then_some(UiEvent::InpaintDelete((image_index, index_in_image)))),
+                container(text(if bulk_busy { "Busy" } else { "Delete patch" }).size(scale::s(11.0)))
                     .padding(scale::s(6.0))
                     .style(container::rounded_box),
                 tooltip::Position::Top
@@ -169,8 +171,8 @@ fn layer_row<'a>(
                 button(crate::icon::lucide(Icon::RefreshCw).size(scale::s(12.0)).center())
                     .padding(scale::s(4.0))
                     .style(crate::panel::button_style)
-                    .on_press(UiEvent::InpaintRepaint((image_index, index_in_image))),
-                container(text("Repaint").size(scale::s(11.0)))
+                    .on_press_maybe((!bulk_busy).then_some(UiEvent::InpaintRepaint((image_index, index_in_image)))),
+                container(text(if bulk_busy { "Busy" } else { "Repaint" }).size(scale::s(11.0)))
                     .padding(scale::s(6.0))
                     .style(container::rounded_box),
                 tooltip::Position::Top
@@ -283,7 +285,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         sections.push(image_header(name, entries.len()));
         for (i, (bounds, handle)) in entries.into_iter().enumerate() {
             let is_selected = selected_inpaint == Some((image_index, i));
-            sections.push(layer_row(name, image_index, i, bounds, handle, global_visible, is_selected));
+            sections.push(layer_row(name, image_index, i, bounds, handle, global_visible, is_selected, state.is_bulk_busy()));
         }
     }
 

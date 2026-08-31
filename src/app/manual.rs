@@ -1,5 +1,6 @@
 use iced::Task;
 use iced::Rectangle;
+use scanlateit_ui::UiState;
 use scanlateit_ui::event::ManualMode;
 
 use super::{App, Message};
@@ -9,6 +10,13 @@ pub fn handle_enter(app: &mut App, mode: ManualMode) -> Task<Message> {
     if app.images.is_empty() {
         app.status = "Open images first.".to_string();
         return Task::none();
+    }
+    if app.is_bulk_busy() {
+        // allow switching manual modes? still block entering new one while bulk busy
+        if app.manual_mode == ManualMode::None || app.manual_mode != mode {
+            app.status = "Wait for current task to finish.".to_string();
+            return Task::none();
+        }
     }
     if app.inpainting {
         app.status = "Wait for inpaint to finish.".to_string();
@@ -139,6 +147,11 @@ pub fn handle_start(app: &mut App) -> Task<Message> {
     if app.manual_selections.is_empty() {
         eprintln!("[manual] no selections -> none");
         app.status = "No selections to run.".to_string();
+        return Task::none();
+    }
+    if app.is_bulk_busy() {
+        eprintln!("[manual] bulk busy {:?}", app.is_bulk_busy());
+        app.status = "Wait for current task to finish.".to_string();
         return Task::none();
     }
     if app.inpainting {

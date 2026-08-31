@@ -67,7 +67,7 @@ fn manual_banner<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> 
     } else {
         format!("{count} selections")
     };
-    let busy = state.running() || state.translating() || state.is_inpainting() || state.is_manual_ocring();
+    let busy = state.is_bulk_busy();
     let can_start = count > 0 && !busy;
     let start_label = if is_inpaint { format!("Start Inpaint ({count})") } else { format!("Start OCR ({count})") };
     let start_btn = button(text(start_label).size(scale::s(11.0)))

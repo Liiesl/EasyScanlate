@@ -1,6 +1,7 @@
 use crate::app::tests::app_with_entry;
 use crate::app::{update, Message};
-use scanlateit_model::{EntryId, EntryStyle, TextAlign, TextGradientDir, INITIAL_PRESET_SLOTS};
+use scanlateit_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
+use scanlateit_settings::INITIAL_PRESET_SLOTS;
 use scanlateit_ui::event::UiEvent;
 
 #[test]

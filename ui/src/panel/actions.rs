@@ -18,10 +18,15 @@ fn tip_label(label: &str) -> container::Container<'_, UiEvent> {
 
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let is_running = state.running();
-    let ocr_label = if is_running { "Stop OCR" } else { "Start OCR" };
+    let is_bulk_busy = state.is_bulk_busy();
+    // While any bulk job (pipeline / translate / inpaint / manual OCR) is active,
+    // Start OCR must stay disabled; Stop OCR stays enabled only for raw OCR.
+    let is_stop = is_running;
+    let can_start = !state.images().is_empty() && !is_bulk_busy && !is_running;
+    let ocr_label = if is_stop { "Stop OCR" } else { "Start OCR" };
     let ocr_btn = button(
         row![
-            crate::icon::lucide(if is_running { Icon::Square } else { Icon::Play })
+            crate::icon::lucide(if is_stop { Icon::Square } else { Icon::Play })
                 .size(scale::s(14.0))
                 .center(),
             text(ocr_label).size(scale::s(12.0))
@@ -31,9 +36,9 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     )
     .style(crate::panel::button_style)
     .on_press_maybe(
-        if is_running {
+        if is_stop {
             Some(UiEvent::StopOcr)
-        } else if !state.images().is_empty() && !state.translating() {
+        } else if can_start {
             Some(UiEvent::StartOcr)
         } else {
             None

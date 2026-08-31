@@ -3,7 +3,7 @@ pub mod preset_tests;
 pub mod retranslate_tests;
 
 pub use super::*;
-use scanlateit_model::INITIAL_PRESET_SLOTS;
+use scanlateit_settings::INITIAL_PRESET_SLOTS;
 
 pub(crate) fn app_with_entry() -> (App, EntryId) {
     use scanlateit_model::{EntrySource, NewEntry, Quad};

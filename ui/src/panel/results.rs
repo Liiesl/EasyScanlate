@@ -144,8 +144,7 @@ fn entry_row<'a, S: UiState + ?Sized>(
         .padding(scale::s(4.0))
         .style(crate::panel::button_style)
         .on_press_maybe(
-            (!state.translating()
-                && !state.running()
+            (!state.is_bulk_busy()
                 && !scanlateit_settings::get(|s| s.connections.is_empty()))
             .then_some(UiEvent::RetranslateEntry((index, entry_id))),
         );
@@ -509,7 +508,7 @@ fn translate_bar<'a, S: UiState + ?Sized>(
             .padding(scale::s(6.0))
             .style(crate::panel::button_style)
             .on_press_maybe(
-                (has_entries && !state.translating() && !state.running())
+                (has_entries && !state.is_bulk_busy())
                     .then_some(UiEvent::Translate)
             );
         let translate: Element<'_, UiEvent> =
