@@ -13,29 +13,31 @@ use super::{App, Message};
 /// overlay editor or the panel's results-row editor). Shared by the
 /// double-click action, the toolbar's "Rename" button and the panel rows.
 pub fn start_inline_edit(app: &mut App, index: usize, id: EntryId, origin: EditOrigin) -> Task<Message> {
-    if index >= app.images.len() {
+    let tab = app.active_tab_mut();
+    if index >= tab.images.len() {
         return Task::none();
     }
-    // Image existence is source of truth via Project, not images[index] alone
-    let Some(entry) = app.project.entry(id) else {
+    let Some(entry) = tab.project.entry(id) else {
         return Task::none();
     };
-    // Validate entry belongs to requested image (and image exists in Project)
-    let image_id = app.images[index].image_id;
-    if entry.image_id != image_id || app.project.image(image_id).is_none() {
+    let image_id = tab.images[index].image_id;
+    if entry.image_id != image_id || tab.project.image(image_id).is_none() {
         return Task::none();
     }
-    let text = app.project.display_text(entry).to_string();
+    let text = tab.project.display_text(entry).to_string();
     clear_editing(app);
     let mut tasks = vec![select_entry(app, index, id)];
-    app.editing = Some((index, id));
-    app.editing_origin = origin;
-    app.editing_dirty = false;
-    app.editing_rect = None;
-    let mut content = text_editor::Content::with_text(&text);
-    content.perform(text_editor::Action::SelectAll);
-    app.edit_content = Some(content);
-    app.status = format!("Editing \"{text}\" in the overlay.");
+    {
+        let tab = app.active_tab_mut();
+        tab.editing = Some((index, id));
+        tab.editing_origin = origin;
+        tab.editing_dirty = false;
+        tab.editing_rect = None;
+        let mut content = text_editor::Content::with_text(&text);
+        content.perform(text_editor::Action::SelectAll);
+        tab.edit_content = Some(content);
+        tab.status = format!("Editing \"{text}\" in the overlay.");
+    }
     let focus_id = match origin {
         EditOrigin::Overlay => EDIT_INPUT_ID,
         EditOrigin::Panel => PANEL_EDIT_INPUT_ID,
@@ -47,24 +49,30 @@ pub fn start_inline_edit(app: &mut App, index: usize, id: EntryId, origin: EditO
     Task::batch(tasks)
 }
 
-/// Clears every piece of inline-editing state in one place.
+/// Clears every piece of inline-editing state in one place (App wrapper).
 pub fn clear_editing(app: &mut App) {
-    app.editing = None;
-    app.editing_origin = EditOrigin::Overlay;
-    app.edit_content = None;
-    app.editing_dirty = false;
-    app.editing_rect = None;
+    clear_editing_tab(app.active_tab_mut())
+}
+
+/// Clears editing on a Tab directly (used by handle_model_event).
+pub fn clear_editing_tab(tab: &mut super::tab::Tab) {
+    tab.editing = None;
+    tab.editing_origin = EditOrigin::Overlay;
+    tab.edit_content = None;
+    tab.editing_dirty = false;
+    tab.editing_rect = None;
 }
 
 /// Reseeds the style panel inputs from `style`, closing any open picker and
 /// keeping the raw number strings in sync with the resolved values. Also
 /// clears any hex text buffers so the hex inputs show the canonical value.
 pub fn seed_style_inputs(app: &mut App, style: scanlateit_model::EntryStyle) {
-    app.style_stroke_width = style.stroke_width.to_string();
-    app.style_bg_radius = style.bg_radius.to_string();
-    app.style_working = style;
-    app.style_picker = None;
-    app.style_hex_overrides.clear();
+    let tab = app.active_tab_mut();
+    tab.style_stroke_width = style.stroke_width.to_string();
+    tab.style_bg_radius = style.bg_radius.to_string();
+    tab.style_working = style;
+    tab.style_picker = None;
+    tab.style_hex_overrides.clear();
 }
 
 /// Selects `(index, id)`: seeds the style inputs and, when the entry's page
@@ -72,15 +80,24 @@ pub fn seed_style_inputs(app: &mut App, style: scanlateit_model::EntryStyle) {
 /// moved the viewport without a `TilesVisible` event), schedules a full-res
 /// settle for that page.
 pub fn select_entry(app: &mut App, index: usize, id: EntryId) -> Task<Message> {
-    app.selected_inpaint = None;
-    app.selected = Some((index, id));
-    seed_style_inputs(app, app.project.entry_style(id));
-    if app.scheduler.needs_settle(index, app.images.len()) {
-        app.scheduler
-            .schedule(index..index + 1, Message::SettleElapsed)
-    } else {
-        Task::none()
+    {
+        let tab = app.active_tab_mut();
+        tab.selected_inpaint = None;
+        tab.selected = Some((index, id));
+        let style = tab.project.entry_style(id);
+        // inline seed to avoid double borrow
+        tab.style_stroke_width = style.stroke_width.to_string();
+        tab.style_bg_radius = style.bg_radius.to_string();
+        tab.style_working = style;
+        tab.style_picker = None;
+        tab.style_hex_overrides.clear();
+        if tab.scheduler.needs_settle(index, tab.images.len()) {
+            let tid = tab.id;
+            return tab.scheduler
+                .schedule(index..index + 1, move |seq| Message::Tab(tid, crate::app::TabMessage::SettleElapsed(seq)));
+        }
     }
+    Task::none()
 }
 
 // ---------------------------------------------------------------------------
@@ -89,35 +106,42 @@ pub fn select_entry(app: &mut App, index: usize, id: EntryId) -> Task<Message> {
 
 pub fn handle_entry_clicked(app: &mut App, selection: Option<(usize, EntryId)>) -> Task<Message> {
     clear_editing(app);
-    if app.selected_inpaint.is_some() {
-        app.selected_inpaint = None;
+    {
+        let tab = app.active_tab_mut();
+        if tab.selected_inpaint.is_some() {
+            tab.selected_inpaint = None;
+        }
     }
     match selection {
-        Some((index, id)) if index < app.images.len() && app.project.entry(id).is_some() => {
-            Task::batch([select_entry(app, index, id), scroll_to_row::<Message>(index, id)])
+        Some((index, id)) => {
+            let ok = {
+                let tab = app.active_tab();
+                index < tab.images.len() && tab.project.entry(id).is_some()
+            };
+            if ok {
+                Task::batch([select_entry(app, index, id), scroll_to_row::<Message>(index, id)])
+            } else {
+                app.active_tab_mut().selected = None;
+                Task::none()
+            }
         }
         _ => {
-            app.selected = None;
+            app.active_tab_mut().selected = None;
             Task::none()
         }
     }
 }
 
 pub fn handle_entry_double_clicked(app: &mut App, pair: (usize, EntryId)) -> Task<Message> {
-    if app.selected_inpaint.is_some() {
-        app.selected_inpaint = None;
-    }
+    app.active_tab_mut().selected_inpaint = None;
     start_inline_edit(app, pair.0, pair.1, EditOrigin::Overlay)
 }
 
 pub fn handle_panel_entry_edit(app: &mut App, pair: (usize, EntryId)) -> Task<Message> {
-    if app.translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate {
-        // Editing via panel is forbidden in Translate mode: treat as selection.
+    if app.active_tab().translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate {
         return handle_entry_clicked(app, Some(pair));
     }
-    if app.selected_inpaint.is_some() {
-        app.selected_inpaint = None;
-    }
+    app.active_tab_mut().selected_inpaint = None;
     start_inline_edit(app, pair.0, pair.1, EditOrigin::Panel)
 }
 
@@ -125,72 +149,106 @@ pub fn handle_entry_toolbar(app: &mut App, index: usize, id: EntryId, action: To
     match action {
         ToolbarAction::Rename => start_inline_edit(app, index, id, EditOrigin::Overlay),
         ToolbarAction::Delete => {
-            if index >= app.images.len() {
+            let ok = {
+                let tab = app.active_tab();
+                index < tab.images.len()
+            };
+            if !ok {
                 return Task::none();
             }
-            let Some(ev) = app.project.delete_entry_with_event(id) else {
+            let ev = {
+                let tab = app.active_tab_mut();
+                tab.project.delete_entry_with_event(id)
+            };
+            let Some(ev) = ev else {
                 return Task::none();
             };
-            crate::app::handle_model_event(app, ev);
-            app.status = "Deleted entry.".to_string();
+            {
+                let tab = app.active_tab_mut();
+                crate::app::handle_model_event(tab, ev);
+                tab.status = "Deleted entry.".to_string();
+            }
             Task::none()
         }
         ToolbarAction::RevertTransform => {
-            if index >= app.images.len() {
+            let ok = {
+                let tab = app.active_tab();
+                index < tab.images.len() && tab.project.has_view_quad(id)
+            };
+            if !ok {
                 return Task::none();
             }
-            if !app.project.has_view_quad(id) {
-                return Task::none();
+            let ev = {
+                let tab = app.active_tab_mut();
+                tab.project.revert_transform_with_event(id)
+            };
+            if let Some(ev) = ev {
+                let tab = app.active_tab_mut();
+                crate::app::handle_model_event(tab, ev);
             }
-            if let Some(ev) = app.project.revert_transform_with_event(id) {
-                crate::app::handle_model_event(app, ev);
-            }
-            app.status = "Reverted transform.".to_string();
+            app.active_tab_mut().status = "Reverted transform.".to_string();
             Task::none()
         }
     }
 }
 
 pub fn handle_entry_moved(app: &mut App, index: usize, id: EntryId, quad: scanlateit_model::Quad) -> Task<Message> {
-    if index < app.images.len() {
-        let ev = app.project.set_view_quad_with_event(id, quad);
-        crate::app::handle_model_event(app, ev);
+    let ok = {
+        let tab = app.active_tab();
+        index < tab.images.len()
+    };
+    if ok {
+        let ev = {
+            let tab = app.active_tab_mut();
+            tab.project.set_view_quad_with_event(id, quad)
+        };
+        crate::app::handle_model_event(app.active_tab_mut(), ev);
     }
     Task::none()
 }
 
 pub fn handle_edit_action(app: &mut App, action: text_editor::Action) -> Task<Message> {
-    let Some(content) = app.edit_content.as_mut() else {
+    // Need to handle mutable borrow of edit_content
+    let has_edit = app.active_tab().edit_content.is_some();
+    if !has_edit {
+        return Task::none();
+    }
+    // Perform action on content
+    let (text, editing, editing_dirty) = {
+        let tab = app.active_tab_mut();
+        let content = tab.edit_content.as_mut().unwrap();
+        content.perform(action);
+        let text = content.text();
+        (text, tab.editing, tab.editing_dirty)
+    };
+    let Some((_index, id)) = editing else {
         return Task::none();
     };
-    content.perform(action);
-    let text = content.text();
-    let Some((_index, id)) = app.editing else {
-        return Task::none();
-    };
-    if !app.editing_dirty {
-        app.editing_dirty = true;
-        // Fork the chapter-wide profile if editing Default — go through the
-        // live DB so callers get granular ModelEvents (ProfileCreated/Selected)
-        // via the single Message::Model hub.
-        if let Some((name, evs)) = app.project.fork_for_edit_with_event() {
-            for ev in evs {
-                crate::app::handle_model_event(app, ev);
+    if !editing_dirty {
+        {
+            let tab = app.active_tab_mut();
+            tab.editing_dirty = true;
+            if let Some((name, evs)) = tab.project.fork_for_edit_with_event() {
+                for ev in evs {
+                    crate::app::handle_model_event(tab, ev);
+                }
+                tab.status = format!(
+                    "Edit forked into '{name}': the OCR text stays untouched."
+                );
             }
-            app.status = format!(
-                "Edit forked into '{name}': the OCR text stays untouched."
-            );
         }
     }
-    let target_text = text.clone();
-    let ev = app.project.set_translation_with_event(id, Some(target_text.clone()));
-    crate::app::handle_model_event(app, ev);
+    let ev = {
+        let tab = app.active_tab_mut();
+        tab.project.set_translation_with_event(id, Some(text.clone()))
+    };
+    crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
 pub fn handle_edit_rect(app: &mut App, rect: Rectangle) -> Task<Message> {
-    if app.editing.is_some() {
-        app.editing_rect = Some(rect);
+    if app.active_tab().editing.is_some() {
+        app.active_tab_mut().editing_rect = Some(rect);
     }
     Task::none()
 }

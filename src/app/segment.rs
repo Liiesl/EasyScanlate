@@ -6,29 +6,34 @@ use scanlateit_segment::Engine as SegmentEngine;
 use super::{App, Message};
 
 pub fn start_segment_filter(app: &mut App) -> Task<Message> {
+    start_segment_filter_for(app, app.active_tab().id)
+}
+pub fn start_segment_filter_for(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Message> {
     #[cfg(feature = "segment")]
     {
-        if app.images.is_empty() {
+        let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none() };
+        let tab = &app.tabs[idx];
+        if tab.images.is_empty() {
             return Task::none();
         }
         if !scanlateit_settings::get(|s| s.auto_sfx_filter) {
             return Task::none();
         }
-        match &app.segment_engine {
+        match &app.engines.segment {
             Some(engine) => {
                 let engine = engine.clone();
-                let dims: Vec<(u32, u32)> = app.images.iter().map(|img| {
-                    app.project.image(img.image_id).map(|m| (m.width as u32, m.height as u32)).unwrap_or((0, 0))
+                let dims: Vec<(u32, u32)> = tab.images.iter().map(|img| {
+                    tab.project.image(img.image_id).map(|m| (m.width as u32, m.height as u32)).unwrap_or((0, 0))
                 }).collect();
-                let paths: Vec<String> = app.images.iter().map(|img| {
-                    app.project.image(img.image_id).map(|m| m.path.clone()).unwrap_or_default()
+                let paths: Vec<String> = tab.images.iter().map(|img| {
+                    tab.project.image(img.image_id).map(|m| m.path.clone()).unwrap_or_default()
                 }).collect();
-                let ocr_boxes: Vec<Vec<([f32; 4], EntryId)>> = app.images.iter().map(|img| {
+                let ocr_boxes: Vec<Vec<([f32; 4], EntryId)>> = tab.images.iter().map(|img| {
                     let image_id = img.image_id;
-                    app.project.visible_for(image_id).map(|e| (app.project.view_quad(e).bounds(), e.id)).collect()
+                    tab.project.visible_for(image_id).map(|e| (tab.project.view_quad(e).bounds(), e.id)).collect()
                 }).collect();
-                app.segment_filtering = true;
-                app.status = "Filtering SFX via segmentation...".to_string();
+                app.tabs[idx].segment_filtering = true;
+                app.tabs[idx].status = "Filtering SFX via segmentation...".to_string();
                 return Task::perform(
                     async move {
                         let res = tokio::task::spawn_blocking(move || run_segment_filter_blocking(&engine, &dims, &paths, &ocr_boxes))
@@ -36,19 +41,20 @@ pub fn start_segment_filter(app: &mut App) -> Task<Message> {
                             .unwrap_or_else(|e| Err(format!("segment task cancelled: {e}")));
                         res
                     },
-                    Message::SegmentFiltered,
+                    move |res| Message::Tab(tab_id, crate::app::TabMessage::SegmentFiltered(res)),
                 );
             }
             None => {
-                app.segment_filtering = true;
-                app.status = "Loading segmentation model...".to_string();
-                return Task::perform(async move { SegmentEngine::build() }, Message::SegmentEngineReady);
+                app.tabs[idx].segment_filtering = true;
+                app.tabs[idx].status = "Loading segmentation model...".to_string();
+                return Task::perform(async move { SegmentEngine::build() }, move |res| Message::Tab(tab_id, crate::app::TabMessage::SegmentEngineReady(res)));
             }
         }
     }
     #[cfg(not(feature = "segment"))]
     {
         let _ = app;
+        let _ = tab_id;
         return Task::none();
     }
 }
@@ -121,15 +127,21 @@ fn run_segment_filter_blocking(
 
 #[cfg(feature = "segment")]
 pub fn handle_engine_ready(app: &mut App, result: Result<SegmentEngine, String>) -> Task<Message> {
+    handle_engine_ready_for(app, app.active_tab().id, result)
+}
+#[cfg(feature = "segment")]
+pub fn handle_engine_ready_for(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<SegmentEngine, String>) -> Task<Message> {
     match result {
         Ok(engine) => {
-            app.segment_engine = Some(engine.clone());
-            app.segment_filtering = false;
-            start_segment_filter(app)
+            app.engines.segment = Some(engine.clone());
+            let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none()};
+            app.tabs[idx].segment_filtering = false;
+            start_segment_filter_for(app, tab_id)
         }
         Err(e) => {
-            app.segment_filtering = false;
-            app.status = e.clone();
+            let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none()};
+            app.tabs[idx].segment_filtering = false;
+            app.tabs[idx].status = e.clone();
             Task::none()
         }
     }
@@ -140,27 +152,38 @@ pub fn handle_filtered(
     app: &mut App,
     result: Result<Vec<(usize, EntryId)>, String>,
 ) -> Task<Message> {
-    app.segment_filtering = false;
+    handle_filtered_for(app, app.active_tab().id, result)
+}
+#[cfg(feature = "segment")]
+pub fn handle_filtered_for(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    result: Result<Vec<(usize, EntryId)>, String>,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none()};
+    app.tabs[idx].segment_filtering = false;
     let is_pipeline = {
         #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-        { app.pipeline_active }
+        { app.tabs[idx].pipeline_active }
         #[cfg(not(all(feature = "styling", feature = "inpaint", feature = "segment")))]
         { false }
     };
     match result {
         Ok(to_delete) => {
             let n = to_delete.len();
-            for (idx, id) in to_delete {
-                if idx < app.images.len() {
-                    if let Some(ev) = app.project.delete_entry_with_event(id) {
-                        crate::app::handle_model_event(app, ev);
+            for (pidx, id) in to_delete {
+                if pidx < app.tabs[idx].images.len() {
+                    let tab = &mut app.tabs[idx];
+                    if let Some(ev) = tab.project.delete_entry_with_event(id) {
+                        crate::app::handle_model_event(tab, ev);
                     }
                 }
             }
+            let tab_status = app.tabs[idx].status.clone();
             if n > 0 {
-                app.status = format!("SFX filter removed {n} entry(s). {}", app.status);
+                app.tabs[idx].status = format!("SFX filter removed {n} entry(s). {}", tab_status);
             } else {
-                app.status = format!("SFX filter: no entries removed. {}", app.status);
+                app.tabs[idx].status = format!("SFX filter: no entries removed. {}", tab_status);
             }
             if is_pipeline {
                 let (need_style_inpaint, need_inpaint_solo) = scanlateit_settings::get(|s| {
@@ -171,7 +194,7 @@ pub fn handle_filtered(
                 if need_style_inpaint {
                     #[cfg(all(feature = "styling", feature = "inpaint"))]
                     {
-                        return super::styling::classify(app);
+                        return super::styling::classify_for(app, tab_id);
                     }
                 } else if need_inpaint_solo {
                     let eff = scanlateit_settings::get(|s| {
@@ -183,29 +206,29 @@ pub fn handle_filtered(
                     });
                     #[cfg(feature = "inpaint")]
                     {
-                        return super::inpaint::dispatch_auto_solo(app, eff);
+                        return super::inpaint::dispatch_auto_solo_for(app, tab_id, eff);
                     }
                 } else {
                     #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
                     {
-                        app.pipeline_active = false;
+                        app.tabs[idx].pipeline_active = false;
                     }
                     let need_style_only = scanlateit_settings::get(|s| s.auto_style_detect && !s.auto_inpaint);
                     if need_style_only {
                         #[cfg(feature = "styling")]
                         {
-                            return super::styling::classify(app);
+                            return super::styling::classify_for(app, tab_id);
                         }
                     }
                 }
             }
         }
         Err(e) => {
-            app.status = format!("SFX filter failed: {e}");
+            app.tabs[idx].status = format!("SFX filter failed: {e}");
             if is_pipeline {
                 #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
                 {
-                    app.pipeline_active = false;
+                    app.tabs[idx].pipeline_active = false;
                 }
             }
         }

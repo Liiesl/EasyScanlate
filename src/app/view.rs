@@ -1,17 +1,14 @@
-use iced::{Color, Element, Length};
+use iced::{Element, Length};
 use iced::widget::pane_grid;
 use scanlateit_ui::event::UiEvent;
 use scanlateit_ui::{main_area, panel, scale, toolbar};
 use scanlateit_ui::settings as settings_modal;
 
 use super::layout::{CARD_RADIUS, GAP, MAIN_AREA_MIN_WIDTH, OUTER_PADDING, STYLING_MIN_WIDTH};
-use super::chrome::title_icon_handle;
 use super::{App, Message};
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    // Homepage vs Editor branching
-    let inner: Element<'_, UiEvent> = match app.app_view {
-        super::AppView::Home => {
+    let inner: Element<'_, UiEvent> = if app.active_is_home() {
             let base: Element<'_, UiEvent> = iced::widget::container(scanlateit_ui::home::view(app))
                 .padding(scale::s(OUTER_PADDING))
                 .width(Length::Fill)
@@ -22,7 +19,6 @@ pub fn view(app: &App) -> Element<'_, Message> {
             } else {
                 base
             };
-            // Settings overlay reused from editor (same modal)
             let with_settings: Element<'_, UiEvent> = if app.settings_open {
                 settings_modal::view(app, with_new)
             } else {
@@ -38,9 +34,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
             } else {
                 with_connect
             }
-        }
-        super::AppView::Editor => {
-            let grid: Element<'_, UiEvent> = pane_grid::PaneGrid::new(&app.panes, |_, kind, _| {
+        } else {
+            let grid: Element<'_, UiEvent> = pane_grid::PaneGrid::new(&app.tabs[app.active].panes, |_, kind, _| {
                 pane_grid::Content::new(match kind {
                     super::layout::PaneKind::MainArea => {
                         let el: Element<'_, UiEvent> = iced::widget::container(main_area::view(app))
@@ -56,11 +51,11 @@ pub fn view(app: &App) -> Element<'_, Message> {
                     }
                     super::layout::PaneKind::Panel => {
                         let side_grid: Element<'_, UiEvent> =
-                            pane_grid::PaneGrid::new(&app.side_panes, |_, inner, _| {
+                            pane_grid::PaneGrid::new(&app.tabs[app.active].side_panes, |_, inner, _| {
                                 pane_grid::Content::new(match inner {
                                     super::layout::SidePaneKind::Styling => {
                                         let el: Element<'_, UiEvent> = pane_grid::PaneGrid::new(
-                                            &app.styling_panes,
+                                            &app.tabs[app.active].styling_panes,
                                             |_, kind, _| {
                                                 let body: Element<'_, UiEvent> = match kind {
                                                     super::layout::StylingPaneKind::Inspector => {
@@ -180,12 +175,13 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 }
             };
             inner_with_modals
-        }
-    };
+        };
     let inner_mapped: Element<'_, Message> = inner.map(Message::from);
 
     let framed: Element<'_, Message> = if let Some(window_id) = app.frame.primary_window() {
-        app.frame.view(window_id, "", None, None, inner_mapped, Message::Frame)
+        let tab_bar = crate::app::tabs::titlebar_view(app);
+        // Icon merged into first tab (`scanlateit`) per spec — no leading icon.
+        app.frame.view(window_id, "", None, Some(tab_bar), inner_mapped, Message::Frame)
     } else {
         inner_mapped
     };
@@ -198,42 +194,11 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let base_with_aurora: Element<'_, Message> =
         iced::widget::Stack::with_children(vec![aurora, framed]).into();
 
-    let title_overlay: Element<'_, Message> = {
-        let h = app.frame.config().title_bar_height;
-        let is_dark = scanlateit_settings::get(|s| s.aurora_is_dark);
-        let title_color = if is_dark {
-            Color::from_rgb(0.92, 0.92, 0.92)
-        } else {
-            Color::from_rgb(0.12, 0.12, 0.12)
-        };
-        let icon_element: Element<'_, Message> = match title_icon_handle() {
-            Some(handle) => iced::widget::image(handle)
-                .width(Length::Fixed(16.0))
-                .height(Length::Fixed(16.0))
-                .into(),
-            None => iced::widget::space::horizontal()
-                .width(Length::Fixed(16.0))
-                .height(Length::Fixed(16.0))
-                .into(),
-        };
-        let row = iced::widget::row![
-            icon_element,
-            iced::widget::text("Scanlateit").size(13).color(title_color)
-        ]
-        .spacing(8)
-        .align_y(iced::Center);
-        iced::widget::container(row)
-            .width(Length::Fill)
-            .height(Length::Fixed(h))
-            .center_x(Length::Fill)
-            .center_y(Length::Fixed(h))
-            .into()
+    let with_close: Element<'_, Message> = if app.pending_close.is_some() {
+        crate::app::confirm_close::view(app, base_with_aurora)
+    } else {
+        base_with_aurora
     };
 
-    let title_bar_container: Element<'_, Message> = iced::widget::container(title_overlay)
-        .width(Length::Fill)
-        .height(Length::Fixed(app.frame.config().title_bar_height))
-        .into();
-
-    iced::widget::Stack::with_children(vec![base_with_aurora, title_bar_container]).into()
+    with_close.into()
 }

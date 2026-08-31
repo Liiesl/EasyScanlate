@@ -3,11 +3,12 @@ use std::sync::Arc;
 
 use iced::Task;
 
+use super::tab::Tab;
 use super::{App, Message};
 
-fn extract_inpaint_data(app: &App) -> Vec<scanlateit_mmtl::InpaintImageData> {
+fn extract_inpaint_data(tab: &Tab) -> Vec<scanlateit_mmtl::InpaintImageData> {
     let mut out = Vec::new();
-    for loaded in &app.images {
+    for loaded in &tab.images {
         let image_id = loaded.image_id;
         for layer in &loaded.inpaint {
             let (width, height, pixels) = match &layer.handle {
@@ -38,13 +39,16 @@ fn extract_inpaint_data(app: &App) -> Vec<scanlateit_mmtl::InpaintImageData> {
 }
 
 pub fn handle_save(app: &mut App) -> Task<Message> {
-    if let Some(path) = app.mmtl_path.clone() {
-        return do_save(app.project.clone(), extract_inpaint_data(app), path);
+    let tab = app.active_tab();
+    let tab_id = tab.id;
+    if let Some(path) = tab.mmtl_path.clone() {
+        return do_save_for(tab_id, tab.project.clone(), extract_inpaint_data(tab), path);
     }
     handle_save_as(app)
 }
 
 pub fn handle_save_as(_app: &mut App) -> Task<Message> {
+    let tab_id = _app.active_tab().id;
     Task::perform(
         async {
             let file = rfd::AsyncFileDialog::new()
@@ -54,11 +58,12 @@ pub fn handle_save_as(_app: &mut App) -> Task<Message> {
                 .await;
             file.map(|f| f.path().to_string_lossy().to_string())
         },
-        Message::MmtlSavePicked,
+        move |picked| Message::Tab(tab_id, crate::app::TabMessage::MmtlSavePicked(picked)),
     )
 }
 
 pub fn handle_open(_app: &mut App) -> Task<Message> {
+    let tab_id = _app.active_tab().id;
     Task::perform(
         async {
             let file = rfd::AsyncFileDialog::new()
@@ -67,18 +72,26 @@ pub fn handle_open(_app: &mut App) -> Task<Message> {
                 .await;
             file.map(|f| f.path().to_string_lossy().to_string())
         },
-        Message::MmtlOpenPicked,
+        move |picked| Message::Tab(tab_id, crate::app::TabMessage::MmtlOpenPicked(picked)),
     )
 }
 
 pub fn handle_save_picked(app: &mut App, picked: Option<String>) -> Task<Message> {
+    handle_save_picked_for(app, app.active_tab().id, picked)
+}
+pub fn handle_save_picked_for(app: &mut App, tab_id: crate::app::tab::TabId, picked: Option<String>) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     let Some(path_str) = picked else {
-        app.status = "Save cancelled.".to_string();
+        app.tabs[idx].status = "Save cancelled.".to_string();
         return Task::none();
     };
     let path = PathBuf::from(&path_str);
-    app.mmtl_path = Some(path.clone());
-    do_save(app.project.clone(), extract_inpaint_data(app), path)
+    {
+        let tab = &mut app.tabs[idx];
+        tab.mmtl_path = Some(path.clone());
+    }
+    let tab = &app.tabs[idx];
+    do_save_for(tab_id, tab.project.clone(), extract_inpaint_data(tab), path)
 }
 
 fn build_loaded_images(res: scanlateit_mmtl::LoadResult, display: String) -> Result<(scanlateit_model::Project, Vec<scanlateit_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String> {
@@ -104,6 +117,9 @@ fn build_loaded_images(res: scanlateit_mmtl::LoadResult, display: String) -> Res
 }
 
 fn do_save(project: scanlateit_model::Project, inpaint: Vec<scanlateit_mmtl::InpaintImageData>, path: PathBuf) -> Task<Message> {
+    do_save_for(crate::app::tab::TabId(0), project, inpaint, path)
+}
+fn do_save_for(tab_id: crate::app::tab::TabId, project: scanlateit_model::Project, inpaint: Vec<scanlateit_mmtl::InpaintImageData>, path: PathBuf) -> Task<Message> {
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
@@ -112,17 +128,69 @@ fn do_save(project: scanlateit_model::Project, inpaint: Vec<scanlateit_mmtl::Inp
             .await
             .unwrap_or_else(|e| Err(format!("save task failed: {e}")))
         },
-        Message::MmtlSaved,
+        move |res| Message::Tab(tab_id, crate::app::TabMessage::MmtlSaved(res)),
     )
 }
 
 pub fn handle_open_picked(app: &mut App, picked: Option<String>) -> Task<Message> {
+    handle_open_picked_for(app, app.active_tab().id, picked)
+}
+pub(crate) fn push_project_tab(
+    app: &mut App,
+    id: crate::app::tab::TabId,
+    project: scanlateit_model::Project,
+    images: Vec<scanlateit_ui::LoadedImage>,
+    display_path: String,
+    temp_dir: Option<Arc<tempfile::TempDir>>,
+) -> Task<Message> {
+    let path = PathBuf::from(&display_path);
+    // Dedup: if already open, just activate it.
+    if let Some(idx) = app
+        .tabs
+        .iter()
+        .position(|t| t.mmtl_path.as_deref() == Some(path.as_path()))
+    {
+        app.active = idx;
+        app.tabs[idx].status = format!("Already open: {}", app.tabs[idx].title);
+        return Task::none();
+    }
+    let title = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("project")
+        .to_string();
+    let len = images.len();
+    let project_clone = project.clone();
+    let tab = crate::app::tab::Tab::project_from_loaded(id, title, project, images, path.clone(), temp_dir);
+    app.tabs.push(tab);
+    app.active = app.tabs.len() - 1;
+    scanlateit_settings::touch_recent(display_path.clone());
+    app.recent_projects = scanlateit_settings::get(|s| s.recent_projects.clone());
+    // Update status on the newly created tab (project_from_loaded already sets Loaded, keep it)
+    // but ensure recent already touched; no extra status override needed.
+    if len > 0 {
+        let new_tab = &mut app.tabs[app.active];
+        let tid = new_tab.id;
+        return new_tab.scheduler.decode_thumbs_with_project(
+            &mut new_tab.images,
+            &project_clone,
+            move |i, r| Message::Tab(tid, crate::app::TabMessage::ThumbDecoded(i, r)),
+        );
+    }
+    Task::none()
+}
+
+pub fn handle_open_picked_for(app: &mut App, tab_id: crate::app::tab::TabId, picked: Option<String>) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     let Some(path_str) = picked else {
-        app.status = "Open cancelled.".to_string();
+        app.tabs[idx].status = "Open cancelled.".to_string();
         return Task::none();
     };
     let path = PathBuf::from(path_str);
-    app.status = format!("Loading {}...", path.display());
+    app.tabs[idx].status = format!("Loading {}...", path.display());
+    // Allocate a fresh TabId for the new project tab.
+    let new_id = crate::app::tab::TabId(app.next_tab_id);
+    app.next_tab_id += 1;
     Task::perform(
         async move {
             let path_clone = path.clone();
@@ -134,20 +202,40 @@ pub fn handle_open_picked(app: &mut App, picked: Option<String>) -> Task<Message
             .await
             .unwrap_or_else(|e| Err(format!("load task failed: {e}")))
         },
-        Message::MmtlLoaded,
+        move |res| Message::Tab(new_id, crate::app::TabMessage::MmtlLoaded(res)),
     )
 }
 
 pub fn handle_saved(app: &mut App, result: Result<String, String>) -> Task<Message> {
+    handle_saved_for(app, app.active_tab().id, result)
+}
+pub fn handle_saved_for(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<String, String>) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     match result {
         Ok(path) => {
-            app.status = format!("Saved to {path}");
-            app.mmtl_path = Some(PathBuf::from(path.clone()));
-            scanlateit_settings::touch_recent(path);
+            {
+                let tab = &mut app.tabs[idx];
+                tab.status = format!("Saved to {path}");
+                tab.mmtl_path = Some(PathBuf::from(path.clone()));
+                tab.dirty = false;
+                tab.title = PathBuf::from(&path).file_stem().and_then(|s| s.to_str()).unwrap_or("project").to_string();
+            }
+            scanlateit_settings::touch_recent(path.clone());
             app.recent_projects = scanlateit_settings::get(|s| s.recent_projects.clone());
+            // If there was a pending close for this tab, now close it
+            if app.pending_close == Some(tab_id) {
+                if let Some(pos) = app.tabs.iter().position(|t| t.id == tab_id) {
+                    if app.tabs[pos].is_project() {
+                        app.tabs.remove(pos);
+                        if app.active >= app.tabs.len() { app.active = app.tabs.len().saturating_sub(1); }
+                        else if pos < app.active { app.active -= 1; }
+                    }
+                }
+                app.pending_close = None;
+            }
         }
         Err(e) => {
-            app.status = format!("Save failed: {e}");
+            app.tabs[idx].status = format!("Save failed: {e}");
         }
     }
     Task::none()
@@ -164,26 +252,36 @@ pub fn handle_loaded(
     app: &mut App,
     result: Result<(scanlateit_model::Project, Vec<scanlateit_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String>,
 ) -> Task<Message> {
+    handle_loaded_for(app, app.active_tab().id, result)
+}
+pub fn handle_loaded_for(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    result: Result<(scanlateit_model::Project, Vec<scanlateit_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String>,
+) -> Task<Message> {
     match result {
         Ok((project, images, display_path, temp_dir)) => {
             debug_assert_eq!(project.image_count(), images.len(), "project/images parity must hold after load");
-            app.project = project;
-            app.images = images;
-            app.mmtl_path = Some(PathBuf::from(display_path.clone()));
-            app.mmtl_temp_dir = temp_dir;
-            app.selected = None;
-            app.selected_inpaint = None;
-            app.editing = None;
-            app.edit_content = None;
-            app.app_view = super::AppView::Editor;
-            scanlateit_settings::touch_recent(display_path.clone());
-            app.recent_projects = scanlateit_settings::get(|s| s.recent_projects.clone());
-            app.status = format!("Loaded {} ({} image(s))", display_path, app.images.len());
-            let project = &app.project;
-            return app.scheduler.decode_thumbs_with_project(&mut app.images, project, super::Message::ThumbDecoded);
+            // New-tab flow: push Tab::project_from_loaded (P4). Dedup handled inside.
+            // tab_id is the freshly allocated id from handle_open_picked_for / HomeRecent / Create.
+            // If the caller was a stale reuse (e.g. legacy flat), tab_id may already be in tabs —
+            // still push with that id? Prefer to mint fresh if collision.
+            let fresh_id = if app.tabs.iter().any(|t| t.id == tab_id) {
+                let nid = crate::app::tab::TabId(app.next_tab_id);
+                app.next_tab_id += 1;
+                nid
+            } else {
+                tab_id
+            };
+            return push_project_tab(app, fresh_id, project, images, display_path, temp_dir);
         }
         Err(e) => {
-            app.status = format!("Load failed: {e}");
+            // Route error to the requestor tab if it still exists, else active.
+            if let Some(idx) = app.tabs.iter().position(|t| t.id == tab_id) {
+                app.tabs[idx].status = format!("Load failed: {e}");
+            } else {
+                app.active_tab_mut().status = format!("Load failed: {e}");
+            }
         }
     }
     Task::none()

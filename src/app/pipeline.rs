@@ -10,12 +10,21 @@ pub fn dispatch_inpaint(
     app: &mut App,
     buffered: Vec<(usize, EntryId, Result<(EntryStyle, scanlateit_styling::StylePrediction), String>, Quad, String)>,
 ) -> Task<Message> {
-    let results = if buffered.is_empty() && app.pipeline_style_results.is_empty() {
+    dispatch_inpaint_for(app, app.active_tab().id, buffered)
+}
+#[cfg(all(feature = "styling", feature = "inpaint"))]
+pub fn dispatch_inpaint_for(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    buffered: Vec<(usize, EntryId, Result<(EntryStyle, scanlateit_styling::StylePrediction), String>, Quad, String)>,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    let results = if buffered.is_empty() && app.tabs[idx].pipeline_style_results.is_empty() {
         Vec::new()
     } else if !buffered.is_empty() {
         buffered
     } else {
-        std::mem::take(&mut app.pipeline_style_results)
+        std::mem::take(&mut app.tabs[idx].pipeline_style_results)
     };
     let mut telea_jobs: Vec<AutoInpaintJob> = Vec::new();
     let mut lama_jobs: Vec<AutoInpaintJob> = Vec::new();
@@ -29,20 +38,21 @@ pub fn dispatch_inpaint(
     });
     let has_inpaint = scanlateit_settings::get(|s| s.auto_inpaint);
     if !has_inpaint {
-        app.pipeline_style_pending = 0;
+        app.tabs[idx].pipeline_style_pending = 0;
         #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
         {
-            app.pipeline_active = false;
+            app.tabs[idx].pipeline_active = false;
         }
         for (_index, id, result, quad, _path) in results {
             if let Ok((_, pred)) = result {
                 let applied = pred.to_entry_style_for_auto(EntryStyle::default());
-                let ev = app.project.set_entry_style_with_event(id, applied);
-                crate::app::handle_model_event(app, ev);
+                let tab = &mut app.tabs[idx];
+                let ev = tab.project.set_entry_style_with_event(id, applied);
+                crate::app::handle_model_event(tab, ev);
                 let _ = quad;
             }
         }
-        app.status = "Applied deferred styles (no auto-inpaint).".to_string();
+        app.tabs[idx].status = "Applied deferred styles (no auto-inpaint).".to_string();
         return Task::none();
     }
     for (index, id, result, quad, path) in results {
@@ -54,8 +64,11 @@ pub fn dispatch_inpaint(
             }
         };
         let applied = pred.to_entry_style_for_auto(EntryStyle::default());
-        let ev = app.project.set_entry_style_with_event(id, applied);
-        crate::app::handle_model_event(app, ev);
+        {
+            let tab = &mut app.tabs[idx];
+            let ev = tab.project.set_entry_style_with_event(id, applied);
+            crate::app::handle_model_event(tab, ev);
+        }
         let need = match pred.bg_type {
             scanlateit_styling::BgType::Solid => None,
             scanlateit_styling::BgType::Gradient => Some(match effective_model {
@@ -80,23 +93,23 @@ pub fn dispatch_inpaint(
             }
         }
     }
-    app.pipeline_style_pending = 0;
+    app.tabs[idx].pipeline_style_pending = 0;
     let mut tasks: Vec<Task<Message>> = Vec::new();
     if !telea_jobs.is_empty() {
-        tasks.push(super::inpaint::dispatch_auto(app, telea_jobs, InpaintBackend::Telea));
+        tasks.push(super::inpaint::dispatch_auto_for(app, tab_id, telea_jobs, InpaintBackend::Telea));
     }
     if !lama_jobs.is_empty() {
-        tasks.push(super::inpaint::dispatch_auto(app, lama_jobs, InpaintBackend::Lama));
+        tasks.push(super::inpaint::dispatch_auto_for(app, tab_id, lama_jobs, InpaintBackend::Lama));
     }
     if !aot_jobs.is_empty() {
-        tasks.push(super::inpaint::dispatch_auto(app, aot_jobs, InpaintBackend::Aot));
+        tasks.push(super::inpaint::dispatch_auto_for(app, tab_id, aot_jobs, InpaintBackend::Aot));
     }
     if tasks.is_empty() {
         #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
         {
-            app.pipeline_active = false;
+            app.tabs[idx].pipeline_active = false;
         }
-        app.status = "Pipeline done: styles applied (solid bg, no inpaint needed).".to_string();
+        app.tabs[idx].status = "Pipeline done: styles applied (solid bg, no inpaint needed).".to_string();
         return Task::none();
     }
     Task::batch(tasks)

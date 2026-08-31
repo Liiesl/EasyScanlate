@@ -33,7 +33,7 @@ pub fn handle_settings_search(app: &mut App, query: String) -> Task<Message> {
 
 pub fn handle_settings_changed(app: &mut App) -> Task<Message> {
     translation::sync_tx_from_store(app);
-    app.status = "Settings saved.".to_string();
+    app.active_tab_mut().status = "Settings saved.".to_string();
     Task::none()
 }
 
@@ -81,14 +81,14 @@ pub fn handle_setting_edit(app: &mut App, edit: scanlateit_ui::event::SettingEdi
         }
     });
     translation::sync_tx_from_store(app);
-    app.status = "Settings saved.".to_string();
+    app.active_tab_mut().status = "Settings saved.".to_string();
     Task::none()
 }
 
 pub fn handle_open_url(app: &mut App, url: String) -> Task<Message> {
     if let Err(e) = open::that(&url) {
         eprintln!("[app] failed to open {url}: {e}");
-        app.status = format!("Failed to open {url}: {e}");
+        app.active_tab_mut().status = format!("Failed to open {url}: {e}");
     }
     Task::none()
 }

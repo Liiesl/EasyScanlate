@@ -11,23 +11,30 @@ use super::{App, Message};
 
 #[cfg(feature = "ocr")]
 pub fn start_ocr_stream(app: &mut App) -> Task<Message> {
+    start_ocr_stream_for(app, app.active_tab().id)
+}
+
+#[cfg(feature = "ocr")]
+pub fn start_ocr_stream_for(app: &mut App, tab_id: super::tab::TabId) -> Task<Message> {
     let pipeline = app
+        .engines
         .pipeline
         .clone()
         .expect("pipeline must be built before starting the stream");
-    let token = app
+    let tab = app.tab_by_id(tab_id).expect("tab must exist for ocr stream");
+    let token = tab
         .cancel
         .clone()
         .expect("cancellation token set before starting the stream");
-    let runs = app.ocr_plans.clone();
-    let dims = app.ocr_dims.clone();
+    let runs = tab.ocr_plans.clone();
+    let dims = tab.ocr_dims.clone();
     let paths: Vec<Vec<String>> = runs
         .iter()
         .map(|run| {
             (run.page_start..=run.page_end)
                 .map(|i| {
-                    app.project
-                        .image(app.images[i].image_id)
+                    tab.project
+                        .image(tab.images[i].image_id)
                         .map(|m| m.path.clone())
                         .unwrap_or_default()
                 })
@@ -38,8 +45,8 @@ pub fn start_ocr_stream(app: &mut App) -> Task<Message> {
         .iter()
         .map(|run| {
             run.above.map(|(page, _)| {
-                app.project
-                    .image(app.images[page].image_id)
+                tab.project
+                    .image(tab.images[page].image_id)
                     .map(|m| m.path.clone())
                     .unwrap_or_default()
             })
@@ -49,8 +56,8 @@ pub fn start_ocr_stream(app: &mut App) -> Task<Message> {
         .iter()
         .map(|run| {
             run.below.map(|(page, _)| {
-                app.project
-                    .image(app.images[page].image_id)
+                tab.project
+                    .image(tab.images[page].image_id)
                     .map(|m| m.path.clone())
                     .unwrap_or_default()
             })
@@ -62,7 +69,7 @@ pub fn start_ocr_stream(app: &mut App) -> Task<Message> {
         iced::stream::try_channel(1, move |mut sender: iced::futures::channel::mpsc::Sender<Message>| async move {
             while let Some(event) = session.step(&pipeline, &token)? {
                 if sender
-                    .send(Message::OcrStreamRun(Ok::<ocr::RunEvent, String>(event)))
+                    .send(Message::Tab(tab_id, crate::app::TabMessage::OcrStreamRun(Ok::<ocr::RunEvent, String>(event))))
                     .await
                     .is_err()
                 {
@@ -71,9 +78,9 @@ pub fn start_ocr_stream(app: &mut App) -> Task<Message> {
             }
             Ok(())
         })
-        .map(|item| match item {
+        .map(move |item| match item {
             Ok(message) => message,
-            Err(e) => Message::OcrStreamFailed(e),
+            Err(e) => Message::Tab(tab_id, crate::app::TabMessage::OcrStreamFailed(e)),
         }),
     )
 }
@@ -81,36 +88,36 @@ pub fn start_ocr_stream(app: &mut App) -> Task<Message> {
 #[cfg(feature = "ocr")]
 pub fn commit_per_page(app: &mut App, per_page: Vec<(usize, Vec<NewEntry>)>) {
     for (page, entries) in per_page {
-        let Some(image) = app.images.get(page) else {
+        let Some(image) = app.active_tab_mut().images.get(page) else {
             continue;
         };
         let image_id = image.image_id;
         let count = entries.len();
-        if let Some(ev) = app.project.append_ocr_for_image_with_event(image_id, entries) {
+        if let Some(ev) = app.active_tab_mut().project.append_ocr_for_image_with_event(image_id, entries) {
             // ocr_total tracks total appended lines, matches ids length
             if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev {
-                app.ocr_total += ids.len();
+                app.active_tab_mut().ocr_total += ids.len();
             } else {
-                app.ocr_total += count;
+                app.active_tab_mut().ocr_total += count;
             }
-            crate::app::handle_model_event(app, ev);
+            crate::app::handle_model_event(app.active_tab_mut(), ev);
         }
     }
 }
 
 #[cfg(feature = "ocr")]
 pub fn flush_held_boundary(app: &mut App) {
-    if let Some(state) = app.held_boundary.take() {
+    if let Some(state) = app.active_tab_mut().held_boundary.take() {
         for candidate in state.candidates {
-            if let Some(image) = app.images.get(candidate.page) {
+            if let Some(image) = app.active_tab_mut().images.get(candidate.page) {
                 let image_id = image.image_id;
-                if let Some(ev) = app.project.append_ocr_for_image_with_event(image_id, vec![candidate.entry]) {
+                if let Some(ev) = app.active_tab_mut().project.append_ocr_for_image_with_event(image_id, vec![candidate.entry]) {
                     if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev {
-                        app.ocr_total += ids.len();
+                        app.active_tab_mut().ocr_total += ids.len();
                     } else {
-                        app.ocr_total += 1;
+                        app.active_tab_mut().ocr_total += 1;
                     }
-                    crate::app::handle_model_event(app, ev);
+                    crate::app::handle_model_event(app.active_tab_mut(), ev);
                 }
             }
         }
@@ -119,14 +126,17 @@ pub fn flush_held_boundary(app: &mut App) {
 
 #[cfg(feature = "ocr")]
 pub fn maybe_start_ocr(app: &mut App) -> Task<Message> {
-    if app.running && app.pipeline.is_some() {
-        app.cancel = app
-            .pipeline
-            .as_ref()
-            .map(|pipeline| pipeline.cancellation_token().clone());
-        start_ocr_stream(app)
-    } else if !app.running {
-        if let Some(pipeline) = app.pipeline.take() {
+    maybe_start_ocr_for(app, app.active_tab().id)
+}
+#[cfg(feature = "ocr")]
+pub fn maybe_start_ocr_for(app: &mut App, tab_id: super::tab::TabId) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    if app.tabs[idx].running && app.engines.pipeline.is_some() {
+        let token = app.engines.pipeline.as_ref().map(|pipeline| pipeline.cancellation_token().clone());
+        app.tabs[idx].cancel = token;
+        start_ocr_stream_for(app, tab_id)
+    } else if !app.tabs[idx].running {
+        if let Some(pipeline) = app.engines.pipeline.take() {
             pipeline.cancel();
         }
         Task::none()
@@ -138,101 +148,115 @@ pub fn maybe_start_ocr(app: &mut App) -> Task<Message> {
 #[cfg(feature = "ocr")]
 pub fn finalize_run(app: &mut App) {
     flush_held_boundary(app);
-    app.running = false;
-    app.cancel = None;
-    app.pipeline = None;
-    app.status = if app.ocr_cancelled {
+    let (total, failed, cancelled) = {
+        let tab = app.active_tab();
+        (tab.ocr_total, tab.ocr_failed, tab.ocr_cancelled)
+    };
+    app.active_tab_mut().running = false;
+    app.active_tab_mut().cancel = None;
+    app.engines.pipeline = None;
+    app.active_tab_mut().status = if cancelled {
         "OCR cancelled.".to_string()
-    } else if app.ocr_failed > 0 {
+    } else if failed > 0 {
         format!(
             "OCR done: {} line(s), {} run(s) failed.",
-            app.ocr_total, app.ocr_failed
+            total, failed
         )
     } else {
-        format!("OCR done: {} line(s).", app.ocr_total)
+        format!("OCR done: {} line(s).", total)
     };
 }
 
 pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
     #[cfg(feature = "ocr")]
     {
-        if app.images.is_empty() {
-            app.status = "Open images first.".to_string();
+        if app.active_tab_mut().images.is_empty() {
+            app.active_tab_mut().status = "Open images first.".to_string();
             return Task::none();
         }
-        if app.running || app.is_bulk_busy() {
+        if app.active_tab_mut().running || app.active_state().is_bulk_busy() {
             // is_bulk_busy covers translating / inpainting / pipeline etc; keep Start disabled while any bulk job runs
-            if !app.running {
-                app.status = "Wait for current task to finish.".to_string();
+            if !app.active_tab_mut().running {
+                app.active_tab_mut().status = "Wait for current task to finish.".to_string();
             }
             return Task::none();
         }
-        app.running = true;
-        let dims: Vec<(u32, u32)> = app.images.iter().map(|image| {
-            app.project.image(image.image_id).map(|m| (m.width as u32, m.height as u32)).unwrap_or((0, 0))
-        }).collect();
+        app.active_tab_mut().running = true;
+        let dims: Vec<(u32, u32)> = {
+            let tab = app.active_tab();
+            tab.images.iter().map(|image| {
+                tab.project.image(image.image_id).map(|m| (m.width as u32, m.height as u32)).unwrap_or((0, 0))
+            }).collect()
+        };
         let runs = ocr::plan_runs(&dims);
         let run_count = runs.len();
-        app.ocr_plans = runs;
-        app.ocr_dims = dims;
-        app.ocr_runs = run_count;
-        app.pending = run_count;
-        app.ocr_total = 0;
-        app.ocr_failed = 0;
-        app.ocr_cancelled = false;
-        app.held_boundary = None;
-        app.status = format!("Running OCR on {} run(s) covering {} image(s)...", run_count, app.images.len());
-        if app.pipeline.is_none() {
+        app.active_tab_mut().ocr_plans = runs;
+        app.active_tab_mut().ocr_dims = dims;
+        app.active_tab_mut().ocr_runs = run_count;
+        app.active_tab_mut().pending = run_count;
+        app.active_tab_mut().ocr_total = 0;
+        app.active_tab_mut().ocr_failed = 0;
+        app.active_tab_mut().ocr_cancelled = false;
+        app.active_tab_mut().held_boundary = None;
+        app.active_tab_mut().status = format!("Running OCR on {} run(s) covering {} image(s)...", run_count, app.active_tab_mut().images.len());
+        if app.engines.pipeline.is_none() {
             let (workers, cfg) = scanlateit_settings::get(|s| {
                 let workers = s.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
                 let cfg = ocr::config_from_strings(&s.ocr_text_score, &s.ocr_max_side_len);
                 (workers, cfg)
             });
-            app.status = format!("Loading the OCR engine ({workers} detection worker(s))...");
-            return Task::perform(async move { ParallelEngine::build_with_config(cfg, workers) }, Message::ParallelEngineReady);
+            app.active_tab_mut().status = format!("Loading the OCR engine ({workers} detection worker(s))...");
+            let tab_id = app.active_tab().id;
+            return Task::perform(async move { ParallelEngine::build_with_config(cfg, workers) }, move |res| Message::Tab(tab_id, crate::app::TabMessage::ParallelEngineReady(res)));
         }
         return maybe_start_ocr(app);
     }
     #[cfg(not(feature = "ocr"))]
     {
         use super::boot::fake_ocr_entries;
-        if app.images.is_empty() {
-            app.status = "Open images first.".to_string();
+        if app.active_tab_mut().images.is_empty() {
+            app.active_tab_mut().status = "Open images first.".to_string();
             return Task::none();
         }
-        if app.running || app.is_bulk_busy() {
-            if !app.running {
-                app.status = "Wait for current task to finish.".to_string();
+        if app.active_tab_mut().running || app.active_state().is_bulk_busy() {
+            if !app.active_tab_mut().running {
+                app.active_tab_mut().status = "Wait for current task to finish.".to_string();
             }
             return Task::none();
         }
-        app.running = true;
+        app.active_tab_mut().running = true;
         let mut added = 0;
-        let image_ids: Vec<_> = app.images.iter().map(|i| i.image_id).collect();
+        let image_ids: Vec<_> = app.active_tab_mut().images.iter().map(|i| i.image_id).collect();
         for image_id in image_ids {
             let entries = fake_ocr_entries();
             let cnt = entries.len();
-            if let Some(ev) = app.project.append_ocr_for_image_with_event(image_id, entries) {
+            if let Some(ev) = app.active_tab_mut().project.append_ocr_for_image_with_event(image_id, entries) {
                 if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev { added += ids.len(); } else { added += cnt; }
-                crate::app::handle_model_event(app, ev);
+                crate::app::handle_model_event(app.active_tab_mut(), ev);
             }
         }
-        app.running = false;
-        app.status = format!("Fake OCR done: {added} line(s) (no OCR engine in this build).");
+        app.active_tab_mut().running = false;
+        app.active_tab_mut().status = format!("Fake OCR done: {added} line(s) (no OCR engine in this build).");
         return Task::none();
     }
 }
 
 #[cfg(feature = "ocr")]
 pub fn handle_parallel_ready(app: &mut App, result: Result<ParallelEngine, String>) -> Task<Message> {
+    handle_parallel_ready_for(app, app.active_tab().id, result)
+}
+#[cfg(feature = "ocr")]
+pub fn handle_parallel_ready_for(app: &mut App, tab_id: super::tab::TabId, result: Result<ParallelEngine, String>) -> Task<Message> {
     match result {
         Ok(pipeline) => {
-            app.pipeline = Some(pipeline.clone());
-            maybe_start_ocr(app)
+            app.engines.pipeline = Some(pipeline.clone());
+            maybe_start_ocr_for(app, tab_id)
         }
         Err(e) => {
-            app.running = false;
-            app.status = e;
+            if let Some(tab) = app.tab_by_id_mut(tab_id) {
+                tab.running = false;
+                tab.status = e;
+            }
             Task::none()
         }
     }
@@ -241,21 +265,26 @@ pub fn handle_parallel_ready(app: &mut App, result: Result<ParallelEngine, Strin
 pub fn handle_stop_ocr(app: &mut App) -> Task<Message> {
     #[cfg(feature = "ocr")]
     {
-        if let Some(token) = &app.cancel { token.cancel(); }
-        app.running = false;
-        app.status = "Cancelling OCR...".to_string();
+        if let Some(token) = &app.active_tab_mut().cancel { token.cancel(); }
+        app.active_tab_mut().running = false;
+        app.active_tab_mut().status = "Cancelling OCR...".to_string();
         return Task::none();
     }
     #[cfg(not(feature = "ocr"))]
     {
-        app.status = "OCR is not available in this build.".to_string();
+        app.active_tab_mut().status = "OCR is not available in this build.".to_string();
         return Task::none();
     }
 }
 
 #[cfg(feature = "ocr")]
 pub fn handle_ocr_stream_run(app: &mut App, result: Result<ocr::RunEvent, String>) -> Task<Message> {
-    app.pending = app.pending.saturating_sub(1);
+    handle_ocr_stream_run_for(app, app.active_tab().id, result)
+}
+#[cfg(feature = "ocr")]
+pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, result: Result<ocr::RunEvent, String>) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    app.tabs[idx].pending = app.tabs[idx].pending.saturating_sub(1);
     match result {
         Ok(ocr::RunEvent::Canvas {
             index,
@@ -263,15 +292,16 @@ pub fn handle_ocr_stream_run(app: &mut App, result: Result<ocr::RunEvent, String
             margin_top,
             lines,
         }) => {
-            let run = app.ocr_plans[index];
+            let run = app.tabs[idx].ocr_plans[index];
             let prev = run.dedup.map(|(page, offset)| {
-                let image_id = app.images[page].image_id;
-                let quads: Vec<Quad> = app
+                let tab = &app.tabs[idx];
+                let image_id = tab.images[page].image_id;
+                let quads: Vec<Quad> = tab
                     .project
-                    .all_for(image_id) // escape hatch: includes deleted for dedup `model/src/project.rs:120`
+                    .all_for(image_id)
                     .map(|entry| entry.quad)
                     .collect();
-                let width = app
+                let width = tab
                     .project
                     .image(image_id)
                     .map(|m| m.width as u32)
@@ -291,37 +321,85 @@ pub fn handle_ocr_stream_run(app: &mut App, result: Result<ocr::RunEvent, String
                         .unwrap_or(100.0),
                 )
             });
+            let (plans, dims, held) = {
+                let tab = &mut app.tabs[idx];
+                (tab.ocr_plans.clone(), tab.ocr_dims.clone(), tab.held_boundary.take())
+            };
             let run_result = ocr::assemble_with_config(
                 index,
                 width,
                 margin_top,
                 lines,
-                &app.ocr_plans,
-                &app.ocr_dims,
-                app.held_boundary.take(),
+                &plans,
+                &dims,
+                held,
                 prev,
                 merge_cfg,
                 min_h,
                 max_h,
             );
-            app.held_boundary = run_result.held;
-            commit_per_page(app, run_result.per_page);
+            app.tabs[idx].held_boundary = run_result.held;
+            // commit per page to this specific tab
+            let per_page = run_result.per_page;
+            for (page, entries) in per_page {
+                let image_id = match app.tabs[idx].images.get(page).map(|im| im.image_id) { Some(id) => id, None => continue };
+                let cnt = entries.len();
+                if let Some(ev) = app.tabs[idx].project.append_ocr_for_image_with_event(image_id, entries) {
+                    if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev { app.tabs[idx].ocr_total += ids.len(); } else { app.tabs[idx].ocr_total += cnt; }
+                    let ev_clone = ev;
+                    crate::app::handle_model_event(&mut app.tabs[idx], ev_clone);
+                }
+            }
         }
         Err(e) => {
-            app.ocr_failed += 1;
+            app.tabs[idx].ocr_failed += 1;
             if e == "cancelled" {
-                app.ocr_cancelled = true;
+                app.tabs[idx].ocr_cancelled = true;
             } else {
-                // Undecodable page or other error: flush any held boundary to not lose previous run's bottom-margin capture
-                flush_held_boundary(app);
+                // flush held boundary for this tab
+                if let Some(state) = app.tabs[idx].held_boundary.take() {
+                    for candidate in state.candidates {
+                        let img_len = app.tabs[idx].images.len();
+                        if candidate.page >= img_len { continue; }
+                        let image_id = app.tabs[idx].images[candidate.page].image_id;
+                        let cnt = 1;
+                        if let Some(ev) = app.tabs[idx].project.append_ocr_for_image_with_event(image_id, vec![candidate.entry]) {
+                            if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev { app.tabs[idx].ocr_total += ids.len(); } else { app.tabs[idx].ocr_total += cnt; }
+                            crate::app::handle_model_event(&mut app.tabs[idx], ev);
+                        }
+                    }
+                }
             }
         }
     }
+    // finalize and auto pipeline need tab-aware versions
     #[cfg_attr(not(any(feature = "styling", feature = "segment", feature = "inpaint")), allow(unused_mut))]
     let mut tasks: Vec<Task<Message>> = Vec::new();
-    if app.pending == 0 || app.ocr_cancelled {
-        finalize_run(app);
-        if !app.ocr_cancelled {
+    let pending = app.tabs[idx].pending;
+    let cancelled = app.tabs[idx].ocr_cancelled;
+    if pending == 0 || cancelled {
+        // finalize for this tab
+        {
+            let tab = &mut app.tabs[idx];
+            let held = tab.held_boundary.take();
+            if let Some(state) = held {
+                for candidate in state.candidates {
+                    if candidate.page >= tab.images.len() { continue; }
+                    let image_id = tab.images[candidate.page].image_id;
+                    if let Some(ev) = tab.project.append_ocr_for_image_with_event(image_id, vec![candidate.entry]) {
+                        if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev { tab.ocr_total += ids.len(); } else { tab.ocr_total += 1; }
+                        crate::app::handle_model_event(tab, ev);
+                    }
+                }
+            }
+            let (total, failed, cancelled) = (tab.ocr_total, tab.ocr_failed, tab.ocr_cancelled);
+            tab.running = false;
+            tab.cancel = None;
+            tab.status = if cancelled { "OCR cancelled.".to_string() } else if failed>0 { format!("OCR done: {} line(s), {} run(s) failed.", total, failed) } else { format!("OCR done: {} line(s).", total) };
+        }
+        app.engines.pipeline = None;
+        let cancelled_now = app.tabs[idx].ocr_cancelled;
+        if !cancelled_now {
             let (do_sfx, do_style, do_inpaint, model) = scanlateit_settings::get(|s| {
                 (s.auto_sfx_filter, s.auto_style_detect, s.auto_inpaint, s.auto_inpaint_model)
             });
@@ -337,47 +415,48 @@ pub fn handle_ocr_stream_run(app: &mut App, result: Result<ocr::RunEvent, String
                     #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
                     {
                         if need_chain {
-                            app.pipeline_active = true;
+                            app.tabs[idx].pipeline_active = true;
                         }
                     }
-                    tasks.push(super::segment::start_segment_filter(app));
+                    tasks.push(super::segment::start_segment_filter_for(app, tab_id));
                 }
                 #[cfg(not(feature = "segment"))]
                 {
                     #[cfg(feature = "styling")]
                     if do_style && !do_inpaint {
-                        tasks.push(super::styling::classify(app));
+                        tasks.push(super::styling::classify_for(app, tab_id));
                     }
                     #[cfg(feature = "inpaint")]
                     if do_inpaint && !do_style {
-                        tasks.push(super::inpaint::dispatch_auto_solo(app, effective_model));
+                        tasks.push(super::inpaint::dispatch_auto_solo_for(app, tab_id, effective_model));
                     }
                     #[cfg(all(feature = "styling", feature = "inpaint"))]
                     if do_style && do_inpaint {
-                        tasks.push(super::styling::classify(app));
+                        tasks.push(super::styling::classify_for(app, tab_id));
                     }
                 }
             } else {
                 #[cfg(all(feature = "styling", feature = "inpaint"))]
                 if do_style && do_inpaint {
-                    tasks.push(super::styling::classify(app));
+                    tasks.push(super::styling::classify_for(app, tab_id));
                 }
                 #[cfg(feature = "styling")]
                 if do_style && !do_inpaint {
-                    tasks.push(super::styling::classify(app));
+                    tasks.push(super::styling::classify_for(app, tab_id));
                 }
                 #[cfg(feature = "inpaint")]
                 if do_inpaint && !do_style {
-                    tasks.push(super::inpaint::dispatch_auto_solo(app, effective_model));
+                    tasks.push(super::inpaint::dispatch_auto_solo_for(app, tab_id, effective_model));
                 }
             }
         }
     } else {
-        app.status = format!(
+        let (runs, pending, total) = { let tab = &app.tabs[idx]; (tab.ocr_runs, tab.pending, tab.ocr_total) };
+        app.tabs[idx].status = format!(
             "OCR in progress: {} of {} run(s) done ({} line(s)).",
-            app.ocr_runs - app.pending,
-            app.ocr_runs,
-            app.ocr_total
+            runs - pending,
+            runs,
+            total
         );
     }
     if tasks.is_empty() {
@@ -389,15 +468,35 @@ pub fn handle_ocr_stream_run(app: &mut App, result: Result<ocr::RunEvent, String
 
 #[cfg(feature = "ocr")]
 pub fn handle_ocr_stream_failed(app: &mut App, e: String) -> Task<Message> {
-    app.ocr_failed += 1;
+    handle_ocr_stream_failed_for(app, app.active_tab().id, e)
+}
+#[cfg(feature = "ocr")]
+pub fn handle_ocr_stream_failed_for(app: &mut App, tab_id: super::tab::TabId, e: String) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none()};
+    app.tabs[idx].ocr_failed += 1;
     if e == "cancelled" {
-        app.ocr_cancelled = true;
+        app.tabs[idx].ocr_cancelled = true;
     } else {
-        flush_held_boundary(app);
+        // flush
+        if let Some(state) = app.tabs[idx].held_boundary.take() {
+            for candidate in state.candidates {
+                if candidate.page >= app.tabs[idx].images.len() { continue; }
+                let image_id = app.tabs[idx].images[candidate.page].image_id;
+                if let Some(ev) = app.tabs[idx].project.append_ocr_for_image_with_event(image_id, vec![candidate.entry]) {
+                    if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev { app.tabs[idx].ocr_total += ids.len(); } else { app.tabs[idx].ocr_total += 1; }
+                    crate::app::handle_model_event(&mut app.tabs[idx], ev);
+                }
+            }
+        }
     }
-    if app.pending > 0 {
-        app.pending = 0;
-        finalize_run(app);
+    if app.tabs[idx].pending > 0 {
+        app.tabs[idx].pending = 0;
+        // finalize
+        let (total, failed, cancelled) = { let t=&app.tabs[idx]; (t.ocr_total, t.ocr_failed, t.ocr_cancelled) };
+        app.tabs[idx].running = false;
+        app.tabs[idx].cancel = None;
+        app.engines.pipeline = None;
+        app.tabs[idx].status = if cancelled { "OCR cancelled.".to_string() } else if failed>0 { format!("OCR done: {} line(s), {} run(s) failed.", total, failed) } else { format!("OCR done: {} line(s).", total) };
     }
     Task::none()
 }
@@ -418,17 +517,25 @@ pub fn handle_ocr_stream_failed(app: &mut App, e: String) -> Task<Message> {
 
 #[cfg(feature = "ocr")]
 pub fn handle_manual_ocr_engine_ready(app: &mut App, result: Result<ocr::Engine, String>) -> Task<Message> {
+    handle_manual_ocr_engine_ready_for(app, app.active_tab().id, result)
+}
+#[cfg(feature = "ocr")]
+pub fn handle_manual_ocr_engine_ready_for(app: &mut App, tab_id: super::tab::TabId, result: Result<ocr::Engine, String>) -> Task<Message> {
     match result {
         Ok(engine) => {
-            app.manual_ocr_engine = Some(engine.clone());
-            if let Some(multi) = app.pending_manual_multi_ocr.take() {
-                return start_manual_ocr_selection(app, multi, engine.clone());
+            app.engines.manual_ocr = Some(engine.clone());
+            if let Some(tab) = app.tab_by_id_mut(tab_id) {
+                if let Some(multi) = tab.pending_manual_multi_ocr.take() {
+                    return start_manual_ocr_selection_for(app, tab_id, multi, engine.clone());
+                }
             }
             Task::none()
         }
         Err(e) => {
-            app.pending_manual_multi_ocr = None;
-            app.status = format!("Manual OCR engine failed: {e}");
+            if let Some(tab) = app.tab_by_id_mut(tab_id) {
+                tab.pending_manual_multi_ocr = None;
+                tab.status = format!("Manual OCR engine failed: {e}");
+            }
             Task::none()
         }
     }
@@ -451,48 +558,71 @@ pub fn handle_manual_ocr_engine_ready(app: &mut App, result: Result<ocr::Engine,
 
 
 pub fn handle_manual_ocr_selection(app: &mut App, selections: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
+    handle_manual_ocr_selection_for(app, app.active_tab().id, selections)
+}
+pub fn handle_manual_ocr_selection_for(app: &mut App, tab_id: super::tab::TabId, selections: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
     #[cfg(feature = "ocr")]
     {
         if selections.is_empty() { return Task::none(); }
-        if app.is_bulk_busy() { return Task::none(); }
+        // check bulk busy for that tab
+        if let Some(tab) = app.tab_by_id(tab_id) {
+            if tab.running || tab.translating || tab.inpainting { return Task::none(); }
+            #[cfg(feature = "ocr")]
+            if tab.manual_ocring { return Task::none(); }
+        }
+        let len = app.tab_by_id(tab_id).map(|t| t.images.len()).unwrap_or(0);
         let mut valid: Vec<(usize, iced::Rectangle)> = Vec::new();
         for (idx, r) in selections {
-            if idx >= app.images.len() { continue; }
+            if idx >= len { continue; }
             if r.width < 4.0 || r.height < 4.0 { continue; }
             valid.push((idx, r));
         }
         if valid.is_empty() {
-            app.status = "Manual OCR: no valid selections.".to_string();
+            if let Some(tab) = app.tab_by_id_mut(tab_id) { tab.status = "Manual OCR: no valid selections.".to_string(); }
             return Task::none();
         }
         let cfg = scanlateit_settings::get(|s| ocr::config_with(0.0, s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000)));
-        let cached = app.manual_ocr_engine.clone();
-        if let Some(engine) = cached { return start_manual_ocr_selection(app, valid, engine); }
-        app.pending_manual_multi_ocr = Some(valid);
-        app.status = "Loading OCR engine for manual OCR…".to_string();
-        return Task::perform(async move { ocr::Engine::build_with_config(cfg) }, Message::ManualOcrEngineReady);
+        let cached = app.engines.manual_ocr.clone();
+        if let Some(engine) = cached { return start_manual_ocr_selection_for(app, tab_id, valid, engine); }
+        if let Some(tab) = app.tab_by_id_mut(tab_id) {
+            tab.pending_manual_multi_ocr = Some(valid);
+            tab.status = "Loading OCR engine for manual OCR…".to_string();
+        }
+        return Task::perform(async move { ocr::Engine::build_with_config(cfg) }, move |res| Message::Tab(tab_id, crate::app::TabMessage::ManualOcrEngineReady(res)));
     }
     #[cfg(not(feature = "ocr"))]
     {
         let _ = selections;
-        app.status = "OCR not available in this build.".to_string();
+        app.active_tab_mut().status = "OCR not available in this build.".to_string();
         return Task::none();
     }
 }
 
 #[cfg(feature = "ocr")]
 fn start_manual_ocr_selection(app: &mut App, selections: Vec<(usize, iced::Rectangle)>, engine: ocr::Engine) -> Task<Message> {
-    app.manual_ocring = true;
-    app.status = format!("Manual OCR on {} selection(s)...", selections.len());
+    start_manual_ocr_selection_for(app, app.active_tab().id, selections, engine)
+}
+#[cfg(feature = "ocr")]
+fn start_manual_ocr_selection_for(app: &mut App, tab_id: super::tab::TabId, selections: Vec<(usize, iced::Rectangle)>, engine: ocr::Engine) -> Task<Message> {
+    if let Some(tab) = app.tab_by_id_mut(tab_id) {
+        tab.manual_ocring = true;
+        tab.status = format!("Manual OCR on {} selection(s)...", selections.len());
+    }
     // Build per-image paths
     let mut items: Vec<(usize, String, iced::Rectangle)> = Vec::new();
-    for (idx, rect) in selections {
-        if idx >= app.images.len() { continue; }
-        let path = app.project.image(app.images[idx].image_id).map(|m| m.path.clone()).unwrap_or_default();
-        if path.is_empty() { continue; }
-        items.push((idx, path, rect));
+    {
+        let tab = match app.tab_by_id(tab_id) { Some(t) => t, None => return Task::none() };
+        for (idx, rect) in selections {
+            if idx >= tab.images.len() { continue; }
+            let path = tab.project.image(tab.images[idx].image_id).map(|m| m.path.clone()).unwrap_or_default();
+            if path.is_empty() { continue; }
+            items.push((idx, path, rect));
+        }
     }
-    if items.is_empty() { app.manual_ocring=false; return Task::none(); }
+    if items.is_empty() {
+        if let Some(tab) = app.tab_by_id_mut(tab_id) { tab.manual_ocring=false; }
+        return Task::none();
+    }
     let merge_cfg = scanlateit_settings::get(|s| ocr::MergeConfig::from_threshold_str(&s.ocr_merge_threshold));
     Task::perform(
         async move {
@@ -500,7 +630,7 @@ fn start_manual_ocr_selection(app: &mut App, selections: Vec<(usize, iced::Recta
                 .await
                 .unwrap_or_else(|e| Err(format!("Manual multi OCR task cancelled: {e}")))
         },
-        Message::ManualOcrMultiFinished,
+        move |res| Message::Tab(tab_id, crate::app::TabMessage::ManualOcrMultiFinished(res)),
     )
 }
 
@@ -604,13 +734,16 @@ fn run_manual_ocr_selection(engine: ocr::Engine, items: Vec<(usize, String, iced
 }
 
 pub fn handle_manual_ocr_finished(app: &mut App, result: Result<Vec<(usize, Vec<NewEntry>)>, String>) -> Task<Message> {
+    handle_manual_ocr_finished_for(app, app.active_tab().id, result)
+}
+pub fn handle_manual_ocr_finished_for(app: &mut App, tab_id: super::tab::TabId, result: Result<Vec<(usize, Vec<NewEntry>)>, String>) -> Task<Message> {
     #[cfg(feature = "ocr")]
     {
-        app.manual_ocring = false;
+        if let Some(tab) = app.tab_by_id_mut(tab_id) { tab.manual_ocring = false; }
         match result {
             Ok(per_image) => {
                 if per_image.is_empty() {
-                    app.status = "Manual OCR: no text found.".to_string();
+                    if let Some(tab) = app.tab_by_id_mut(tab_id) { tab.status = "Manual OCR: no text found.".to_string(); }
                     return Task::none();
                 }
                 let mut total_added = 0usize;
@@ -619,32 +752,37 @@ pub fn handle_manual_ocr_finished(app: &mut App, result: Result<Vec<(usize, Vec<
                 for (idx, entries) in per_image {
                     let cnt = entries.len();
                     total_detected += cnt;
-                    if idx >= app.images.len() { continue; }
-                    let image_id = app.images[idx].image_id;
-                    let added = if let Some(ev) = app.project.append_ocr_for_image_with_event(image_id, entries) {
+                    let len = app.tab_by_id(tab_id).map(|t| t.images.len()).unwrap_or(0);
+                    if idx >= len { continue; }
+                    let image_id = app.tab_by_id(tab_id).unwrap().images[idx].image_id;
+                    let tab = app.tab_by_id_mut(tab_id).unwrap();
+                    let added = if let Some(ev) = tab.project.append_ocr_for_image_with_event(image_id, entries) {
                         let n = if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev { ids.len() } else { cnt };
-                        crate::app::handle_model_event(app, ev);
-                        let rev = app.project.reorder_entries_for_image_with_event(image_id);
-                        crate::app::handle_model_event(app, rev);
+                        let ev2 = ev;
+                        crate::app::handle_model_event(tab, ev2);
+                        let rev = tab.project.reorder_entries_for_image_with_event(image_id);
+                        crate::app::handle_model_event(tab, rev);
                         n
                     } else { 0 };
                     total_added += added;
                     image_count += 1;
                 }
-                if total_added==0 && total_detected==0 {
-                    app.status = "Manual OCR: no text found.".to_string();
-                } else {
-                    app.status = format!("Manual OCR: {total_added} line(s) added across {image_count} image(s) ({total_detected} detected).");
+                if let Some(tab) = app.tab_by_id_mut(tab_id) {
+                    if total_added==0 && total_detected==0 {
+                        tab.status = "Manual OCR: no text found.".to_string();
+                    } else {
+                        tab.status = format!("Manual OCR: {total_added} line(s) added across {image_count} image(s) ({total_detected} detected).");
+                    }
                 }
             }
-            Err(e) => { app.status = format!("Manual OCR multi failed: {e}"); }
+            Err(e) => { if let Some(tab) = app.tab_by_id_mut(tab_id) { tab.status = format!("Manual OCR multi failed: {e}"); } }
         }
         return Task::none();
     }
     #[cfg(not(feature = "ocr"))]
     {
         let _ = result;
-        app.status = "OCR not available in this build.".to_string();
+        app.active_tab_mut().status = "OCR not available in this build.".to_string();
         return Task::none();
     }
 }

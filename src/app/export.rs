@@ -461,17 +461,19 @@ fn rasterize_page(
 // Public handlers
 // ---------------------------------------------------------------------------
 pub fn handle_export_all(app: &mut App) -> Task<Message> {
-    if app.project.images().is_empty() || app.images.is_empty() {
-        app.status = "Nothing to export.".to_string();
+    if app.active_tab().project.images().is_empty() || app.active_tab().images.is_empty() {
+        app.active_tab_mut().status = "Nothing to export.".to_string();
         return Task::none();
     }
     // default folder = mmtl parent or first image parent
-    let default_dir = app
+    let tab = app.active_tab();
+    let tid = tab.id;
+    let default_dir = tab
         .mmtl_path
         .as_ref()
         .and_then(|p| p.parent().map(|par| par.to_path_buf()))
         .or_else(|| {
-            app.project
+            tab.project
                 .images()
                 .first()
                 .map(|m| std::path::Path::new(&m.path).parent().map(|p| p.to_path_buf()).unwrap_or_default())
@@ -487,30 +489,34 @@ pub fn handle_export_all(app: &mut App) -> Task<Message> {
             let folder = dlg.pick_folder().await;
             folder.map(|f| f.path().to_string_lossy().to_string())
         },
-        Message::ExportFolderPicked,
+        move |picked| Message::Tab(tid, crate::app::TabMessage::ExportFolderPicked(picked)),
     )
 }
 
 pub fn handle_export_picked(app: &mut App, folder: Option<String>) -> Task<Message> {
+    handle_export_picked_for(app, app.active_tab().id, folder)
+}
+pub fn handle_export_picked_for(app: &mut App, tab_id: crate::app::tab::TabId, folder: Option<String>) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     let Some(folder_str) = folder else {
-        app.status = "Export cancelled.".to_string();
+        app.tabs[idx].status = "Export cancelled.".to_string();
         return Task::none();
     };
     let folder_path = PathBuf::from(&folder_str);
     if !folder_path.exists() {
         if let Err(e) = std::fs::create_dir_all(&folder_path) {
-            app.status = format!("Export failed: cannot create folder: {e}");
+            app.tabs[idx].status = format!("Export failed: cannot create folder: {e}");
             return Task::none();
         }
     }
 
     // Snapshot project + inpaint raw for blocking thread
-    let project = app.project.clone();
+    let project = app.tabs[idx].project.clone();
     let font = app.font.unwrap_or(Font::DEFAULT);
 
     // Extract inpaint raw per image (bounds + RgbaImage) to avoid Handle Send issues
     let mut inpaint_per_image: Vec<Vec<([f32; 4], RgbaImage)>> = Vec::new();
-    for loaded in &app.images {
+    for loaded in &app.tabs[idx].images {
         let mut v = Vec::new();
         for layer in &loaded.inpaint {
             if let Some(rgba) = handle_to_rgba(&layer.handle) {
@@ -527,7 +533,7 @@ pub fn handle_export_picked(app: &mut App, folder: Option<String>) -> Task<Messa
         .map(|m| (m.id, m.path.clone()))
         .collect();
 
-    app.status = format!("Exporting {} image(s)...", metas.len());
+    app.tabs[idx].status = format!("Exporting {} image(s)...", metas.len());
 
     let folder_clone = folder_path.clone();
     Task::perform(
@@ -536,7 +542,7 @@ pub fn handle_export_picked(app: &mut App, folder: Option<String>) -> Task<Messa
                 .await
                 .unwrap_or_else(|e| Err(format!("export task failed: {e}")))
         },
-        Message::ExportFinished,
+        move |res| Message::Tab(tab_id, crate::app::TabMessage::ExportFinished(res)),
     )
 }
 
@@ -656,9 +662,13 @@ fn export_blocking(
 }
 
 pub fn handle_export_finished(app: &mut App, result: Result<String, String>) -> Task<Message> {
+    handle_export_finished_for(app, app.active_tab().id, result)
+}
+pub fn handle_export_finished_for(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<String, String>) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     match result {
-        Ok(msg) => app.status = msg,
-        Err(e) => app.status = format!("Export failed: {e}"),
+        Ok(msg) => app.tabs[idx].status = msg,
+        Err(e) => app.tabs[idx].status = format!("Export failed: {e}"),
     }
     Task::none()
 }

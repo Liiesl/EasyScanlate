@@ -6,166 +6,172 @@ use scanlateit_ui::event::{EditOrigin, MainAreaMode, ManualMode, SettingsTab, St
 use scanlateit_ui::{ConnectModal, LoadedImage, UiState};
 
 use super::App;
+use super::tab::Tab;
 
-impl UiState for App {
+pub(crate) struct ActiveTab<'a> {
+    pub app: &'a App,
+    pub tab: &'a Tab,
+}
+
+impl UiState for ActiveTab<'_> {
     fn images(&self) -> &[LoadedImage] {
-        &self.images
+        &self.tab.images
     }
 
     fn project(&self) -> &scanlateit_model::Project {
-        &self.project
+        &self.tab.project
     }
 
     fn running(&self) -> bool {
-        self.running
+        self.tab.running
     }
 
     fn translating(&self) -> bool {
-        self.translating
+        self.tab.translating
     }
 
     fn status(&self) -> &str {
-        &self.status
+        &self.tab.status
     }
 
     fn translate_model_groups(&self) -> &[(String, String, Vec<(String, String)>)] {
-        self.tx.model_groups()
+        self.app.tx.model_groups()
     }
 
     fn translate_model_selection(&self) -> (String, String) {
-        (self.tx.selected_id.clone(), self.tx.selected_model.clone())
+        (self.app.tx.selected_id.clone(), self.app.tx.selected_model.clone())
     }
 
     fn translate_lang(&self) -> &str {
-        &self.translate_lang
+        &self.tab.translate_lang
     }
 
     fn connect_modal(&self) -> Option<&ConnectModal> {
-        self.connect_modal.as_ref()
+        self.app.connect_modal.as_ref()
     }
 
     fn selected(&self) -> Option<(usize, EntryId)> {
-        self.selected
+        self.tab.selected
     }
 
     fn selected_inpaint(&self) -> Option<(usize, usize)> {
-        self.selected_inpaint
+        self.tab.selected_inpaint
     }
 
     fn style_working(&self) -> &EntryStyle {
-        &self.style_working
+        &self.tab.style_working
     }
 
     fn style_text_color(&self) -> Color {
-        rgba_to_color(self.style_working.text_color)
+        rgba_to_color(self.tab.style_working.text_color)
     }
 
     fn style_stroke_color(&self) -> Color {
-        rgba_to_color(self.style_working.stroke_color)
+        rgba_to_color(self.tab.style_working.stroke_color)
     }
 
     fn style_bg_color(&self) -> Color {
-        rgba_to_color(self.style_working.bg_color)
+        rgba_to_color(self.tab.style_working.bg_color)
     }
 
     fn style_picker_open(&self) -> Option<StyleField> {
-        self.style_picker
+        self.tab.style_picker
     }
 
     fn style_stroke_width(&self) -> &str {
-        &self.style_stroke_width
+        &self.tab.style_stroke_width
     }
 
     fn style_bg_radius(&self) -> &str {
-        &self.style_bg_radius
+        &self.tab.style_bg_radius
     }
 
     fn style_presets(&self) -> &[Option<EntryStyle>] {
-        self.presets.as_slice()
+        self.app.presets.as_slice()
     }
 
     fn installed_fonts(&self) -> &[String] {
-        &self.installed_fonts
+        &self.app.installed_fonts
     }
 
     fn style_font_family(&self) -> Option<&str> {
-        self.style_working.font_family.as_deref()
+        self.tab.style_working.font_family.as_deref()
     }
 
     fn style_text_align(&self) -> TextAlign {
-        self.style_working.text_align
+        self.tab.style_working.text_align
     }
 
     fn style_gradient_a(&self) -> Color {
-        rgba_to_color(self.style_working.gradient_a)
+        rgba_to_color(self.tab.style_working.gradient_a)
     }
 
     fn style_gradient_b(&self) -> Color {
-        rgba_to_color(self.style_working.gradient_b)
+        rgba_to_color(self.tab.style_working.gradient_b)
     }
 
     fn style_gradient_dir(&self) -> TextGradientDir {
-        self.style_working.gradient_dir
+        self.tab.style_working.gradient_dir
     }
 
     fn style_hex_override(&self, field: StyleField) -> Option<&str> {
-        self.style_hex_overrides.get(&field).map(|s| s.as_str())
+        self.tab.style_hex_overrides.get(&field).map(|s| s.as_str())
     }
 
     fn editing(&self) -> Option<(usize, EntryId)> {
-        self.editing
+        self.tab.editing
     }
 
     fn editing_origin(&self) -> EditOrigin {
-        self.editing_origin
+        self.tab.editing_origin
     }
 
     fn editing_rect(&self) -> Option<Rectangle> {
-        self.editing_rect
+        self.tab.editing_rect
     }
 
     fn edit_content(&self) -> Option<&text_editor::Content> {
-        self.edit_content.as_ref()
+        self.tab.edit_content.as_ref()
     }
 
     fn font(&self) -> Option<Font> {
-        self.font
+        self.app.font
     }
 
     fn inpaint_mode(&self) -> bool {
-        self.manual_mode == ManualMode::Inpaint
+        self.tab.manual_mode == ManualMode::Inpaint
     }
 
     fn ocr_mode(&self) -> bool {
-        self.manual_mode == ManualMode::Ocr
+        self.tab.manual_mode == ManualMode::Ocr
     }
 
     fn manual_mode(&self) -> ManualMode {
-        self.manual_mode
+        self.tab.manual_mode
     }
 
     fn manual_selections(&self) -> &[(usize, Rectangle)] {
-        &self.manual_selections
+        &self.tab.manual_selections
     }
 
     fn is_inpainting(&self) -> bool {
-        self.inpainting
+        self.tab.inpainting
     }
 
     fn is_manual_ocring(&self) -> bool {
         #[cfg(feature = "ocr")]
-        { self.manual_ocring }
+        { self.tab.manual_ocring }
         #[cfg(not(feature = "ocr"))]
         { false }
     }
 
     fn is_pipeline_running(&self) -> bool {
         #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-        { self.pipeline_active }
+        { self.tab.pipeline_active }
         #[cfg(not(all(feature = "styling", feature = "inpaint", feature = "segment")))]
         {
             #[cfg(all(feature = "styling", feature = "inpaint"))]
-            { self.pipeline_style_pending > 0 }
+            { self.tab.pipeline_style_pending > 0 }
             #[cfg(not(all(feature = "styling", feature = "inpaint")))]
             { false }
         }
@@ -173,14 +179,14 @@ impl UiState for App {
 
     fn is_auto_inpainting(&self) -> bool {
         #[cfg(feature = "inpaint")]
-        { self.auto_inpaint_pending > 0 }
+        { self.tab.auto_inpaint_pending > 0 }
         #[cfg(not(feature = "inpaint"))]
         { false }
     }
 
     fn is_segment_filtering(&self) -> bool {
         #[cfg(feature = "segment")]
-        { self.segment_filtering }
+        { self.tab.segment_filtering }
         #[cfg(not(feature = "segment"))]
         { false }
     }
@@ -188,21 +194,18 @@ impl UiState for App {
     fn is_styling_busy(&self) -> bool {
         #[cfg(feature = "styling")]
         {
-            if self.pipeline_style_pending > 0 { return true; }
-            // Manual single auto-detect or bulk classify sets `building` while the ONNX engine loads.
-            // Treat that as bulk busy so AutoDetect cannot be re-entered.
-            if self.styling.is_building() { return true; }
+            if self.tab.pipeline_style_pending > 0 { return true; }
+            if self.tab.styling.is_building() { return true; }
             false
         }
         #[cfg(not(feature = "styling"))]
         { false }
     }
 
-    // is_bulk_busy has default impl in trait that composes the above; override to keep cfg correctness
     fn is_bulk_busy(&self) -> bool {
-        self.running
-            || self.translating
-            || self.inpainting
+        self.tab.running
+            || self.tab.translating
+            || self.tab.inpainting
             || self.is_manual_ocring()
             || self.is_pipeline_running()
             || self.is_auto_inpainting()
@@ -211,91 +214,91 @@ impl UiState for App {
     }
 
     fn show_overlay_text(&self) -> bool {
-        self.show_overlay_text
+        self.tab.show_overlay_text
     }
 
     fn show_inpaint(&self) -> bool {
-        self.show_inpaint
+        self.tab.show_inpaint
     }
 
     fn view_mode(&self) -> MainAreaMode {
-        self.view_mode
+        self.tab.view_mode
     }
 
     fn viewer_scroll(&self) -> f32 {
-        self.viewer_scroll
+        self.tab.viewer_scroll
     }
 
     fn settings_open(&self) -> bool {
-        self.settings_open
+        self.app.settings_open
     }
 
     fn settings_tab(&self) -> SettingsTab {
-        self.settings_tab
+        self.app.settings_tab
     }
 
     fn settings_search(&self) -> &str {
-        &self.settings_search
+        &self.app.settings_search
     }
 
     fn manage_models_open(&self) -> bool {
-        self.manage_models_open
+        self.app.manage_models_open
     }
 
     fn manage_models_search(&self) -> &str {
-        &self.manage_models_search
+        &self.app.manage_models_search
     }
 
     fn all_model_groups(&self) -> Vec<(String, String, Vec<(String, String)>)> {
-        self.tx.all_model_groups()
+        self.app.tx.all_model_groups()
     }
 
     fn translation_panel_mode(&self) -> TranslationPanelMode {
-        self.translation_panel_mode
+        self.tab.translation_panel_mode
     }
 
     fn base_profile(&self) -> Option<scanlateit_model::ProfileId> {
-        if let Some(id) = self.translate_base {
-            if self.project.profiles.iter().any(|p| p.id == id) {
+        if let Some(id) = self.tab.translate_base {
+            if self.tab.project.profiles.iter().any(|p| p.id == id) {
                 return Some(id);
             }
         }
-        if self.images.is_empty() {
+        if self.tab.images.is_empty() {
             return None;
         }
-        Some(self.project.profiles.selected_id())
+        Some(self.tab.project.profiles.selected_id())
     }
 
     fn target_profile(&self) -> TargetProfileSelection {
-        // Resolve virtual placeholder that already exists as real profile to Existing
-        if let TargetProfileSelection::AutoPlaceholder(name) = &self.translate_target {
-            if let Some(id) = self.project.profiles.find_by_name(name) {
+        if let TargetProfileSelection::AutoPlaceholder(name) = &self.tab.translate_target {
+            if let Some(id) = self.tab.project.profiles.find_by_name(name) {
                 let base = self.base_profile();
                 if Some(id) != base {
                     return TargetProfileSelection::Existing(id);
                 }
             }
         }
-        self.translate_target.clone()
+        self.tab.translate_target.clone()
     }
 
     fn target_placeholder_name(&self) -> String {
-        format!("{}(auto)", self.translate_lang)
+        format!("{}(auto)", self.tab.translate_lang)
     }
 
     fn app_view(&self) -> scanlateit_ui::state::AppView {
-        match self.app_view {
-            super::AppView::Home => scanlateit_ui::state::AppView::Home,
-            super::AppView::Editor => scanlateit_ui::state::AppView::Editor,
+        if self.tab.is_home() {
+            scanlateit_ui::state::AppView::Home
+        } else {
+            scanlateit_ui::state::AppView::Editor
         }
     }
 
     fn recent_projects(&self) -> &[scanlateit_settings::RecentProject] {
-        &self.recent_projects
+        &self.app.recent_projects
     }
 
     fn new_project_overlay(&self) -> Option<scanlateit_ui::state::NewProjectOverlay> {
-        self.new_project.as_ref().map(|np| scanlateit_ui::state::NewProjectOverlay {
+        self.app.new_project.as_ref().map(|np| scanlateit_ui::state::NewProjectOverlay {
             source_paths: np.source_files.iter().map(|(p, _, _)| p.clone()).collect(),
             original_lang: np.original_lang.clone(),
             project_location: np.project_location.clone(),
@@ -303,6 +306,154 @@ impl UiState for App {
     }
 
     fn translation_anim_phase(&self) -> f32 {
-        self.translate_anim_phase
+        self.tab.translate_anim_phase
     }
 }
+
+// Shim kept for view lifetime: `view.rs` returns `Element<'a, Message>` tied to
+// `&'a App`. `ActiveTab<'a>` is a temporary containing `&'a App` + `&'a Tab`;
+// borrowing it would tie the `Element` to the temporary's stack frame (E0515).
+// Keeping `UiState for App` forwarding to `tabs[active]` lets `view` pass `app`
+// directly and keep the `Element` tied to `app` (the caller). `ActiveTab` remains
+// the canonical impl for tests and non-view call sites (`app.active_state()`).
+impl UiState for App {
+    fn images(&self) -> &[LoadedImage] { &self.tabs[self.active].images }
+    fn project(&self) -> &scanlateit_model::Project { &self.tabs[self.active].project }
+    fn running(&self) -> bool { self.tabs[self.active].running }
+    fn translating(&self) -> bool { self.tabs[self.active].translating }
+    fn status(&self) -> &str { &self.tabs[self.active].status }
+    fn translate_model_groups(&self) -> &[(String, String, Vec<(String, String)>)] { self.tx.model_groups() }
+    fn translate_model_selection(&self) -> (String, String) { (self.tx.selected_id.clone(), self.tx.selected_model.clone()) }
+    fn translate_lang(&self) -> &str { &self.tabs[self.active].translate_lang }
+    fn connect_modal(&self) -> Option<&ConnectModal> { self.connect_modal.as_ref() }
+    fn selected(&self) -> Option<(usize, EntryId)> { self.tabs[self.active].selected }
+    fn selected_inpaint(&self) -> Option<(usize, usize)> { self.tabs[self.active].selected_inpaint }
+    fn style_working(&self) -> &EntryStyle { &self.tabs[self.active].style_working }
+    fn style_text_color(&self) -> Color { rgba_to_color(self.tabs[self.active].style_working.text_color) }
+    fn style_stroke_color(&self) -> Color { rgba_to_color(self.tabs[self.active].style_working.stroke_color) }
+    fn style_bg_color(&self) -> Color { rgba_to_color(self.tabs[self.active].style_working.bg_color) }
+    fn style_picker_open(&self) -> Option<StyleField> { self.tabs[self.active].style_picker }
+    fn style_stroke_width(&self) -> &str { &self.tabs[self.active].style_stroke_width }
+    fn style_bg_radius(&self) -> &str { &self.tabs[self.active].style_bg_radius }
+    fn style_presets(&self) -> &[Option<EntryStyle>] { self.presets.as_slice() }
+    fn installed_fonts(&self) -> &[String] { &self.installed_fonts }
+    fn style_font_family(&self) -> Option<&str> { self.tabs[self.active].style_working.font_family.as_deref() }
+    fn style_text_align(&self) -> TextAlign { self.tabs[self.active].style_working.text_align }
+    fn style_gradient_a(&self) -> Color { rgba_to_color(self.tabs[self.active].style_working.gradient_a) }
+    fn style_gradient_b(&self) -> Color { rgba_to_color(self.tabs[self.active].style_working.gradient_b) }
+    fn style_gradient_dir(&self) -> TextGradientDir { self.tabs[self.active].style_working.gradient_dir }
+    fn style_hex_override(&self, field: StyleField) -> Option<&str> { self.tabs[self.active].style_hex_overrides.get(&field).map(|s| s.as_str()) }
+    fn editing(&self) -> Option<(usize, EntryId)> { self.tabs[self.active].editing }
+    fn editing_origin(&self) -> EditOrigin { self.tabs[self.active].editing_origin }
+    fn editing_rect(&self) -> Option<Rectangle> { self.tabs[self.active].editing_rect }
+    fn edit_content(&self) -> Option<&text_editor::Content> { self.tabs[self.active].edit_content.as_ref() }
+    fn font(&self) -> Option<Font> { self.font }
+    fn inpaint_mode(&self) -> bool { self.tabs[self.active].manual_mode == ManualMode::Inpaint }
+    fn ocr_mode(&self) -> bool { self.tabs[self.active].manual_mode == ManualMode::Ocr }
+    fn manual_mode(&self) -> ManualMode { self.tabs[self.active].manual_mode }
+    fn manual_selections(&self) -> &[(usize, Rectangle)] { &self.tabs[self.active].manual_selections }
+    fn is_inpainting(&self) -> bool { self.tabs[self.active].inpainting }
+    fn is_manual_ocring(&self) -> bool {
+        #[cfg(feature = "ocr")]
+        { self.tabs[self.active].manual_ocring }
+        #[cfg(not(feature = "ocr"))]
+        { false }
+    }
+    fn is_pipeline_running(&self) -> bool {
+        #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+        { self.tabs[self.active].pipeline_active }
+        #[cfg(not(all(feature = "styling", feature = "inpaint", feature = "segment")))]
+        {
+            #[cfg(all(feature = "styling", feature = "inpaint"))]
+            { self.tabs[self.active].pipeline_style_pending > 0 }
+            #[cfg(not(all(feature = "styling", feature = "inpaint")))]
+            { false }
+        }
+    }
+    fn is_auto_inpainting(&self) -> bool {
+        #[cfg(feature = "inpaint")]
+        { self.tabs[self.active].auto_inpaint_pending > 0 }
+        #[cfg(not(feature = "inpaint"))]
+        { false }
+    }
+    fn is_segment_filtering(&self) -> bool {
+        #[cfg(feature = "segment")]
+        { self.tabs[self.active].segment_filtering }
+        #[cfg(not(feature = "segment"))]
+        { false }
+    }
+    fn is_styling_busy(&self) -> bool {
+        #[cfg(feature = "styling")]
+        {
+            if self.tabs[self.active].pipeline_style_pending > 0 { return true; }
+            if self.tabs[self.active].styling.is_building() { return true; }
+            false
+        }
+        #[cfg(not(feature = "styling"))]
+        { false }
+    }
+    fn is_bulk_busy(&self) -> bool {
+        self.tabs[self.active].running
+            || self.tabs[self.active].translating
+            || self.tabs[self.active].inpainting
+            || self.is_manual_ocring()
+            || self.is_pipeline_running()
+            || self.is_auto_inpainting()
+            || self.is_segment_filtering()
+            || self.is_styling_busy()
+    }
+    fn show_overlay_text(&self) -> bool { self.tabs[self.active].show_overlay_text }
+    fn show_inpaint(&self) -> bool { self.tabs[self.active].show_inpaint }
+    fn view_mode(&self) -> MainAreaMode { self.tabs[self.active].view_mode }
+    fn viewer_scroll(&self) -> f32 { self.tabs[self.active].viewer_scroll }
+    fn settings_open(&self) -> bool { self.settings_open }
+    fn settings_tab(&self) -> SettingsTab { self.settings_tab }
+    fn settings_search(&self) -> &str { &self.settings_search }
+    fn manage_models_open(&self) -> bool { self.manage_models_open }
+    fn manage_models_search(&self) -> &str { &self.manage_models_search }
+    fn all_model_groups(&self) -> Vec<(String, String, Vec<(String, String)>)> { self.tx.all_model_groups() }
+    fn translation_panel_mode(&self) -> TranslationPanelMode { self.tabs[self.active].translation_panel_mode }
+    fn base_profile(&self) -> Option<scanlateit_model::ProfileId> {
+        let tab = &self.tabs[self.active];
+        if let Some(id) = tab.translate_base {
+            if tab.project.profiles.iter().any(|p| p.id == id) {
+                return Some(id);
+            }
+        }
+        if tab.images.is_empty() {
+            return None;
+        }
+        Some(tab.project.profiles.selected_id())
+    }
+    fn target_profile(&self) -> TargetProfileSelection {
+        let tab = &self.tabs[self.active];
+        if let TargetProfileSelection::AutoPlaceholder(name) = &tab.translate_target {
+            if let Some(id) = tab.project.profiles.find_by_name(name) {
+                let base = self.base_profile();
+                if Some(id) != base {
+                    return TargetProfileSelection::Existing(id);
+                }
+            }
+        }
+        tab.translate_target.clone()
+    }
+    fn target_placeholder_name(&self) -> String { format!("{}(auto)", self.tabs[self.active].translate_lang) }
+    fn app_view(&self) -> scanlateit_ui::state::AppView {
+        if self.tabs[self.active].is_home() {
+            scanlateit_ui::state::AppView::Home
+        } else {
+            scanlateit_ui::state::AppView::Editor
+        }
+    }
+    fn recent_projects(&self) -> &[scanlateit_settings::RecentProject] { &self.recent_projects }
+    fn new_project_overlay(&self) -> Option<scanlateit_ui::state::NewProjectOverlay> {
+        self.new_project.as_ref().map(|np| scanlateit_ui::state::NewProjectOverlay {
+            source_paths: np.source_files.iter().map(|(p, _, _)| p.clone()).collect(),
+            original_lang: np.original_lang.clone(),
+            project_location: np.project_location.clone(),
+        })
+    }
+    fn translation_anim_phase(&self) -> f32 { self.tabs[self.active].translate_anim_phase }
+}
+
+

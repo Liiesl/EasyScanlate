@@ -1,6 +1,6 @@
 use crate::app::tests::app_with_entry;
 use crate::app::translation as translation;
-use crate::app::{update, Message};
+use crate::app::{update, Message, TabMessage};
 use scanlateit_model::EntryId;
 use scanlateit_ui::event::UiEvent;
 use std::collections::BTreeMap;
@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 fn retranslate_without_connection_is_rejected() {
     let (mut app, id) = app_with_entry();
     let _ = update(&mut app, Message::Ui(UiEvent::RetranslateEntry((0, id))));
-    assert!(!app.translating);
-    assert!(app.status.contains("Connect a translation service"));
+    assert!(!app.active_tab().translating);
+    assert!(app.active_tab().status.contains("Connect a translation service"));
 }
 
 #[cfg(feature = "translation")]
@@ -22,8 +22,8 @@ fn retranslate_missing_entry_is_rejected() {
         &mut app,
         Message::Ui(UiEvent::RetranslateEntry((0, EntryId(999)))),
     );
-    assert!(!app.translating);
-    assert!(app.status.contains("no longer exists"));
+    assert!(!app.active_tab().translating);
+    assert!(app.active_tab().status.contains("no longer exists"));
 }
 
 #[cfg(feature = "translation")]
@@ -42,19 +42,20 @@ fn retranslate_starts_translation_when_connected() {
         None,
     );
     let _ = update(&mut app, Message::Ui(UiEvent::RetranslateEntry((0, id))));
-    assert!(app.translating, "retranslate must set the translating flag");
-    assert!(app.status.starts_with("Retranslating"));
+    assert!(app.active_tab().translating, "retranslate must set the translating flag");
+    assert!(app.active_tab().status.starts_with("Retranslating"));
 }
 
 #[cfg(feature = "translation")]
 #[test]
 fn retranslate_finished_forks_a_profile_off_the_default() {
     let (mut app, id) = app_with_entry();
+    let tid = app.active_tab().id;
     let _ = update(
         &mut app,
-        Message::RetranslateFinished((0, id), Ok("Hello".to_string())),
+        Message::Tab(tid, TabMessage::RetranslateFinished((0, id), Ok("Hello".to_string()))),
     );
-    let project = &app.project;
+    let project = &app.active_tab().project;
     assert_eq!(project.profiles.len(), 2, "a fork must be created");
     assert_eq!(project.profiles.selected().name, "Profile 1");
     assert_eq!(project.profiles.selected().translation_of(id), Some("Hello"));
@@ -70,17 +71,19 @@ fn retranslate_finished_forks_a_profile_off_the_default() {
 #[test]
 fn retranslate_finished_writes_into_the_selected_profile_in_place() {
     let (mut app, id) = app_with_entry();
-    app.project
+    app.active_tab_mut()
+        .project
         .profiles
         .selected_mut()
         .set_translation(id, Some("Hello".into()));
-    let jp = app.project.profiles.add("JP");
-    app.project.profiles.select(jp);
+    let jp = app.active_tab_mut().project.profiles.add("JP");
+    app.active_tab_mut().project.profiles.select(jp);
+    let tid = app.active_tab().id;
     let _ = update(
         &mut app,
-        Message::RetranslateFinished((0, id), Ok("Hola".to_string())),
+        Message::Tab(tid, TabMessage::RetranslateFinished((0, id), Ok("Hola".to_string()))),
     );
-    let project = &app.project;
+    let project = &app.active_tab().project;
     assert_eq!(project.profiles.len(), 2, "no fork on non-original profiles");
     assert_eq!(project.profiles.selected_id(), jp);
     assert_eq!(project.profiles.selected().translation_of(id), Some("Hola"));
@@ -90,17 +93,19 @@ fn retranslate_finished_writes_into_the_selected_profile_in_place() {
 #[test]
 fn retranslate_finished_error_leaves_the_profile_untouched() {
     let (mut app, id) = app_with_entry();
-    app.project
+    app.active_tab_mut()
+        .project
         .profiles
         .selected_mut()
         .set_translation(id, Some("Hello".into()));
+    let tid = app.active_tab().id;
     let _ = update(
         &mut app,
-        Message::RetranslateFinished((0, id), Err("boom".to_string())),
+        Message::Tab(tid, TabMessage::RetranslateFinished((0, id), Err("boom".to_string()))),
     );
-    assert!(!app.translating);
-    assert_eq!(app.status, "boom");
-    let project = &app.project;
+    assert!(!app.active_tab().translating);
+    assert_eq!(app.active_tab().status, "boom");
+    let project = &app.active_tab().project;
     assert_eq!(project.profiles.len(), 1);
     assert_eq!(project.profiles.selected().translation_of(id), Some("Hello"));
 }
@@ -109,11 +114,12 @@ fn retranslate_finished_error_leaves_the_profile_untouched() {
 #[test]
 fn retranslate_finished_strips_quotes_and_clears_when_identical_to_ocr() {
     let (mut app, id) = app_with_entry();
+    let tid = app.active_tab().id;
     let _ = update(
         &mut app,
-        Message::RetranslateFinished((0, id), Ok("\"안녕\"".to_string())),
+        Message::Tab(tid, TabMessage::RetranslateFinished((0, id), Ok("\"안녕\"".to_string()))),
     );
-    let project = &app.project;
+    let project = &app.active_tab().project;
     assert_eq!(project.profiles.len(), 2, "the fork still happens");
     assert_eq!(
         project.profiles.selected().translation_of(id),

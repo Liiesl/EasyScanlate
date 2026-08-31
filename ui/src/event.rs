@@ -322,4 +322,19 @@ pub enum UiEvent {
     /// Export every page as a baked raster image (original + inpaint + overlay)
     /// to a chosen folder. One click exports the whole chapter.
     ExportAll,
+    // -- Tab management (multi-project, Phase 2+) --
+    /// Select the tab with `id` (titlebar chip or Ctrl+1..9 / Ctrl+Tab).
+    TabSelected(u64),
+    /// Close the tab with `id` (× button or Ctrl+W). Home (0) is pinned.
+    TabClose(u64),
+    /// User confirmed the dirty-close modal for `id`: `bool` = save?
+    TabCloseConfirmed(u64, bool),
+    /// Close all project tabs except `id` (future use). None = all.
+    TabCloseOthers(u64),
+    /// Close all project tabs.
+    TabCloseAll,
+    /// Create a new tab (Home → New Project overlay or Ctrl+T).
+    TabNew,
+    /// Dismiss the dirty-close confirmation modal (Cancel / backdrop / Esc).
+    TabCloseCancel,
 }

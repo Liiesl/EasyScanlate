@@ -119,20 +119,39 @@ pub fn boot(frame: NativeFrame) -> (App, Task<Message>) {
         });
         // Live DB: go through granular ModelEvents even for test boot,
         // keeping the single Message::Model hub the reactivity source.
-        let (image_id, ev) = app.project.add_image_with_event("fake-white-page.png", width as f32, height as f32);
-        app.images.push(LoadedImage {
-            image_id,
-            decode: PageDecode {
-                thumb: Tier::Ready(page.clone()),
-                full: Tier::Ready(page),
-            },
-            inpaint: Vec::new(),
-        });
-        crate::app::handle_model_event(&mut app, ev);
-        if let Some(ev) = app.project.append_ocr_for_image_with_event(image_id, fake_ocr_entries()) {
-            crate::app::handle_model_event(&mut app, ev);
+        // P4: keep Home pristine and push a real Project tab for test-ui (was mutating Home).
+        {
+            let nid = crate::app::tab::TabId(app.next_tab_id);
+            app.next_tab_id += 1;
+            let mut project = scanlateit_model::Project::new();
+            let (image_id, ev) = project.add_image_with_event("fake-white-page.png", width as f32, height as f32);
+            let images = vec![LoadedImage {
+                image_id,
+                decode: PageDecode {
+                    thumb: Tier::Ready(page.clone()),
+                    full: Tier::Ready(page),
+                },
+                inpaint: Vec::new(),
+            }];
+            let mut tab = crate::app::tab::Tab::project_from_loaded(
+                nid,
+                "test-ui".to_string(),
+                project,
+                images,
+                std::path::PathBuf::from("test-ui.mmtl"),
+                None,
+            );
+            // project_from_loaded already set dirty=false; replay the add_image event for dirty flag
+            crate::app::handle_model_event(&mut tab, ev);
+            let image_id = tab.images[0].image_id;
+            if let Some(ev2) = tab.project.append_ocr_for_image_with_event(image_id, fake_ocr_entries()) {
+                crate::app::handle_model_event(&mut tab, ev2);
+            }
+            // Ensure the fake tab is dirty=false after boot (like a loaded project)
+            tab.dirty = false;
+            app.tabs.push(tab);
+            app.active = app.tabs.len() - 1;
         }
-        app.app_view = crate::app::AppView::Editor;
         #[cfg(all(feature = "test-ui", not(feature = "translation")))]
         {
             use std::collections::BTreeMap;
@@ -166,7 +185,7 @@ pub fn boot(frame: NativeFrame) -> (App, Task<Message>) {
             tx.sync_models();
             app.tx = tx;
         }
-        app.status = "TEST-UI build: fake white page with fake OCR entries and fake translation loaded."
+        app.active_tab_mut().status = "TEST-UI build: fake white page with fake OCR entries and fake translation loaded."
             .to_string();
     }
     let fonts_task =
