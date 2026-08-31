@@ -1804,7 +1804,16 @@ pub fn handle_auto_engine_ready_for(app: &mut App, tab_id: crate::app::tab::TabI
             app.tabs[idx].status = format!("Auto-inpaint engine failed: {e}");
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
             { app.tabs[idx].pipeline_active = false; }
-            Task::none()
+            // free queue weight (build failed) and promote
+            let kind = match backend {
+                InpaintBackend::Telea => crate::app::queue::EngineKind::InpaintTelea,
+                InpaintBackend::Lama => crate::app::queue::EngineKind::InpaintLama,
+                InpaintBackend::Aot => crate::app::queue::EngineKind::InpaintAot,
+            };
+            app.engines.queue.complete(tab_id, kind);
+            let promote = crate::app::queue::dispatch_pending(app);
+            crate::app::queue::refresh_queued_statuses(app);
+            return promote;
         }
     }
 }
@@ -1840,6 +1849,14 @@ pub fn handle_auto_finished_for(app: &mut App, tab_id: crate::app::tab::TabId, i
                 { app.tabs[idx].pipeline_active = false; }
                 let s = app.tabs[idx].status.clone();
                 app.tabs[idx].status = format!("Auto-inpaint done. {}", s);
+                // free queue weight for InpaintTelea (per-region batch uses telea weight)
+                app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintTelea);
+                // also try other backends if mistakenly reserved (e.g., mixed)
+                app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintLama);
+                app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintAot);
+                let promote = crate::app::queue::dispatch_pending(app);
+                crate::app::queue::refresh_queued_statuses(app);
+                return promote;
             } else {
                 let s = app.tabs[idx].status.clone();
                 app.tabs[idx].status = format!("Auto-inpaint: {} remaining. {}", pending, s);
@@ -1850,6 +1867,12 @@ pub fn handle_auto_finished_for(app: &mut App, tab_id: crate::app::tab::TabId, i
             if pending == 0 {
                 #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
                 { app.tabs[idx].pipeline_active = false; }
+                app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintTelea);
+                app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintLama);
+                app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintAot);
+                let promote = crate::app::queue::dispatch_pending(app);
+                crate::app::queue::refresh_queued_statuses(app);
+                return promote;
             }
         }
     }
@@ -1889,6 +1912,16 @@ pub fn handle_auto_batch_for(app: &mut App, tab_id: crate::app::tab::TabId, batc
         { app.tabs[idx].pipeline_active = false; }
         let s = app.tabs[idx].status.clone();
         app.tabs[idx].status = format!("Auto-inpaint batch done. {}", s);
+        // free whichever inpaint backend was running (lama/aot)
+        let mut freed = false;
+        if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintLama).is_some() { freed = true; }
+        if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintAot).is_some() { freed = true; }
+        if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintTelea).is_some() { freed = true; }
+        if freed {
+            let promote = crate::app::queue::dispatch_pending(app);
+            crate::app::queue::refresh_queued_statuses(app);
+            return promote;
+        }
     }
     Task::none()
 }
@@ -1928,6 +1961,32 @@ pub fn handle_inpaint_finished_for(app: &mut App, tab_id: crate::app::tab::TabId
 #[cfg(feature = "inpaint")]
 pub fn dispatch_auto_for(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<AutoInpaintJob>, backend: InpaintBackend) -> Task<Message> {
     if jobs.is_empty() { return Task::none(); }
+    // queue gate — weights 1/4/3 strict FIFO
+    {
+        use crate::app::queue::{AcquireResult, EngineKind};
+        let kind = match backend {
+            InpaintBackend::Telea => EngineKind::InpaintTelea,
+            InpaintBackend::Lama => EngineKind::InpaintLama,
+            InpaintBackend::Aot => EngineKind::InpaintAot,
+        };
+        let already_reserved = app.engines.queue.running_for(tab_id, kind).is_some();
+        if !already_reserved {
+            match app.engines.queue.try_acquire_or_enqueue(tab_id, kind) {
+                AcquireResult::Acquired(_) => {},
+                AcquireResult::Queued(_, pos) => {
+                    let idx_tmp = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none() };
+                    // store pending for later dispatch_pending
+                    match backend {
+                        InpaintBackend::Telea => app.tabs[idx_tmp].pending_auto_telea_jobs = Some(jobs),
+                        InpaintBackend::Lama => app.tabs[idx_tmp].pending_auto_lama_jobs = Some(jobs),
+                        InpaintBackend::Aot => app.tabs[idx_tmp].pending_auto_aot_jobs = Some(jobs),
+                    }
+                    app.tabs[idx_tmp].status = format!("Queued {} (pos {}, pool {}/{}) ...", kind.label(), pos, app.engines.queue.used_weight(), crate::app::queue::POOL_CAPACITY);
+                    return Task::none();
+                }
+            }
+        }
+    }
     let radius = scanlateit_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
     let pad = auto_pad_for(backend, radius);
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };

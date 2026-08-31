@@ -387,6 +387,27 @@ fn collect_jobs_for(app: &App, tab_id: crate::app::tab::TabId) -> Vec<(usize, En
 }
 #[cfg(feature = "styling")]
 pub fn classify_for(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Message> {
+    // queue gate — weight 2, strict FIFO
+    {
+        use crate::app::queue::{AcquireResult, EngineKind};
+        let already_reserved = app.engines.queue.running_for(tab_id, EngineKind::Style).is_some();
+        if !already_reserved {
+            let idx_tmp = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none()};
+            match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Style) {
+                AcquireResult::Acquired(_) => {},
+                AcquireResult::Queued(_, pos) => {
+                    app.tabs[idx_tmp].status = format!("Queued {} (pos {}, pool {}/{}) ...", EngineKind::Style.label(), pos, app.engines.queue.used_weight(), crate::app::queue::POOL_CAPACITY);
+                    // mark pipeline active if deferred chain expected
+                    let deferred = scanlateit_settings::get(|s| s.auto_inpaint) && cfg!(feature = "inpaint");
+                    if deferred {
+                        #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+                        { app.tabs[idx_tmp].pipeline_active = true; }
+                    }
+                    return Task::none();
+                }
+            }
+        }
+    }
     let deferred = scanlateit_settings::get(|s| s.auto_inpaint) && cfg!(feature = "inpaint");
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     let engine_opt = app.tabs[idx].styling.engine().cloned();
@@ -398,7 +419,7 @@ pub fn classify_for(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Messa
                 #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
                 { app.tabs[idx].pipeline_active = true; }
             }
-            app.tabs[idx].status = "Loading the styling model...".to_string();
+            app.tabs[idx].status = format!("Loading the styling model... pool {}/4", app.engines.queue.used_weight());
             Task::perform(async move { StylingEngine::build() }, move |res| Message::Tab(tab_id, crate::app::TabMessage::StylingEngineReady(res)))
         }
     }
@@ -491,13 +512,19 @@ pub fn handle_styling_ready_for(app: &mut App, tab_id: crate::app::tab::TabId, r
             app.tabs[idx].status = e.clone();
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
             { app.tabs[idx].pipeline_active = false; }
-            Task::none()
+            // free queue weight (build failed) and promote
+            app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Style);
+            let promote = crate::app::queue::dispatch_pending(app);
+            crate::app::queue::refresh_queued_statuses(app);
+            return promote;
         }
     }
 }
 #[cfg(feature = "styling")]
 pub fn handle_style_detected_for(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, id: EntryId, result: Result<EntryStyle, String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    // For single style detect (manual), free queue weight after completion
+    let is_queued_style = app.engines.queue.running_for(tab_id, crate::app::queue::EngineKind::Style).is_some();
     match result {
         Ok(style) => {
             if index < app.tabs[idx].images.len() {
@@ -508,6 +535,17 @@ pub fn handle_style_detected_for(app: &mut App, tab_id: crate::app::tab::TabId, 
             }
         }
         Err(e) => { app.tabs[idx].status = format!("Style detect failed for {}:{:?}: {}", index, id, e); }
+    }
+    if is_queued_style {
+        // Check if this was the last pending single? For single detect, we free now.
+        // For bulk pipeline, free is handled in pipeline handler's pending==0.
+        // Detect bulk by pipeline_style_pending >0 — don't free yet
+        if app.tabs[idx].pipeline_style_pending == 0 {
+            app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Style);
+            let promote = crate::app::queue::dispatch_pending(app);
+            crate::app::queue::refresh_queued_statuses(app);
+            return promote;
+        }
     }
     Task::none()
 }
@@ -523,8 +561,14 @@ pub fn handle_pipeline_style_detected_for(app: &mut App, tab_id: crate::app::tab
     app.tabs[idx].pipeline_style_results.push((index, id, result, quad, path));
     app.tabs[idx].pipeline_style_pending = app.tabs[idx].pipeline_style_pending.saturating_sub(1);
     if app.tabs[idx].pipeline_style_pending == 0 {
+        // style bulk done — free queue weight for Style
+        app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Style);
+        crate::app::queue::refresh_queued_statuses(app);
         let buffered = std::mem::take(&mut app.tabs[idx].pipeline_style_results);
-        return super::pipeline::dispatch_inpaint_for(app, tab_id, buffered);
+        // dispatch_inpaint_for will enqueue inpaint jobs via queue (strict FIFO)
+        let inpaint_task = super::pipeline::dispatch_inpaint_for(app, tab_id, buffered);
+        let promote = crate::app::queue::dispatch_pending(app);
+        return Task::batch([inpaint_task, promote]);
     }
     Task::none()
 }

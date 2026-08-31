@@ -12,11 +12,46 @@ pub fn start_segment_filter_for(app: &mut App, tab_id: crate::app::tab::TabId) -
     #[cfg(feature = "segment")]
     {
         let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none() };
+        // queue gate — weight 4, strict FIFO
+        {
+            use crate::app::queue::{AcquireResult, EngineKind};
+            // Only gate if not already running — if already running, we are in dispatch chain, so allow
+            let already_reserved = app.engines.queue.running_for(tab_id, EngineKind::Segment).is_some();
+            if !already_reserved {
+                // if this tab is already queued/running for segment, don't duplicate
+                if app.engines.queue.is_tab_queued(tab_id) || app.engines.queue.is_tab_running(tab_id) {
+                    // already queued, avoid duplicate enqueue
+                    // check if pending for this exact kind
+                    if app.engines.queue.pending_for_tab(tab_id).iter().any(|j| j.kind == EngineKind::Segment) || app.engines.queue.running_for(tab_id, EngineKind::Segment).is_some() {
+                        return Task::none();
+                    }
+                }
+                match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Segment) {
+                    AcquireResult::Acquired(_) => {
+                        // fall through to spawn
+                    }
+                    AcquireResult::Queued(_, pos) => {
+                        app.tabs[idx].segment_filtering = true;
+                        app.tabs[idx].status = format!(
+                            "Queued {} (pos {}, pool {}/{}) ...",
+                            EngineKind::Segment.label(),
+                            pos,
+                            app.engines.queue.used_weight(),
+                            crate::app::queue::POOL_CAPACITY
+                        );
+                        return Task::none();
+                    }
+                }
+            }
+        }
         let tab = &app.tabs[idx];
         if tab.images.is_empty() {
+            // release reservation if we acquired
+            app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Segment);
             return Task::none();
         }
         if !scanlateit_settings::get(|s| s.auto_sfx_filter) {
+            app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Segment);
             return Task::none();
         }
         match &app.engines.segment {
@@ -33,7 +68,10 @@ pub fn start_segment_filter_for(app: &mut App, tab_id: crate::app::tab::TabId) -
                     tab.project.visible_for(image_id).map(|e| (tab.project.view_quad(e).bounds(), e.id)).collect()
                 }).collect();
                 app.tabs[idx].segment_filtering = true;
-                app.tabs[idx].status = "Filtering SFX via segmentation...".to_string();
+                app.tabs[idx].status = format!(
+                    "Filtering SFX via segmentation... pool {}/4",
+                    app.engines.queue.used_weight()
+                );
                 return Task::perform(
                     async move {
                         let res = tokio::task::spawn_blocking(move || run_segment_filter_blocking(&engine, &dims, &paths, &ocr_boxes))
@@ -46,7 +84,10 @@ pub fn start_segment_filter_for(app: &mut App, tab_id: crate::app::tab::TabId) -
             }
             None => {
                 app.tabs[idx].segment_filtering = true;
-                app.tabs[idx].status = "Loading segmentation model...".to_string();
+                app.tabs[idx].status = format!(
+                    "Loading segmentation model... pool {}/4",
+                    app.engines.queue.used_weight()
+                );
                 return Task::perform(async move { SegmentEngine::build() }, move |res| Message::Tab(tab_id, crate::app::TabMessage::SegmentEngineReady(res)));
             }
         }
@@ -136,13 +177,43 @@ pub fn handle_engine_ready_for(app: &mut App, tab_id: crate::app::tab::TabId, re
             app.engines.segment = Some(engine.clone());
             let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none()};
             app.tabs[idx].segment_filtering = false;
-            start_segment_filter_for(app, tab_id)
+            // engine built while weight reserved — keep reservation, directly spawn filter without re-queue
+            // Temporarily clear running? No, keep reserved. Call internal spawn bypassing queue gate.
+            // To bypass gate, we temporarily mark as already reserved and call spawn logic that checks gate.
+            // Easier: directly spawn blocking without queue check since reservation already held.
+            let engine_clone = engine.clone();
+            let tab = &app.tabs[idx];
+            let dims: Vec<(u32, u32)> = tab.images.iter().map(|img| {
+                tab.project.image(img.image_id).map(|m| (m.width as u32, m.height as u32)).unwrap_or((0, 0))
+            }).collect();
+            let paths: Vec<String> = tab.images.iter().map(|img| {
+                tab.project.image(img.image_id).map(|m| m.path.clone()).unwrap_or_default()
+            }).collect();
+            let ocr_boxes: Vec<Vec<([f32; 4], EntryId)>> = tab.images.iter().map(|img| {
+                let image_id = img.image_id;
+                tab.project.visible_for(image_id).map(|e| (tab.project.view_quad(e).bounds(), e.id)).collect()
+            }).collect();
+            app.tabs[idx].segment_filtering = true;
+            app.tabs[idx].status = format!("Filtering SFX via segmentation... pool {}/4", app.engines.queue.used_weight());
+            return Task::perform(
+                async move {
+                    let res = tokio::task::spawn_blocking(move || run_segment_filter_blocking(&engine_clone, &dims, &paths, &ocr_boxes))
+                        .await
+                        .unwrap_or_else(|e| Err(format!("segment task cancelled: {e}")));
+                    res
+                },
+                move |res| Message::Tab(tab_id, crate::app::TabMessage::SegmentFiltered(res)),
+            );
         }
         Err(e) => {
             let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none()};
             app.tabs[idx].segment_filtering = false;
             app.tabs[idx].status = e.clone();
-            Task::none()
+            // free queue weight (build failed) and promote
+            app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Segment);
+            let promote = crate::app::queue::dispatch_pending(app);
+            crate::app::queue::refresh_queued_statuses(app);
+            return promote;
         }
     }
 }
@@ -162,12 +233,16 @@ pub fn handle_filtered_for(
 ) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none()};
     app.tabs[idx].segment_filtering = false;
+    // free queue weight for segment (success or failure)
+    app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Segment);
+    crate::app::queue::refresh_queued_statuses(app);
     let is_pipeline = {
         #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
         { app.tabs[idx].pipeline_active }
         #[cfg(not(all(feature = "styling", feature = "inpaint", feature = "segment")))]
         { false }
     };
+    let mut tasks: Vec<Task<Message>> = Vec::new();
     match result {
         Ok(to_delete) => {
             let n = to_delete.len();
@@ -194,7 +269,16 @@ pub fn handle_filtered_for(
                 if need_style_inpaint {
                     #[cfg(all(feature = "styling", feature = "inpaint"))]
                     {
-                        return super::styling::classify_for(app, tab_id);
+                        use crate::app::queue::{AcquireResult, EngineKind};
+                        match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Style) {
+                            AcquireResult::Acquired(_) => tasks.push(super::styling::classify_for(app, tab_id)),
+                            AcquireResult::Queued(_, pos) => {
+                                let used = app.engines.queue.used_weight();
+                                if let Some(t) = app.tab_by_id_mut(tab_id) {
+                                    t.status = format!("Queued {} (pos {}, pool {}/{}) ...", EngineKind::Style.label(), pos, used, crate::app::queue::POOL_CAPACITY);
+                                }
+                            }
+                        }
                     }
                 } else if need_inpaint_solo {
                     let eff = scanlateit_settings::get(|s| {
@@ -206,7 +290,22 @@ pub fn handle_filtered_for(
                     });
                     #[cfg(feature = "inpaint")]
                     {
-                        return super::inpaint::dispatch_auto_solo_for(app, tab_id, eff);
+                        use crate::app::queue::{AcquireResult, EngineKind};
+                        let kind = match eff {
+                            scanlateit_settings::AutoInpaintModel::Telea => EngineKind::InpaintTelea,
+                            scanlateit_settings::AutoInpaintModel::Lama => EngineKind::InpaintLama,
+                            scanlateit_settings::AutoInpaintModel::Aot => EngineKind::InpaintAot,
+                            scanlateit_settings::AutoInpaintModel::Mixed => EngineKind::InpaintTelea,
+                        };
+                        match app.engines.queue.try_acquire_or_enqueue(tab_id, kind) {
+                            AcquireResult::Acquired(_) => tasks.push(super::inpaint::dispatch_auto_solo_for(app, tab_id, eff)),
+                            AcquireResult::Queued(_, pos) => {
+                                let used = app.engines.queue.used_weight();
+                                if let Some(t) = app.tab_by_id_mut(tab_id) {
+                                    t.status = format!("Queued {} (pos {}, pool {}/{}) ...", kind.label(), pos, used, crate::app::queue::POOL_CAPACITY);
+                                }
+                            }
+                        }
                     }
                 } else {
                     #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
@@ -217,7 +316,16 @@ pub fn handle_filtered_for(
                     if need_style_only {
                         #[cfg(feature = "styling")]
                         {
-                            return super::styling::classify_for(app, tab_id);
+                            use crate::app::queue::{AcquireResult, EngineKind};
+                            match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Style) {
+                                AcquireResult::Acquired(_) => tasks.push(super::styling::classify_for(app, tab_id)),
+                                AcquireResult::Queued(_, pos) => {
+                                let used = app.engines.queue.used_weight();
+                                if let Some(t) = app.tab_by_id_mut(tab_id) {
+                                    t.status = format!("Queued {} (pos {}, pool {}/{}) ...", EngineKind::Style.label(), pos, used, crate::app::queue::POOL_CAPACITY);
+                                }
+                            }
+                            }
                         }
                     }
                 }
@@ -233,5 +341,7 @@ pub fn handle_filtered_for(
             }
         }
     }
-    Task::none()
+    // promote any pending that now fits
+    tasks.push(crate::app::queue::dispatch_pending(app));
+    if tasks.is_empty() { Task::none() } else { Task::batch(tasks) }
 }

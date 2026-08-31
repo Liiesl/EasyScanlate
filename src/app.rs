@@ -108,6 +108,7 @@ pub mod view;
 pub mod tab;
 pub mod tabs;
 pub mod confirm_close;
+pub mod queue;
 
 use layout::IMAGE_FILTERS;
 use tab::{AutoInpaintJob, EnginePool, Tab, TabId};
@@ -315,10 +316,21 @@ pub fn boot(frame: NativeFrame) -> (App, Task<Message>) {
     boot::boot(frame)
 }
 
-pub(crate) fn close_tab_immediate(app: &mut App, id: TabId) {
+pub(crate) fn close_tab_immediate(app: &mut App, id: TabId) -> Task<Message> {
     if let Some(idx) = app.tabs.iter().position(|t| t.id == id) {
         if app.tabs[idx].is_home() {
-            return;
+            return Task::none();
+        }
+        // cancel any queued/running jobs for this tab
+        app.engines.queue.cancel_pending_for_tab(id);
+        let freed = !app.engines.queue.cancel_running_for_tab(id).is_empty();
+        let promote = if freed {
+            crate::app::queue::dispatch_pending(app)
+        } else {
+            Task::none()
+        };
+        if freed {
+            crate::app::queue::refresh_queued_statuses(app);
         }
         app.tabs.remove(idx);
         if app.active >= app.tabs.len() {
@@ -332,7 +344,9 @@ pub(crate) fn close_tab_immediate(app: &mut App, id: TabId) {
         if app.pending_close == Some(id) {
             app.pending_close = None;
         }
+        return promote;
     }
+    Task::none()
 }
 
 pub(crate) fn handle_model_event(tab: &mut Tab, event: ModelEvent) {
@@ -635,7 +649,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 if app.tabs[idx].dirty {
                     app.pending_close = Some(id);
                 } else {
-                    close_tab_immediate(app, id);
+                    return close_tab_immediate(app, id);
                 }
             }
             Task::none()
@@ -703,8 +717,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 }
             } else {
                 // Don't Save
-                close_tab_immediate(app, id);
-                Task::none()
+                return close_tab_immediate(app, id);
             }
         }
         Message::Ui(UiEvent::TabCloseCancel) => {
@@ -717,6 +730,12 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             if let Some(dirty) = app.tabs.iter().find(|t| t.is_project() && t.id != keep && t.dirty).map(|t| t.id) {
                 app.pending_close = Some(dirty);
                 return Task::none();
+            }
+            // queue cleanup for removed tabs
+            let remove_ids: Vec<TabId> = app.tabs.iter().filter(|t| t.id != keep && t.is_project()).map(|t| t.id).collect();
+            for rid in &remove_ids {
+                app.engines.queue.cancel_pending_for_tab(*rid);
+                app.engines.queue.cancel_running_for_tab(*rid);
             }
             let keep_idx = app.tabs.iter().position(|t| t.id == keep);
             if let Some(kidx) = keep_idx {
@@ -733,17 +752,27 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     app.active = new_k;
                 }
             }
-            Task::none()
+            let promote = crate::app::queue::dispatch_pending(app);
+            crate::app::queue::refresh_queued_statuses(app);
+            return promote;
         }
         Message::Ui(UiEvent::TabCloseAll) => {
             if let Some(dirty) = app.tabs.iter().find(|t| t.is_project() && t.dirty).map(|t| t.id) {
                 app.pending_close = Some(dirty);
                 return Task::none();
             }
+            // queue cleanup for all project tabs
+            let remove_ids: Vec<TabId> = app.tabs.iter().filter(|t| t.is_project()).map(|t| t.id).collect();
+            for rid in &remove_ids {
+                app.engines.queue.cancel_pending_for_tab(*rid);
+                app.engines.queue.cancel_running_for_tab(*rid);
+            }
             app.tabs.retain(|t| t.is_home());
             app.active = 0;
             app.pending_close = None;
-            Task::none()
+            let promote = crate::app::queue::dispatch_pending(app);
+            crate::app::queue::refresh_queued_statuses(app);
+            return promote;
         }
         Message::Ui(UiEvent::TabNew) => {
             app.new_project = Some(NewProjectState {

@@ -10,7 +10,7 @@ fn applying_a_preset_seeds_working_style_and_entry() {
     app.active_tab_mut().selected = Some((0, id));
     app.active_tab_mut().style_working.bg_color = [1, 2, 3, 255];
     let _ = update(&mut app, Message::Ui(UiEvent::StylePresetApply(1)));
-    let preset = app.presets.get(1).expect("preset 1 seeded");
+    let preset = app.presets.get(1).expect("preset 1 seeded").clone();
     assert_eq!(app.active_tab().style_working, preset);
     assert_eq!(app.active_tab().project.entry_style(id), preset);
     assert_eq!(app.active_tab().style_bg_radius, preset.bg_radius.to_string());
@@ -24,7 +24,11 @@ fn applying_a_preset_without_selection_or_out_of_range_is_a_noop() {
     let _ = update(&mut app, Message::Ui(UiEvent::StylePresetApply(0)));
     assert_eq!(app.active_tab().style_working.bg_color, [1, 2, 3, 255]);
     let image_id = app.active_tab().images[0].image_id;
-    app.active_tab_mut().selected = Some((0, app.active_tab().project.ocr.visible_for(image_id).next().unwrap().id));
+    let style_id = {
+        let tab = app.active_tab();
+        tab.project.ocr.visible_for(image_id).next().unwrap().id
+    };
+    app.active_tab_mut().selected = Some((0, style_id));
     let _ = update(&mut app, Message::Ui(UiEvent::StylePresetApply(999)));
     assert_eq!(app.active_tab().style_working.bg_color, [1, 2, 3, 255]);
 }
@@ -34,7 +38,8 @@ fn applying_an_empty_preset_slot_is_a_noop() {
     let (mut app, id) = app_with_entry();
     app.active_tab_mut().selected = Some((0, id));
     app.active_tab_mut().style_working.bg_color = [1, 2, 3, 255];
-    app.active_tab_mut().project.set_entry_style(id, app.active_tab().style_working.clone());
+    let style_clone = app.active_tab().style_working.clone();
+    app.active_tab_mut().project.set_entry_style(id, style_clone);
     let _ = update(&mut app, Message::Ui(UiEvent::StylePresetApply(5)));
     assert_eq!(app.active_tab().style_working.bg_color, [1, 2, 3, 255]);
     assert_eq!(app.active_tab().project.entry_style(id).bg_color, [1, 2, 3, 255]);

@@ -90,6 +90,7 @@ pub struct EnginePool {
     pub styling: Option<StylingEngine>,
     #[cfg(feature = "segment")]
     pub segment: Option<SegmentEngine>,
+    pub queue: crate::app::queue::EngineQueue,
 }
 
 // ---------------------------------------------------------------------------
