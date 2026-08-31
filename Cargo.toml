@@ -57,12 +57,17 @@ rapidocr-core = { version = "0.2.2", default-features = false }
 # --features test-ui`) skips that crate entirely: no ort (ocr/inpaint/styling)
 # and no rig (translation) are compiled or linked. Disabled subsystems show a
 # "unavailable in this build" status instead of running.
-default = ["ocr", "inpaint", "styling", "translation", "segment"]
+default = ["ocr", "inpaint", "styling", "translation", "segment", "directml"]
 ocr = ["dep:scanlateit-ocr", "scanlateit-ui/ocr"]
 inpaint = ["dep:scanlateit-inpaint", "scanlateit-ui/inpaint"]
 styling = ["dep:scanlateit-styling", "scanlateit-ui/styling"]
 translation = ["dep:scanlateit-translation", "scanlateit-ui/translation"]
 segment = ["dep:scanlateit-segment", "scanlateit-ui/segment"]
+directml = [
+    "scanlateit-ocr/directml",
+    "scanlateit-segment/directml",
+    "scanlateit-inpaint/directml",
+]
 # Convenience aliases: UI-only iteration (fake white image + fake OCR entries
 # at boot, no ML backends), or exactly one real subsystem at a time.
 test-ui = []

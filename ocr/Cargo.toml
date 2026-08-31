@@ -3,6 +3,9 @@ name = "scanlateit-ocr"
 version.workspace = true
 edition.workspace = true
 
+[features]
+directml = ["rapidocr-core/directml"]
+
 [dependencies]
 scanlateit-model = { workspace = true }
 rapidocr-core = { workspace = true }

@@ -95,7 +95,7 @@ pub enum InpaintBackend {
     /// `lama-manga.onnx` file next to the executable.
     Lama,
     /// AOT-GAN ONNX model: faster + lower memory than LaMa, variable
-    /// resolution up to 1024 with pad=8, CPU-only.
+    /// resolution up to 1024 with pad=8, DirectML with CPU fallback.
     Aot,
 }
 

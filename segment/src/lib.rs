@@ -1,4 +1,5 @@
 //! Segmentation (panel / balloon / SFX) inference for manga-mimic grids.
+//! DirectML execution provider by default on Windows (feature `directml`), with CPU fallback.
 //!
 //! Wraps `yolo26s-seg.onnx` @1024 square (classes: frame, dialogue_text, balloon,
 //! onomatopoeia_text). After OCR finishes the app builds ratio-based grid
@@ -112,22 +113,59 @@ impl Engine {
                 alt.display()
             ));
         };
-        // Keep ARNs calm: like OCR we disable memory pattern (dynamic 1024) and CPU arena —
+        // Helper: CPU session (fallback). Keep ARNs calm: like OCR we disable memory pattern (dynamic 1024) and CPU arena —
         // otherwise each 1024 canvas triggers mmap arena grow/shrink sawtooth (+500 residual).
-        let session = Session::builder()
-            .map_err(|e| format!("ORT init failed: {e}"))?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| format!("ORT init failed: {e}"))?
-            .with_intra_threads(2)
-            .map_err(|e| format!("ORT init failed: {e}"))?
-            .with_memory_pattern(false)
-            .map_err(|e| format!("ORT init failed: {e}"))?
-            .with_execution_providers([ort::ep::CPU::default()
-                .with_arena_allocator(false)
-                .build()])
-            .map_err(|e| format!("ORT init failed: {e}"))?
-            .commit_from_file(&path)
-            .map_err(|e| format!("failed to load segmentation model {}: {e}", path.display()))?;
+        let build_cpu = || -> Result<Session, String> {
+            Session::builder()
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .with_optimization_level(GraphOptimizationLevel::Level3)
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .with_intra_threads(2)
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .with_memory_pattern(false)
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .with_execution_providers([ort::ep::CPU::default()
+                    .with_arena_allocator(false)
+                    .build()])
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .commit_from_file(&path)
+                .map_err(|e| format!("failed to load segmentation model {}: {e}", path.display()))
+        };
+
+        #[cfg(all(feature = "directml", target_os = "windows"))]
+        let build_directml = || -> Result<Session, String> {
+            Session::builder()
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .with_optimization_level(GraphOptimizationLevel::Level3)
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .with_intra_threads(2)
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .with_memory_pattern(false)
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .with_execution_providers([ort::ep::DirectML::default()
+                    .build()
+                    .error_on_failure()])
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .commit_from_file(&path)
+                .map_err(|e| format!("failed to load segmentation model {}: {e}", path.display()))
+        };
+
+        #[cfg(all(feature = "directml", target_os = "windows"))]
+        let session = match build_directml() {
+            Ok(s) => {
+                eprintln!("[segment] DirectML EP active for {}", path.display());
+                s
+            }
+            Err(e) => {
+                eprintln!(
+                    "[segment] DirectML EP init failed for {}: {e} – falling back to CPU",
+                    path.display()
+                );
+                build_cpu()?
+            }
+        };
+        #[cfg(any(not(feature = "directml"), not(target_os = "windows")))]
+        let session = build_cpu()?;
         Ok(Self(Arc::new(Mutex::new(session))))
     }
 

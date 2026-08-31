@@ -3,6 +3,9 @@ name = "scanlateit-segment"
 version.workspace = true
 edition.workspace = true
 
+[features]
+directml = ["ort/directml"]
+
 [dependencies]
 scanlateit-model = { workspace = true }
 image = { workspace = true }

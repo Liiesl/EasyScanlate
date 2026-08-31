@@ -1,11 +1,12 @@
-//! CPU image inpainting with three interchangeable backends: the pure-Rust
+//! Image inpainting with three interchangeable backends: the pure-Rust
 //! Telea algorithm from the [`inpaint`] crate (the default: no model, no
 //! download), the LaMa ONNX model (`lama-manga.onnx`, fixed 512) and the
 //! AOT-GAN ONNX model (`inpainting_aot.onnx`, variable resolution up to
-//! 1024, pad=8 — faster + lower memory than LaMa).
+//! 1024, pad=8 — faster + lower memory than LaMa). DirectML execution provider
+//! by default on Windows (feature `directml`), with CPU fallback.
 //!
 //! [`Engine`] owns the backend chosen at build time. The ONNX backends hold
-//! one shared inference session (CPU execution provider by design) and
+//! one shared inference session (DirectML by default, CPU fallback) and
 //! inpaint image regions one at a time; the Telea backend is stateless and
 //! rewrites masked pixels in place. All take the same job: an image path, a
 //! selected mask rectangle and the text-box quads inside it; the mask
@@ -75,41 +76,94 @@ impl fmt::Debug for Engine {
 }
 
 impl Engine {
-    /// Builds the engine for `backend`. The Telea backend is instant and
-    /// stateless; the ONNX backends load their model with a CPU-only session.
+    /// Builds the engine for `backend`. Telea is instant and stateless; the
+    /// ONNX backends load their model with DirectML on Windows (feature
+    /// `directml`) and fallback to CPU on failure.
     pub fn build(backend: InpaintBackend, radius: i32) -> Result<Self, String> {
+        // Helper to build a CPU session for a given model path.
+        let build_cpu = |path: &Path, label: &str| -> Result<Session, String> {
+            Session::builder()
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .with_optimization_level(GraphOptimizationLevel::Level3)
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .with_intra_threads(4)
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .with_execution_providers([ort::ep::CPU::default().build()])
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .commit_from_file(path)
+                .map_err(|e| {
+                    if label == "aot" {
+                        format!("failed to load AOT inpainting model {}: {e}. Place inpainting_aot.onnx (opset 18, inputs img [B,3,H,W] + mask [B,1,H,W]) from https://github.com/zyddnys/manga-image-translator or converted ONNX.", path.display())
+                    } else {
+                        format!("failed to load inpainting model {}: {e}", path.display())
+                    }
+                })
+        };
+        #[cfg(all(feature = "directml", target_os = "windows"))]
+        let build_directml = |path: &Path, label: &str| -> Result<Session, String> {
+            Session::builder()
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .with_optimization_level(GraphOptimizationLevel::Level3)
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .with_intra_threads(4)
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .with_execution_providers([ort::ep::DirectML::default()
+                    .build()
+                    .error_on_failure()])
+                .map_err(|e| format!("ORT init failed: {e}"))?
+                .commit_from_file(path)
+                .map_err(|e| {
+                    if label == "aot" {
+                        format!("failed to load AOT inpainting model {}: {e}. Place inpainting_aot.onnx (opset 18, inputs img [B,3,H,W] + mask [B,1,H,W]) from https://github.com/zyddnys/manga-image-translator or converted ONNX.", path.display())
+                    } else {
+                        format!("failed to load inpainting model {}: {e}", path.display())
+                    }
+                })
+        };
         let session = match backend {
             InpaintBackend::Telea => None,
             InpaintBackend::Lama => {
                 let path = Path::new(MODEL_DIR).join(MODEL_FILE);
-                let session = Session::builder()
-                    .map_err(|e| format!("ORT init failed: {e}"))?
-                    .with_optimization_level(GraphOptimizationLevel::Level3)
-                    .map_err(|e| format!("ORT init failed: {e}"))?
-                    .with_intra_threads(4)
-                    .map_err(|e| format!("ORT init failed: {e}"))?
-                    .with_execution_providers([ort::ep::CPU::default().build()])
-                    .map_err(|e| format!("ORT init failed: {e}"))?
-                    .commit_from_file(&path)
-                    .map_err(|e| {
-                        format!("failed to load inpainting model {}: {e}", path.display())
-                    })?;
+                #[cfg(all(feature = "directml", target_os = "windows"))]
+                let session = {
+                    match build_directml(&path, "lama") {
+                        Ok(s) => {
+                            eprintln!("[inpaint::lama] DirectML EP active for {}", path.display());
+                            s
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[inpaint::lama] DirectML EP init failed for {}: {e} – falling back to CPU",
+                                path.display()
+                            );
+                            build_cpu(&path, "lama")?
+                        }
+                    }
+                };
+                #[cfg(any(not(feature = "directml"), not(target_os = "windows")))]
+                let session = build_cpu(&path, "lama")?;
                 Some(Arc::new(Mutex::new(session)))
             }
             InpaintBackend::Aot => {
                 let path = Path::new(MODEL_DIR).join(MODEL_FILE_AOT);
-                let session = Session::builder()
-                    .map_err(|e| format!("ORT init failed: {e}"))?
-                    .with_optimization_level(GraphOptimizationLevel::Level3)
-                    .map_err(|e| format!("ORT init failed: {e}"))?
-                    .with_intra_threads(4)
-                    .map_err(|e| format!("ORT init failed: {e}"))?
-                    .with_execution_providers([ort::ep::CPU::default().build()])
-                    .map_err(|e| format!("ORT init failed: {e}"))?
-                    .commit_from_file(&path)
-                    .map_err(|e| {
-                        format!("failed to load AOT inpainting model {}: {e}. Place inpainting_aot.onnx (opset 18, inputs img [B,3,H,W] + mask [B,1,H,W]) from https://github.com/zyddnys/manga-image-translator or converted ONNX.", path.display())
-                    })?;
+                #[cfg(all(feature = "directml", target_os = "windows"))]
+                let session = {
+                    match build_directml(&path, "aot") {
+                        Ok(s) => {
+                            eprintln!("[inpaint::aot] DirectML EP active for {}", path.display());
+                            s
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[inpaint::aot] DirectML EP init failed for {}: {e} – falling back to CPU",
+                                path.display()
+                            );
+                            build_cpu(&path, "aot")?
+                        }
+                    }
+                };
+                #[cfg(any(not(feature = "directml"), not(target_os = "windows")))]
+                let session = build_cpu(&path, "aot")?;
                 Some(Arc::new(Mutex::new(session)))
             }
         };

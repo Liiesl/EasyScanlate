@@ -1,11 +1,12 @@
-//! CPU-only text style classification with the ONNX styling model
-//! (`text_styling_model.onnx`). Given a `160x64` RGB crop of a text region
-//! (from the ONNX Text Styling Classification project), the model predicts
-//! five binary style flags, the background type, and several colors in a
-//! single forward pass.
+//! Text style classification with the ONNX styling model
+//! (`text_styling_model.onnx`). CPU-only — the model uses ops incompatible
+//! with the DirectML execution provider. Given a `160x64` RGB crop of a text
+//! region (from the ONNX Text Styling Classification project), the model
+//! predicts five binary style flags, the background type, and several colors
+//! in a single forward pass.
 //!
-//! [`Engine`] holds one shared inference session (CPU execution provider by
-//! design), mirroring the inpainting crate's pattern. Callers pass an image
+//! [`Engine`] holds one shared inference session (CPU-only),
+//! mirroring the inpainting crate's pattern. Callers pass an image
 //! path plus an entry's [`Quad`]; the quad's bounding box is squished to the
 //! model's fixed `160x64` input (the model was trained on stretched crops, so
 //! no aspect-ratio letterboxing), normalized, and classified.
@@ -90,7 +91,7 @@ impl fmt::Debug for Engine {
 }
 
 impl Engine {
-    /// Loads the styling model with a CPU-only session.
+    /// Loads the styling model (CPU-only; incompatible with DirectML).
     pub fn build() -> Result<Self, String> {
         let path = Path::new(MODEL_DIR).join(MODEL_FILE);
         let session = Session::builder()

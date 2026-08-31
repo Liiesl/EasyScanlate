@@ -198,12 +198,22 @@ pub fn config_with(text_score: f32, max_side_len: u32) -> RapidOcrConfig {
         0.5
     };
     let max_side = max_side_len.max(1);
+    // DirectML by default when the `directml` feature is enabled on Windows; otherwise CPU.
+    // The underlying rapidocr-core session will eprintln and fallback to CPU if DirectML init fails.
+    #[cfg(all(feature = "directml", target_os = "windows"))]
+    let ep = rapidocr_core::config::ExecutionProvider::DirectMl;
+    #[cfg(any(not(feature = "directml"), not(target_os = "windows")))]
+    let ep = rapidocr_core::config::ExecutionProvider::Cpu;
+    let inference = InferenceOptions {
+        intra_threads: 4,
+        inter_threads: 1,
+        parallel_execution: false,
+        enable_cpu_mem_arena: false,
+        execution_provider: ep,
+    };
     RapidOcrConfig {
         pipeline: PipelineConfig::without_cls(),
-        inference: InferenceOptions {
-            intra_threads: 4,
-            ..Default::default()
-        },
+        inference,
         text_score,
         min_side_len: 30,
         max_side_len: max_side,
