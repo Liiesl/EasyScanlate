@@ -759,6 +759,42 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
             return Task::none();
         }
         let (backend, radius) = scanlateit_settings::get(|s| (s.inpaint_backend, s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1)));
+        // queue gate for background stitch (single inpaint)
+        {
+            use crate::app::queue::{AcquireResult, EngineKind};
+            let kind = match backend {
+                InpaintBackend::Telea => EngineKind::InpaintTelea,
+                InpaintBackend::Lama => EngineKind::InpaintLama,
+                InpaintBackend::Aot => EngineKind::InpaintAot,
+            };
+            let tab_id = app.active_tab().id;
+            let already_running = app.engines.queue.running_for(tab_id, kind).is_some();
+            let already_queued = app.engines.queue.pending_for_tab(tab_id).iter().any(|j| j.kind == kind);
+            if !already_running && !already_queued {
+                match app.engines.queue.try_acquire_or_enqueue(tab_id, kind) {
+                    AcquireResult::Acquired(_) => {},
+                    AcquireResult::Queued(_, pos) => {
+                        let used = app.engines.queue.used_weight();
+                        // store pending for later dispatch (use pending_background_stitch)
+                        let pad_tmp = auto_pad_for(backend, radius);
+                        let (prev_tmp, next_tmp) = neighbor_paths(app, index);
+                        let job_tmp = AutoInpaintJob { index, id, path: path.clone(), quad };
+                        app.active_tab_mut().pending_background_stitch = Some((job_tmp, pad_tmp, prev_tmp, next_tmp));
+                        app.active_tab_mut().status = format!(
+                            "Queued {} (pos {}, pool {}/{}) ...",
+                            kind.label(),
+                            pos,
+                            used,
+                            crate::app::queue::POOL_CAPACITY
+                        );
+                        return Task::none();
+                    }
+                }
+            } else if already_queued || already_running {
+                app.active_tab_mut().status = "Wait for current task to finish.".to_string();
+                return Task::none();
+            }
+        }
         let pad = auto_pad_for(backend, radius);
         let (prev, next) = neighbor_paths(app, index);
         let job = AutoInpaintJob { index, id, path: path.clone(), quad };
@@ -979,6 +1015,38 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
                 s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1),
             )
         });
+        // queue gate for repaint manual inpaint (single selection)
+        {
+            use crate::app::queue::{AcquireResult, EngineKind};
+            let kind = match backend {
+                scanlateit_settings::InpaintBackend::Telea => EngineKind::InpaintTelea,
+                scanlateit_settings::InpaintBackend::Lama => EngineKind::InpaintLama,
+                scanlateit_settings::InpaintBackend::Aot => EngineKind::InpaintAot,
+            };
+            let tab_id = app.active_tab().id;
+            let already_running = app.engines.queue.running_for(tab_id, kind).is_some();
+            let already_queued = app.engines.queue.pending_for_tab(tab_id).iter().any(|j| j.kind == kind);
+            if !already_running && !already_queued {
+                match app.engines.queue.try_acquire_or_enqueue(tab_id, kind) {
+                    AcquireResult::Acquired(_) => {},
+                    AcquireResult::Queued(_, pos) => {
+                        let used = app.engines.queue.used_weight();
+                        app.active_tab_mut().pending_manual_multi = Some(vec![(image_index, path.clone(), rect, quads.clone())]);
+                        app.active_tab_mut().status = format!(
+                            "Queued {} (pos {}, pool {}/{}) ...",
+                            kind.label(),
+                            pos,
+                            used,
+                            crate::app::queue::POOL_CAPACITY
+                        );
+                        return Task::none();
+                    }
+                }
+            } else if already_queued || already_running {
+                app.active_tab_mut().status = "Wait for current task to finish.".to_string();
+                return Task::none();
+            }
+        }
         let cached = app
             .engines
             .inpaint
@@ -1086,8 +1154,44 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
     eprintln!("[manual::inpaint] data sorted len={} idxs={:?} rects={:?}", data.len(), data.iter().map(|(idx,_,_,_)| *idx).collect::<Vec<_>>(), data.iter().map(|(_,_,r,_)| *r).collect::<Vec<_>>());
     let (backend, radius) = scanlateit_settings::get(|s| (s.inpaint_backend, s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1)));
     eprintln!("[manual::inpaint] backend={:?} radius={} cached_match={}", backend, radius, app.engines.inpaint.as_ref().map(|e| e.backend()==backend && e.radius()==radius).unwrap_or(false));
+    // queue gate — manual inpaint uses same backend weight/priority as auto
+    {
+        use crate::app::queue::{AcquireResult, EngineKind};
+        let kind = match backend {
+            InpaintBackend::Telea => EngineKind::InpaintTelea,
+            InpaintBackend::Lama => EngineKind::InpaintLama,
+            InpaintBackend::Aot => EngineKind::InpaintAot,
+        };
+        let tab_id = app.active_tab().id;
+        // Avoid duplicate queue if already running/queued for this tab+kind
+        let already_running = app.engines.queue.running_for(tab_id, kind).is_some();
+        let already_queued = app.engines.queue.pending_for_tab(tab_id).iter().any(|j| j.kind == kind);
+        if !already_running && !already_queued {
+            match app.engines.queue.try_acquire_or_enqueue(tab_id, kind) {
+                AcquireResult::Acquired(_) => {
+                    // weight reserved, proceed to engine/start
+                }
+                AcquireResult::Queued(_, pos) => {
+                    let used = app.engines.queue.used_weight();
+                    app.active_tab_mut().pending_manual_multi = Some(data);
+                    app.active_tab_mut().status = format!(
+                        "Queued {} (pos {}, pool {}/{}) ...",
+                        kind.label(),
+                        pos,
+                        used,
+                        crate::app::queue::POOL_CAPACITY
+                    );
+                    return Task::none();
+                }
+            }
+        } else if already_queued || already_running {
+            // duplicate submission while queued/running -> treat as busy
+            app.active_tab_mut().status = "Wait for current task to finish.".to_string();
+            return Task::none();
+        }
+    }
     let cached = app.engines.inpaint.clone().filter(|e| e.backend() == backend && e.radius() == radius);
-    // Store pending for engine build path
+    // Store pending for engine build path (weight already reserved via queue)
     if let Some(engine) = cached {
         eprintln!("[manual::inpaint] using cached engine -> start_inpaint_selection");
         return start_inpaint_selection(app, engine, data);
@@ -1766,7 +1870,17 @@ pub fn handle_inpaint_engine_ready_for(app: &mut App, tab_id: crate::app::tab::T
         Err(e) => {
             app.tabs[idx].pending_manual_multi = None;
             app.tabs[idx].pending_background_stitch = None;
-            app.tabs[idx].status = e;
+            app.tabs[idx].status = e.clone();
+            // free queue weight for manual inpaint (any backend) on build failure
+            let mut freed = false;
+            if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintTelea).is_some() { freed = true; }
+            if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintLama).is_some() { freed = true; }
+            if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintAot).is_some() { freed = true; }
+            if freed {
+                let promote = crate::app::queue::dispatch_pending(app);
+                crate::app::queue::refresh_queued_statuses(app);
+                return promote;
+            }
             Task::none()
         }
     }
@@ -1956,12 +2070,22 @@ pub fn handle_inpaint_finished_for(app: &mut App, tab_id: crate::app::tab::TabId
         }
         Err(e) => { app.tabs[idx].status = format!("Multi inpaint failed: {e}"); }
     }
+    // Free queue weight for manual inpaint (any backend) and promote via backfill
+    let mut freed = false;
+    if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintTelea).is_some() { freed = true; }
+    if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintLama).is_some() { freed = true; }
+    if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintAot).is_some() { freed = true; }
+    if freed {
+        let promote = crate::app::queue::dispatch_pending(app);
+        crate::app::queue::refresh_queued_statuses(app);
+        return promote;
+    }
     Task::none()
 }
 #[cfg(feature = "inpaint")]
 pub fn dispatch_auto_for(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<AutoInpaintJob>, backend: InpaintBackend) -> Task<Message> {
     if jobs.is_empty() { return Task::none(); }
-    // queue gate — weights 1/4/3 strict FIFO
+    // queue gate — weights 1/4/3 backfill + priority (cap 5)
     {
         use crate::app::queue::{AcquireResult, EngineKind};
         let kind = match backend {
@@ -2088,7 +2212,7 @@ pub fn dispatch_auto_solo_for(app: &mut App, tab_id: crate::app::tab::TabId, eff
     dispatch_auto_for(app, tab_id, jobs, backend)
 }
 #[cfg(feature = "inpaint")]
-fn start_inpaint_selection_for(app: &mut App, tab_id: crate::app::tab::TabId, engine: InpaintEngine, data: Vec<(usize, String, [f32;4], Vec<scanlateit_model::Quad>)>) -> Task<Message> {
+pub(crate) fn start_inpaint_selection_for(app: &mut App, tab_id: crate::app::tab::TabId, engine: InpaintEngine, data: Vec<(usize, String, [f32;4], Vec<scanlateit_model::Quad>)>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     app.tabs[idx].inpainting = true;
     app.tabs[idx].status = "inpainting...".to_string();
@@ -2110,7 +2234,7 @@ fn start_inpaint_selection_for(app: &mut App, tab_id: crate::app::tab::TabId, en
     )
 }
 #[cfg(feature = "inpaint")]
-fn start_background_stitch_for(app: &mut App, tab_id: crate::app::tab::TabId, engine: InpaintEngine, job: AutoInpaintJob, pad: f32, prev: Option<String>, next: Option<String>) -> Task<Message> {
+pub(crate) fn start_background_stitch_for(app: &mut App, tab_id: crate::app::tab::TabId, engine: InpaintEngine, job: AutoInpaintJob, pad: f32, prev: Option<String>, next: Option<String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     app.tabs[idx].inpainting = true;
     app.tabs[idx].status = "inpainting background (stitched)...".to_string();

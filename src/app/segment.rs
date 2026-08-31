@@ -12,7 +12,7 @@ pub fn start_segment_filter_for(app: &mut App, tab_id: crate::app::tab::TabId) -
     #[cfg(feature = "segment")]
     {
         let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none() };
-        // queue gate — weight 4, strict FIFO
+        // queue gate — weight 4, backfill + priority (cap 5)
         {
             use crate::app::queue::{AcquireResult, EngineKind};
             // Only gate if not already running — if already running, we are in dispatch chain, so allow
@@ -69,8 +69,9 @@ pub fn start_segment_filter_for(app: &mut App, tab_id: crate::app::tab::TabId) -
                 }).collect();
                 app.tabs[idx].segment_filtering = true;
                 app.tabs[idx].status = format!(
-                    "Filtering SFX via segmentation... pool {}/4",
-                    app.engines.queue.used_weight()
+                    "Filtering SFX via segmentation... pool {}/{}",
+                    app.engines.queue.used_weight(),
+                    crate::app::queue::POOL_CAPACITY
                 );
                 return Task::perform(
                     async move {
@@ -85,8 +86,9 @@ pub fn start_segment_filter_for(app: &mut App, tab_id: crate::app::tab::TabId) -
             None => {
                 app.tabs[idx].segment_filtering = true;
                 app.tabs[idx].status = format!(
-                    "Loading segmentation model... pool {}/4",
-                    app.engines.queue.used_weight()
+                    "Loading segmentation model... pool {}/{}",
+                    app.engines.queue.used_weight(),
+                    crate::app::queue::POOL_CAPACITY
                 );
                 return Task::perform(async move { SegmentEngine::build() }, move |res| Message::Tab(tab_id, crate::app::TabMessage::SegmentEngineReady(res)));
             }
@@ -194,7 +196,7 @@ pub fn handle_engine_ready_for(app: &mut App, tab_id: crate::app::tab::TabId, re
                 tab.project.visible_for(image_id).map(|e| (tab.project.view_quad(e).bounds(), e.id)).collect()
             }).collect();
             app.tabs[idx].segment_filtering = true;
-            app.tabs[idx].status = format!("Filtering SFX via segmentation... pool {}/4", app.engines.queue.used_weight());
+            app.tabs[idx].status = format!("Filtering SFX via segmentation... pool {}/{}", app.engines.queue.used_weight(), crate::app::queue::POOL_CAPACITY);
             return Task::perform(
                 async move {
                     let res = tokio::task::spawn_blocking(move || run_segment_filter_blocking(&engine_clone, &dims, &paths, &ocr_boxes))

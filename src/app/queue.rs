@@ -1,6 +1,6 @@
-//! Weighted FIFO queue for the engine pool.
+//! Weighted backfill queue with priority for the engine pool.
 //!
-//! Potato-PC guarantee: total concurrent engine weight ≤ 4.
+//! Potato-PC guarantee: total concurrent engine weight ≤ 5.
 //! Spec weights (hard-coded, not settings):
 //!   OCR            = 4
 //!   SEGMENT        = 4
@@ -9,17 +9,23 @@
 //!   INPAINT lama   = 4
 //!   INPAINT aot    = 3
 //!
-//! Queue is strict FIFO: head blocks if its weight doesn't fit, even if a
-//! smaller job behind would fit (backfill disabled by spec). Full pipeline
-//! is decomposed into 4 sequential queued jobs, pushed one-by-one as each
-//! stage finishes — preserving global FIFO interleaving across tabs.
+//! Spec priorities (lower = run sooner, based on expected time; time-efficient):
+//!   INPAINT telea (0) < STYLE auto-detect (1) < SEGMENT (2) < OCR (3) < INPAINT aot (4) < INPAINT lama (5)
+//! Weight caps concurrency, priority decides dispatch order.
+//!
+//! Queue is FIFO insertion + priority backfill scan: insertion order is FIFO
+//! (ties broken by FIFO), but dispatch scans pending in priority order and
+//! picks the first job whose weight fits `remaining`. Head does NOT block
+//! lighter higher-priority jobs behind it (backfill enabled). Full/partial
+//! pipeline strict ordering is orchestrated outside the queue (segment ->
+//! style -> inpaint chain pushed one-by-one) so queue can reorder freely.
 
 use std::collections::VecDeque;
 
 use super::tab::TabId;
 use iced::Task;
 
-pub const POOL_CAPACITY: u8 = 4;
+pub const POOL_CAPACITY: u8 = 5;
 
 /// Engine kind that occupies the pool. Translation is excluded (network).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,6 +47,18 @@ impl EngineKind {
             EngineKind::InpaintTelea => 1,
             EngineKind::InpaintLama => 4,
             EngineKind::InpaintAot => 3,
+        }
+    }
+
+    /// Lower value = higher priority (run sooner). SJF-inspired.
+    pub fn priority(self) -> u8 {
+        match self {
+            EngineKind::InpaintTelea => 0,
+            EngineKind::Style => 1,
+            EngineKind::Segment => 2,
+            EngineKind::Ocr => 3,
+            EngineKind::InpaintAot => 4,
+            EngineKind::InpaintLama => 5,
         }
     }
 
@@ -67,6 +85,9 @@ pub struct QueuedJob {
 impl QueuedJob {
     pub fn weight(&self) -> u8 {
         self.kind.weight()
+    }
+    pub fn priority(&self) -> u8 {
+        self.kind.priority()
     }
 }
 
@@ -144,31 +165,57 @@ impl EngineQueue {
             .map(|p| p + 1)
     }
 
-    /// Check strict-FIFO dispatchability: head weight fits in remaining capacity.
+    /// True if ANY pending job fits in remaining capacity (backfill).
     pub fn can_dispatch(&self) -> bool {
-        if let Some(head) = self.pending.front() {
-            head.weight() <= self.remaining()
-        } else {
-            false
-        }
+        let rem = self.remaining();
+        self.pending.iter().any(|j| j.weight() <= rem)
     }
 
-    /// Try to pop the head if it fits. Marks it running and reserves weight.
-    /// Returns the dispatched job (now running).
+    /// Backfill pop: scan pending in priority order (lower priority value first,
+    /// FIFO tie-break via id) and pop the first job whose weight fits.
+    /// Marks it running and reserves weight. Returns the dispatched job.
     pub fn try_pop_dispatchable(&mut self) -> Option<QueuedJob> {
-        let fits = if let Some(head) = self.pending.front() {
-            head.weight() <= self.remaining()
-        } else {
-            false
-        };
-        if fits {
-            let job = self.pending.pop_front().unwrap();
+        let rem = self.remaining();
+        if self.pending.is_empty() || rem == 0 {
+            // still need to check if any fits; empty handled, but keep scan for priority
+        }
+        // Find best candidate index by priority then FIFO (id)
+        let mut best_idx: Option<usize> = None;
+        let mut best_key: Option<(u8, u64)> = None;
+        for (idx, job) in self.pending.iter().enumerate() {
+            if job.weight() <= rem {
+                let key = (job.priority(), job.id);
+                if best_key.is_none() || key < best_key.unwrap() {
+                    best_key = Some(key);
+                    best_idx = Some(idx);
+                }
+            }
+        }
+        if let Some(idx) = best_idx {
+            let job = self.pending.remove(idx).unwrap();
             self.used = self.used.saturating_add(job.weight());
             self.running.push(job.clone());
             Some(job)
         } else {
             None
         }
+    }
+
+    /// Peek the best dispatchable job (priority scan) without mutating.
+    pub fn peek_dispatchable(&self) -> Option<QueuedJob> {
+        let rem = self.remaining();
+        let mut best: Option<&QueuedJob> = None;
+        let mut best_key: Option<(u8, u64)> = None;
+        for job in self.pending.iter() {
+            if job.weight() <= rem {
+                let key = (job.priority(), job.id);
+                if best_key.is_none() || key < best_key.unwrap() {
+                    best_key = Some(key);
+                    best = Some(job);
+                }
+            }
+        }
+        best.cloned()
     }
 
     /// Release a running job by `id`. Returns the job if found.
@@ -253,25 +300,48 @@ impl EngineQueue {
             .collect()
     }
 
-    /// Strict-FIFO acquire: if pending empty and capacity fits, reserve immediately
-    /// and return Acquired; otherwise enqueue and return Queued with position.
+    /// Backfill acquire: FIFO insertion + priority scan.
+    /// If `kind` fits in `remaining` it is dispatched immediately via backfill
+    /// (even if pending not empty), otherwise it is enqueued FIFO and returns
+    /// Queued with FIFO position. Weight is reserved on Acquired.
     pub fn try_acquire_or_enqueue(&mut self, tab_id: TabId, kind: EngineKind) -> AcquireResult {
         let w = kind.weight();
-        if self.pending.is_empty() && self.used + w <= POOL_CAPACITY {
-            let job = QueuedJob {
-                id: self.next_id,
-                tab_id,
-                kind,
-            };
-            self.next_id += 1;
-            self.used = self.used.saturating_add(w);
-            self.running.push(job.clone());
-            AcquireResult::Acquired(job)
-        } else {
-            let job = self.enqueue(tab_id, kind);
-            let pos = self.position(job.id).unwrap_or(self.pending_len());
-            AcquireResult::Queued(job, pos)
+        if w <= self.remaining() {
+            // Check if any pending job would be preferred by priority scan and also fits.
+            // Pending is FIFO, dispatch picks best priority fitting. If there exists a
+            // pending fitting job with higher priority (lower value) than `kind`,
+            // we should not starve it by acquiring new job immediately.
+            // So we enqueue tentatively and see who would be picked, but to avoid
+            // extra allocation we just scan pending.
+            let mut best_pending_key: Option<(u8, u64)> = None;
+            let rem = self.remaining();
+            for job in self.pending.iter() {
+                if job.weight() <= rem {
+                    let key = (job.priority(), job.id);
+                    if best_pending_key.is_none() || key < best_pending_key.unwrap() {
+                        best_pending_key = Some(key);
+                    }
+                }
+            }
+            let new_key = (kind.priority(), self.next_id);
+            // If no pending fitting job, or new job has higher priority (lower key), acquire directly.
+            // Otherwise enqueue FIFO and let the higher-priority pending be dispatched via dispatch_pending.
+            if best_pending_key.is_none() || new_key < best_pending_key.unwrap() {
+                let job = QueuedJob {
+                    id: self.next_id,
+                    tab_id,
+                    kind,
+                };
+                self.next_id += 1;
+                self.used = self.used.saturating_add(w);
+                self.running.push(job.clone());
+                return AcquireResult::Acquired(job);
+            }
+            // A pending higher-priority fitting job exists: must enqueue new job FIFO
         }
+        let job = self.enqueue(tab_id, kind);
+        let pos = self.position(job.id).unwrap_or(self.pending_len());
+        AcquireResult::Queued(job, pos)
     }
 
     /// Release and then report remaining capacity for UI.
@@ -313,19 +383,17 @@ pub fn refresh_queued_statuses(app: &mut crate::app::App) {
     }
 }
 
-/// Try to dispatch as many pending jobs as weight allows.
-/// Called after enqueue or after a job completes. Spawns the actual
-/// engine work for each dispatched job (build + run) while weight remains
-/// reserved until completion handlers free it.
+/// Try to dispatch as many pending jobs as weight allows using backfill
+/// priority scan (FIFO insertion, priority dispatch). Called after enqueue
+/// or after a job completes. Spawns the actual engine work for each
+/// dispatched job while weight remains reserved until completion.
 pub fn dispatch_pending(app: &mut crate::app::App) -> Task<crate::app::Message> {
     let mut tasks: Vec<Task<crate::app::Message>> = Vec::new();
     loop {
-        let head = { app.engines.queue.pending.front().cloned() };
-        let Some(head) = head else { break };
-        if head.weight() > app.engines.queue.remaining() {
-            break;
-        }
-        // reserve
+        // Find best fitting pending job in priority order; break if none fits.
+        let candidate = { app.engines.queue.peek_dispatchable() };
+        let Some(_) = candidate else { break };
+        // reserve via priority pop
         let job = app.engines.queue.try_pop_dispatchable().unwrap();
         let idx_opt = app.tabs.iter().position(|t| t.id == job.tab_id);
         if idx_opt.is_none() {
@@ -367,7 +435,27 @@ pub fn dispatch_pending(app: &mut crate::app::App) -> Task<crate::app::Message> 
 
 #[cfg(feature = "ocr")]
 fn dispatch_ocr(app: &mut crate::app::App, tab_id: super::tab::TabId) -> Task<crate::app::Message> {
-    // if pipeline already cached, start stream; else build it (weight already reserved)
+    // Manual OCR has priority if pending_manual_multi_ocr exists (FIFO insertion + priority scan dispatched this job)
+    let idx_opt = app.tabs.iter().position(|t| t.id == tab_id);
+    if let Some(idx) = idx_opt {
+        if app.tabs[idx].pending_manual_multi_ocr.is_some() {
+            let data = app.tabs[idx].pending_manual_multi_ocr.take().unwrap();
+            let cached = app.engines.manual_ocr.clone();
+            if let Some(engine) = cached {
+                return crate::app::ocr::start_manual_ocr_selection_for(app, tab_id, data, engine);
+            } else {
+                let cfg = scanlateit_settings::get(|s| scanlateit_ocr::config_with(0.0, s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000)));
+                app.tabs[idx].pending_manual_multi_ocr = Some(data);
+                app.tabs[idx].status = "Loading OCR engine for manual OCR…".to_string();
+                let tid = tab_id;
+                return Task::perform(
+                    async move { scanlateit_ocr::Engine::build_with_config(cfg) },
+                    move |res| crate::app::Message::Tab(tid, crate::app::TabMessage::ManualOcrEngineReady(res)),
+                );
+            }
+        }
+    }
+    // otherwise pipeline OCR
     if app.engines.pipeline.is_some() {
         return crate::app::ocr::maybe_start_ocr_for(app, tab_id);
     }
@@ -433,11 +521,51 @@ fn dispatch_inpaint(
             }
             return crate::app::inpaint::dispatch_auto_for(app, tab_id, jobs, backend);
         }
-        // Fallback: if no bulk pending, maybe it's a manual inpaint (pending_manual_multi)
+        // Fallback: manual inpaint queued via InpaintTelea/Lama/Aot kind
         if app.tabs[idx].pending_manual_multi.is_some() {
-            // manual inpaint dispatch is handled via manual queue kind, but we map telea here
-            // For now, no-op; manual jobs are enqueued as InpaintTelea etc via manual handler
-            return Task::none();
+            let data = app.tabs[idx].pending_manual_multi.take().unwrap();
+            // Need to dispatch manual inpaint now that weight is reserved (queue already popped to running)
+            // Check cached engine for this backend; if not cached, build it (weight remains reserved)
+            let radius = scanlateit_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
+            let cached = app.engines.inpaint.clone().filter(|e| e.backend() == backend && e.radius() == radius);
+            if let Some(engine) = cached {
+                // use helper that takes tab_id-aware start
+                return crate::app::inpaint::start_inpaint_selection_for(app, tab_id, engine, data);
+            } else {
+                // store back for engine-ready path and build
+                app.tabs[idx].pending_manual_multi = Some(data);
+                app.tabs[idx].status = match backend {
+                    scanlateit_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
+                    scanlateit_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
+                    scanlateit_settings::InpaintBackend::Telea => "Inpainting...".to_string(),
+                };
+                let tid = tab_id;
+                return Task::perform(
+                    async move { scanlateit_inpaint::Engine::build(backend, radius) },
+                    move |res| crate::app::Message::Tab(tid, crate::app::TabMessage::InpaintEngineReady(res)),
+                );
+            }
+        }
+        // Also handle background stitch pending (single inpaint queued)
+        if app.tabs[idx].pending_background_stitch.is_some() {
+            let (job, pad, prev, next) = app.tabs[idx].pending_background_stitch.take().unwrap();
+            let radius = scanlateit_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
+            let cached = app.engines.inpaint.clone().filter(|e| e.backend() == backend && e.radius() == radius);
+            if let Some(engine) = cached {
+                return crate::app::inpaint::start_background_stitch_for(app, tab_id, engine, job, pad, prev, next);
+            } else {
+                app.tabs[idx].pending_background_stitch = Some((job, pad, prev, next));
+                app.tabs[idx].status = match backend {
+                    scanlateit_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
+                    scanlateit_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
+                    scanlateit_settings::InpaintBackend::Telea => "Inpainting background...".to_string(),
+                };
+                let tid = tab_id;
+                return Task::perform(
+                    async move { scanlateit_inpaint::Engine::build(backend, radius) },
+                    move |res| crate::app::Message::Tab(tid, crate::app::TabMessage::InpaintEngineReady(res)),
+                );
+            }
         }
         return Task::none();
     }
@@ -467,85 +595,223 @@ mod tests {
     }
 
     #[test]
-    fn capacity_is_hard_4() {
-        assert_eq!(POOL_CAPACITY, 4);
+    fn priorities_match_spec() {
+        assert_eq!(EngineKind::InpaintTelea.priority(), 0);
+        assert_eq!(EngineKind::Style.priority(), 1);
+        assert_eq!(EngineKind::Segment.priority(), 2);
+        assert_eq!(EngineKind::Ocr.priority(), 3);
+        assert_eq!(EngineKind::InpaintAot.priority(), 4);
+        assert_eq!(EngineKind::InpaintLama.priority(), 5);
     }
 
     #[test]
-    fn fifo_strict_blocks_head_even_if_smaller_behind_fits() {
+    fn capacity_is_hard_4() {
+        assert_eq!(POOL_CAPACITY, 5);
+    }
+
+    #[test]
+    fn backfill_telea_behind_lama_when_capacity_allows() {
         let mut q = EngineQueue::new();
-        // enqueue OCR w4 then telea w1
-        let ocr = q.enqueue(tid(1), EngineKind::Ocr);
+        // Simulate used=3 (e.g. Style w2 + Telea w1 already running)
+        // We do this by directly dispatching then enqueueing more.
+        // Simpler: enqueue Lama w4 first (prio5), then Telea w1 (prio0), with used=2.
+        let s = q.enqueue(tid(10), EngineKind::Style); // w2
+        let d = q.try_pop_dispatchable().unwrap();
+        assert_eq!(d.id, s.id);
+        assert_eq!(q.used_weight(), 2);
+        // Now pending: Lama w4 (does not fit 2+4>4), Telea w1 (fits 2+1<=4)
+        // FIFO insertion order: lama first, telea second
+        let lama = q.enqueue(tid(1), EngineKind::InpaintLama);
         let telea = q.enqueue(tid(2), EngineKind::InpaintTelea);
         assert_eq!(q.pending_len(), 2);
-        // dispatch OCR fits (0+4<=4)
-        let d1 = q.try_pop_dispatchable().unwrap();
-        assert_eq!(d1.id, ocr.id);
-        assert_eq!(q.used_weight(), 4);
-        // head now telea w1, but 4+1>4 so cannot dispatch -> strict FIFO blocks
-        assert!(q.try_pop_dispatchable().is_none());
-        assert_eq!(q.position(telea.id), Some(1));
-        // free OCR
-        q.complete_by_id(ocr.id);
-        assert_eq!(q.used_weight(), 0);
-        // now telea dispatches
+        // Backfill should pick telea (prio0) before lama (prio5) even though lama arrived first
         let d2 = q.try_pop_dispatchable().unwrap();
-        assert_eq!(d2.id, telea.id);
+        assert_eq!(d2.id, telea.id, "backfill must prioritize telea over lama");
+        assert_eq!(q.used_weight(), 3);
+        // lama still pending, now 3+4>4 cannot dispatch
+        assert!(q.try_pop_dispatchable().is_none());
+        assert_eq!(q.position(lama.id), Some(1));
+        assert_eq!(q.position(telea.id), None); // already running
+        q.complete_by_id(telea.id);
+        assert_eq!(q.used_weight(), 2);
+        // lama still doesn't fit 2+4>4
+        assert!(q.try_pop_dispatchable().is_none());
+        q.complete_by_id(s.id);
+        assert_eq!(q.used_weight(), 0);
+        let d3 = q.try_pop_dispatchable().unwrap();
+        assert_eq!(d3.id, lama.id);
     }
 
     #[test]
-    fn weight_packing_style_plus_telea() {
+    fn priority_scan_telea_before_style_before_segment() {
         let mut q = EngineQueue::new();
-        let s1 = q.enqueue(tid(1), EngineKind::Style); // w2
-        let s2 = q.enqueue(tid(2), EngineKind::Style); // w2
-        let t1 = q.enqueue(tid(3), EngineKind::InpaintTelea); // w1
-        // 2 dispatches
-        assert!(q.try_pop_dispatchable().is_some()); // s1 -> used 2
-        assert_eq!(q.used_weight(), 2);
-        // s2 head w2 fits 2+2<=4
-        assert!(q.try_pop_dispatchable().is_some()); // s2 -> used 4
-        assert_eq!(q.used_weight(), 4);
-        // t1 head w1 blocked (4+1>4)
+        // Enqueue in reverse priority order to ensure scan reorders
+        let lama = q.enqueue(tid(1), EngineKind::InpaintLama); // 5
+        let ocr = q.enqueue(tid(3), EngineKind::Ocr); // 3
+        let seg = q.enqueue(tid(4), EngineKind::Segment); // 2
+        let style = q.enqueue(tid(5), EngineKind::Style); // 1
+        let telea = q.enqueue(tid(6), EngineKind::InpaintTelea); // 0
+        assert_eq!(q.pending_len(), 5);
+        // With used=0, first dispatch should be telea (prio0)
+        let d1 = q.try_pop_dispatchable().unwrap();
+        assert_eq!(d1.id, telea.id);
+        assert_eq!(q.used_weight(), 1);
+        // Next best fitting is style w2 (1+2=3 fits), next after that would be lama? No lama w4 would be 1+2+4>5, seg w4 also > etc.
+        let d2 = q.try_pop_dispatchable().unwrap();
+        assert_eq!(d2.id, style.id);
+        assert_eq!(q.used_weight(), 3);
+        // remaining 2, only w2 or w1 would fit but remaining pending are w4 -> none
         assert!(q.try_pop_dispatchable().is_none());
+        // Free telea
+        q.complete_by_id(telea.id);
+        assert_eq!(q.used_weight(), 2);
+        // Now remaining 3, but pending are w4 (seg/lama/ocr) -> none fits (2+4>5)
+        assert!(q.try_pop_dispatchable().is_none());
+        q.complete_by_id(style.id);
+        assert_eq!(q.used_weight(), 0);
+        // Now first should be seg prio2 (before ocr)
+        let d3 = q.try_pop_dispatchable().unwrap();
+        assert_eq!(d3.id, seg.id);
+        assert_eq!(d3.kind, EngineKind::Segment);
+        let _ = (lama, ocr);
+    }
+
+    #[test]
+    fn fifo_tie_break_within_same_priority() {
+        let mut q = EngineQueue::new();
+        let t1 = q.enqueue(tid(1), EngineKind::InpaintTelea);
+        let t2 = q.enqueue(tid(2), EngineKind::InpaintTelea);
+        let t3 = q.enqueue(tid(3), EngineKind::InpaintTelea);
+        // All same prio0, should dispatch FIFO
+        let d1 = q.try_pop_dispatchable().unwrap();
+        assert_eq!(d1.id, t1.id);
+        let d2 = q.try_pop_dispatchable().unwrap();
+        assert_eq!(d2.id, t2.id);
+        let d3 = q.try_pop_dispatchable().unwrap();
+        assert_eq!(d3.id, t3.id);
+    }
+
+    #[test]
+    fn weight_packing_with_priority() {
+        let mut q = EngineQueue::new();
+        // Enqueue 2 styles w2 and one telea w1 in FIFO order
+        // Pending [Style, Style, Telea] -> priority scan picks Telea first
+        // With capacity 5, all three fit: 1+2+2=5
+        let s1 = q.enqueue(tid(1), EngineKind::Style); // w2 prio1
+        let s2 = q.enqueue(tid(2), EngineKind::Style); // w2 prio1
+        let t1 = q.enqueue(tid(3), EngineKind::InpaintTelea); // w1 prio0
+        let d1 = q.try_pop_dispatchable().unwrap();
+        assert_eq!(d1.id, t1.id, "telea prio0 should go first");
+        assert_eq!(q.used_weight(), 1);
+        let d2 = q.try_pop_dispatchable().unwrap();
+        assert_eq!(d2.id, s1.id, "style FIFO tie break s1 before s2");
+        assert_eq!(q.used_weight(), 3);
+        // remaining 2, s2 w2 fits 3+2=5
+        let d3 = q.try_pop_dispatchable().unwrap();
+        assert_eq!(d3.id, s2.id);
+        assert_eq!(q.used_weight(), 5);
+        assert!(q.try_pop_dispatchable().is_none());
+        q.complete_by_id(t1.id);
+        assert_eq!(q.used_weight(), 4);
         q.complete_by_id(s1.id);
         assert_eq!(q.used_weight(), 2);
-        // t1 now head? Actually order: pending [t1]; s2 still running. t1 w1 fits 2+1<=4
-        assert!(q.try_pop_dispatchable().is_some());
-        assert_eq!(q.used_weight(), 3);
         let _ = s2;
-        let _ = t1;
     }
 
     #[test]
     fn four_telea_fill_capacity() {
         let mut q = EngineQueue::new();
         let mut ids = vec![];
-        for i in 0..5 {
+        for i in 0..6 {
             ids.push(q.enqueue(tid(i), EngineKind::InpaintTelea));
         }
-        for _ in 0..4 {
+        for _ in 0..5 {
             assert!(q.try_pop_dispatchable().is_some());
         }
-        assert_eq!(q.used_weight(), 4);
-        // 5th blocked
+        assert_eq!(q.used_weight(), 5);
+        // 6th blocked (remaining 0)
         assert!(q.try_pop_dispatchable().is_none());
         assert_eq!(q.pending_len(), 1);
         q.complete_by_id(ids[0].id);
         assert!(q.try_pop_dispatchable().is_some());
-        assert_eq!(q.used_weight(), 4);
+        assert_eq!(q.used_weight(), 5);
     }
 
     #[test]
-    fn lama_alone_blocks() {
+    fn lama_vs_style_priority() {
         let mut q = EngineQueue::new();
-        let lama = q.enqueue(tid(1), EngineKind::InpaintLama);
-        let style = q.enqueue(tid(2), EngineKind::Style);
-        q.try_pop_dispatchable().unwrap(); // lama -> used 4
+        let lama = q.enqueue(tid(1), EngineKind::InpaintLama); // prio5
+        let style = q.enqueue(tid(2), EngineKind::Style); // prio1
+        // Used 0, style should be picked before lama despite FIFO
+        let d1 = q.try_pop_dispatchable().unwrap();
+        assert_eq!(d1.id, style.id);
+        assert_eq!(q.used_weight(), 2);
+        // lama w4 doesn't fit 2+4>5? actually 2+4=6>5 blocked
         assert!(q.try_pop_dispatchable().is_none());
-        q.complete_by_id(lama.id);
-        assert!(q.try_pop_dispatchable().is_some());
-        assert_eq!(q.running_for(tid(2), EngineKind::Style).is_some(), true);
-        let _ = style;
+        q.complete_by_id(style.id);
+        let d2 = q.try_pop_dispatchable().unwrap();
+        assert_eq!(d2.id, lama.id);
+        assert_eq!(q.running_for(tid(1), EngineKind::InpaintLama).is_some(), true);
+        let _ = lama;
+    }
+
+    #[test]
+    fn try_acquire_backfill_immediate() {
+        let mut q = EngineQueue::new();
+        // Acquire a Style w2 directly
+        let a = q.try_acquire_or_enqueue(tid(1), EngineKind::Style);
+        assert!(matches!(a, AcquireResult::Acquired(_)));
+        assert_eq!(q.used_weight(), 2);
+        // Enqueue Lama w4 (doesn't fit 2+4>5? 6>5) -> Queued
+        let lama_res = q.try_acquire_or_enqueue(tid(2), EngineKind::InpaintLama);
+        assert!(matches!(lama_res, AcquireResult::Queued(_, _)));
+        assert_eq!(q.pending_len(), 1);
+        // Try to acquire Telea w1 (fits 2+1<=5) -> should backfill Acquired even though pending not empty
+        let telea_res = q.try_acquire_or_enqueue(tid(3), EngineKind::InpaintTelea);
+        assert!(matches!(telea_res, AcquireResult::Acquired(_)), "telea should backfill when lama head blocked");
+        assert_eq!(q.used_weight(), 3);
+        assert_eq!(q.pending_len(), 1); // lama still pending
+        // Next Telea w1 fits 3+1=4 -> Acquired (4<=5)
+        let telea2 = q.try_acquire_or_enqueue(tid(4), EngineKind::InpaintTelea);
+        assert!(matches!(telea2, AcquireResult::Acquired(_)));
+        assert_eq!(q.used_weight(), 4);
+        // Next Telea w1 fits 4+1=5 -> Acquired
+        let telea3 = q.try_acquire_or_enqueue(tid(5), EngineKind::InpaintTelea);
+        assert!(matches!(telea3, AcquireResult::Acquired(_)));
+        assert_eq!(q.used_weight(), 5);
+        // Next Style w2 would not fit 5+2>5
+        let s = q.try_acquire_or_enqueue(tid(6), EngineKind::Style);
+        assert!(matches!(s, AcquireResult::Queued(_, _)));
+    }
+
+    #[test]
+    fn try_acquire_respects_higher_priority_pending() {
+        let mut q = EngineQueue::new();
+        // Fill used 2 with one style running
+        let _ = q.try_acquire_or_enqueue(tid(1), EngineKind::Style);
+        // Enqueue Style w2 pending (fits 2+2<=4 but we force queued by simulating? Instead enqueue directly via enqueue to create pending fitting job
+        let style_pending = q.enqueue(tid(2), EngineKind::Style); // w2 prio1, pending len 1, would fit 2+2<=4 but not dispatched because we used enqueue not dispatch
+        assert_eq!(q.pending_len(), 1);
+        // Now try to acquire Lama w4 (prio5) which does not fit (2+4>4) -> Queued
+        // But also try to acquire Aot w3 (prio4) which does not fit either? 2+3>4 so queued
+        // Now try to acquire Telea w1 (prio0) which fits 2+1<=4, but there exists higher priority pending Style w2 prio1 that also fits 2+2<=4 (actually style_pending fits!)
+        // Our try_acquire should detect that pending Style prio1 is higher priority than new Telea? No Telea prio0 is HIGHER than Style prio1 (0<1)
+        // So Telea should still be allowed to backfill before Style? But Style arrived earlier and also fits, and has prio1 vs Telea prio0, Telea higher so it should go first - that's correct priority scan.
+        // Now test opposite: pending has Telea prio0 fitting, new Style prio1 also fits but lower priority -> new should be queued, pending Telea should stay
+        let mut q2 = EngineQueue::new();
+        let _ = q2.try_acquire_or_enqueue(tid(10), EngineKind::Segment); // w4 used4? Actually Segment w4
+        // Need used 0 for clean test: simpler scenario
+        let mut q3 = EngineQueue::new();
+        let _ = q3.enqueue(tid(20), EngineKind::Style); // pending style prio1 w2
+        // used 0, remaining 4, style fits
+        // Now try to acquire Lama prio5 w4 which also fits remaining 4, but style pending prio1 higher than lama prio5, so lama should be queued not acquired
+        let lama_q = q3.try_acquire_or_enqueue(tid(21), EngineKind::InpaintLama);
+        assert!(matches!(lama_q, AcquireResult::Queued(_, _)), "lama lower priority than pending style should be queued");
+        // Whereas telea prio0 higher than style prio1 should be acquired
+        let telea_a = q3.try_acquire_or_enqueue(tid(22), EngineKind::InpaintTelea);
+        // Telea prio0 < style prio1, so telea should be acquired even though style pending exists
+        assert!(matches!(telea_a, AcquireResult::Acquired(_)), "higher priority telea should backfill ahead of style");
+        let _ = style_pending;
     }
 
     #[test]

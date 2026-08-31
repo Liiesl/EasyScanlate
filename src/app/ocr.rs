@@ -257,7 +257,7 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
             tab.ocr_cancelled = false;
             tab.held_boundary = None;
         }
-        // queue gate — weight 4, strict FIFO
+        // queue gate — weight 4, backfill + priority (cap 5)
         use crate::app::queue::{AcquireResult, EngineKind};
         match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Ocr) {
             AcquireResult::Acquired(_) => {
@@ -275,7 +275,7 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
                         (workers, cfg)
                     });
                     app.tabs[idx].status =
-                        format!("Loading the OCR engine ({workers} detection worker(s))... pool {}/4", app.engines.queue.used_weight());
+                        format!("Loading the OCR engine ({workers} detection worker(s))... pool {}/{}", app.engines.queue.used_weight(), crate::app::queue::POOL_CAPACITY);
                     let tid = tab_id;
                     return Task::perform(
                         async move { ParallelEngine::build_with_config(cfg, workers) },
@@ -514,7 +514,7 @@ pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, resul
             } else {
                 model
             };
-            // Enqueue next pipeline stages via queue (strict FIFO, weight-checked)
+            // Enqueue next pipeline stages via queue (backfill + priority, weight-checked)
             use crate::app::queue::{AcquireResult, EngineKind};
             if do_sfx {
                 #[cfg(feature = "segment")]
@@ -634,7 +634,7 @@ pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, resul
                 }
             }
         }
-        // also dispatch any other pending jobs that now fit (strict FIFO head)
+        // also dispatch any other pending jobs that now fit (backfill priority scan)
         tasks.push(crate::app::queue::dispatch_pending(app));
     } else {
         let (runs, pending, total) = { let tab = &app.tabs[idx]; (tab.ocr_runs, tab.pending, tab.ocr_total) };
@@ -726,6 +726,12 @@ pub fn handle_manual_ocr_engine_ready_for(app: &mut App, tab_id: super::tab::Tab
                 tab.pending_manual_multi_ocr = None;
                 tab.status = format!("Manual OCR engine failed: {e}");
             }
+            // free queue weight on build failure (manual OCR)
+            if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Ocr).is_some() {
+                let promote = crate::app::queue::dispatch_pending(app);
+                crate::app::queue::refresh_queued_statuses(app);
+                return promote;
+            }
             Task::none()
         }
     }
@@ -771,6 +777,37 @@ pub fn handle_manual_ocr_selection_for(app: &mut App, tab_id: super::tab::TabId,
             if let Some(tab) = app.tab_by_id_mut(tab_id) { tab.status = "Manual OCR: no valid selections.".to_string(); }
             return Task::none();
         }
+        // queue gate — manual OCR uses OCR weight/priority (w4, prio3)
+        {
+            use crate::app::queue::{AcquireResult, EngineKind};
+            let kind = EngineKind::Ocr;
+            let already_running = app.engines.queue.running_for(tab_id, kind).is_some();
+            let already_queued = app.engines.queue.pending_for_tab(tab_id).iter().any(|j| j.kind == kind);
+            if !already_running && !already_queued {
+                match app.engines.queue.try_acquire_or_enqueue(tab_id, kind) {
+                    AcquireResult::Acquired(_) => {},
+                    AcquireResult::Queued(_, pos) => {
+                        let used = app.engines.queue.used_weight();
+                        if let Some(tab) = app.tab_by_id_mut(tab_id) {
+                            tab.pending_manual_multi_ocr = Some(valid);
+                            tab.status = format!(
+                                "Queued {} (pos {}, pool {}/{}) ...",
+                                kind.label(),
+                                pos,
+                                used,
+                                crate::app::queue::POOL_CAPACITY
+                            );
+                        }
+                        return Task::none();
+                    }
+                }
+            } else if already_queued || already_running {
+                if let Some(tab) = app.tab_by_id_mut(tab_id) {
+                    tab.status = "Wait for current task to finish.".to_string();
+                }
+                return Task::none();
+            }
+        }
         let cfg = scanlateit_settings::get(|s| ocr::config_with(0.0, s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000)));
         let cached = app.engines.manual_ocr.clone();
         if let Some(engine) = cached { return start_manual_ocr_selection_for(app, tab_id, valid, engine); }
@@ -793,7 +830,7 @@ fn start_manual_ocr_selection(app: &mut App, selections: Vec<(usize, iced::Recta
     start_manual_ocr_selection_for(app, app.active_tab().id, selections, engine)
 }
 #[cfg(feature = "ocr")]
-fn start_manual_ocr_selection_for(app: &mut App, tab_id: super::tab::TabId, selections: Vec<(usize, iced::Rectangle)>, engine: ocr::Engine) -> Task<Message> {
+pub(crate) fn start_manual_ocr_selection_for(app: &mut App, tab_id: super::tab::TabId, selections: Vec<(usize, iced::Rectangle)>, engine: ocr::Engine) -> Task<Message> {
     if let Some(tab) = app.tab_by_id_mut(tab_id) {
         tab.manual_ocring = true;
         tab.status = format!("Manual OCR on {} selection(s)...", selections.len());
@@ -930,11 +967,20 @@ pub fn handle_manual_ocr_finished_for(app: &mut App, tab_id: super::tab::TabId, 
     #[cfg(feature = "ocr")]
     {
         if let Some(tab) = app.tab_by_id_mut(tab_id) { tab.manual_ocring = false; }
+        // Free queue weight for manual OCR (same kind as pipeline OCR) and backfill promote
+        let mut freed = app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Ocr).is_some();
+        let mut promote_task = Task::none();
+        let mut refresh_needed = false;
+        if freed {
+            promote_task = crate::app::queue::dispatch_pending(app);
+            refresh_needed = true;
+        }
         match result {
             Ok(per_image) => {
                 if per_image.is_empty() {
                     if let Some(tab) = app.tab_by_id_mut(tab_id) { tab.status = "Manual OCR: no text found.".to_string(); }
-                    return Task::none();
+                    if refresh_needed { crate::app::queue::refresh_queued_statuses(app); }
+                    return promote_task;
                 }
                 let mut total_added = 0usize;
                 let mut total_detected = 0usize;
@@ -967,7 +1013,8 @@ pub fn handle_manual_ocr_finished_for(app: &mut App, tab_id: super::tab::TabId, 
             }
             Err(e) => { if let Some(tab) = app.tab_by_id_mut(tab_id) { tab.status = format!("Manual OCR multi failed: {e}"); } }
         }
-        return Task::none();
+        if refresh_needed { crate::app::queue::refresh_queued_statuses(app); }
+        return promote_task;
     }
     #[cfg(not(feature = "ocr"))]
     {

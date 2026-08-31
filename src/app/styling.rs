@@ -387,7 +387,7 @@ fn collect_jobs_for(app: &App, tab_id: crate::app::tab::TabId) -> Vec<(usize, En
 }
 #[cfg(feature = "styling")]
 pub fn classify_for(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Message> {
-    // queue gate — weight 2, strict FIFO
+    // queue gate — weight 2, backfill + priority (cap 5)
     {
         use crate::app::queue::{AcquireResult, EngineKind};
         let already_reserved = app.engines.queue.running_for(tab_id, EngineKind::Style).is_some();
@@ -419,7 +419,7 @@ pub fn classify_for(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Messa
                 #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
                 { app.tabs[idx].pipeline_active = true; }
             }
-            app.tabs[idx].status = format!("Loading the styling model... pool {}/4", app.engines.queue.used_weight());
+            app.tabs[idx].status = format!("Loading the styling model... pool {}/{}", app.engines.queue.used_weight(), crate::app::queue::POOL_CAPACITY);
             Task::perform(async move { StylingEngine::build() }, move |res| Message::Tab(tab_id, crate::app::TabMessage::StylingEngineReady(res)))
         }
     }
@@ -565,7 +565,7 @@ pub fn handle_pipeline_style_detected_for(app: &mut App, tab_id: crate::app::tab
         app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Style);
         crate::app::queue::refresh_queued_statuses(app);
         let buffered = std::mem::take(&mut app.tabs[idx].pipeline_style_results);
-        // dispatch_inpaint_for will enqueue inpaint jobs via queue (strict FIFO)
+        // dispatch_inpaint_for will enqueue inpaint jobs via queue (backfill + priority)
         let inpaint_task = super::pipeline::dispatch_inpaint_for(app, tab_id, buffered);
         let promote = crate::app::queue::dispatch_pending(app);
         return Task::batch([inpaint_task, promote]);
