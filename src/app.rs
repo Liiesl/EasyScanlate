@@ -201,6 +201,11 @@ pub enum Message {
     CjkFallbackLoaded(usize),
     FetchModels,
     ModelsFetched(std::collections::HashMap<String, ui_translation::Provider>),
+    /// Polled from `subscription`: drain the single-instance TCP listener.
+    IpcPoll,
+    /// External open requests (CLI forward, drag-drop, IPC). Each string is
+    /// a raw path that may contain quotes/spaces.
+    ExternalOpen(Vec<String>),
 }
 
 impl From<UiEvent> for Message {
@@ -232,6 +237,7 @@ pub struct App {
     pub(crate) recent_projects: Vec<scanlateit_settings::RecentProject>,
     pub(crate) new_project: Option<NewProjectState>,
     pub frame: NativeFrame,
+    pub(crate) ipc_listener: Option<crate::single_instance::Listener>,
 }
 
 impl App {
@@ -289,6 +295,7 @@ impl App {
             new_project: None,
             frame,
             pending_close: None,
+            ipc_listener: None,
         }
     }
 
@@ -312,8 +319,12 @@ impl App {
     }
 }
 
-pub fn boot(frame: NativeFrame) -> (App, Task<Message>) {
-    boot::boot(frame)
+pub fn boot(
+    frame: NativeFrame,
+    initial_mmtl: Option<std::path::PathBuf>,
+    ipc_listener: Option<crate::single_instance::Listener>,
+) -> (App, Task<Message>) {
+    boot::boot(frame, initial_mmtl, ipc_listener)
 }
 
 pub(crate) fn close_tab_immediate(app: &mut App, id: TabId) -> Task<Message> {
@@ -622,8 +633,68 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
     }
 }
 
+fn handle_external_opens(app: &mut App, paths: Vec<String>) -> Task<Message> {
+    if paths.is_empty() {
+        return Task::none();
+    }
+    let mut tasks = Vec::new();
+    for raw in paths {
+        let trimmed = raw.trim().trim_matches('"').trim().to_string();
+        if trimmed.is_empty() {
+            continue;
+        }
+        // Only .mmtl is handled; other drops are ignored with a status hint.
+        if !trimmed.to_ascii_lowercase().ends_with(".mmtl") {
+            app.active_tab_mut().status = format!("Not a .mmtl: {trimmed}");
+            continue;
+        }
+        let path = std::path::PathBuf::from(&trimmed);
+        if !path.exists() {
+            app.active_tab_mut().status = format!("Missing: {}", path.display());
+            continue;
+        }
+        // Allocate a fresh TabId for the incoming project (same as HomeRecentClicked).
+        let new_id = TabId(app.next_tab_id);
+        app.next_tab_id += 1;
+        app.active_tab_mut().status = format!("Loading {}...", path.display());
+        let path_clone = path.clone();
+        tasks.push(Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    mmtl::load_created_project(path_clone.to_string_lossy().to_string())
+                })
+                .await
+                .unwrap_or_else(|e| Err(format!("load task failed: {e}")))
+            },
+            move |res| Message::Tab(new_id, TabMessage::RecentPickedToLoad(res)),
+        ));
+    }
+    if tasks.is_empty() {
+        Task::none()
+    } else {
+        Task::batch(tasks)
+    }
+}
+
 pub fn update(app: &mut App, message: Message) -> Task<Message> {
     let task = match message {
+        Message::IpcPoll => {
+            // Drain single-instance listener (secondary forwards via TCP).
+            let pending = app
+                .ipc_listener
+                .as_mut()
+                .map(|l| l.poll())
+                .unwrap_or_default();
+            // Filter out empty "focus-only" pings (secondary launched without path).
+            let paths: Vec<String> = pending.into_iter().filter(|s| !s.is_empty()).collect();
+            if paths.is_empty() {
+                Task::none()
+            } else {
+                // Bring-forward is already done inside `poll()`, just open files.
+                handle_external_opens(app, paths)
+            }
+        }
+        Message::ExternalOpen(paths) => handle_external_opens(app, paths),
         Message::Frame(action) => app.frame.update(action, Message::Frame),
         Message::Tab(tab_id, tab_msg) => handle_tab_message(app, tab_id, tab_msg),
         Message::Model(ev) => {
@@ -1433,6 +1504,29 @@ pub fn subscription(app: &App) -> Subscription<Message> {
         }
     });
     let mut subs = vec![frame_sub, keys];
+
+    // Drag-drop: dropping a .mmtl onto the window opens it (Explorer → window).
+    let drops = iced::event::listen().filter_map(|event| match event {
+        iced::Event::Window(iced::window::Event::FileDropped(path)) => {
+            let s = path.to_string_lossy().to_string();
+            if s.to_ascii_lowercase().ends_with(".mmtl") {
+                Some(Message::ExternalOpen(vec![s]))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    });
+    subs.push(drops);
+
+    // Single-instance IPC poll: secondary instances forward their CLI .mmtl via
+    // localhost TCP; primary drains it every 250 ms and opens the projects.
+    // Only subscribe when we hold the listener (primary); secondary never
+    // reaches App.
+    if app.ipc_listener.is_some() {
+        subs.push(iced::time::every(Duration::from_millis(250)).map(|_| Message::IpcPoll));
+    }
+
     // Per-tab tick subscriptions (Phase 2: each tab ticks independently)
     for tab in &app.tabs {
         let tid = tab.id;

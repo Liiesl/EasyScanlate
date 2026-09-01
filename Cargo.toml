@@ -57,7 +57,7 @@ rapidocr-core = { version = "0.2.2", default-features = false }
 # --features test-ui`) skips that crate entirely: no ort (ocr/inpaint/styling)
 # and no rig (translation) are compiled or linked. Disabled subsystems show a
 # "unavailable in this build" status instead of running.
-default = ["ocr", "inpaint", "styling", "translation", "segment", "directml"]
+default = ["ocr", "inpaint", "styling", "translation", "segment", "directml", "file-assoc"]
 ocr = ["dep:scanlateit-ocr", "scanlateit-ui/ocr"]
 inpaint = ["dep:scanlateit-inpaint", "scanlateit-ui/inpaint"]
 styling = ["dep:scanlateit-styling", "scanlateit-ui/styling"]
@@ -76,6 +76,7 @@ test-inpaint = ["inpaint"]
 test-styling = ["styling"]
 test-translation = ["translation"]
 test-segment = ["segment"]
+file-assoc = ["dep:winreg"]
 
 [dependencies]
 iced = { workspace = true }
@@ -99,9 +100,13 @@ tiny-skia = { workspace = true }
 open = { workspace = true }
 serde = { workspace = true }
 lucide-icons = { workspace = true }
+winreg = { version = "0.53", optional = true }
 
 [profile.dev.package."*"]
 debug = "line-tables-only"
+
+[build-dependencies]
+winres = "0.1"
 
 [patch.crates-io]
 rapidocr-core = { path = "rapidocr-rs/crates/rapidocr-core" }

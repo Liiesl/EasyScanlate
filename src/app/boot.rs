@@ -50,7 +50,11 @@ fn is_cjk_fallback_family(name: &str) -> bool {
         .any(|f| f.eq_ignore_ascii_case(name))
 }
 
-pub fn boot(frame: NativeFrame) -> (App, Task<Message>) {
+pub fn boot(
+    frame: NativeFrame,
+    initial_mmtl: Option<std::path::PathBuf>,
+    ipc_listener: Option<crate::single_instance::Listener>,
+) -> (App, Task<Message>) {
     scanlateit_settings::init();
     let font_task = match std::fs::read(KOREAN_FONT_PATH) {
         Ok(bytes) => iced::font::load(bytes).map(|_| Message::FontLoaded),
@@ -191,7 +195,46 @@ pub fn boot(frame: NativeFrame) -> (App, Task<Message>) {
     let fonts_task =
         Task::perform(async move { enumerate_system_fonts() }, Message::SystemFonts);
     let cjk_task = Task::perform(async move { load_cjk_fallbacks() }, Message::CjkFallbackLoaded);
-    (app, Task::batch([font_task, models_task, fonts_task, cjk_task]))
+
+    // Store single-instance listener (so subscription can poll for forwarded .mmtl).
+    app.ipc_listener = ipc_listener;
+
+    // CLI open: if an .mmtl was passed on the command line, load it into a
+    // new project tab immediately (mirrors ManhwaOCR main.py:216-226 which
+    // skips Home when sys.argv[1] is .mmtl). Missing file → status error.
+    let cli_task = if let Some(path) = initial_mmtl {
+        if !path.exists() {
+            app.active_tab_mut().status =
+                format!("Missing: {}", path.display());
+            Task::none()
+        } else {
+            let display = path.to_string_lossy().to_string();
+            let new_id = crate::app::tab::TabId(app.next_tab_id);
+            app.next_tab_id += 1;
+            // Show loading feedback on the Home tab until the new tab appears.
+            app.active_tab_mut().status = format!("Loading {}...", path.display());
+            let path_clone = path.clone();
+            Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        crate::app::mmtl::load_created_project(
+                            path_clone.to_string_lossy().to_string(),
+                        )
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(format!("load task failed: {e}")))
+                },
+                move |res| Message::Tab(new_id, crate::app::TabMessage::RecentPickedToLoad(res)),
+            )
+        }
+    } else {
+        Task::none()
+    };
+
+    (
+        app,
+        Task::batch([font_task, models_task, fonts_task, cjk_task, cli_task]),
+    )
 }
 
 /// Fake OCR entries for TEST builds: a small batch of Korean bubbles spread
