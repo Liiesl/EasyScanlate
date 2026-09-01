@@ -1,3 +1,6 @@
 [submodule "rapidocr-rs"]
 	path = rapidocr-rs
 	url = https://github.com/Liiesl/rapidocr-rs.git
+[submodule "NeverLiieIcedWidgets"]
+	path = NeverLiieIcedWidgets
+	url = https://github.com/Liiesl/NeverLiieIcedWidgets.git
