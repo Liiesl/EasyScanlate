@@ -101,6 +101,7 @@ open = { workspace = true }
 serde = { workspace = true }
 lucide-icons = { workspace = true }
 winreg = { version = "0.53", optional = true }
+velopack = "1.2"
 
 [profile.dev.package."*"]
 debug = "line-tables-only"

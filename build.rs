@@ -3,8 +3,12 @@ fn main() {
     {
         let mut res = winres::WindowsResource::new();
         res.set_icon("app_icon.ico");
-        // Pull version from Cargo.toml package version so EXE shows correct FileVersion.
-        let version = env!("CARGO_PKG_VERSION");
+        // Version: CI injects VELPK_VERSION / VPK_PACK_VERSION / VERSION (stripped tag, e.g. 0.1.0).
+        // Fallback is Cargo package version so local cargo build still shows 0.1.0.
+        let version = std::env::var("VELPK_VERSION")
+            .or_else(|_| std::env::var("VPK_PACK_VERSION"))
+            .or_else(|_| std::env::var("VERSION"))
+            .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
         // winres expects "x,y,z,w" — pad to 4 parts.
         let mut parts: Vec<&str> = version.split('.').collect();
         while parts.len() < 4 {

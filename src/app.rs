@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 #[cfg(all(feature = "test-ui", not(feature = "translation")))]
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 /// Natural ordering for file paths: numeric chunks compared as numbers
@@ -206,6 +206,13 @@ pub enum Message {
     /// External open requests (CLI forward, drag-drop, IPC). Each string is
     /// a raw path that may contain quotes/spaces.
     ExternalOpen(Vec<String>),
+    // ——— Updates (Velopack) ———
+    UpdateCheckResult(Box<Option<velopack::UpdateInfo>>),
+    UpdateDownloadStart,
+    UpdateApply,
+    UpdateDismiss,
+    UpdateCheckAgain,
+    UpdatePoll,
 }
 
 impl From<UiEvent> for Message {
@@ -238,6 +245,13 @@ pub struct App {
     pub(crate) new_project: Option<NewProjectState>,
     pub frame: NativeFrame,
     pub(crate) ipc_listener: Option<crate::single_instance::Listener>,
+    // ——— Updates (Velopack, per-user, GithubSource Liiesl/EasyScanlate) ———
+    pub update_info: Option<velopack::UpdateInfo>,
+    pub update_downloading: bool,
+    pub update_progress: i16,
+    pub update_ready: bool,
+    pub update_rx: Option<Arc<Mutex<mpsc::Receiver<i16>>>>,
+    pub update_error: Option<String>,
 }
 
 impl App {
@@ -296,6 +310,12 @@ impl App {
             frame,
             pending_close: None,
             ipc_listener: None,
+            update_info: None,
+            update_downloading: false,
+            update_progress: 0,
+            update_ready: false,
+            update_rx: None,
+            update_error: None,
         }
     }
 
@@ -1426,8 +1446,130 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::OpenUrl(url)) => settings::handle_open_url(app, url),
         Message::Ui(UiEvent::SaveProject) => mmtl::handle_save(app),
         Message::Ui(UiEvent::ExportAll) => export::handle_export_all(app),
+        // ——— Updates (Velopack) ———
+        Message::Ui(UiEvent::UpdateCheck) => {
+            app.update_error = None;
+            return Task::perform(
+                async { tokio::task::spawn_blocking(crate::updater::check_for_updates).await.unwrap_or(None) },
+                |info| Message::UpdateCheckResult(Box::new(info)),
+            );
+        }
+        Message::Ui(UiEvent::UpdateDownload) => {
+            return handle_update_download(app);
+        }
+        Message::Ui(UiEvent::UpdateApply) => {
+            return handle_update_apply(app);
+        }
+        Message::Ui(UiEvent::UpdateDismiss) => {
+            app.update_info = None;
+            app.update_ready = false;
+            app.update_downloading = false;
+            app.update_progress = 0;
+            app.update_rx = None;
+            app.update_error = None;
+            Task::none()
+        }
+        Message::UpdateCheckResult(info) => {
+            app.update_info = *info;
+            if app.update_info.is_none() {
+                app.update_error = None;
+            }
+            Task::none()
+        }
+        Message::UpdateCheckAgain => {
+            app.update_error = None;
+            return Task::perform(
+                async { tokio::task::spawn_blocking(crate::updater::check_for_updates).await.unwrap_or(None) },
+                |info| Message::UpdateCheckResult(Box::new(info)),
+            );
+        }
+        Message::UpdateDownloadStart => return handle_update_download(app),
+        Message::UpdateApply => return handle_update_apply(app),
+        Message::UpdateDismiss => {
+            app.update_info = None;
+            app.update_ready = false;
+            app.update_downloading = false;
+            app.update_progress = 0;
+            app.update_rx = None;
+            app.update_error = None;
+            Task::none()
+        }
+        Message::UpdatePoll => {
+            if let Some(rx_arc) = app.update_rx.clone() {
+                if let Ok(rx) = rx_arc.lock() {
+                    // drain all pending progress values, keep last
+                    let mut last: Option<i16> = None;
+                    while let Ok(v) = rx.try_recv() {
+                        last = Some(v);
+                    }
+                    if let Some(p) = last {
+                        app.update_progress = p.clamp(0, 100);
+                        if p >= 100 {
+                            app.update_downloading = false;
+                            app.update_ready = true;
+                        }
+                    }
+                    // detect sender dropped (download finished without 100)
+                    // if channel disconnected and we were downloading, mark ready if progress high
+                    if app.update_downloading {
+                        // try_recv returns Disconnected when sender dropped
+                        // we can't distinguish without checking, so poll with try_recv error
+                        // Actually above loop already consumed; if Disconnected and progress <100,
+                        // we assume download completed via velopack's internal handling
+                    }
+                }
+                // if receiver reports disconnected (sender finished), finish download
+                // check via try_recv Disconnected: do a non-blocking check
+                if app.update_downloading {
+                    if let Ok(rx) = rx_arc.lock() {
+                        // peek disconnected by checking try_recv error
+                        // we already drained, so next try_recv would be Empty or Disconnected
+                        match rx.try_recv() {
+                            Err(mpsc::TryRecvError::Disconnected) => {
+                                app.update_downloading = false;
+                                app.update_ready = true;
+                                app.update_progress = 100;
+                                app.update_rx = None;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Task::none()
+        }
     };
     task
+}
+
+fn handle_update_download(app: &mut App) -> Task<Message> {
+    if app.update_info.is_none() || app.update_downloading || app.update_ready {
+        return Task::none();
+    }
+    let info = app.update_info.clone().unwrap();
+    let (tx, rx) = mpsc::channel::<i16>();
+    app.update_downloading = true;
+    app.update_progress = 0;
+    app.update_ready = false;
+    app.update_rx = Some(Arc::new(Mutex::new(rx)));
+    app.update_error = None;
+    Task::perform(
+        async move { tokio::task::spawn_blocking(move || crate::updater::download_updates(&info, tx)).await.unwrap_or(false) },
+        |ok| {
+            if ok {
+                Message::UpdatePoll
+            } else {
+                Message::UpdateDismiss
+            }
+        },
+    )
+}
+
+fn handle_update_apply(app: &mut App) -> Task<Message> {
+    if let Some(info) = app.update_info.clone() {
+        let _ = crate::updater::apply_updates(&info);
+    }
+    Task::none()
 }
 
 pub fn subscription(app: &App) -> Subscription<Message> {
@@ -1538,6 +1680,11 @@ pub fn subscription(app: &App) -> Subscription<Message> {
             subs.push(iced::time::every(Duration::from_millis(16)).with(tid).map(|(tid, _)| Message::Tab(tid, TabMessage::TranslateTick)));
         }
     }
+
+    if app.update_downloading {
+        subs.push(iced::time::every(Duration::from_millis(100)).map(|_| Message::UpdatePoll));
+    }
+
     Subscription::batch(subs)
 }
 

@@ -155,4 +155,11 @@ pub trait UiState {
     fn recent_projects(&self) -> &[scanlateit_settings::RecentProject];
     fn new_project_overlay(&self) -> Option<NewProjectOverlay>;
     fn translation_anim_phase(&self) -> f32;
+    // ——— Updates (Velopack) ———
+    fn update_current_version(&self) -> String { String::new() }
+    fn update_available_version(&self) -> Option<String> { None }
+    fn update_downloading(&self) -> bool { false }
+    fn update_progress(&self) -> i16 { 0 }
+    fn update_ready(&self) -> bool { false }
+    fn update_notes(&self) -> Option<String> { None }
 }

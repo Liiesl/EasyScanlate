@@ -41,6 +41,8 @@ pub enum SettingsTab {
     Inpaint,
     /// Machine-translation settings (API key).
     Translation,
+    /// App updates (Velopack, GitHub releases).
+    Updates,
 }
 
 /// Where an inline text edit was started; decides which editor widget
@@ -337,4 +339,9 @@ pub enum UiEvent {
     TabNew,
     /// Dismiss the dirty-close confirmation modal (Cancel / backdrop / Esc).
     TabCloseCancel,
+    // ——— Updates (Velopack) ———
+    UpdateCheck,
+    UpdateDownload,
+    UpdateApply,
+    UpdateDismiss,
 }

@@ -1,0 +1,89 @@
+name: Build & Package Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-package:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install vpk
+        run: dotnet tool install -g vpk
+
+      - name: Install NSIS
+        run: choco install nsis -y
+
+      - name: Add NSIS to PATH
+        shell: pwsh
+        run: echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Build release
+        shell: bash
+        run: |
+          export VELPK_VERSION="${{ steps.version.outputs.VERSION }}"
+          export VPK_PACK_VERSION="${{ steps.version.outputs.VERSION }}"
+          export VERSION="${{ steps.version.outputs.VERSION }}"
+          cargo build --release --features file-assoc
+
+      - name: Stage files
+        shell: pwsh
+        run: |
+          if (Test-Path staging) { Remove-Item -Recurse -Force staging }
+          New-Item -ItemType Directory -Path staging | Out-Null
+          Copy-Item target/release/scanlateit.exe staging/
+
+      - name: Create Velopack Release
+        shell: bash
+        run: |
+          # Download prior release for delta generation (ignore failure on first release)
+          vpk download github --repoUrl https://github.com/Liiesl/EasyScanlate --token ${{ secrets.GITHUB_TOKEN }} || true
+          vpk pack -u EasyScanlate -v ${{ steps.version.outputs.VERSION }} -p ./staging -e scanlateit.exe --packTitle EasyScanlate --packAuthors Liie --icon app_icon.ico
+
+      - name: Build single installer (EasyScanlate-Installer.exe)
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.version.outputs.VERSION }}"
+          # Wrapper expects Releases/EasyScanlate-win-Setup.exe from vpk pack
+          if (-not (Test-Path "Releases/EasyScanlate-win-Setup.exe")) {
+            Write-Error "Releases/EasyScanlate-win-Setup.exe not found — vpk pack failed"
+            exit 1
+          }
+          makensis /DVERSION=$ver dev/installer/EasyScanlate-Installer.nsi
+          if (-not (Test-Path "EasyScanlate-Installer.exe")) {
+            Write-Error "EasyScanlate-Installer.exe not produced by NSIS"
+            exit 1
+          }
+          # Keep Velopack nupkg + RELEASES for delta updates; remove raw Setup.exe from publish (wrapper is the single installer)
+          Remove-Item Releases/EasyScanlate-win-Setup.exe -Force -ErrorAction SilentlyContinue
+
+      - name: Publish to GitHub
+        shell: bash
+        run: |
+          vpk upload github --repoUrl https://github.com/Liiesl/EasyScanlate --publish --tag v${{ steps.version.outputs.VERSION }} --token ${{ secrets.GITHUB_TOKEN }} || true
+          # Upload the single installer (wrapper) as the legacy-named asset old clients poll
+          gh release upload v${{ steps.version.outputs.VERSION }} EasyScanlate-Installer.exe --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

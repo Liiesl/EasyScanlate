@@ -7,8 +7,8 @@
 
 #[allow(unused_imports)]
 use iced::widget::{
-    button, center, checkbox, column, container, mouse_area, opaque, row, rule, scrollable, space,
-    stack, text, toggler,
+    button, center, checkbox, column, container, mouse_area, opaque, progress_bar, row, rule,
+    scrollable, space, stack, text, toggler,
 };
 #[cfg(feature = "inpaint")]
 use iced::widget::pick_list;
@@ -1503,7 +1503,85 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     cards
 }
 
-fn global_search_filtered(query: String) -> Element<'static, UiEvent> {
+fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'static, UiEvent>> {
+    if !matches_any(query, &["updates", "update", "version", "download", "install", "velopack", "github", "release"]) && !query.trim().is_empty() {
+        return Vec::new();
+    }
+    let current = state.update_current_version();
+    let available = state.update_available_version();
+    let downloading = state.update_downloading();
+    let progress = state.update_progress();
+    let ready = state.update_ready();
+    let notes = state.update_notes();
+
+    let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
+    col.push(card_header(Icon::Download, "Updates", Some("Velopack — GitHub releases Liiesl/EasyScanlate")).into());
+    col.push(text(format!("Current version: {}", if current.is_empty() { env!("CARGO_PKG_VERSION").to_string() } else { current.clone() })).size(scale::s(11.0)).color(MUTED_FG).into());
+    col.push(item_separator());
+
+    if ready {
+        col.push(text("Update ready — restart to apply.").size(scale::s(12.0)).color(ACCENT).into());
+        if let Some(v) = available.clone() {
+            col.push(text(format!("Ready: v{} → v{}", current, v)).size(scale::s(11.0)).color(MUTED_FG).into());
+        }
+        if let Some(n) = notes.clone() {
+            col.push(container(text(n).size(scale::s(11.0)).color(MUTED_FG)).padding(scale::s(6.0)).style(|_| container::Style{ background: Some(Color::from_rgba8(255,255,255,0.04).into()), border: iced::Border::default().rounded(scale::s(6.0)), ..Default::default() }).into());
+        }
+        col.push(row![
+            button(text("Restart & Update").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateApply),
+            button(text("Later").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateDismiss),
+        ].spacing(scale::s(8.0)).into());
+        col.push(helper_text("The app will restart and install the update (Velopack — per-user, no admin).").into());
+    } else if downloading {
+        let pct = progress.clamp(0, 100);
+        col.push(text(format!("Downloading update {}% — please don't close", pct)).size(scale::s(12.0)).color(ACCENT).into());
+        col.push(
+            progress_bar(0.0..=100.0, pct as f32)
+                .girth(Length::Fixed(scale::s(6.0)))
+                .style(|_theme: &iced::Theme| iced::widget::progress_bar::Style {
+                    background: Color::from_rgba8(255, 255, 255, 0.12).into(),
+                    bar: ACCENT.into(),
+                    border: iced::Border::default().rounded(scale::s(3.0)),
+                })
+                .into(),
+        );
+        col.push(text(format!("{}% — Velopack will restart when done", pct)).size(scale::s(11.0)).color(MUTED_FG).into());
+    } else if let Some(v) = available.clone() {
+        col.push(text(format!("Update available: v{} → v{}", current, v)).size(scale::s(12.0)).color(ACCENT).into());
+        if let Some(n) = notes.clone() {
+            col.push(container(text(n).size(scale::s(11.0)).color(MUTED_FG)).padding(scale::s(6.0)).style(|_| container::Style{ background: Some(Color::from_rgba8(255,255,255,0.04).into()), border: iced::Border::default().rounded(scale::s(6.0)), ..Default::default() }).into());
+        }
+        col.push(row![
+            button(text("Download").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateDownload),
+            button(text("Dismiss").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateDismiss),
+        ].spacing(scale::s(8.0)).into());
+        col.push(helper_text("Downloaded via Velopack (delta if available) from GitHub releases.").into());
+    } else {
+        col.push(text("You're up to date.").size(scale::s(12.0)).color(Color::WHITE).into());
+        col.push(text(format!("Current: v{}", current)).size(scale::s(11.0)).color(MUTED_FG).into());
+        col.push(button(text("Check again").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateCheck).into());
+        col.push(helper_text("Checks GitHub Liiesl/EasyScanlate — same endpoint old app used (update.py).").into());
+    }
+
+    if available.is_none() && !ready && !downloading {
+        // also offer check when up-to-date already has button; downloading/ready hide extra check
+    } else if !downloading && !ready {
+        col.push(space::vertical().height(Length::Fixed(scale::s(6.0))).into());
+        col.push(button(text("Check for updates").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateCheck).into());
+    }
+
+    vec![container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into()]
+}
+
+fn updates_tab_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Element<'static, UiEvent> {
+    let cards = updates_cards(state, &query);
+    if cards.is_empty() {
+        return scrollable(container(text(format!("No update settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG)).padding(scale::s(14.0)).style(|_| card_style())).height(Length::Fill).into();
+    }
+    scrollable(column(cards).spacing(scale::s(10.0))).height(Length::Fill).into()
+}
+
+fn global_search_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Element<'static, UiEvent> {
     let q = query.as_str();
     let mut all: Vec<Element<'static, UiEvent>> = Vec::new();
 
@@ -1526,6 +1604,10 @@ fn global_search_filtered(query: String) -> Element<'static, UiEvent> {
     let t = translation_cards(q);
     if !t.is_empty() {
         all.extend(t);
+    }
+    let u = updates_cards(state, q);
+    if !u.is_empty() {
+        all.extend(u);
     }
 
     if all.is_empty() {
@@ -1550,7 +1632,7 @@ fn global_search_filtered(query: String) -> Element<'static, UiEvent> {
 fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent> {
     let query = state.settings_search().to_string();
     if !query.trim().is_empty() {
-        return global_search_filtered(query);
+        return global_search_filtered(state, query);
     }
     match state.settings_tab() {
         SettingsTab::General => general_tab_filtered(query.clone()),
@@ -1558,6 +1640,7 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent> {
         SettingsTab::Ocr => ocr_tab_filtered(query.clone()),
         SettingsTab::Inpaint => inpaint_tab_filtered(query.clone()),
         SettingsTab::Translation => translation_tab_filtered(query.clone()),
+        SettingsTab::Updates => updates_tab_filtered(state, query.clone()),
     }
 }
 
@@ -1603,6 +1686,7 @@ pub fn view<'a, S: UiState + ?Sized>(
                 tab_button(state, SettingsTab::Ocr, Icon::ScanSearch, "OCR"),
                 tab_button(state, SettingsTab::Inpaint, Icon::Brush, "Inpaint"),
                 tab_button(state, SettingsTab::Translation, Icon::Languages, "Translation"),
+                tab_button(state, SettingsTab::Updates, Icon::Download, "Updates"),
             ]
             .spacing(scale::s(4.0))
             .width(Length::Fill),

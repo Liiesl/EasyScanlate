@@ -1,11 +1,14 @@
 mod app;
 mod assoc;
 mod single_instance;
+mod updater;
 
 use iced::Size;
 use lucide_icons::LUCIDE_FONT_BYTES;
 use neverliie_iced_widgets::title_bar::{NativeFrame, NativeFrameConfig};
 use std::path::PathBuf;
+#[cfg(windows)]
+use velopack::VelopackApp;
 
 fn print_help() {
     println!(
@@ -45,6 +48,10 @@ Examples:
 }
 
 fn main() -> iced::Result {
+    // ---- Velopack lifecycle (must be first, handles install/update/uninstall and exits) ----
+    #[cfg(windows)]
+    VelopackApp::build().run();
+
     // ---- CLI flags (handled before iced / single-instance) ----------------
     let args: Vec<String> = std::env::args().collect();
     let has = |flag: &str| args.iter().any(|a| a == flag);

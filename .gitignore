@@ -6,3 +6,11 @@ settings.json
 lineconfig.yaml
 iced/
 CONTINUE.md
+# Velopack
+/Releases
+/staging
+*.nupkg
+RELEASES
+releases.*.json
+assets.*.json
+EasyScanlate-Installer.exe

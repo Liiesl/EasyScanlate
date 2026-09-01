@@ -308,6 +308,28 @@ impl UiState for ActiveTab<'_> {
     fn translation_anim_phase(&self) -> f32 {
         self.tab.translate_anim_phase
     }
+
+    fn update_current_version(&self) -> String {
+        crate::updater::get_current_version()
+    }
+    fn update_available_version(&self) -> Option<String> {
+        self.app.update_info.as_ref().map(|i| i.TargetFullRelease.Version.to_string())
+    }
+    fn update_downloading(&self) -> bool {
+        self.app.update_downloading
+    }
+    fn update_progress(&self) -> i16 {
+        self.app.update_progress
+    }
+    fn update_ready(&self) -> bool {
+        self.app.update_ready
+    }
+    fn update_notes(&self) -> Option<String> {
+        self.app.update_info.as_ref().and_then(|i| {
+            let n = i.TargetFullRelease.NotesMarkdown.clone();
+            if n.trim().is_empty() { None } else { Some(n) }
+        })
+    }
 }
 
 // Shim kept for view lifetime: `view.rs` returns `Element<'a, Message>` tied to
@@ -454,6 +476,19 @@ impl UiState for App {
         })
     }
     fn translation_anim_phase(&self) -> f32 { self.tabs[self.active].translate_anim_phase }
+    fn update_current_version(&self) -> String { crate::updater::get_current_version() }
+    fn update_available_version(&self) -> Option<String> {
+        self.update_info.as_ref().map(|i| i.TargetFullRelease.Version.to_string())
+    }
+    fn update_downloading(&self) -> bool { self.update_downloading }
+    fn update_progress(&self) -> i16 { self.update_progress }
+    fn update_ready(&self) -> bool { self.update_ready }
+    fn update_notes(&self) -> Option<String> {
+        self.update_info.as_ref().and_then(|i| {
+            let n = i.TargetFullRelease.NotesMarkdown.clone();
+            if n.trim().is_empty() { None } else { Some(n) }
+        })
+    }
 }
 
 

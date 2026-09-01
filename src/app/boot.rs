@@ -199,6 +199,14 @@ pub fn boot(
     // Store single-instance listener (so subscription can poll for forwarded .mmtl).
     app.ipc_listener = ipc_listener;
 
+    // Velopack update check (GithubSource Liiesl/EasyScanlate, per-user). Mirrors
+    // ManhwaOCR update.py 2s startup delay + settings toggle; here always on
+    // at boot, results surface in Settings → Updates and Home badge.
+    let update_task = Task::perform(
+        async { tokio::task::spawn_blocking(crate::updater::check_for_updates).await.unwrap_or(None) },
+        |info| Message::UpdateCheckResult(Box::new(info)),
+    );
+
     // CLI open: if an .mmtl was passed on the command line, load it into a
     // new project tab immediately (mirrors ManhwaOCR main.py:216-226 which
     // skips Home when sys.argv[1] is .mmtl). Missing file → status error.
@@ -233,7 +241,7 @@ pub fn boot(
 
     (
         app,
-        Task::batch([font_task, models_task, fonts_task, cjk_task, cli_task]),
+        Task::batch([font_task, models_task, fonts_task, cjk_task, cli_task, update_task]),
     )
 }
 
