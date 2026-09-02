@@ -26,11 +26,11 @@ Name "${APP_NAME}"
 OutFile "..\..\EasyScanlate-Installer.exe"
 RequestExecutionLevel admin
 SetCompressor /SOLID lzma
-Icon "..\..\app_icon.ico"
-UninstallIcon "..\..\app_icon.ico"
+Icon "..\..\assets\app_icon.ico"
+UninstallIcon "..\..\assets\app_icon.ico"
 
-!define MUI_ICON "..\..\app_icon.ico"
-!define MUI_UNICON "..\..\app_icon.ico"
+!define MUI_ICON "..\..\assets\app_icon.ico"
+!define MUI_UNICON "..\..\assets\app_icon.ico"
 !define MUI_ABORTWARNING
 
 ; No pages — wrapper is silent-aware one-click like Velopack. Show InstFiles briefly when not silent.
@@ -84,7 +84,7 @@ Function .onInit
   ${EndIf}
 
   ; Uninstall old admin install if present — now elevated (admin), so HKLM uninstall succeeds.
-  ; Mirrors EasyScanlate/dev/installer/installer.nsi:60-64 + cleanup of orphaned keys/files.
+  ; Cleanup of orphaned keys/files.
   SetRegView 64
   ReadRegStr $R0 HKLM "${REG_UNINSTALL_KEY}" "UninstallString"
   ${If} $R0 != ""

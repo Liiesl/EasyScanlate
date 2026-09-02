@@ -1,0 +1,165 @@
+name: Bug Report
+description: Report a bug or error encountered in EasyScanlate
+title: "[BUG] "
+labels: ["bug"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report! Please check the [documentation](https://docs.easyscanlate.site/) and [discussions](https://github.com/Liiesl/EasyScanlate/discussions) first to see if your issue has already been addressed.
+
+  - type: textarea
+    id: error-details
+    attributes:
+      label: Error Details
+      description: Describe the error you encountered.
+      placeholder: What happened? Include any error messages you saw.
+    validations:
+      required: true
+
+  - type: textarea
+    id: traceback
+    attributes:
+      label: Full Traceback
+      description: Paste the full traceback here if available. It will be formatted as code automatically.
+      placeholder: |
+        Traceback (most recent call last):
+          File "app.py", line 10, in <module>
+            ...
+        ValueError: ...
+      render: python
+    validations:
+      required: false
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: What OS are you running?
+      options:
+        - Windows 10
+        - Windows 11
+        - macOS 14+
+        - Linux Ubuntu 22.04+
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os-details
+    attributes:
+      label: OS Details
+      description: Optional — provide exact OS version/build.
+      placeholder: e.g., Windows 11 23H2, macOS 15.1, Ubuntu 24.04
+    validations:
+      required: false
+
+  - type: dropdown
+    id: arch
+    attributes:
+      label: Architecture
+      description: CPU architecture.
+      options:
+        - x86_64
+        - ARM64
+        - ARM
+        - Unknown
+    validations:
+      required: false
+
+  - type: input
+    id: app-version
+    attributes:
+      label: App Version
+      description: Version shown in the app or APPVERSION file.
+      placeholder: e.g., 1.0.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: running-mode
+    attributes:
+      label: Running Mode
+      description: How did you build/run the application?
+      options:
+        - Precompiled (Release)
+        - Self-compiled (Cargo)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: error-type
+    attributes:
+      label: Error Type
+      description: Severity of the error.
+      options:
+        - critical
+        - warning
+        - information
+        - Other
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: What were you doing when the error occurred?
+      description: Describe what actions you were performing, what features you were using, or what operation you were trying to complete.
+      placeholder: I was trying to... when I...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce the issue? Leave empty if not applicable.
+      placeholder: |
+        1.
+        2.
+        3.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+      placeholder: I expected...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual Behavior
+      description: What actually happened.
+      placeholder: Instead, ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-info
+    attributes:
+      label: Additional Information
+      description: Add any other context, screenshots, or logs. You can drag-and-drop images here.
+      placeholder: Add screenshots or extra details here.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      description: Please confirm the following before submitting.
+      options:
+        - label: I have searched existing issues and discussions and did not find a duplicate
+          required: true
+        - label: I have checked the documentation and troubleshooting guide
+          required: false

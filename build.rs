@@ -2,7 +2,7 @@ fn main() {
     #[cfg(windows)]
     {
         let mut res = winres::WindowsResource::new();
-        res.set_icon("app_icon.ico");
+        res.set_icon("assets/app_icon.ico");
         // Version: CI injects VELPK_VERSION / VPK_PACK_VERSION / VERSION (stripped tag, e.g. 0.1.0).
         // Fallback is Cargo package version so local cargo build still shows 0.1.0.
         let version = std::env::var("VELPK_VERSION")

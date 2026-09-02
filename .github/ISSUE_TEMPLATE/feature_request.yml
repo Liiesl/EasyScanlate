@@ -1,0 +1,80 @@
+name: Feature Request
+description: Suggest a new feature or enhancement for EasyScanlate
+title: "[FR] "
+labels: ["enhancement"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! Please check [discussions](https://github.com/Liiesl/EasyScanlate/discussions) and existing issues first. Provide as much detail as possible so we can understand your use case.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Feature Description
+      description: Clear and concise description of the feature you would like to see added.
+      placeholder: I would like to be able to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case / Problem Statement
+      description: What problem does this solve? Why is it needed?
+      placeholder: This would help when...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution
+      description: How do you envision this feature working?
+      placeholder: It should...
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions or features you have considered.
+      placeholder: I considered...
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Add any other context, mockups, screenshots, or examples. You can drag-and-drop images here.
+      placeholder: Screenshots, mockups, links...
+    validations:
+      required: false
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System (optional)
+      description: If relevant to the feature.
+      options:
+        - Windows 10
+        - Windows 11
+        - macOS 14+
+        - Linux Ubuntu 22.04+
+        - Other
+        - Not applicable
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have searched existing issues, discussions and the roadmap (todo.md) for duplicates
+          required: true
+        - label: This feature would be useful to more than just me
+          required: false

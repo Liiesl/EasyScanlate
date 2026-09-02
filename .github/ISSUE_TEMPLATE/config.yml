@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions / Q&A
+    url: https://github.com/Liiesl/EasyScanlate/discussions
+    about: Ask questions, search existing discussions, or request help before filing an issue.
+  - name: Documentation
+    url: https://docs.easyscanlate.site/
+    about: Check installation and troubleshooting guides first.

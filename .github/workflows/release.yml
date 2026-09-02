@@ -59,7 +59,7 @@ jobs:
         run: |
           # Download prior release for delta generation (ignore failure on first release)
           vpk download github --repoUrl https://github.com/Liiesl/EasyScanlate --token ${{ secrets.GITHUB_TOKEN }} || true
-          vpk pack -u EasyScanlate -v ${{ steps.version.outputs.VERSION }} -p ./staging -e scanlateit.exe --packTitle EasyScanlate --packAuthors Liie --icon app_icon.ico
+          vpk pack -u EasyScanlate -v ${{ steps.version.outputs.VERSION }} -p ./staging -e scanlateit.exe --packTitle EasyScanlate --packAuthors Liie --icon assets/app_icon.ico
 
       - name: Build single installer (EasyScanlate-Installer.exe)
         shell: pwsh
@@ -70,7 +70,7 @@ jobs:
             Write-Error "Releases/EasyScanlate-win-Setup.exe not found — vpk pack failed"
             exit 1
           }
-          makensis /DVERSION=$ver dev/installer/EasyScanlate-Installer.nsi
+          makensis /DVERSION=$ver .github/scripts/EasyScanlate-Installer.nsi
           if (-not (Test-Path "EasyScanlate-Installer.exe")) {
             Write-Error "EasyScanlate-Installer.exe not produced by NSIS"
             exit 1
