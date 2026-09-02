@@ -5,10 +5,12 @@
 ; Velopack Setup.exe only understands -s/--silent (Setup.exe --help).
 ; This wrapper is published AS EasyScanlate-Installer.exe and embeds the
 ; Velopack Setup.exe produced by `vpk pack -u EasyScanlate ...` (Releases/EasyScanlate-win-Setup.exe).
-; It translates /SILENT -> --silent, best-effort uninstalls the old admin
-; NSIS install (HKLM $PROGRAMFILES, installer.nsi:60-64), then runs the
-; Velopack Setup (per-user %LocalAppData%\EasyScanlate, no elevation).
-; Result: one published installer satisfies both old and new clients.
+; It translates /SILENT -> --silent, elevates to remove the old admin
+; NSIS install (HKLM $PROGRAMFILES, installer.nsi:60-64) that previously
+; persisted due to user-level wrapper failing HKLM uninstall, then runs the
+; Velopack Setup (per-user %LocalAppData%\EasyScanlate).
+; Result: one published installer satisfies both old and new clients and
+; fully replaces the $PROGRAMFILES install.
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
@@ -22,7 +24,7 @@
 
 Name "${APP_NAME}"
 OutFile "..\..\EasyScanlate-Installer.exe"
-RequestExecutionLevel user
+RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 Icon "..\..\app_icon.ico"
 UninstallIcon "..\..\app_icon.ico"
@@ -81,20 +83,44 @@ Function .onInit
     ${EndIf}
   ${EndIf}
 
-  ; Best-effort: uninstall old admin install if present (needs elevation, will fail per-user — ignore).
-  ; Mirrors ManhwaOCR dev/installer/installer.nsi:60-64
+  ; Uninstall old admin install if present — now elevated (admin), so HKLM uninstall succeeds.
+  ; Mirrors EasyScanlate/dev/installer/installer.nsi:60-64 + cleanup of orphaned keys/files.
   SetRegView 64
   ReadRegStr $R0 HKLM "${REG_UNINSTALL_KEY}" "UninstallString"
   ${If} $R0 != ""
-    DetailPrint "Found old install, running uninstaller (best-effort)..."
-    ; Old uninstall string is quoted: "C:\Program Files\EasyScanlate\uninstall.exe"
+    DetailPrint "Found old install (64-bit view), running uninstaller..."
     ExecWait '"$R0" /S _?=$INSTDIR'
   ${EndIf}
   SetRegView 32
   ReadRegStr $R0 HKLM "${REG_UNINSTALL_KEY}" "UninstallString"
   ${If} $R0 != ""
+    DetailPrint "Found old install (32-bit view), running uninstaller..."
     ExecWait '"$R0" /S _?=$INSTDIR'
   ${EndIf}
+  ; Fallback: uninstaller may have been deleted but registry/files remain — force-clean.
+  SetRegView 64
+  ReadRegStr $R0 HKLM "${REG_UNINSTALL_KEY}" "UninstallString"
+  ${If} $R0 != ""
+    DetailPrint "Old uninstall key still present, forcing cleanup..."
+  ${EndIf}
+  ; Remove old $PROGRAMFILES dir if still exists (uninstall /S is async via _?=$INSTDIR trick)
+  IfFileExists "$PROGRAMFILES\${APP_NAME}\*.*" 0 +2
+    RMDir /r "$PROGRAMFILES\${APP_NAME}"
+  IfFileExists "$PROGRAMFILES64\${APP_NAME}\*.*" 0 +2
+    RMDir /r "$PROGRAMFILES64\${APP_NAME}"
+  SetRegView 64
+  DeleteRegKey HKLM "${REG_UNINSTALL_KEY}"
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\main.exe"
+  DeleteRegKey HKCR ".mmtl"
+  DeleteRegKey HKCR "EasyScanlate.MMTLFile"
+  SetRegView 32
+  DeleteRegKey HKLM "${REG_UNINSTALL_KEY}"
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\main.exe"
+  ; Old shortcuts (admin StartMenu/Desktop) — Velopack recreates per-user ones
+  Delete "$DESKTOP\${APP_NAME}.lnk"
+  Delete "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk"
+  Delete "$SMPROGRAMS\${APP_NAME}\Uninstall ${APP_NAME}.lnk"
+  RMDir "$SMPROGRAMS\${APP_NAME}"
 FunctionEnd
 
 Section "Velopack Setup" SecVelopack
