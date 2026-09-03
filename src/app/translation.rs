@@ -67,8 +67,12 @@ pub fn handle_models_fetched(app: &mut App, providers: HashMap<String, translati
     Task::none()
 }
 
-fn capitalized_profile_name(lang: &str) -> String {
+pub(crate) fn placeholder_name(lang: &str) -> String {
     format!("{lang}(auto)")
+}
+
+fn capitalized_profile_name(lang: &str) -> String {
+    placeholder_name(lang)
 }
 
 fn resolve_base_id(app: &App) -> Option<easyscanlate_model::ProfileId> {
@@ -413,6 +417,139 @@ pub fn handle_connect_modal_submit(app: &mut App) -> Task<Message> {
 
 pub fn handle_connect_modal_cancel(app: &mut App) -> Task<Message> {
     app.connect_modal = None;
+    Task::none()
+}
+
+fn validate_base_target(app: &App, base: Option<easyscanlate_model::ProfileId>, target: &easyscanlate_ui::event::TargetProfileSelection) -> bool {
+    match target {
+        easyscanlate_ui::event::TargetProfileSelection::Existing(tid) => Some(*tid) != base,
+        easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) => {
+            if let Some(b) = base {
+                if let Some(bname) = app.active_tab().project.profiles.iter().find(|p| p.id == b).map(|p| p.name.clone()) {
+                    return &bname != name;
+                }
+            }
+            true
+        }
+    }
+}
+
+pub fn handle_panel_mode(app: &mut App, mode: easyscanlate_ui::event::TranslationPanelMode) -> Task<Message> {
+    if mode == easyscanlate_ui::event::TranslationPanelMode::Translate && app.active_tab_mut().translation_panel_mode != easyscanlate_ui::event::TranslationPanelMode::Translate {
+        if app.active_tab_mut().translate_base.is_none() && !app.active_tab_mut().images.is_empty() {
+            app.active_tab_mut().translate_base = Some(app.active_tab_mut().project.profiles.selected_id());
+        }
+        if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(_) = app.active_tab_mut().translate_target.clone() {
+            app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(placeholder_name(&app.active_tab_mut().translate_lang));
+        }
+        if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.active_tab_mut().translate_target.clone() {
+            if let Some(id) = app.active_tab_mut().project.profiles.find_by_name(&name) {
+                let base = app.active_tab_mut().translate_base.or_else(|| Some(app.active_tab_mut().project.profiles.selected_id()));
+                if Some(id) != base {
+                    app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::Existing(id);
+                }
+            }
+        }
+        if let (Some(base), easyscanlate_ui::event::TargetProfileSelection::Existing(tid)) = (app.active_tab_mut().translate_base, app.active_tab_mut().translate_target.clone()) {
+            if base == tid {
+                app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(placeholder_name(&app.active_tab_mut().translate_lang));
+            }
+        }
+    }
+    app.active_tab_mut().translation_panel_mode = mode;
+    app.active_tab_mut().status = match mode {
+        easyscanlate_ui::event::TranslationPanelMode::Edit => "Edit mode: single profile.".to_string(),
+        easyscanlate_ui::event::TranslationPanelMode::Translate => "Translate mode: base → target.".to_string(),
+    };
+    if app.active_tab_mut().editing.is_some() && app.active_tab_mut().editing_origin == easyscanlate_ui::event::EditOrigin::Panel {
+        crate::app::edit::clear_editing(app);
+    }
+    Task::none()
+}
+
+pub fn handle_base_select(app: &mut App, id: easyscanlate_model::ProfileId) -> Task<Message> {
+    if app.active_tab_mut().images.is_empty() {
+        return Task::none();
+    }
+    let exists = app.active_tab_mut().project.profiles.iter().any(|p| p.id == id);
+    if !exists {
+        return Task::none();
+    }
+    if let easyscanlate_ui::event::TargetProfileSelection::Existing(tid) = app.active_tab_mut().translate_target.clone() {
+        if tid == id {
+            app.active_tab_mut().status = "Base and target must differ.".to_string();
+            return Task::none();
+        }
+    }
+    if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.active_tab().translate_target.clone() {
+        let bprof_name = app.active_tab().project.profiles.iter().find(|p| p.id == id).map(|p| p.name.clone());
+        if let Some(bname) = bprof_name { if bname == name { app.active_tab_mut().status = "Base and target must differ.".to_string(); return Task::none(); } }
+    }
+    app.active_tab_mut().translate_base = Some(id);
+    let name = app.active_tab_mut().project.profiles.iter().find(|p| p.id == id).map(|p| p.name.clone()).unwrap_or_default();
+    app.active_tab_mut().status = format!("Base: {name}");
+    Task::none()
+}
+
+pub fn handle_target_select(app: &mut App, sel: easyscanlate_ui::event::TargetProfileSelection) -> Task<Message> {
+    if app.active_tab().images.is_empty() {
+        return Task::none();
+    }
+    let base = {
+        let tab = app.active_tab();
+        tab.translate_base.or_else(|| Some(tab.project.profiles.selected_id()))
+    };
+    match &sel {
+        easyscanlate_ui::event::TargetProfileSelection::Existing(id) => {
+            if Some(*id) == base {
+                app.active_tab_mut().status = "Base and target must differ.".to_string();
+                return Task::none();
+            }
+            let exists = app.active_tab().project.profiles.iter().any(|p| p.id == *id);
+            if !exists { return Task::none(); }
+        }
+        easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) => {
+            if let Some(b) = base {
+                let bprof_name = app.active_tab().project.profiles.iter().find(|p| p.id == b).map(|p| p.name.clone());
+                if let Some(bname) = bprof_name { if &bname == name { app.active_tab_mut().status = "Base and target must differ.".to_string(); return Task::none(); } }
+            }
+        }
+    }
+    let resolved = match sel.clone() {
+        easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) => {
+            let found = app.active_tab().project.profiles.find_by_name(&name);
+            if let Some(id) = found { if Some(id) != base { easyscanlate_ui::event::TargetProfileSelection::Existing(id) } else { easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) } } else { easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) }
+        }
+        other => other,
+    };
+    app.active_tab_mut().translate_target = resolved.clone();
+    let label = match resolved {
+        easyscanlate_ui::event::TargetProfileSelection::Existing(id) => app.active_tab().project.profiles.iter().find(|p| p.id == id).map(|p| p.name.clone()).unwrap_or_default(),
+        easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(n) => n,
+    };
+    app.active_tab_mut().status = format!("Target: {label}");
+    Task::none()
+}
+
+pub fn handle_lang(app: &mut App, lang: String) -> Task<Message> {
+    app.active_tab_mut().translate_lang = lang.clone();
+    if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(_) = app.active_tab_mut().translate_target.clone() {
+        let new_name = placeholder_name(&lang);
+        if !app.active_tab_mut().images.is_empty() {
+            if let Some(id) = app.active_tab_mut().project.profiles.find_by_name(&new_name) {
+                let base = app.active_tab_mut().translate_base.or_else(|| Some(app.active_tab_mut().project.profiles.selected_id()));
+                if Some(id) != base {
+                    app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::Existing(id);
+                } else {
+                    app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(new_name);
+                }
+            } else {
+                app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(new_name);
+            }
+        } else {
+            app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(new_name);
+        }
+    }
     Task::none()
 }
 

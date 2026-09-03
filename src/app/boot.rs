@@ -10,6 +10,9 @@ use easyscanlate_ui::{KOREAN_FONT_PATH, LoadedImage};
 #[cfg(feature = "test-ui")]
 use iced::widget::image::Handle;
 
+use iced::Font;
+use std::collections::HashSet;
+
 use super::{App, Message};
 use super::translation;
 
@@ -297,6 +300,51 @@ pub fn enumerate_system_fonts() -> Vec<(String, String)> {
         }
     }
     out
+}
+
+pub fn handle_font_loaded(app: &mut App) -> Task<Message> {
+    app.font = Some(Font::with_name(easyscanlate_ui::KOREAN_FONT_NAME));
+    app.active_tab_mut().status = format!(
+        "{} font ready. {}",
+        easyscanlate_ui::KOREAN_FONT_NAME,
+        if app.active_tab_mut().images.is_empty() {
+            "Open images to begin."
+        } else {
+            ""
+        }
+    );
+    Task::none()
+}
+
+pub fn handle_system_fonts(app: &mut App, fonts: Vec<(String, String)>) -> Task<Message> {
+    app.system_fonts = fonts.into_iter().collect();
+    let mut names: Vec<String> = app.system_fonts.keys().cloned().collect();
+    for bundled in easyscanlate_model::BUNDLED_FONTS {
+        if !names.iter().any(|n| n.eq_ignore_ascii_case(bundled)) {
+            names.push(bundled.to_string());
+        }
+    }
+    names.sort();
+    names.dedup();
+    {
+        let mut seen_lower = HashSet::new();
+        names.retain(|n| seen_lower.insert(n.to_ascii_lowercase()));
+    }
+    names.sort();
+    app.installed_fonts = names;
+    Task::none()
+}
+
+pub fn handle_style_font_loaded(app: &mut App, name: String) -> Task<Message> {
+    app.active_tab_mut().status = format!("Font \"{name}\" loaded.");
+    Task::none()
+}
+
+pub fn handle_cjk_fallback_loaded(app: &mut App, count: usize) -> Task<Message> {
+    if count > 0 {
+        app.active_tab_mut().status = format!("Loaded {count} CJK fallback font(s).");
+    }
+    Task::none()
 }
 
 /// Loads only CJK-covering system fonts into iced's `cosmic_text` DB,

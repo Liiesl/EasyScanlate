@@ -236,6 +236,37 @@ pub fn load_created_project(path_str: String) -> Result<(easyscanlate_model::Pro
     build_loaded_images(res, display)
 }
 
+pub fn handle_external_opens(app: &mut App, paths: Vec<String>) -> Task<Message> {
+    if paths.is_empty() { return Task::none(); }
+    let mut tasks = Vec::new();
+    for raw in paths {
+        let trimmed = raw.trim().trim_matches('"').trim().to_string();
+        if trimmed.is_empty() { continue; }
+        if !trimmed.to_ascii_lowercase().ends_with(".mmtl") {
+            app.active_tab_mut().status = format!("Not a .mmtl: {trimmed}");
+            continue;
+        }
+        let path = std::path::PathBuf::from(&trimmed);
+        if !path.exists() {
+            app.active_tab_mut().status = format!("Missing: {}", path.display());
+            continue;
+        }
+        let new_id = crate::app::tab::TabId(app.next_tab_id);
+        app.next_tab_id += 1;
+        app.active_tab_mut().status = format!("Loading {}...", path.display());
+        let path_clone = path.clone();
+        tasks.push(Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || load_created_project(path_clone.to_string_lossy().to_string()))
+                    .await
+                    .unwrap_or_else(|e| Err(format!("load task failed: {e}")))
+            },
+            move |res| Message::Tab(new_id, crate::app::TabMessage::RecentPickedToLoad(res)),
+        ));
+    }
+    if tasks.is_empty() { Task::none() } else { Task::batch(tasks) }
+}
+
 pub fn handle_loaded(
     app: &mut App,
     tab_id: crate::app::tab::TabId,

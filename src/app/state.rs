@@ -5,6 +5,8 @@ use easyscanlate_ui::color::rgba_to_color;
 use easyscanlate_ui::event::{EditOrigin, MainAreaMode, ManualMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
 use easyscanlate_ui::{ConnectModal, LoadedImage, UiState};
 
+use easyscanlate_model::ModelEvent;
+
 use super::App;
 use super::tab::Tab;
 
@@ -510,6 +512,56 @@ impl UiState for App {
     fn onboarding_overall_progress(&self) -> f32 { self.onboarding.as_ref().map(|o| o.overall_progress()).unwrap_or(0.0) }
     fn onboarding_downloading(&self) -> bool { self.onboarding.as_ref().map(|o| o.downloading).unwrap_or(false) }
     fn onboarding_all_done(&self) -> bool { self.onboarding.as_ref().map(|o| o.is_all_done()).unwrap_or(true) }
+}
+
+pub(crate) fn handle_model_event(tab: &mut Tab, event: ModelEvent) {
+    match &event {
+        ModelEvent::EntryDeleted { .. }
+        | ModelEvent::EntriesReordered { .. }
+        | ModelEvent::EntryMoved { .. }
+        | ModelEvent::EntriesAdded { .. }
+        | ModelEvent::ImageAdded { .. }
+        | ModelEvent::EntryTextUpdated { .. }
+        | ModelEvent::EntryStyleUpdated { .. }
+        | ModelEvent::ProfileCreated { .. }
+        | ModelEvent::ProfileRemoved { .. }
+        | ModelEvent::ProfileSelected { .. }
+        | ModelEvent::ProfileRenamed { .. }
+        | ModelEvent::InpaintAdded { .. }
+        | ModelEvent::InpaintRemoved { .. }
+        | ModelEvent::NoteUpdated { .. }
+        | ModelEvent::EntryRestored { .. } => {
+            tab.dirty = true;
+        }
+    }
+    match event {
+        ModelEvent::EntryDeleted { id } => {
+            if tab.selected.is_some_and(|(_, sel_id)| sel_id == id) {
+                tab.selected = None;
+                crate::app::edit::clear_editing_tab(tab);
+            }
+            if tab.editing.is_some_and(|(_, eid)| eid == id) {
+                crate::app::edit::clear_editing_tab(tab);
+            }
+        }
+        ModelEvent::EntryRestored { .. } => {}
+        ModelEvent::EntriesReordered { .. } => {}
+        ModelEvent::EntryMoved { .. } => {}
+        ModelEvent::EntriesAdded { .. } => {
+            debug_assert!(tab.images.len() == tab.project.image_count());
+        }
+        ModelEvent::ImageAdded { .. } => {
+            debug_assert!(tab.images.len() == tab.project.image_count());
+        }
+        ModelEvent::EntryTextUpdated { .. } => {}
+        ModelEvent::EntryStyleUpdated { .. } => {}
+        ModelEvent::ProfileCreated { .. }
+        | ModelEvent::ProfileRemoved { .. }
+        | ModelEvent::ProfileSelected { .. }
+        | ModelEvent::ProfileRenamed { .. } => {}
+        ModelEvent::InpaintAdded { .. } | ModelEvent::InpaintRemoved { .. } => {}
+        ModelEvent::NoteUpdated { .. } => {}
+    }
 }
 
 

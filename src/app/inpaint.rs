@@ -74,21 +74,6 @@ pub fn start_inpaint(
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #[cfg(feature = "inpaint")]
 fn auto_pad_for(backend: InpaintBackend, radius: i32) -> f32 {
     match backend {
@@ -609,14 +594,6 @@ fn run_auto_job_with_stitch(
     }
     Ok(out)
 }
-
-
-
-
-
-
-
-
 
 pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
     if app.active_state().is_bulk_busy() {

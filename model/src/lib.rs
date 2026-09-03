@@ -40,6 +40,7 @@ pub mod extras;
 pub mod ocr_result;
 pub mod profile;
 pub mod project;
+pub mod sort;
 pub mod style;
 
 pub use entry::{EntryId, EntrySource, ImageId, ImageMeta, NewEntry, OcrEntry, Quad};
@@ -48,6 +49,7 @@ pub use extras::{Extras, InpaintId, InpaintPatch, Shape, ShapeKind};
 pub use ocr_result::OcrResult;
 pub use profile::{EntryDelta, Profile, ProfileId, Profiles};
 pub use project::Project;
+pub use sort::natural_cmp;
 pub use style::{
     EntryStyle, TextAlign, TextGradientDir, ANIME_ACE_FAMILY, AUGIE_FAMILY, BUNDLED_FONTS,
     DEFAULT_FONT_FAMILY,
