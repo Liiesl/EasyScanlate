@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["model", "inpaint", "ocr", "styling", "translation", "ui", "settings", "segment", "mmtl"]
+members = ["model", "inpaint", "ocr", "styling", "translation", "ui", "settings", "segment", "mmtl", "models-store"]
 resolver = "3"
 exclude = ["iced", "rapidocr-core", "NeverLiieIcedWidgets"]
 
@@ -22,7 +22,11 @@ iced = { version = "0.14.0", features = ["image", "canvas", "advanced", "tokio"]
 image = "0.25"
 bytes = "1.6"
 rfd = "0.17"
-tokio = { version = "1", features = ["rt", "time"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
+url = "2"
+fast-down-api = { git = "https://github.com/fast-down/core.git" }
+path_helper = { version = "=0.1.9", features = ["auto_ext", "sanitize", "tokio"] }
+tokio-util = "0.7"
 fontdb = "0.24"
 tiny-skia = "0.11"
 open = "5"
@@ -42,6 +46,7 @@ tempfile = "3"
 # Internal path dependencies
 scanlateit-model = { path = "model" }
 scanlateit-settings = { path = "settings" }
+scanlateit-models = { path = "models-store" }
 scanlateit-inpaint = { path = "inpaint" }
 scanlateit-ocr = { path = "ocr" }
 scanlateit-styling = { path = "styling" }

@@ -14,3 +14,4 @@ RELEASES
 releases.*.json
 assets.*.json
 EasyScanlate-Installer.exe
+/legacy

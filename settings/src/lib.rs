@@ -516,6 +516,55 @@ pub fn modify(f: impl FnOnce(&mut Settings)) -> Result<(), String> {
     result
 }
 
+/// Returns the absolute path to the confy configuration file.
+///
+/// On Windows this is typically `%APPDATA%\scanlateit\config\default-config.toml`,
+/// on Linux `~/.config/scanlateit/config/default-config.toml`.
+pub fn config_file_path() -> std::path::PathBuf {
+    confy::get_configuration_file_path(APP_NAME, None).unwrap_or_else(|_| {
+        // Fallback: should never happen, but keep a deterministic path for tests.
+        std::path::PathBuf::from("scanlateit/default-config.toml")
+    })
+}
+
+/// Returns the directory containing the confy configuration file.
+pub fn config_dir() -> std::path::PathBuf {
+    config_file_path()
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
+/// Returns the directory where ONNX models are persisted.
+///
+/// This is a sibling `models/` directory next to the settings file, e.g.
+/// `%APPDATA%\scanlateit\config\models\` on Windows and
+/// `~/.config/scanlateit/config/models/` on Linux. It is the canonical
+/// location for all downloaded models and is created on demand.
+pub fn models_dir() -> std::path::PathBuf {
+    config_dir().join("models")
+}
+
+/// Like [`models_dir`] but derived from an explicit config file path (useful for tests).
+pub fn models_dir_for_config_path(config_path: &std::path::Path) -> std::path::PathBuf {
+    config_path
+        .parent()
+        .map(|p| p.join("models"))
+        .unwrap_or_else(|| std::path::PathBuf::from("models"))
+}
+
+/// Returns the full path for a model file inside [`models_dir`].
+pub fn model_path(filename: &str) -> std::path::PathBuf {
+    models_dir().join(filename)
+}
+
+/// Ensures [`models_dir`] exists, creating it recursively if needed.
+pub fn ensure_models_dir() -> std::io::Result<std::path::PathBuf> {
+    let dir = models_dir();
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
 /// Bump `recent_projects` with `path`, moving it to front and updating
 /// `last_opened`. Keeps at most 20 entries.
 pub fn touch_recent(path: String) {
