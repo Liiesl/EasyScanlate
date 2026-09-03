@@ -415,13 +415,13 @@ pub fn dispatch_pending(app: &mut crate::app::App) -> Task<crate::app::Message> 
             EngineKind::Segment => dispatch_segment(app, tab_id),
             EngineKind::Style => dispatch_style(app, tab_id),
             EngineKind::InpaintTelea => {
-                dispatch_inpaint(app, tab_id, scanlateit_settings::InpaintBackend::Telea)
+                dispatch_inpaint(app, tab_id, easyscanlate_settings::InpaintBackend::Telea)
             }
             EngineKind::InpaintLama => {
-                dispatch_inpaint(app, tab_id, scanlateit_settings::InpaintBackend::Lama)
+                dispatch_inpaint(app, tab_id, easyscanlate_settings::InpaintBackend::Lama)
             }
             EngineKind::InpaintAot => {
-                dispatch_inpaint(app, tab_id, scanlateit_settings::InpaintBackend::Aot)
+                dispatch_inpaint(app, tab_id, easyscanlate_settings::InpaintBackend::Aot)
             }
         };
         tasks.push(task);
@@ -444,12 +444,12 @@ fn dispatch_ocr(app: &mut crate::app::App, tab_id: super::tab::TabId) -> Task<cr
             if let Some(engine) = cached {
                 return crate::app::ocr::start_manual_ocr_selection_for(app, tab_id, data, engine);
             } else {
-                let cfg = scanlateit_settings::get(|s| scanlateit_ocr::config_with(0.0, s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000)));
+                let cfg = easyscanlate_settings::get(|s| easyscanlate_ocr::config_with(0.0, s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000)));
                 app.tabs[idx].pending_manual_multi_ocr = Some(data);
                 app.tabs[idx].status = "Loading OCR engine for manual OCR…".to_string();
                 let tid = tab_id;
                 return Task::perform(
-                    async move { scanlateit_ocr::Engine::build_with_config(cfg) },
+                    async move { easyscanlate_ocr::Engine::build_with_config(cfg) },
                     move |res| crate::app::Message::Tab(tid, crate::app::TabMessage::ManualOcrEngineReady(res)),
                 );
             }
@@ -460,14 +460,14 @@ fn dispatch_ocr(app: &mut crate::app::App, tab_id: super::tab::TabId) -> Task<cr
         return crate::app::ocr::maybe_start_ocr_for(app, tab_id);
     }
     // need to build pipeline
-    let (workers, cfg) = scanlateit_settings::get(|s| {
+    let (workers, cfg) = easyscanlate_settings::get(|s| {
         let workers = s.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
-        let cfg = scanlateit_ocr::config_from_strings(&s.ocr_text_score, &s.ocr_max_side_len);
+        let cfg = easyscanlate_ocr::config_from_strings(&s.ocr_text_score, &s.ocr_max_side_len);
         (workers, cfg)
     });
     let tid = tab_id;
     Task::perform(
-        async move { scanlateit_ocr::ParallelEngine::build_with_config(cfg, workers) },
+        async move { easyscanlate_ocr::ParallelEngine::build_with_config(cfg, workers) },
         move |res| crate::app::Message::Tab(tid, crate::app::TabMessage::ParallelEngineReady(res)),
     )
 }
@@ -496,7 +496,7 @@ fn dispatch_style(app: &mut crate::app::App, tab_id: super::tab::TabId) -> Task<
 fn dispatch_inpaint(
     app: &mut crate::app::App,
     tab_id: super::tab::TabId,
-    backend: scanlateit_settings::InpaintBackend,
+    backend: easyscanlate_settings::InpaintBackend,
 ) -> Task<crate::app::Message> {
     #[cfg(feature = "inpaint")]
     {
@@ -508,16 +508,16 @@ fn dispatch_inpaint(
         }
         let idx = idx_opt.unwrap();
         let jobs_opt = match backend {
-            scanlateit_settings::InpaintBackend::Telea => app.tabs[idx].pending_auto_telea_jobs.clone(),
-            scanlateit_settings::InpaintBackend::Lama => app.tabs[idx].pending_auto_lama_jobs.clone(),
-            scanlateit_settings::InpaintBackend::Aot => app.tabs[idx].pending_auto_aot_jobs.clone(),
+            easyscanlate_settings::InpaintBackend::Telea => app.tabs[idx].pending_auto_telea_jobs.clone(),
+            easyscanlate_settings::InpaintBackend::Lama => app.tabs[idx].pending_auto_lama_jobs.clone(),
+            easyscanlate_settings::InpaintBackend::Aot => app.tabs[idx].pending_auto_aot_jobs.clone(),
         };
         if let Some(jobs) = jobs_opt {
             // Clear tab pending so re-entrance doesn't duplicate; queue holds running
             match backend {
-                scanlateit_settings::InpaintBackend::Telea => app.tabs[idx].pending_auto_telea_jobs = None,
-                scanlateit_settings::InpaintBackend::Lama => app.tabs[idx].pending_auto_lama_jobs = None,
-                scanlateit_settings::InpaintBackend::Aot => app.tabs[idx].pending_auto_aot_jobs = None,
+                easyscanlate_settings::InpaintBackend::Telea => app.tabs[idx].pending_auto_telea_jobs = None,
+                easyscanlate_settings::InpaintBackend::Lama => app.tabs[idx].pending_auto_lama_jobs = None,
+                easyscanlate_settings::InpaintBackend::Aot => app.tabs[idx].pending_auto_aot_jobs = None,
             }
             return crate::app::inpaint::dispatch_auto_for(app, tab_id, jobs, backend);
         }
@@ -526,7 +526,7 @@ fn dispatch_inpaint(
             let data = app.tabs[idx].pending_manual_multi.take().unwrap();
             // Need to dispatch manual inpaint now that weight is reserved (queue already popped to running)
             // Check cached engine for this backend; if not cached, build it (weight remains reserved)
-            let radius = scanlateit_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
+            let radius = easyscanlate_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
             let cached = app.engines.inpaint.clone().filter(|e| e.backend() == backend && e.radius() == radius);
             if let Some(engine) = cached {
                 // use helper that takes tab_id-aware start
@@ -535,13 +535,13 @@ fn dispatch_inpaint(
                 // store back for engine-ready path and build
                 app.tabs[idx].pending_manual_multi = Some(data);
                 app.tabs[idx].status = match backend {
-                    scanlateit_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
-                    scanlateit_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
-                    scanlateit_settings::InpaintBackend::Telea => "Inpainting...".to_string(),
+                    easyscanlate_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
+                    easyscanlate_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
+                    easyscanlate_settings::InpaintBackend::Telea => "Inpainting...".to_string(),
                 };
                 let tid = tab_id;
                 return Task::perform(
-                    async move { scanlateit_inpaint::Engine::build(backend, radius) },
+                    async move { easyscanlate_inpaint::Engine::build(backend, radius) },
                     move |res| crate::app::Message::Tab(tid, crate::app::TabMessage::InpaintEngineReady(res)),
                 );
             }
@@ -549,20 +549,20 @@ fn dispatch_inpaint(
         // Also handle background stitch pending (single inpaint queued)
         if app.tabs[idx].pending_background_stitch.is_some() {
             let (job, pad, prev, next) = app.tabs[idx].pending_background_stitch.take().unwrap();
-            let radius = scanlateit_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
+            let radius = easyscanlate_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
             let cached = app.engines.inpaint.clone().filter(|e| e.backend() == backend && e.radius() == radius);
             if let Some(engine) = cached {
                 return crate::app::inpaint::start_background_stitch_for(app, tab_id, engine, job, pad, prev, next);
             } else {
                 app.tabs[idx].pending_background_stitch = Some((job, pad, prev, next));
                 app.tabs[idx].status = match backend {
-                    scanlateit_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
-                    scanlateit_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
-                    scanlateit_settings::InpaintBackend::Telea => "Inpainting background...".to_string(),
+                    easyscanlate_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
+                    easyscanlate_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
+                    easyscanlate_settings::InpaintBackend::Telea => "Inpainting background...".to_string(),
                 };
                 let tid = tab_id;
                 return Task::perform(
-                    async move { scanlateit_inpaint::Engine::build(backend, radius) },
+                    async move { easyscanlate_inpaint::Engine::build(backend, radius) },
                     move |res| crate::app::Message::Tab(tid, crate::app::TabMessage::InpaintEngineReady(res)),
                 );
             }

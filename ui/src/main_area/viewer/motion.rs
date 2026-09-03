@@ -1,7 +1,7 @@
 use iced::{Point, Rectangle, Size};
 
 use lucide_icons::Icon;
-use scanlateit_model::{EntryId, Quad};
+use easyscanlate_model::{EntryId, Quad};
 
 use crate::main_area::geometry::order_quad;
 use crate::scale;

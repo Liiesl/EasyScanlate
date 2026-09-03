@@ -1,5 +1,5 @@
 [package]
-name = "scanlateit-ui"
+name = "easyscanlate-ui"
 version.workspace = true
 edition.workspace = true
 
@@ -7,11 +7,11 @@ edition.workspace = true
 # Mirrors the root package's subsystem switches: the app crate toggles these
 # to keep heavy ML/rig dependencies out of UI-only test builds.
 default = ["translation"]
-translation = ["dep:scanlateit-translation"]
+translation = ["dep:easyscanlate-translation"]
 ocr = []
 inpaint = []
 styling = []
-segment = ["dep:scanlateit-segment"]
+segment = ["dep:easyscanlate-segment"]
 
 [dependencies]
 # Mirrored locally in `iced/` (excluded workspace); version pinned in
@@ -21,11 +21,11 @@ iced = { workspace = true }
 bytes = { workspace = true }
 image = { workspace = true }
 neverliie-iced-widgets = { workspace = true }
-scanlateit-model = { workspace = true }
-scanlateit-settings = { workspace = true }
-scanlateit-models = { workspace = true }
-scanlateit-translation = { workspace = true, optional = true }
-scanlateit-segment = { workspace = true, optional = true }
+easyscanlate-model = { workspace = true }
+easyscanlate-settings = { workspace = true }
+easyscanlate-models = { workspace = true }
+easyscanlate-translation = { workspace = true, optional = true }
+easyscanlate-segment = { workspace = true, optional = true }
 tokio = { workspace = true }
 open = { workspace = true }
 lucide-icons = { workspace = true }

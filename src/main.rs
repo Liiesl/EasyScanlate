@@ -12,14 +12,14 @@ use velopack::VelopackApp;
 
 fn print_help() {
     println!(
-        r#"Scanlateit — EasyScanlate (scanlateit.exe)
+        r#"EasyScanlate — EasyScanlate (EasyScanlate.exe)
 
 Usage:
-  scanlateit [OPTIONS] [PATH]
+  easyscanlate [OPTIONS] [PATH]
 
 Arguments:
   PATH   Optional .mmtl project to open. Double-click association passes
-         the file as the first argument (e.g. scanlateit "C:\path\to\proj.mmtl").
+         the file as the first argument (e.g. easyscanlate "C:\path\to\proj.mmtl").
 
 Options:
   -h, --help          Show this help and exit
@@ -39,9 +39,9 @@ Single-instance:
   project in a new tab.
 
 Examples:
-  scanlateit project.mmtl
-  scanlateit --register
-  scanlateit --check-assoc
+  easyscanlate project.mmtl
+  easyscanlate --register
+  easyscanlate --check-assoc
 "#,
         single_instance::SINGLE_INSTANCE_PORT
     );
@@ -61,7 +61,7 @@ fn main() -> iced::Result {
         return Ok(());
     }
     if has("--version") || has("-V") {
-        println!("scanlateit {}", env!("CARGO_PKG_VERSION"));
+        println!("easyscanlate {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
     if has("--register") {
@@ -98,7 +98,7 @@ fn main() -> iced::Result {
     // ---- Single-instance: secondary forwards and exits, primary keeps listener ---
     let ipc_listener = single_instance::acquire_or_forward(initial_mmtl_str.clone());
 
-    scanlateit_settings::init();
+    easyscanlate_settings::init();
 
     // Single-window custom frame: fixed chrome — not scaled with ui_font_size.
     let frame = NativeFrame::new(
@@ -139,7 +139,7 @@ fn main() -> iced::Result {
     .font(include_bytes!("../assets/fonts/anime-ace.bold.ttf"))
     .font(include_bytes!("../assets/fonts/anime-ace.italic.ttf"))
     .font(include_bytes!("../assets/fonts/augie.ttf"))
-    .title("Scanlateit")
+    .title("EasyScanlate")
     .theme(|app: &app::App| app.theme())
     .subscription(app::subscription)
     .run()

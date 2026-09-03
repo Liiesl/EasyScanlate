@@ -1,7 +1,7 @@
 use iced::Task;
-use scanlateit_model::EntryId;
+use easyscanlate_model::EntryId;
 #[cfg(feature = "segment")]
-use scanlateit_segment::Engine as SegmentEngine;
+use easyscanlate_segment::Engine as SegmentEngine;
 
 use super::{App, Message};
 
@@ -50,7 +50,7 @@ pub fn start_segment_filter_for(app: &mut App, tab_id: crate::app::tab::TabId) -
             app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Segment);
             return Task::none();
         }
-        if !scanlateit_settings::get(|s| s.auto_sfx_filter) {
+        if !easyscanlate_settings::get(|s| s.auto_sfx_filter) {
             app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Segment);
             return Task::none();
         }
@@ -109,9 +109,9 @@ fn run_segment_filter_blocking(
     paths: &[String],
     ocr_boxes: &[Vec<([f32; 4], EntryId)>],
 ) -> Result<Vec<(usize, EntryId)>, String> {
-    use scanlateit_segment::filter::{DetBox, sfx_filter_indexes};
-    use scanlateit_segment::grid::{build_grid_canvas_with_loader, grid_det_to_page, plan_grids};
-    use scanlateit_segment::SegClass;
+    use easyscanlate_segment::filter::{DetBox, sfx_filter_indexes};
+    use easyscanlate_segment::grid::{build_grid_canvas_with_loader, grid_det_to_page, plan_grids};
+    use easyscanlate_segment::SegClass;
     if dims.is_empty() {
         return Ok(Vec::new());
     }
@@ -122,7 +122,7 @@ fn run_segment_filter_blocking(
             None => return image::RgbImage::new(1, 1),
         };
         #[cfg(feature = "ocr")]
-        let img = scanlateit_ocr::load_rgb(path).unwrap_or_else(|| image::RgbImage::new(1, 1));
+        let img = easyscanlate_ocr::load_rgb(path).unwrap_or_else(|| image::RgbImage::new(1, 1));
         #[cfg(not(feature = "ocr"))]
         let img = image::open(path).map(|i| i.to_rgb8()).unwrap_or_else(|_| image::RgbImage::new(1, 1));
         img
@@ -263,7 +263,7 @@ pub fn handle_filtered_for(
                 app.tabs[idx].status = format!("SFX filter: no entries removed. {}", tab_status);
             }
             if is_pipeline {
-                let (need_style_inpaint, need_inpaint_solo) = scanlateit_settings::get(|s| {
+                let (need_style_inpaint, need_inpaint_solo) = easyscanlate_settings::get(|s| {
                     let need_style = s.auto_style_detect && s.auto_inpaint;
                     let need_solo = s.auto_inpaint && !s.auto_style_detect;
                     (need_style, need_solo)
@@ -283,9 +283,9 @@ pub fn handle_filtered_for(
                         }
                     }
                 } else if need_inpaint_solo {
-                    let eff = scanlateit_settings::get(|s| {
-                        if !s.auto_style_detect && s.auto_inpaint_model == scanlateit_settings::AutoInpaintModel::Mixed {
-                            scanlateit_settings::AutoInpaintModel::Telea
+                    let eff = easyscanlate_settings::get(|s| {
+                        if !s.auto_style_detect && s.auto_inpaint_model == easyscanlate_settings::AutoInpaintModel::Mixed {
+                            easyscanlate_settings::AutoInpaintModel::Telea
                         } else {
                             s.auto_inpaint_model
                         }
@@ -294,10 +294,10 @@ pub fn handle_filtered_for(
                     {
                         use crate::app::queue::{AcquireResult, EngineKind};
                         let kind = match eff {
-                            scanlateit_settings::AutoInpaintModel::Telea => EngineKind::InpaintTelea,
-                            scanlateit_settings::AutoInpaintModel::Lama => EngineKind::InpaintLama,
-                            scanlateit_settings::AutoInpaintModel::Aot => EngineKind::InpaintAot,
-                            scanlateit_settings::AutoInpaintModel::Mixed => EngineKind::InpaintTelea,
+                            easyscanlate_settings::AutoInpaintModel::Telea => EngineKind::InpaintTelea,
+                            easyscanlate_settings::AutoInpaintModel::Lama => EngineKind::InpaintLama,
+                            easyscanlate_settings::AutoInpaintModel::Aot => EngineKind::InpaintAot,
+                            easyscanlate_settings::AutoInpaintModel::Mixed => EngineKind::InpaintTelea,
                         };
                         match app.engines.queue.try_acquire_or_enqueue(tab_id, kind) {
                             AcquireResult::Acquired(_) => tasks.push(super::inpaint::dispatch_auto_solo_for(app, tab_id, eff)),
@@ -314,7 +314,7 @@ pub fn handle_filtered_for(
                     {
                         app.tabs[idx].pipeline_active = false;
                     }
-                    let need_style_only = scanlateit_settings::get(|s| s.auto_style_detect && !s.auto_inpaint);
+                    let need_style_only = easyscanlate_settings::get(|s| s.auto_style_detect && !s.auto_inpaint);
                     if need_style_only {
                         #[cfg(feature = "styling")]
                         {

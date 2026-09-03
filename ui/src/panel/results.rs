@@ -20,7 +20,7 @@ use crate::segmented::{segment_icon, segmented_group};
 use crate::state::UiState;
 use crate::translation;
 use lucide_icons::Icon;
-use scanlateit_model::{EntryId, OcrEntry, ProfileId};
+use easyscanlate_model::{EntryId, OcrEntry, ProfileId};
 
 /// Widget id of the multi-line editor shown in a row while the entry is
 /// edited from the panel; must match the app's focus id.
@@ -145,7 +145,7 @@ fn entry_row<'a, S: UiState + ?Sized>(
         .style(crate::panel::button_style)
         .on_press_maybe(
             (!state.is_bulk_busy()
-                && !scanlateit_settings::get(|s| s.connections.is_empty()))
+                && !easyscanlate_settings::get(|s| s.connections.is_empty()))
             .then_some(UiEvent::RetranslateEntry((index, entry_id))),
         );
     let retranslate_tip: Element<'_, UiEvent> =
@@ -482,7 +482,7 @@ fn translate_bar<'a, S: UiState + ?Sized>(
     state: &'a S,
     has_entries: bool,
 ) -> Element<'a, UiEvent> {
-    let connected = scanlateit_settings::get(|s| !s.connections.is_empty());
+    let connected = easyscanlate_settings::get(|s| !s.connections.is_empty());
     let body: Element<'_, UiEvent> = if connected {
         let (sel_provider, sel_model) = state.translate_model_selection();
         let mut entries: Vec<MenuItem<'a, ModelOption, UiEvent, iced::Theme, iced::Renderer>> =

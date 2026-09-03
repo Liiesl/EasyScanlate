@@ -1,4 +1,4 @@
-//! .mmtl persistence for Scanlateit.
+//! .mmtl persistence for EasyScanlate.
 //! Single `project.xml` inside a ZIP, plus `images/` and optional `inpaint/`.
 //! Legacy ManhwaOCR JSON import/export also lives here.
 

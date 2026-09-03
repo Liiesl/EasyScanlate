@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 
-use scanlateit_model::EntryId;
+use easyscanlate_model::EntryId;
 
 use crate::Engine;
 
@@ -16,7 +16,7 @@ pub struct PendingSingle {
     pub index: usize,
     pub id: EntryId,
     pub path: String,
-    pub quad: scanlateit_model::Quad,
+    pub quad: easyscanlate_model::Quad,
 }
 
 /// The auto-detect job state the app owns: the lazily-built engine, whether
@@ -182,7 +182,7 @@ mod tests {
             index: 1,
             id: EntryId(2),
             path: "p".to_string(),
-            quad: scanlateit_model::Quad { points: [[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]] },
+            quad: easyscanlate_model::Quad { points: [[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]] },
         });
         let pending = tracker.take_pending_single().unwrap();
         assert_eq!(pending.index, 1);
@@ -193,7 +193,7 @@ mod tests {
             index: 0,
             id: EntryId(5),
             path: "q".to_string(),
-            quad: scanlateit_model::Quad { points: [[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]] },
+            quad: easyscanlate_model::Quad { points: [[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]] },
         });
         tracker.mark_building();
         tracker.fail_build();

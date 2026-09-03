@@ -1,6 +1,6 @@
 //! Model registry: filenames, URLs and metadata for all downloadable ONNX assets.
 //!
-//! Persisted location is always `scanlateit_settings::models_dir()` (settings-relative).
+//! Persisted location is always `easyscanlate_settings::models_dir()` (settings-relative).
 
 use std::path::PathBuf;
 
@@ -107,7 +107,7 @@ pub fn get_model_by_filename(filename: &str) -> Option<&'static ModelSpec> {
 
 /// Returns the models directory (settings-relative).
 pub fn models_dir() -> PathBuf {
-    scanlateit_settings::models_dir()
+    easyscanlate_settings::models_dir()
 }
 
 /// Returns the expected on-disk path for a registered model.
@@ -198,6 +198,6 @@ mod tests {
         let dir = models_dir();
         // Should end with "models" and be inside config_dir
         assert!(dir.ends_with("models"));
-        assert_eq!(dir, scanlateit_settings::config_dir().join("models"));
+        assert_eq!(dir, easyscanlate_settings::config_dir().join("models"));
     }
 }

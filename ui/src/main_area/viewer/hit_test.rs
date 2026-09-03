@@ -1,6 +1,6 @@
 use iced::{Point, Rectangle, Size};
 
-use scanlateit_model::EntryId;
+use easyscanlate_model::EntryId;
 
 use crate::main_area::geometry::order_quad;
 use crate::scale;
@@ -163,7 +163,7 @@ pub fn selected_quad_view(tiles: &[TileSpec<'_>], state: &TileViewState, index: 
     })))
 }
 
-pub fn entry_quad(tiles: &[TileSpec<'_>], index: usize, id: EntryId) -> Option<scanlateit_model::Quad> {
+pub fn entry_quad(tiles: &[TileSpec<'_>], index: usize, id: EntryId) -> Option<easyscanlate_model::Quad> {
     let tile = tiles.get(index)?;
     tile.overlays.iter().find(|e| e.id == id).map(|e| e.quad)
 }

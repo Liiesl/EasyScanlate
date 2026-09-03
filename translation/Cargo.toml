@@ -1,5 +1,5 @@
 [package]
-name = "scanlateit-translation"
+name = "easyscanlate-translation"
 version.workspace = true
 edition.workspace = true
 
@@ -8,4 +8,4 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
 rig = { workspace = true }
-scanlateit-settings = { workspace = true }
+easyscanlate-settings = { workspace = true }

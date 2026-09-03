@@ -1,5 +1,5 @@
 [package]
-name = "scanlateit-ocr"
+name = "easyscanlate-ocr"
 version.workspace = true
 edition.workspace = true
 
@@ -7,7 +7,7 @@ edition.workspace = true
 directml = ["rapidocr-core/directml"]
 
 [dependencies]
-scanlateit-model = { workspace = true }
-scanlateit-settings = { workspace = true }
+easyscanlate-model = { workspace = true }
+easyscanlate-settings = { workspace = true }
 rapidocr-core = { workspace = true }
 image = { workspace = true }

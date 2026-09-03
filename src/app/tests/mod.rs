@@ -4,10 +4,10 @@ pub mod retranslate_tests;
 
 pub use super::*;
 use iced::widget::text_editor;
-use scanlateit_settings::INITIAL_PRESET_SLOTS;
+use easyscanlate_settings::INITIAL_PRESET_SLOTS;
 
 pub(crate) fn app_with_entry() -> (App, EntryId) {
-    use scanlateit_model::{EntrySource, NewEntry, Quad};
+    use easyscanlate_model::{EntrySource, NewEntry, Quad};
     let mut app = App::new(NativeFrame::default());
     {
         let tab = app.active_tab_mut();

@@ -19,7 +19,7 @@ pub use rapidocr_core::OcrCancellationToken;
 pub mod session;
 pub use session::{RunEvent, RunSession};
 
-use scanlateit_model::{EntrySource, NewEntry, Project, Quad};
+use easyscanlate_model::{EntrySource, NewEntry, Project, Quad};
 
 const MODEL_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../models");
 
@@ -54,7 +54,7 @@ impl Engine {
     }
 
     /// Builds the engine with an explicit [`RapidOcrConfig`]. Callers that
-    /// read OCR tunables from `scanlateit_settings` should construct the config
+    /// read OCR tunables from `easyscanlate_settings` should construct the config
     /// via [`config_with`] and pass it here so the engine reflects the user's
     /// settings.
     pub fn build_with_config(cfg: RapidOcrConfig) -> Result<Self, String> {
@@ -190,9 +190,9 @@ pub fn config() -> RapidOcrConfig {
 /// stay at defaults (30).
 pub fn config_with(text_score: f32, max_side_len: u32) -> RapidOcrConfig {
     // Prefer onboarding-downloaded models in settings models_dir(), fallback to legacy crate-relative ../models.
-    let det_path = scanlateit_settings::resolve_model_path("PP-OCRv6_det_tiny.onnx");
-    let rec_path = scanlateit_settings::resolve_model_path("korean_PP-OCRv5_rec_mobile.onnx");
-    let dict_path = scanlateit_settings::resolve_model_path("korean_dict.txt");
+    let det_path = easyscanlate_settings::resolve_model_path("PP-OCRv6_det_tiny.onnx");
+    let rec_path = easyscanlate_settings::resolve_model_path("korean_PP-OCRv5_rec_mobile.onnx");
+    let dict_path = easyscanlate_settings::resolve_model_path("korean_dict.txt");
     // Keep model_dir for error messages fallback, but use resolved paths.
     let _model_dir = PathBuf::from(MODEL_DIR);
     // Clamp to valid ranges; rapidocr_core::config::RapidOcrConfig::validate
@@ -320,7 +320,7 @@ pub fn filter_by_bbox_height(lines: Vec<OcrLine>, min_height: f32, max_height: f
 
 /// Parses bbox height thresholds from settings strings, falling back to
 /// permissive defaults (0 and 10000) for ocr crate.
-/// App side defaults (0.7/40/100) are in `scanlateit_settings`.
+/// App side defaults (0.7/40/100) are in `easyscanlate_settings`.
 pub fn parse_bbox_heights(min_str: &str, max_str: &str) -> (f32, f32) {
     let min_h = min_str.trim().parse::<f32>().unwrap_or(0.0);
     let max_h = max_str.trim().parse::<f32>().unwrap_or(10000.0);
@@ -649,7 +649,7 @@ impl RunResult {
             .iter()
             .map(|(page, entries)| {
                 projects.get_mut(*page).map_or(0, |project| {
-                    let image_id = project.images().first().map(|m| m.id).unwrap_or(scanlateit_model::ImageId(0));
+                    let image_id = project.images().first().map(|m| m.id).unwrap_or(easyscanlate_model::ImageId(0));
                     project.append_ocr_for_image(image_id, entries.clone())
                 })
             })
@@ -677,7 +677,7 @@ impl BoundaryState {
             .iter()
             .map(|candidate| {
                 projects.get_mut(candidate.page).map_or(0, |project| {
-                    let image_id = project.images().first().map(|m| m.id).unwrap_or(scanlateit_model::ImageId(0));
+                    let image_id = project.images().first().map(|m| m.id).unwrap_or(easyscanlate_model::ImageId(0));
                     project.append_ocr_for_image(image_id, vec![candidate.entry.clone()])
                 })
             })

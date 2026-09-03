@@ -18,7 +18,7 @@
 
 !define APP_NAME "EasyScanlate"
 !define APP_ID "EasyScanlate"
-!define APP_EXE "scanlateit.exe"
+!define APP_EXE "EasyScanlate.exe"
 !define REG_UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
 !define VEL_SETUP "..\..\Releases\EasyScanlate-win-Setup.exe"
 

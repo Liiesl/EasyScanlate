@@ -97,11 +97,11 @@ impl Engine {
         // Prefer onboarding-downloaded models (koharu-yolo26s-seg.onnx) then legacy names.
         // Downloaded canonical filename is `koharu-yolo26s-seg.onnx` (registry MODELS).
         // Keep legacy fallbacks for dev `yolo26s-seg.onnx`, `best.onnx`, and alt folder.
-        let canonical = scanlateit_settings::resolve_model_path_with_legacy(
+        let canonical = easyscanlate_settings::resolve_model_path_with_legacy(
             "koharu-yolo26s-seg.onnx",
             Some(MODEL_FILE_KOHARU),
         );
-        let fallback = scanlateit_settings::resolve_model_path(MODEL_FILE_FALLBACK);
+        let fallback = easyscanlate_settings::resolve_model_path(MODEL_FILE_FALLBACK);
         let alt = Path::new(MODEL_DIR)
             .join("../onnx-text-styling-classification/panel-bubble-sfx-det")
             .join(MODEL_FILE_KOHARU);

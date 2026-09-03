@@ -1,6 +1,6 @@
 use iced::widget::image::Handle;
 
-use scanlateit_model::{ImageId, Quad};
+use easyscanlate_model::{ImageId, Quad};
 
 use crate::main_area::decode::PageDecode;
 

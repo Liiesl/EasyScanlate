@@ -2,8 +2,8 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use iced::Task;
 
-use scanlateit_models::registry::ModelSpec;
-use scanlateit_ui::state::ModelDownloadStatus;
+use easyscanlate_models::registry::ModelSpec;
+use easyscanlate_ui::state::ModelDownloadStatus;
 
 use super::{App, Message};
 
@@ -55,8 +55,8 @@ impl OnboardingState {
         for (id, _, status) in &self.models {
             match status {
                 ModelDownloadStatus::Done => {
-                    if let Some(spec) = scanlateit_models::get_model(id) {
-                        let path = scanlateit_settings::model_path(spec.filename);
+                    if let Some(spec) = easyscanlate_models::get_model(id) {
+                        let path = easyscanlate_settings::model_path(spec.filename);
                         if let Ok(meta) = std::fs::metadata(&path) {
                             let len = meta.len();
                             if len > 0 {
@@ -79,8 +79,8 @@ impl OnboardingState {
             for (id, _, status) in &self.models {
                 let (w, p) = match status {
                     ModelDownloadStatus::Done => {
-                        let w = if let Some(spec) = scanlateit_models::get_model(id) {
-                            let path = scanlateit_settings::model_path(spec.filename);
+                        let w = if let Some(spec) = easyscanlate_models::get_model(id) {
+                            let path = easyscanlate_settings::model_path(spec.filename);
                             std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) as f64
                         } else {
                             0.0
@@ -116,7 +116,7 @@ impl OnboardingState {
             if matches!(status, ModelDownloadStatus::Done) {
                 continue;
             }
-            if let Some(spec) = scanlateit_models::get_model(id) {
+            if let Some(spec) = easyscanlate_models::get_model(id) {
                 return Some(*spec);
             }
         }
@@ -125,7 +125,7 @@ impl OnboardingState {
 }
 
 fn mandatory_specs() -> Vec<&'static ModelSpec> {
-    scanlateit_models::MODELS
+    easyscanlate_models::MODELS
         .iter()
         .filter(|m| m.available)
         .collect()
@@ -137,26 +137,26 @@ fn is_present(spec: &ModelSpec) -> bool {
     // so that `cargo run` with local legacy models still triggers the
     // onboarding download flow for easier debugging. Runtime engine loading
     // still falls back via `resolve_model_path` — this gate is onboarding-only.
-    scanlateit_models::registry::is_downloaded(spec)
-        || scanlateit_models::registry::is_downloaded_with_legacy(spec)
+    easyscanlate_models::registry::is_downloaded(spec)
+        || easyscanlate_models::registry::is_downloaded_with_legacy(spec)
 }
 
 fn ensure_korean_dict() {
-    let path = scanlateit_settings::model_path("korean_dict.txt");
+    let path = easyscanlate_settings::model_path("korean_dict.txt");
     if path.exists() {
         return;
     }
     // Try legacy copy (app crate manifest is workspace root)
     let legacy = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models/korean_dict.txt");
     if legacy.exists() {
-        let _ = scanlateit_settings::ensure_models_dir();
+        let _ = easyscanlate_settings::ensure_models_dir();
         let _ = std::fs::copy(&legacy, &path);
         return;
     }
     // Also try settings crate relative legacy
     let legacy2 = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../models/korean_dict.txt");
     if legacy2.exists() {
-        let _ = scanlateit_settings::ensure_models_dir();
+        let _ = easyscanlate_settings::ensure_models_dir();
         let _ = std::fs::copy(&legacy2, &path);
         return;
     }
@@ -165,7 +165,7 @@ fn ensure_korean_dict() {
         if let Some(dir) = exe.parent() {
             let exe_legacy = dir.join("models").join("korean_dict.txt");
             if exe_legacy.exists() {
-                let _ = scanlateit_settings::ensure_models_dir();
+                let _ = easyscanlate_settings::ensure_models_dir();
                 let _ = std::fs::copy(&exe_legacy, &path);
                 return;
             }
@@ -175,7 +175,7 @@ fn ensure_korean_dict() {
     // We attempt to include via relative path at runtime: check if `models/korean_dict.txt` exists relative to current dir
     let cwd_legacy = std::path::PathBuf::from("models/korean_dict.txt");
     if cwd_legacy.exists() {
-        let _ = scanlateit_settings::ensure_models_dir();
+        let _ = easyscanlate_settings::ensure_models_dir();
         let _ = std::fs::copy(&cwd_legacy, &path);
     }
 }
@@ -267,13 +267,13 @@ fn start_download(app: &mut App, id: String) -> Task<Message> {
 }
 
 fn download_task(id: String, sender: mpsc::Sender<(f32, u64, u64)>) -> Task<Message> {
-    let spec = match scanlateit_models::get_model(&id) {
+    let spec = match easyscanlate_models::get_model(&id) {
         Some(s) => *s,
         None => return Task::none(),
     };
     Task::perform(
         async move {
-            let res = scanlateit_models::ensure_model_with_sender(&spec, sender).await;
+            let res = easyscanlate_models::ensure_model_with_sender(&spec, sender).await;
             (id, res.map(|_| ()))
         },
         |(id, res)| Message::OnboardingModelDone { id, result: res.map_err(|e| e.to_string()) },
@@ -372,32 +372,32 @@ pub fn handle_poll(app: &mut App) -> Task<Message> {
 }
 
 pub fn handle_toggle_theme(_app: &mut App) -> Task<Message> {
-    let is_dark = scanlateit_settings::get(|s| s.aurora_is_dark);
-    let _ = scanlateit_settings::modify(|s| s.aurora_is_dark = !is_dark);
+    let is_dark = easyscanlate_settings::get(|s| s.aurora_is_dark);
+    let _ = easyscanlate_settings::modify(|s| s.aurora_is_dark = !is_dark);
     Task::none()
 }
 
 pub fn handle_font_size(_app: &mut App, inc: bool) -> Task<Message> {
-    let cur = scanlateit_settings::get(|s| s.ui_font_size);
+    let cur = easyscanlate_settings::get(|s| s.ui_font_size);
     let next = if inc { cur.saturating_add(1) } else { cur.saturating_sub(1) };
     let clamped = next.clamp(8, 30);
-    let _ = scanlateit_settings::modify(|s| s.ui_font_size = clamped);
+    let _ = easyscanlate_settings::modify(|s| s.ui_font_size = clamped);
     Task::none()
 }
 
 pub fn handle_toggle_auto_style(_app: &mut App) -> Task<Message> {
-    let cur = scanlateit_settings::get(|s| s.auto_style_detect);
-    let _ = scanlateit_settings::modify(|s| s.auto_style_detect = !cur);
+    let cur = easyscanlate_settings::get(|s| s.auto_style_detect);
+    let _ = easyscanlate_settings::modify(|s| s.auto_style_detect = !cur);
     Task::none()
 }
 pub fn handle_toggle_auto_sfx(_app: &mut App) -> Task<Message> {
-    let cur = scanlateit_settings::get(|s| s.auto_sfx_filter);
-    let _ = scanlateit_settings::modify(|s| s.auto_sfx_filter = !cur);
+    let cur = easyscanlate_settings::get(|s| s.auto_sfx_filter);
+    let _ = easyscanlate_settings::modify(|s| s.auto_sfx_filter = !cur);
     Task::none()
 }
 pub fn handle_toggle_auto_inpaint(_app: &mut App) -> Task<Message> {
-    let cur = scanlateit_settings::get(|s| s.auto_inpaint);
-    let _ = scanlateit_settings::modify(|s| s.auto_inpaint = !cur);
+    let cur = easyscanlate_settings::get(|s| s.auto_inpaint);
+    let _ = easyscanlate_settings::modify(|s| s.auto_inpaint = !cur);
     Task::none()
 }
 
@@ -410,7 +410,7 @@ pub fn handle_finish(app: &mut App) -> Task<Message> {
         }
         return Task::none();
     }
-    scanlateit_settings::mark_onboarding_completed();
+    easyscanlate_settings::mark_onboarding_completed();
     app.onboarding = None;
     // Sync translation etc.
     crate::app::translation::sync_tx_from_store(app);
@@ -419,7 +419,7 @@ pub fn handle_finish(app: &mut App) -> Task<Message> {
 }
 
 pub fn handle_replay(app: &mut App) -> Task<Message> {
-    scanlateit_settings::reset_onboarding();
+    easyscanlate_settings::reset_onboarding();
     app.onboarding = Some(OnboardingState::new());
     app.settings_open = false;
     app.manage_models_open = false;

@@ -1,15 +1,15 @@
 use iced::Task;
-use scanlateit_model::{EntryId, Quad};
+use easyscanlate_model::{EntryId, Quad};
 #[cfg(feature = "inpaint")]
-use scanlateit_inpaint::Engine as InpaintEngine;
+use easyscanlate_inpaint::Engine as InpaintEngine;
 #[cfg(feature = "inpaint")]
-use scanlateit_settings::InpaintBackend;
+use easyscanlate_settings::InpaintBackend;
 #[cfg(feature = "inpaint")]
-use scanlateit_ui::loaded::InpaintLayer;
+use easyscanlate_ui::loaded::InpaintLayer;
 #[cfg(feature = "inpaint")]
 use image::RgbaImage;
 
-use scanlateit_ui::UiState;
+use easyscanlate_ui::UiState;
 
 use super::{App, AutoInpaintJob, Message};
 
@@ -113,7 +113,7 @@ pub fn dispatch_auto(app: &mut App, jobs: Vec<AutoInpaintJob>, backend: InpaintB
 }
 
 #[cfg(feature = "inpaint")]
-pub fn dispatch_auto_solo(app: &mut App, effective_model: scanlateit_settings::AutoInpaintModel) -> Task<Message> {
+pub fn dispatch_auto_solo(app: &mut App, effective_model: easyscanlate_settings::AutoInpaintModel) -> Task<Message> {
     dispatch_auto_solo_for(app, app.active_tab().id, effective_model)
 }
 
@@ -134,7 +134,7 @@ pub fn handle_auto_finished(app: &mut App, index: usize, id: EntryId, result: Re
 
 #[cfg(feature = "inpaint")]
 fn apply_patches(app: &mut App, patches: Vec<(usize, image::RgbaImage, [f32; 4], Option<Quad>)>) {
-    let mut pending_evs: Vec<(scanlateit_model::ImageId, [f32; 4], Option<Quad>)> = Vec::new();
+    let mut pending_evs: Vec<(easyscanlate_model::ImageId, [f32; 4], Option<Quad>)> = Vec::new();
     let mut affected = std::collections::HashSet::new();
     for (target_idx, patch, bounds, quad) in patches {
         let Some(image_id) = app.active_tab_mut().images.get(target_idx).map(|i| i.image_id) else { continue; };
@@ -758,7 +758,7 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
             app.active_tab_mut().status = "Inpaint Background: selected box is degenerate.".to_string();
             return Task::none();
         }
-        let (backend, radius) = scanlateit_settings::get(|s| (s.inpaint_backend, s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1)));
+        let (backend, radius) = easyscanlate_settings::get(|s| (s.inpaint_backend, s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1)));
         // queue gate for background stitch (single inpaint)
         {
             use crate::app::queue::{AcquireResult, EngineKind};
@@ -809,7 +809,7 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
                     InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
                     InpaintBackend::Telea => "Inpainting background...".to_string(),
                 };
-                Task::perform(async move { scanlateit_inpaint::Engine::build(backend, radius) }, move |res| Message::Tab(tid, crate::app::TabMessage::InpaintEngineReady(res)))
+                Task::perform(async move { easyscanlate_inpaint::Engine::build(backend, radius) }, move |res| Message::Tab(tid, crate::app::TabMessage::InpaintEngineReady(res)))
             }
         };
     }
@@ -1009,7 +1009,7 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
     }
     #[cfg(feature = "inpaint")]
     {
-        let (backend, radius) = scanlateit_settings::get(|s| {
+        let (backend, radius) = easyscanlate_settings::get(|s| {
             (
                 s.inpaint_backend,
                 s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1),
@@ -1019,9 +1019,9 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
         {
             use crate::app::queue::{AcquireResult, EngineKind};
             let kind = match backend {
-                scanlateit_settings::InpaintBackend::Telea => EngineKind::InpaintTelea,
-                scanlateit_settings::InpaintBackend::Lama => EngineKind::InpaintLama,
-                scanlateit_settings::InpaintBackend::Aot => EngineKind::InpaintAot,
+                easyscanlate_settings::InpaintBackend::Telea => EngineKind::InpaintTelea,
+                easyscanlate_settings::InpaintBackend::Lama => EngineKind::InpaintLama,
+                easyscanlate_settings::InpaintBackend::Aot => EngineKind::InpaintAot,
             };
             let tab_id = app.active_tab().id;
             let already_running = app.engines.queue.running_for(tab_id, kind).is_some();
@@ -1058,12 +1058,12 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
             None => {
                 app.active_tab_mut().pending_manual_multi = Some(vec![(image_index, path, rect, quads)]);
                 app.active_tab_mut().status = match backend {
-                    scanlateit_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
-                    scanlateit_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
-                    scanlateit_settings::InpaintBackend::Telea => "Inpainting...".to_string(),
+                    easyscanlate_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
+                    easyscanlate_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
+                    easyscanlate_settings::InpaintBackend::Telea => "Inpainting...".to_string(),
                 };
                 return Task::perform(
-                    async move { scanlateit_inpaint::Engine::build(backend, radius) },
+                    async move { easyscanlate_inpaint::Engine::build(backend, radius) },
                     move |res| Message::Tab(tid, crate::app::TabMessage::InpaintEngineReady(res)),
                 );
             }
@@ -1077,12 +1077,12 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
     }
 }
 
-pub fn handle_inpaint_toolbar(app: &mut App, image_index: usize, patch_idx: usize, action: scanlateit_ui::event::InpaintToolbarAction) -> Task<Message> {
+pub fn handle_inpaint_toolbar(app: &mut App, image_index: usize, patch_idx: usize, action: easyscanlate_ui::event::InpaintToolbarAction) -> Task<Message> {
     match action {
-        scanlateit_ui::event::InpaintToolbarAction::Delete => {
+        easyscanlate_ui::event::InpaintToolbarAction::Delete => {
             return handle_inpaint_delete(app, image_index, patch_idx);
         }
-        scanlateit_ui::event::InpaintToolbarAction::Repaint => {
+        easyscanlate_ui::event::InpaintToolbarAction::Repaint => {
             return handle_inpaint_repaint(app, image_index, patch_idx);
         }
     }
@@ -1152,7 +1152,7 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
     }
     data.sort_by_key(|(idx, _, _, _)| *idx);
     eprintln!("[manual::inpaint] data sorted len={} idxs={:?} rects={:?}", data.len(), data.iter().map(|(idx,_,_,_)| *idx).collect::<Vec<_>>(), data.iter().map(|(_,_,r,_)| *r).collect::<Vec<_>>());
-    let (backend, radius) = scanlateit_settings::get(|s| (s.inpaint_backend, s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1)));
+    let (backend, radius) = easyscanlate_settings::get(|s| (s.inpaint_backend, s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1)));
     eprintln!("[manual::inpaint] backend={:?} radius={} cached_match={}", backend, radius, app.engines.inpaint.as_ref().map(|e| e.backend()==backend && e.radius()==radius).unwrap_or(false));
     // queue gate — manual inpaint uses same backend weight/priority as auto
     {
@@ -1204,7 +1204,7 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
             InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
             InpaintBackend::Telea => "Inpainting...".to_string(),
         };
-        return Task::perform(async move { scanlateit_inpaint::Engine::build(backend, radius) }, move |res| Message::Tab(tid, crate::app::TabMessage::InpaintEngineReady(res)));
+        return Task::perform(async move { easyscanlate_inpaint::Engine::build(backend, radius) }, move |res| Message::Tab(tid, crate::app::TabMessage::InpaintEngineReady(res)));
     }
 }
 
@@ -1376,7 +1376,7 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<(usize, String, [f32;
             eprintln!("[manual::multi] group {} oversized solo idx={} {}x{} img={}x{} rect={:?}", group_idx, s.idx, s.w, s.h, s.img_w, s.img_h, s.rect);
             // per spec: take full width or height based on larger side, crop square, resize to 512 (q3)
             // Use shared helper from inpaint crate for consistency with tests
-            let (side, sx_u, sy_u) = scanlateit_inpaint::manual_square_params(s.x0, s.y0, s.w, s.h, s.img_w, s.img_h);
+            let (side, sx_u, sy_u) = easyscanlate_inpaint::manual_square_params(s.x0, s.y0, s.w, s.h, s.img_w, s.img_h);
             let sx = sx_u as i32;
             let sy = sy_u as i32;
             let larger_is_w = s.w >= s.h;
@@ -1932,14 +1932,14 @@ pub fn handle_auto_engine_ready_for(app: &mut App, tab_id: crate::app::tab::TabI
     }
 }
 #[cfg(feature = "inpaint")]
-pub fn handle_auto_finished_for(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, id: scanlateit_model::EntryId, result: Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>) -> Task<Message> {
+pub fn handle_auto_finished_for(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, id: easyscanlate_model::EntryId, result: Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<easyscanlate_model::Quad>)>, String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     app.tabs[idx].auto_inpaint_pending = app.tabs[idx].auto_inpaint_pending.saturating_sub(1);
     let pending = app.tabs[idx].auto_inpaint_pending;
     match result {
         Ok(patches) => {
             // apply patches to this tab
-            let mut pending_evs: Vec<(scanlateit_model::ImageId, [f32;4], Option<scanlateit_model::Quad>)> = Vec::new();
+            let mut pending_evs: Vec<(easyscanlate_model::ImageId, [f32;4], Option<easyscanlate_model::Quad>)> = Vec::new();
             let mut affected = std::collections::HashSet::new();
             for (target_idx, patch, bounds, quad) in patches {
                 let image_id_opt = app.tabs[idx].images.get(target_idx).map(|i| i.image_id);
@@ -1993,13 +1993,13 @@ pub fn handle_auto_finished_for(app: &mut App, tab_id: crate::app::tab::TabId, i
     Task::none()
 }
 #[cfg(feature = "inpaint")]
-pub fn handle_auto_batch_for(app: &mut App, tab_id: crate::app::tab::TabId, batch: Vec<(usize, scanlateit_model::EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>)>) -> Task<Message> {
+pub fn handle_auto_batch_for(app: &mut App, tab_id: crate::app::tab::TabId, batch: Vec<(usize, easyscanlate_model::EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<easyscanlate_model::Quad>)>, String>)>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     for (_index, id, result) in batch {
         app.tabs[idx].auto_inpaint_pending = app.tabs[idx].auto_inpaint_pending.saturating_sub(1);
         match result {
             Ok(patches) => {
-                let mut pending_evs: Vec<(scanlateit_model::ImageId, [f32;4], Option<scanlateit_model::Quad>)> = Vec::new();
+                let mut pending_evs: Vec<(easyscanlate_model::ImageId, [f32;4], Option<easyscanlate_model::Quad>)> = Vec::new();
                 let mut affected = std::collections::HashSet::new();
                 for (target_idx, patch, bounds, quad) in patches {
                     if let Some(image_id) = app.tabs[idx].images.get(target_idx).map(|i| i.image_id) {
@@ -2040,7 +2040,7 @@ pub fn handle_auto_batch_for(app: &mut App, tab_id: crate::app::tab::TabId, batc
     Task::none()
 }
 #[cfg(feature = "inpaint")]
-pub fn handle_inpaint_finished_for(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<Vec<(usize, Vec<(image::RgbaImage, [f32;4], Option<scanlateit_model::Quad>)>)>, String>) -> Task<Message> {
+pub fn handle_inpaint_finished_for(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<Vec<(usize, Vec<(image::RgbaImage, [f32;4], Option<easyscanlate_model::Quad>)>)>, String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     app.tabs[idx].inpainting = false;
     match result {
@@ -2111,7 +2111,7 @@ pub fn dispatch_auto_for(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Ve
             }
         }
     }
-    let radius = scanlateit_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
+    let radius = easyscanlate_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
     let pad = auto_pad_for(backend, radius);
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     let cached: Option<InpaintEngine> = match backend {
@@ -2164,13 +2164,13 @@ pub fn dispatch_auto_for(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Ve
                 Task::perform(
                     async move {
                         tokio::task::spawn_blocking(move || {
-                            let mut out: Vec<(usize, scanlateit_model::EntryId, Result<Vec<(usize, image::RgbaImage, [f32;4], Option<scanlateit_model::Quad>)>, String>)> = Vec::new();
+                            let mut out: Vec<(usize, easyscanlate_model::EntryId, Result<Vec<(usize, image::RgbaImage, [f32;4], Option<easyscanlate_model::Quad>)>, String>)> = Vec::new();
                             for (job, prev_path, next_path) in enriched {
                                 let r = run_auto_job_with_stitch(&engine, &job, pad, prev_path.as_deref(), next_path.as_deref());
                                 out.push((job.index, job.id, r));
                             }
                             out
-                        }).await.unwrap_or_else(|e| { let msg = if is_lama { format!("lama batch cancelled: {e}") } else { format!("aot batch cancelled: {e}") }; vec![(0, scanlateit_model::EntryId(0), Err(msg))] })
+                        }).await.unwrap_or_else(|e| { let msg = if is_lama { format!("lama batch cancelled: {e}") } else { format!("aot batch cancelled: {e}") }; vec![(0, easyscanlate_model::EntryId(0), Err(msg))] })
                     },
                     move |batch| if is_lama { Message::Tab(tid, crate::app::TabMessage::AutoInpaintLamaBatchFinished(batch)) } else { Message::Tab(tid, crate::app::TabMessage::AutoInpaintAotBatchFinished(batch)) },
                 )
@@ -2188,7 +2188,7 @@ pub fn dispatch_auto_for(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Ve
     }
 }
 #[cfg(feature = "inpaint")]
-pub fn dispatch_auto_solo_for(app: &mut App, tab_id: crate::app::tab::TabId, effective_model: scanlateit_settings::AutoInpaintModel) -> Task<Message> {
+pub fn dispatch_auto_solo_for(app: &mut App, tab_id: crate::app::tab::TabId, effective_model: easyscanlate_settings::AutoInpaintModel) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     let mut jobs: Vec<AutoInpaintJob> = Vec::new();
     {
@@ -2208,11 +2208,11 @@ pub fn dispatch_auto_solo_for(app: &mut App, tab_id: crate::app::tab::TabId, eff
         let ev = app.tabs[idx].project.set_entry_style_with_event(job.id, style);
         crate::app::handle_model_event(&mut app.tabs[idx], ev);
     }
-    let backend = match effective_model { scanlateit_settings::AutoInpaintModel::Telea=>InpaintBackend::Telea, scanlateit_settings::AutoInpaintModel::Lama=>InpaintBackend::Lama, scanlateit_settings::AutoInpaintModel::Aot=>InpaintBackend::Aot, scanlateit_settings::AutoInpaintModel::Mixed=>InpaintBackend::Telea };
+    let backend = match effective_model { easyscanlate_settings::AutoInpaintModel::Telea=>InpaintBackend::Telea, easyscanlate_settings::AutoInpaintModel::Lama=>InpaintBackend::Lama, easyscanlate_settings::AutoInpaintModel::Aot=>InpaintBackend::Aot, easyscanlate_settings::AutoInpaintModel::Mixed=>InpaintBackend::Telea };
     dispatch_auto_for(app, tab_id, jobs, backend)
 }
 #[cfg(feature = "inpaint")]
-pub(crate) fn start_inpaint_selection_for(app: &mut App, tab_id: crate::app::tab::TabId, engine: InpaintEngine, data: Vec<(usize, String, [f32;4], Vec<scanlateit_model::Quad>)>) -> Task<Message> {
+pub(crate) fn start_inpaint_selection_for(app: &mut App, tab_id: crate::app::tab::TabId, engine: InpaintEngine, data: Vec<(usize, String, [f32;4], Vec<easyscanlate_model::Quad>)>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     app.tabs[idx].inpainting = true;
     app.tabs[idx].status = "inpainting...".to_string();
@@ -2220,12 +2220,12 @@ pub(crate) fn start_inpaint_selection_for(app: &mut App, tab_id: crate::app::tab
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
-                let mut out: std::collections::HashMap<usize, Vec<(image::RgbaImage, [f32;4], Option<scanlateit_model::Quad>)>> = std::collections::HashMap::new();
+                let mut out: std::collections::HashMap<usize, Vec<(image::RgbaImage, [f32;4], Option<easyscanlate_model::Quad>)>> = std::collections::HashMap::new();
                 for (idx, path, rect, quads) in data {
                     let res = engine.run_blocking(&path, rect, &quads)?;
                     for (img,b,q) in res { out.entry(idx).or_default().push((img,b,q)); }
                 }
-                let mut vec: Vec<(usize, Vec<(image::RgbaImage, [f32;4], Option<scanlateit_model::Quad>)>)> = out.into_iter().collect();
+                let mut vec: Vec<(usize, Vec<(image::RgbaImage, [f32;4], Option<easyscanlate_model::Quad>)>)> = out.into_iter().collect();
                 vec.sort_by_key(|(i,_)| *i);
                 Ok(vec)
             }).await.unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")))
@@ -2242,8 +2242,8 @@ pub(crate) fn start_background_stitch_for(app: &mut App, tab_id: crate::app::tab
     Task::perform(
         async move {
             let result = tokio::task::spawn_blocking(move || run_auto_job_with_stitch(&engine, &job, pad, prev.as_deref(), next.as_deref())).await.unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")));
-            let grouped: Result<Vec<(usize, Vec<(image::RgbaImage, [f32;4], Option<scanlateit_model::Quad>)>)>, String> = result.map(|v| {
-                let mut map: std::collections::HashMap<usize, Vec<(image::RgbaImage, [f32;4], Option<scanlateit_model::Quad>)>> = std::collections::HashMap::new();
+            let grouped: Result<Vec<(usize, Vec<(image::RgbaImage, [f32;4], Option<easyscanlate_model::Quad>)>)>, String> = result.map(|v| {
+                let mut map: std::collections::HashMap<usize, Vec<(image::RgbaImage, [f32;4], Option<easyscanlate_model::Quad>)>> = std::collections::HashMap::new();
                 for (idx, img,b,q) in v { map.entry(idx).or_default().push((img,b,q)); }
                 let mut out: Vec<_> = map.into_iter().collect();
                 out.sort_by_key(|(idx,_)| *idx);

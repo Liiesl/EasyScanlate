@@ -1,10 +1,10 @@
 use iced::Task;
-use scanlateit_model::{EntryId, EntryStyle, Quad, TextAlign, TextGradientDir};
+use easyscanlate_model::{EntryId, EntryStyle, Quad, TextAlign, TextGradientDir};
 #[cfg(feature = "styling")]
-use scanlateit_styling::Engine as StylingEngine;
-use scanlateit_ui::event::StyleField;
+use easyscanlate_styling::Engine as StylingEngine;
+use easyscanlate_ui::event::StyleField;
 
-use scanlateit_ui::UiState;
+use easyscanlate_ui::UiState;
 
 use super::{App, Message};
 use super::edit::seed_style_inputs;
@@ -100,7 +100,7 @@ pub fn handle_style_detected(app: &mut App, index: usize, id: EntryId, result: R
 }
 
 #[cfg(all(feature = "styling", feature = "inpaint"))]
-pub fn handle_pipeline_style_detected(app: &mut App, index: usize, id: EntryId, result: Result<(EntryStyle, scanlateit_styling::StylePrediction), String>) -> Task<Message> {
+pub fn handle_pipeline_style_detected(app: &mut App, index: usize, id: EntryId, result: Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>) -> Task<Message> {
     handle_pipeline_style_detected_for(app, app.active_tab().id, index, id, result)
 }
 
@@ -133,7 +133,7 @@ pub fn handle_font(app: &mut App, name: String) -> Task<Message> {
     // Bundled fonts are already embedded in the binary via `include_bytes!`
     // in `main.rs` — no `font::load` needed. System-installed duplicates are
     // already in the fontdb scan. Only load non-bundled families on demand.
-    let is_bundled = scanlateit_model::BUNDLED_FONTS
+    let is_bundled = easyscanlate_model::BUNDLED_FONTS
         .iter()
         .any(|f| f.eq_ignore_ascii_case(&name));
     if is_bundled {
@@ -223,7 +223,7 @@ pub fn handle_hex_input(app: &mut App, field: StyleField, text: String) -> Task<
     app.active_tab_mut().style_hex_overrides.insert(field, text.clone());
 
     // Live-apply only when the text is a valid hex (or "None").
-    let Some(color) = scanlateit_ui::color::parse_hex_color(&text) else {
+    let Some(color) = easyscanlate_ui::color::parse_hex_color(&text) else {
         // Invalid intermediate – keep buffer, don't update style.
         return Task::none();
     };
@@ -284,20 +284,20 @@ pub fn handle_preset_apply(app: &mut App, preset: usize) -> Task<Message> {
 pub fn handle_preset_add(app: &mut App) -> Task<Message> {
     let style = app.active_tab().style_working.clone();
     app.presets.add(style);
-    let _ = scanlateit_settings::modify(|s| s.style_presets = app.presets.clone());
+    let _ = easyscanlate_settings::modify(|s| s.style_presets = app.presets.clone());
     Task::none()
 }
 
 pub fn handle_preset_replace(app: &mut App, preset: usize) -> Task<Message> {
     let style = app.active_tab().style_working.clone();
     app.presets.replace(preset, style);
-    let _ = scanlateit_settings::modify(|s| s.style_presets = app.presets.clone());
+    let _ = easyscanlate_settings::modify(|s| s.style_presets = app.presets.clone());
     Task::none()
 }
 
 pub fn handle_preset_remove(app: &mut App, preset: usize) -> Task<Message> {
     app.presets.remove(preset);
-    let _ = scanlateit_settings::modify(|s| s.style_presets = app.presets.clone());
+    let _ = easyscanlate_settings::modify(|s| s.style_presets = app.presets.clone());
     Task::none()
 }
 
@@ -308,7 +308,7 @@ pub fn handle_auto_detect(app: &mut App) -> Task<Message> {
     }
     #[cfg(feature = "styling")]
     {
-        use scanlateit_styling::tracker::PendingSingle;
+        use easyscanlate_styling::tracker::PendingSingle;
         let Some((index, id)) = app.active_tab().selected else { return Task::none() };
         // Validate entry still exists and get its view quad.
         let (path, quad) = {
@@ -398,7 +398,7 @@ pub fn classify_for(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Messa
                 AcquireResult::Queued(_, pos) => {
                     app.tabs[idx_tmp].status = format!("Queued {} (pos {}, pool {}/{}) ...", EngineKind::Style.label(), pos, app.engines.queue.used_weight(), crate::app::queue::POOL_CAPACITY);
                     // mark pipeline active if deferred chain expected
-                    let deferred = scanlateit_settings::get(|s| s.auto_inpaint) && cfg!(feature = "inpaint");
+                    let deferred = easyscanlate_settings::get(|s| s.auto_inpaint) && cfg!(feature = "inpaint");
                     if deferred {
                         #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
                         { app.tabs[idx_tmp].pipeline_active = true; }
@@ -408,7 +408,7 @@ pub fn classify_for(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Messa
             }
         }
     }
-    let deferred = scanlateit_settings::get(|s| s.auto_inpaint) && cfg!(feature = "inpaint");
+    let deferred = easyscanlate_settings::get(|s| s.auto_inpaint) && cfg!(feature = "inpaint");
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     let engine_opt = app.tabs[idx].styling.engine().cloned();
     match engine_opt {
@@ -550,7 +550,7 @@ pub fn handle_style_detected_for(app: &mut App, tab_id: crate::app::tab::TabId, 
     Task::none()
 }
 #[cfg(all(feature = "styling", feature = "inpaint"))]
-pub fn handle_pipeline_style_detected_for(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, id: EntryId, result: Result<(EntryStyle, scanlateit_styling::StylePrediction), String>) -> Task<Message> {
+pub fn handle_pipeline_style_detected_for(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, id: EntryId, result: Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     let (quad, path) = {
         let tab = &app.tabs[idx];

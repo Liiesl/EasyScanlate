@@ -1,6 +1,6 @@
 //! Fake translation for UI-only builds (compiled whenever the real
 //! `translation` feature is off, i.e. no rig dependency). Mirrors the public
-//! surface of `scanlateit_translation` so the translation UI stays live
+//! surface of `easyscanlate_translation` so the translation UI stays live
 //! instead of showing a "not available in this build" placeholder: the
 //! pickers, settings list and translate flow are all exercisable with mock
 //! providers/models, exactly like the fake OCR entries of the TEST-UI build.
@@ -52,7 +52,7 @@ pub enum CompatKind {
 /// One stored connection: the API key plus (for custom endpoints) the base
 /// URL and the single model id. Owned by the settings crate (it is persisted
 /// data) and re-exported here, mirroring the real module.
-pub use scanlateit_settings::Connection;
+pub use easyscanlate_settings::Connection;
 
 /// The id of the custom OpenAI-compatible connection.
 pub const CUSTOM_OPENAI: &str = "custom-openai";
@@ -166,7 +166,7 @@ pub static SUPPORTED_PROVIDERS: LazyLock<Vec<Provider>> = LazyLock::new(|| {
 });
 
 /// Metadata for a recommended provider shown in the Translation settings.
-/// Mirrors `scanlateit_translation::RecommendedInfo` so the TEST-UI build can
+/// Mirrors `easyscanlate_translation::RecommendedInfo` so the TEST-UI build can
 /// render the same section (with fake ids).
 #[derive(Debug, Clone, Copy)]
 pub struct RecommendedInfo {

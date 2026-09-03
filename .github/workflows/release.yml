@@ -52,14 +52,14 @@ jobs:
         run: |
           if (Test-Path staging) { Remove-Item -Recurse -Force staging }
           New-Item -ItemType Directory -Path staging | Out-Null
-          Copy-Item target/release/scanlateit.exe staging/
+          Copy-Item target/release/EasyScanlate.exe staging/
 
       - name: Create Velopack Release
         shell: bash
         run: |
           # Download prior release for delta generation (ignore failure on first release)
           vpk download github --repoUrl https://github.com/Liiesl/EasyScanlate --token ${{ secrets.GITHUB_TOKEN }} || true
-          vpk pack -u EasyScanlate -v ${{ steps.version.outputs.VERSION }} -p ./staging -e scanlateit.exe --packTitle EasyScanlate --packAuthors Liie --icon assets/app_icon.ico
+          vpk pack -u EasyScanlate -v ${{ steps.version.outputs.VERSION }} -p ./staging -e EasyScanlate.exe --packTitle EasyScanlate --packAuthors Liie --icon assets/app_icon.ico
 
       - name: Build single installer (EasyScanlate-Installer.exe)
         shell: pwsh

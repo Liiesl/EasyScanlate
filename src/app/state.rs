@@ -1,9 +1,9 @@
 use iced::{Color, Font, Rectangle};
 use iced::widget::text_editor;
-use scanlateit_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
-use scanlateit_ui::color::rgba_to_color;
-use scanlateit_ui::event::{EditOrigin, MainAreaMode, ManualMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
-use scanlateit_ui::{ConnectModal, LoadedImage, UiState};
+use easyscanlate_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
+use easyscanlate_ui::color::rgba_to_color;
+use easyscanlate_ui::event::{EditOrigin, MainAreaMode, ManualMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
+use easyscanlate_ui::{ConnectModal, LoadedImage, UiState};
 
 use super::App;
 use super::tab::Tab;
@@ -18,7 +18,7 @@ impl UiState for ActiveTab<'_> {
         &self.tab.images
     }
 
-    fn project(&self) -> &scanlateit_model::Project {
+    fn project(&self) -> &easyscanlate_model::Project {
         &self.tab.project
     }
 
@@ -257,7 +257,7 @@ impl UiState for ActiveTab<'_> {
         self.tab.translation_panel_mode
     }
 
-    fn base_profile(&self) -> Option<scanlateit_model::ProfileId> {
+    fn base_profile(&self) -> Option<easyscanlate_model::ProfileId> {
         if let Some(id) = self.tab.translate_base {
             if self.tab.project.profiles.iter().any(|p| p.id == id) {
                 return Some(id);
@@ -285,23 +285,23 @@ impl UiState for ActiveTab<'_> {
         format!("{}(auto)", self.tab.translate_lang)
     }
 
-    fn app_view(&self) -> scanlateit_ui::state::AppView {
+    fn app_view(&self) -> easyscanlate_ui::state::AppView {
         if self.app.onboarding.is_some() {
-            return scanlateit_ui::state::AppView::Onboarding;
+            return easyscanlate_ui::state::AppView::Onboarding;
         }
         if self.tab.is_home() {
-            scanlateit_ui::state::AppView::Home
+            easyscanlate_ui::state::AppView::Home
         } else {
-            scanlateit_ui::state::AppView::Editor
+            easyscanlate_ui::state::AppView::Editor
         }
     }
 
-    fn recent_projects(&self) -> &[scanlateit_settings::RecentProject] {
+    fn recent_projects(&self) -> &[easyscanlate_settings::RecentProject] {
         &self.app.recent_projects
     }
 
-    fn new_project_overlay(&self) -> Option<scanlateit_ui::state::NewProjectOverlay> {
-        self.app.new_project.as_ref().map(|np| scanlateit_ui::state::NewProjectOverlay {
+    fn new_project_overlay(&self) -> Option<easyscanlate_ui::state::NewProjectOverlay> {
+        self.app.new_project.as_ref().map(|np| easyscanlate_ui::state::NewProjectOverlay {
             source_paths: np.source_files.iter().map(|(p, _, _)| p.clone()).collect(),
             original_lang: np.original_lang.clone(),
             project_location: np.project_location.clone(),
@@ -336,7 +336,7 @@ impl UiState for ActiveTab<'_> {
 
     fn onboarding_open(&self) -> bool { self.app.onboarding.is_some() }
     fn onboarding_step(&self) -> u8 { self.app.onboarding.as_ref().map(|o| o.step).unwrap_or(0) }
-    fn onboarding_models(&self) -> Vec<(String, String, scanlateit_ui::state::ModelDownloadStatus)> {
+    fn onboarding_models(&self) -> Vec<(String, String, easyscanlate_ui::state::ModelDownloadStatus)> {
         self.app.onboarding.as_ref().map(|o| o.models.clone()).unwrap_or_default()
     }
     fn onboarding_overall_progress(&self) -> f32 { self.app.onboarding.as_ref().map(|o| o.overall_progress()).unwrap_or(0.0) }
@@ -352,7 +352,7 @@ impl UiState for ActiveTab<'_> {
 // the canonical impl for tests and non-view call sites (`app.active_state()`).
 impl UiState for App {
     fn images(&self) -> &[LoadedImage] { &self.tabs[self.active].images }
-    fn project(&self) -> &scanlateit_model::Project { &self.tabs[self.active].project }
+    fn project(&self) -> &easyscanlate_model::Project { &self.tabs[self.active].project }
     fn running(&self) -> bool { self.tabs[self.active].running }
     fn translating(&self) -> bool { self.tabs[self.active].translating }
     fn status(&self) -> &str { &self.tabs[self.active].status }
@@ -447,7 +447,7 @@ impl UiState for App {
     fn manage_models_search(&self) -> &str { &self.manage_models_search }
     fn all_model_groups(&self) -> Vec<(String, String, Vec<(String, String)>)> { self.tx.all_model_groups() }
     fn translation_panel_mode(&self) -> TranslationPanelMode { self.tabs[self.active].translation_panel_mode }
-    fn base_profile(&self) -> Option<scanlateit_model::ProfileId> {
+    fn base_profile(&self) -> Option<easyscanlate_model::ProfileId> {
         let tab = &self.tabs[self.active];
         if let Some(id) = tab.translate_base {
             if tab.project.profiles.iter().any(|p| p.id == id) {
@@ -472,19 +472,19 @@ impl UiState for App {
         tab.translate_target.clone()
     }
     fn target_placeholder_name(&self) -> String { format!("{}(auto)", self.tabs[self.active].translate_lang) }
-    fn app_view(&self) -> scanlateit_ui::state::AppView {
+    fn app_view(&self) -> easyscanlate_ui::state::AppView {
         if self.onboarding.is_some() {
-            return scanlateit_ui::state::AppView::Onboarding;
+            return easyscanlate_ui::state::AppView::Onboarding;
         }
         if self.tabs[self.active].is_home() {
-            scanlateit_ui::state::AppView::Home
+            easyscanlate_ui::state::AppView::Home
         } else {
-            scanlateit_ui::state::AppView::Editor
+            easyscanlate_ui::state::AppView::Editor
         }
     }
-    fn recent_projects(&self) -> &[scanlateit_settings::RecentProject] { &self.recent_projects }
-    fn new_project_overlay(&self) -> Option<scanlateit_ui::state::NewProjectOverlay> {
-        self.new_project.as_ref().map(|np| scanlateit_ui::state::NewProjectOverlay {
+    fn recent_projects(&self) -> &[easyscanlate_settings::RecentProject] { &self.recent_projects }
+    fn new_project_overlay(&self) -> Option<easyscanlate_ui::state::NewProjectOverlay> {
+        self.new_project.as_ref().map(|np| easyscanlate_ui::state::NewProjectOverlay {
             source_paths: np.source_files.iter().map(|(p, _, _)| p.clone()).collect(),
             original_lang: np.original_lang.clone(),
             project_location: np.project_location.clone(),
@@ -506,7 +506,7 @@ impl UiState for App {
     }
     fn onboarding_open(&self) -> bool { self.onboarding.is_some() }
     fn onboarding_step(&self) -> u8 { self.onboarding.as_ref().map(|o| o.step).unwrap_or(0) }
-    fn onboarding_models(&self) -> Vec<(String, String, scanlateit_ui::state::ModelDownloadStatus)> { self.onboarding.as_ref().map(|o| o.models.clone()).unwrap_or_default() }
+    fn onboarding_models(&self) -> Vec<(String, String, easyscanlate_ui::state::ModelDownloadStatus)> { self.onboarding.as_ref().map(|o| o.models.clone()).unwrap_or_default() }
     fn onboarding_overall_progress(&self) -> f32 { self.onboarding.as_ref().map(|o| o.overall_progress()).unwrap_or(0.0) }
     fn onboarding_downloading(&self) -> bool { self.onboarding.as_ref().map(|o| o.downloading).unwrap_or(false) }
     fn onboarding_all_done(&self) -> bool { self.onboarding.as_ref().map(|o| o.is_all_done()).unwrap_or(true) }

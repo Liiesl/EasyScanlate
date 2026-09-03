@@ -218,14 +218,14 @@ impl Scheduler {
     {
         // Project is queried by caller for path; decode itself only needs `LoadedImage.decode`.
         // This overload keeps callers simple when project not needed (tests). For app, caller resolves path before calling.
-        self.settle_with_project(images, &scanlateit_model::Project::new(), map)
+        self.settle_with_project(images, &easyscanlate_model::Project::new(), map)
     }
 
     /// Like `settle` but resolves `path` via `project.image(image_id)`.
     pub fn settle_with_project<T>(
         &mut self,
         images: &mut [LoadedImage],
-        project: &scanlateit_model::Project,
+        project: &easyscanlate_model::Project,
         map: impl Fn(usize, Result<Arc<DecodedPage>, String>) -> T + Send + Clone + 'static,
     ) -> Task<T>
     where
@@ -293,14 +293,14 @@ impl Scheduler {
     where
         T: Send + 'static,
     {
-        self.decode_thumbs_with_project(images, &scanlateit_model::Project::new(), map)
+        self.decode_thumbs_with_project(images, &easyscanlate_model::Project::new(), map)
     }
 
     /// Like `decode_thumbs` but resolves `path` via `project.image(image_id)`.
     pub fn decode_thumbs_with_project<T>(
         &mut self,
         images: &mut [LoadedImage],
-        project: &scanlateit_model::Project,
+        project: &easyscanlate_model::Project,
         map: impl Fn(usize, Result<Arc<DecodedPage>, String>) -> T + Send + Clone + 'static,
     ) -> Task<T>
     where
@@ -334,7 +334,7 @@ impl Scheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scanlateit_model::Project;
+    use easyscanlate_model::Project;
 
     fn test_project_and_images(n: usize) -> (Project, Vec<LoadedImage>) {
         let mut project = Project::new();

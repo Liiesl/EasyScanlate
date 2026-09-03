@@ -4,7 +4,7 @@ use iced::widget::pane_grid;
 use iced::widget::text_editor;
 use iced::{Color, Rectangle};
 
-use scanlateit_model::{EntryId, ProfileId, Quad, TextAlign, TextGradientDir};
+use easyscanlate_model::{EntryId, ProfileId, Quad, TextAlign, TextGradientDir};
 
 /// The actions offered by the floating inpaint toolbar under the selected patch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

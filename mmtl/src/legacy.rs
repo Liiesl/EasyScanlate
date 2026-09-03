@@ -5,7 +5,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use scanlateit_model::{
+use easyscanlate_model::{
     EntrySource, ImageId, NewEntry, OcrResult, ProfileId, Project, Quad,
 };
 
@@ -223,11 +223,11 @@ pub fn project_from_legacy(
         // reconstruct project with new ocr
         let images = project.images().to_vec();
         let next_image_id = project.next_image_id();
-        let profiles = std::mem::replace(&mut project.profiles, scanlateit_model::Profiles::default());
+        let profiles = std::mem::replace(&mut project.profiles, easyscanlate_model::Profiles::default());
         // but we have moved; instead build new project via from_raw
         let styles = project.styles().clone();
         let view_quads = project.view_quads().clone();
-        let extras = std::mem::replace(&mut project.extras, scanlateit_model::Extras::default());
+        let extras = std::mem::replace(&mut project.extras, easyscanlate_model::Extras::default());
         let new_proj = Project::from_raw(images, next_image_id, ocr, profiles, styles, view_quads, extras);
         return Ok(new_proj);
     }
@@ -250,13 +250,13 @@ fn row_to_u64(v: &serde_json::Value) -> Option<u64> {
     }
 }
 
-fn legacy_style_to_entry_style(val: &serde_json::Value) -> Option<scanlateit_model::EntryStyle> {
+fn legacy_style_to_entry_style(val: &serde_json::Value) -> Option<easyscanlate_model::EntryStyle> {
     // ManhwaOCR custom_style is diff vs DEFAULT_TEXT_STYLE.
     // We'll attempt to map known keys to our EntryStyle.
     // Keys seen: font_size, bg_color (#AARRGGBB), bubble_type, corner_radius, text_color, border_color, etc.
     // This is best-effort.
     let obj = val.as_object()?;
-    let mut style = scanlateit_model::EntryStyle::default();
+    let mut style = easyscanlate_model::EntryStyle::default();
     let mut changed = false;
     if let Some(fs) = obj.get("font_size").and_then(|v| v.as_f64()) {
         style.font_size = fs as f32;
@@ -302,10 +302,10 @@ fn legacy_style_to_entry_style(val: &serde_json::Value) -> Option<scanlateit_mod
     }
     if let Some(align) = obj.get("text_alignment").and_then(|v| v.as_u64()) {
         style.text_align = match align {
-            0 => scanlateit_model::TextAlign::Left,
-            1 => scanlateit_model::TextAlign::Center,
-            2 => scanlateit_model::TextAlign::Right,
-            _ => scanlateit_model::TextAlign::Circular,
+            0 => easyscanlate_model::TextAlign::Left,
+            1 => easyscanlate_model::TextAlign::Center,
+            2 => easyscanlate_model::TextAlign::Right,
+            _ => easyscanlate_model::TextAlign::Circular,
         };
         changed = true;
     }
@@ -331,8 +331,8 @@ fn parse_hex_argb(s: &str) -> Option<[u8; 4]> {
     }
 }
 
-fn entry_style_to_legacy_custom(val: &scanlateit_model::EntryStyle) -> Option<serde_json::Value> {
-    let def = scanlateit_model::EntryStyle::default();
+fn entry_style_to_legacy_custom(val: &easyscanlate_model::EntryStyle) -> Option<serde_json::Value> {
+    let def = easyscanlate_model::EntryStyle::default();
     if val == &def {
         return None;
     }
@@ -368,10 +368,10 @@ fn entry_style_to_legacy_custom(val: &scanlateit_model::EntryStyle) -> Option<se
     }
     if val.text_align != def.text_align {
         let v = match val.text_align {
-            scanlateit_model::TextAlign::Left => 0,
-            scanlateit_model::TextAlign::Center => 1,
-            scanlateit_model::TextAlign::Right => 2,
-            scanlateit_model::TextAlign::Circular => 1,
+            easyscanlate_model::TextAlign::Left => 0,
+            easyscanlate_model::TextAlign::Center => 1,
+            easyscanlate_model::TextAlign::Right => 2,
+            easyscanlate_model::TextAlign::Circular => 1,
         };
         map.insert("text_alignment".into(), serde_json::Value::Number(serde_json::Number::from(v)));
     }
@@ -416,7 +416,7 @@ pub fn project_to_legacy_master(project: &Project) -> Vec<serde_json::Value> {
         if entry.deleted {
             obj.insert("is_deleted".into(), serde_json::Value::Bool(true));
         }
-        if entry.source == scanlateit_model::EntrySource::Manual {
+        if entry.source == easyscanlate_model::EntrySource::Manual {
             obj.insert("is_manual".into(), serde_json::Value::Bool(true));
         }
         out.push(serde_json::Value::Object(obj));

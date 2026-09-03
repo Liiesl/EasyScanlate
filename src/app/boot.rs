@@ -2,11 +2,11 @@
 use std::sync::Arc;
 use iced::Task;
 use neverliie_iced_widgets::title_bar::NativeFrame;
-use scanlateit_model::{EntrySource, NewEntry, Quad};
+use easyscanlate_model::{EntrySource, NewEntry, Quad};
 #[cfg(feature = "test-ui")]
-use scanlateit_ui::main_area::decode::{DecodedPage, PageDecode, Tier};
+use easyscanlate_ui::main_area::decode::{DecodedPage, PageDecode, Tier};
 #[allow(unused_imports)]
-use scanlateit_ui::{KOREAN_FONT_PATH, LoadedImage};
+use easyscanlate_ui::{KOREAN_FONT_PATH, LoadedImage};
 #[cfg(feature = "test-ui")]
 use iced::widget::image::Handle;
 
@@ -14,7 +14,7 @@ use super::{App, Message};
 use super::translation;
 
 /// CJK families that provide Hangul/Han/Kana coverage on at least one OS.
-/// Mirrors `scanlateit_ui::main_area::overlay::fallback::CJK_FALLBACK_FAMILIES`
+/// Mirrors `easyscanlate_ui::main_area::overlay::fallback::CJK_FALLBACK_FAMILIES`
 /// to avoid a UI→app cycle at boot; keep both lists in sync.
 const CJK_FALLBACK_FAMILIES: &[&str] = &[
     "Apple SD Gothic Neo",
@@ -55,7 +55,7 @@ pub fn boot(
     initial_mmtl: Option<std::path::PathBuf>,
     ipc_listener: Option<crate::single_instance::Listener>,
 ) -> (App, Task<Message>) {
-    scanlateit_settings::init();
+    easyscanlate_settings::init();
     let font_task = match std::fs::read(KOREAN_FONT_PATH) {
         Ok(bytes) => iced::font::load(bytes).map(|_| Message::FontLoaded),
         Err(_) => Task::none(),
@@ -72,7 +72,7 @@ pub fn boot(
     let mut app = App::new(frame);
     #[cfg(feature = "translation")]
     {
-        let (connections, last_provider, free_only, hidden) = scanlateit_settings::get(|s| {
+        let (connections, last_provider, free_only, hidden) = easyscanlate_settings::get(|s| {
             (
                 s.connections.clone(),
                 s.last_provider.clone(),
@@ -127,7 +127,7 @@ pub fn boot(
         {
             let nid = crate::app::tab::TabId(app.next_tab_id);
             app.next_tab_id += 1;
-            let mut project = scanlateit_model::Project::new();
+            let mut project = easyscanlate_model::Project::new();
             let (image_id, ev) = project.add_image_with_event("fake-white-page.png", width as f32, height as f32);
             let images = vec![LoadedImage {
                 image_id,
@@ -159,10 +159,10 @@ pub fn boot(
         #[cfg(all(feature = "test-ui", not(feature = "translation")))]
         {
             use std::collections::BTreeMap;
-            let _ = scanlateit_settings::modify(|s| {
+            let _ = easyscanlate_settings::modify(|s| {
                 s.connections.insert(
                     translation::FAKE_PROVIDER.to_string(),
-                    scanlateit_settings::Connection {
+                    easyscanlate_settings::Connection {
                         api_key: "fake-key-1234".to_string(),
                         base_url: None,
                         model: None,

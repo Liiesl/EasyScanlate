@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 use iced::Task;
-use scanlateit_model::EntryId;
-use scanlateit_ui::UiState;
-use scanlateit_ui::translation as translation;
+use easyscanlate_model::EntryId;
+use easyscanlate_ui::UiState;
+use easyscanlate_ui::translation as translation;
 #[allow(unused_imports)]
-pub use scanlateit_ui::translation::{
+pub use easyscanlate_ui::translation::{
     catalog_provider, default_hidden_ids, default_hidden_ids_for_models, fetch_local_provider,
     fetch_local_providers, fetch_providers, file_tag, is_custom, is_local, profile_name,
     provider_name, usable_models, validate_connection_for, Connection, Model, Provider,
     Session, LANGUAGES,
 };
 #[cfg(not(feature = "translation"))]
-pub use scanlateit_ui::translation::FAKE_PROVIDER;
+pub use easyscanlate_ui::translation::FAKE_PROVIDER;
 
 use super::{App, Message};
 
@@ -20,7 +20,7 @@ use super::{App, Message};
 /// current selection is kept (`sync` falls back when it dropped out); used
 /// at boot and on the single [`UiEvent::SettingsChanged`] announcement.
 pub fn sync_tx_from_store(app: &mut App) {
-    scanlateit_settings::get(|s| {
+    easyscanlate_settings::get(|s| {
         app.tx.connections = s.connections.clone();
         app.tx.free_only = s.free_models_only;
         app.tx.hidden_models = s.hidden_models.clone();
@@ -44,7 +44,7 @@ pub fn handle_models_fetched(app: &mut App, providers: HashMap<String, translati
     // being filtered out. Free and `*-latest` stay visible.
     let mut to_seed: Vec<(String, std::collections::BTreeSet<String>)> = Vec::new();
     for (id, provider) in app.tx.fetched.iter() {
-        let has_entry = scanlateit_settings::get(|s| s.hidden_models.contains_key(id));
+        let has_entry = easyscanlate_settings::get(|s| s.hidden_models.contains_key(id));
         if !has_entry {
             let default = translation::default_hidden_ids_for_models(&provider.models);
             if !default.is_empty() {
@@ -53,13 +53,13 @@ pub fn handle_models_fetched(app: &mut App, providers: HashMap<String, translati
         }
     }
     if !to_seed.is_empty() {
-        let _ = scanlateit_settings::modify(|s| {
+        let _ = easyscanlate_settings::modify(|s| {
             for (id, default) in to_seed {
                 s.hidden_models.entry(id).or_insert(default);
             }
         });
         // Pull seeded hidden back into session and sync models visibility
-        scanlateit_settings::get(|s| {
+        easyscanlate_settings::get(|s| {
             app.tx.hidden_models = s.hidden_models.clone();
         });
         app.tx.sync_models();
@@ -71,7 +71,7 @@ fn capitalized_profile_name(lang: &str) -> String {
     format!("{lang}(auto)")
 }
 
-fn resolve_base_id(app: &App) -> Option<scanlateit_model::ProfileId> {
+fn resolve_base_id(app: &App) -> Option<easyscanlate_model::ProfileId> {
     let tab = app.active_tab();
     if let Some(id) = tab.translate_base {
         if tab.project.profiles.iter().any(|p| p.id == id) {
@@ -85,7 +85,7 @@ fn resolve_base_id(app: &App) -> Option<scanlateit_model::ProfileId> {
 }
 
 fn resolve_target_name(app: &App) -> String {
-    use scanlateit_ui::event::TargetProfileSelection;
+    use easyscanlate_ui::event::TargetProfileSelection;
     let tab = app.active_tab();
     match &tab.translate_target {
         TargetProfileSelection::Existing(id) => {
@@ -110,17 +110,17 @@ pub fn handle_translate(app: &mut App) -> Task<Message> {
         return Task::none();
     }
     // Ensure base/target initialized when entering translate without prior selection
-    if app.active_tab_mut().translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate && !app.active_tab_mut().images.is_empty() {
+    if app.active_tab_mut().translation_panel_mode == easyscanlate_ui::event::TranslationPanelMode::Translate && !app.active_tab_mut().images.is_empty() {
         if app.active_tab_mut().translate_base.is_none() {
             app.active_tab_mut().translate_base = Some(app.active_tab_mut().project.profiles.selected_id());
         }
-        if let scanlateit_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.active_tab_mut().translate_target.clone() {
+        if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.active_tab_mut().translate_target.clone() {
             if name != capitalized_profile_name(&app.active_tab_mut().translate_lang) {
                 // keep as is; lang change handler already syncs
             }
         }
     }
-    let is_translate_mode = app.active_tab().translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate;
+    let is_translate_mode = app.active_tab().translation_panel_mode == easyscanlate_ui::event::TranslationPanelMode::Translate;
     let base_id = if is_translate_mode { resolve_base_id(app) } else { None };
     let mut jobs: Vec<(usize, EntryId, String, String)> = Vec::new();
     {
@@ -196,7 +196,7 @@ pub fn handle_translate_finished(
     app.active_tab_mut().translate_anim_phase = 0.0;
     match result {
         Ok(translations) => {
-            let is_translate_mode = app.active_tab_mut().translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate;
+            let is_translate_mode = app.active_tab_mut().translation_panel_mode == easyscanlate_ui::event::TranslationPanelMode::Translate;
             let profile_name = if is_translate_mode {
                 resolve_target_name(app)
             } else {
@@ -245,12 +245,12 @@ pub fn handle_translate_finished(
             }
             // In Translate mode, update selection from AutoPlaceholder to Existing if needed
             if is_translate_mode {
-                if let scanlateit_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.active_tab_mut().translate_target.clone() {
+                if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.active_tab_mut().translate_target.clone() {
                     if name == profile_name {
                         if let Some(id) = app.active_tab_mut().project.profiles.find_by_name(&name) {
                             let base = resolve_base_id(app);
                             if Some(id) != base {
-                                app.active_tab_mut().translate_target = scanlateit_ui::event::TargetProfileSelection::Existing(id);
+                                app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::Existing(id);
                             }
                         }
                     }
@@ -282,7 +282,7 @@ pub fn handle_retranslate_finished(
                 }
             }
             // Translate mode: write into target profile (base -> target)
-            if app.active_tab().translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate {
+            if app.active_tab().translation_panel_mode == easyscanlate_ui::event::TranslationPanelMode::Translate {
                 let target_name = resolve_target_name(app);
                 let base_id = resolve_base_id(app);
                 if index >= app.active_tab().images.len() {
@@ -298,11 +298,11 @@ pub fn handle_retranslate_finished(
                 let (_target_id, evs) = app.active_tab_mut().project.store_translation_with_event(&target_name, entry_id, stored.clone());
                 for ev in evs { crate::app::handle_model_event(app.active_tab_mut(), ev); }
                 // Update target selection to Existing if it was placeholder
-                if let scanlateit_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.active_tab().translate_target.clone() {
+                if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.active_tab().translate_target.clone() {
                     if name == target_name {
                         if let Some(id) = app.active_tab().project.profiles.find_by_name(&name) {
                             if Some(id) != base_id {
-                                app.active_tab_mut().translate_target = scanlateit_ui::event::TargetProfileSelection::Existing(id);
+                                app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::Existing(id);
                             }
                         }
                     }
@@ -375,7 +375,7 @@ pub fn handle_retranslate_entry(app: &mut App, index: usize, entry_id: EntryId) 
             .unwrap_or_default()
         };
         // In Translate mode, base profile's text is the source, with context from base as well
-        let (text, context_items) = if app.active_tab().translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate {
+        let (text, context_items) = if app.active_tab().translation_panel_mode == easyscanlate_ui::event::TranslationPanelMode::Translate {
             let base_id = resolve_base_id(app);
             let (txt, ctx) = {
                 let tab = app.active_tab();
@@ -451,12 +451,12 @@ pub fn handle_retranslate_entry(app: &mut App, index: usize, entry_id: EntryId) 
 
 pub fn handle_model_select(app: &mut App, provider: String, model: String) -> Task<Message> {
     app.tx.select_model(provider.clone(), model);
-    let _ = scanlateit_settings::modify(|s| s.last_provider = Some(provider));
+    let _ = easyscanlate_settings::modify(|s| s.last_provider = Some(provider));
     Task::none()
 }
 
 pub fn handle_connect(app: &mut App, provider_id: String) -> Task<Message> {
-    use scanlateit_ui::ConnectModal;
+    use easyscanlate_ui::ConnectModal;
     let is_custom = translation::is_custom(&provider_id);
     let existing = app.tx.connections.get(&provider_id);
     app.connect_modal = Some(ConnectModal {
@@ -473,7 +473,7 @@ pub fn handle_connect(app: &mut App, provider_id: String) -> Task<Message> {
 }
 
 pub fn handle_disconnect(app: &mut App, provider_id: String) -> Task<Message> {
-    let _ = scanlateit_settings::modify(|s| {
+    let _ = easyscanlate_settings::modify(|s| {
         s.connections.remove(&provider_id);
         if s.last_provider.as_deref() == Some(provider_id.as_str()) {
             s.last_provider = None;
@@ -521,7 +521,7 @@ pub fn handle_connect_modal_submit(app: &mut App) -> Task<Message> {
         &modal.base_url,
         &modal.model,
     ) {
-        app.connect_modal = Some(scanlateit_ui::ConnectModal {
+        app.connect_modal = Some(easyscanlate_ui::ConnectModal {
             error: Some(error),
             ..modal
         });
@@ -548,7 +548,7 @@ pub fn handle_connect_modal_submit(app: &mut App) -> Task<Message> {
             None
         },
     };
-    let _ = scanlateit_settings::modify(|s| {
+    let _ = easyscanlate_settings::modify(|s| {
         s.connections.insert(id.clone(), connection.clone());
         s.last_provider = Some(id.clone());
     });
@@ -588,12 +588,12 @@ pub fn handle_translate_finished_for(app: &mut App, tab_id: crate::app::tab::Tab
     app.tabs[idx].translate_anim_phase = 0.0;
     match result {
         Ok(translations) => {
-            let is_translate_mode = app.tabs[idx].translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate;
+            let is_translate_mode = app.tabs[idx].translation_panel_mode == easyscanlate_ui::event::TranslationPanelMode::Translate;
             let profile_name = if is_translate_mode {
                 let tab = &app.tabs[idx];
                 match &tab.translate_target {
-                    scanlateit_ui::event::TargetProfileSelection::Existing(id) => tab.project.profiles.iter().find(|p| &p.id == id).map(|p| p.name.clone()).unwrap_or_else(|| format!("{}(auto)", tab.translate_lang)),
-                    scanlateit_ui::event::TargetProfileSelection::AutoPlaceholder(name) => name.clone(),
+                    easyscanlate_ui::event::TargetProfileSelection::Existing(id) => tab.project.profiles.iter().find(|p| &p.id == id).map(|p| p.name.clone()).unwrap_or_else(|| format!("{}(auto)", tab.translate_lang)),
+                    easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) => name.clone(),
                 }
             } else {
                 let lang = app.tabs[idx].translate_lang.clone();
@@ -633,12 +633,12 @@ pub fn handle_translate_finished_for(app: &mut App, tab_id: crate::app::tab::Tab
             }
             if is_translate_mode {
                 let target_name = profile_name.clone();
-                if let scanlateit_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.tabs[idx].translate_target.clone() {
+                if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.tabs[idx].translate_target.clone() {
                     if name == target_name {
                         if let Some(id) = app.tabs[idx].project.profiles.find_by_name(&name) {
                             let base = app.tabs[idx].translate_base.or_else(|| Some(app.tabs[idx].project.profiles.selected_id()));
                             if Some(id) != base {
-                                app.tabs[idx].translate_target = scanlateit_ui::event::TargetProfileSelection::Existing(id);
+                                app.tabs[idx].translate_target = easyscanlate_ui::event::TargetProfileSelection::Existing(id);
                             }
                         }
                     }
@@ -659,12 +659,12 @@ pub fn handle_retranslate_finished_for(app: &mut App, tab_id: crate::app::tab::T
                 let quoted = (text.starts_with('"') && text.ends_with('"')) || (text.starts_with('\'') && text.ends_with('\''));
                 if quoted { text = text[1..text.len()-1].to_string(); }
             }
-            if app.tabs[idx].translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate {
+            if app.tabs[idx].translation_panel_mode == easyscanlate_ui::event::TranslationPanelMode::Translate {
                 let target_name = {
                     let tab = &app.tabs[idx];
                     match &tab.translate_target {
-                        scanlateit_ui::event::TargetProfileSelection::Existing(id) => tab.project.profiles.iter().find(|p| &p.id == id).map(|p| p.name.clone()).unwrap_or_else(|| format!("{}(auto)", tab.translate_lang)),
-                        scanlateit_ui::event::TargetProfileSelection::AutoPlaceholder(name) => name.clone(),
+                        easyscanlate_ui::event::TargetProfileSelection::Existing(id) => tab.project.profiles.iter().find(|p| &p.id == id).map(|p| p.name.clone()).unwrap_or_else(|| format!("{}(auto)", tab.translate_lang)),
+                        easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) => name.clone(),
                     }
                 };
                 if index >= app.tabs[idx].images.len() {
@@ -679,12 +679,12 @@ pub fn handle_retranslate_finished_for(app: &mut App, tab_id: crate::app::tab::T
                     evs
                 };
                 for ev in evs { crate::app::handle_model_event(&mut app.tabs[idx], ev); }
-                if let scanlateit_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.tabs[idx].translate_target.clone() {
+                if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.tabs[idx].translate_target.clone() {
                     if name == target_name {
                         if let Some(id) = app.tabs[idx].project.profiles.find_by_name(&name) {
                             let base = app.tabs[idx].translate_base.or_else(|| Some(app.tabs[idx].project.profiles.selected_id()));
                             if Some(id) != base {
-                                app.tabs[idx].translate_target = scanlateit_ui::event::TargetProfileSelection::Existing(id);
+                                app.tabs[idx].translate_target = easyscanlate_ui::event::TargetProfileSelection::Existing(id);
                             }
                         }
                     }

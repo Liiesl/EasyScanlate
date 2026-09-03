@@ -1,8 +1,8 @@
 //! Persisted app settings, owned by this crate and shared by every other
 //! crate directly (no per-field routing through the app). Backed by
 //! [`confy`]: the store lives in the OS config dir
-//! (`%APPDATA%\scanlateit\config\default-config.toml` on Windows,
-//! `~/.config/scanlateit/config/default-config.toml` on Linux), so the same
+//! (`%APPDATA%\easyscanlate\config\default-config.toml` on Windows,
+//! `~/.config/easyscanlate/config/default-config.toml` on Linux), so the same
 //! code works cross-platform.
 //!
 //! A process-wide store is initialized once at boot with [`init`]; any crate
@@ -15,11 +15,11 @@ use std::fmt;
 use std::sync::{OnceLock, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use scanlateit_model::EntryStyle;
+use easyscanlate_model::EntryStyle;
 use serde::{Deserialize, Serialize};
 
 /// The confy application name; decides the config directory name.
-const APP_NAME: &str = "scanlateit";
+const APP_NAME: &str = "easyscanlate";
 
 fn default_aurora_color() -> String {
     "#3b0600".to_string()
@@ -532,12 +532,12 @@ pub fn modify(f: impl FnOnce(&mut Settings)) -> Result<(), String> {
 
 /// Returns the absolute path to the confy configuration file.
 ///
-/// On Windows this is typically `%APPDATA%\scanlateit\config\default-config.toml`,
-/// on Linux `~/.config/scanlateit/config/default-config.toml`.
+/// On Windows this is typically `%APPDATA%\easyscanlate\config\default-config.toml`,
+/// on Linux `~/.config/easyscanlate/config/default-config.toml`.
 pub fn config_file_path() -> std::path::PathBuf {
     confy::get_configuration_file_path(APP_NAME, None).unwrap_or_else(|_| {
         // Fallback: should never happen, but keep a deterministic path for tests.
-        std::path::PathBuf::from("scanlateit/default-config.toml")
+        std::path::PathBuf::from("easyscanlate/default-config.toml")
     })
 }
 
@@ -552,8 +552,8 @@ pub fn config_dir() -> std::path::PathBuf {
 /// Returns the directory where ONNX models are persisted.
 ///
 /// This is a sibling `models/` directory next to the settings file, e.g.
-/// `%APPDATA%\scanlateit\config\models\` on Windows and
-/// `~/.config/scanlateit/config/models/` on Linux. It is the canonical
+/// `%APPDATA%\easyscanlate\config\models\` on Windows and
+/// `~/.config/easyscanlate/config/models/` on Linux. It is the canonical
 /// location for all downloaded models and is created on demand.
 pub fn models_dir() -> std::path::PathBuf {
     config_dir().join("models")

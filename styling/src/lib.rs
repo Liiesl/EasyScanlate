@@ -20,7 +20,7 @@ use ndarray::{Array4, ArrayD};
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::TensorRef;
-use scanlateit_model::{EntryStyle, Quad};
+use easyscanlate_model::{EntryStyle, Quad};
 
 pub mod tracker;
 
@@ -93,7 +93,7 @@ impl fmt::Debug for Engine {
 impl Engine {
     /// Loads the styling model (CPU-only; incompatible with DirectML).
     pub fn build() -> Result<Self, String> {
-        let path = scanlateit_settings::resolve_model_path(MODEL_FILE);
+        let path = easyscanlate_settings::resolve_model_path(MODEL_FILE);
         let session = Session::builder()
             .map_err(|e| format!("ORT init failed: {e}"))?
             .with_optimization_level(GraphOptimizationLevel::Level3)

@@ -7,7 +7,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use scanlateit_model::{ImageId, Project};
+use easyscanlate_model::{ImageId, Project};
 use zip::{write::SimpleFileOptions, ZipArchive, ZipWriter};
 
 use crate::legacy;
@@ -250,12 +250,12 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
     if !new_images.is_empty() {
         // reconstruct project with new images paths
         let ocr = std::mem::replace(&mut project.ocr, OcrResult::from_raw(Vec::new(), 0));
-        let profiles = std::mem::replace(&mut project.profiles, scanlateit_model::Profiles::default());
+        let profiles = std::mem::replace(&mut project.profiles, easyscanlate_model::Profiles::default());
         let styles = std::mem::replace(&mut project.styles().clone(), HashMap::new());
         // need mutable access to private fields via from_raw
         // Instead use Project::from_raw
         // we need to extract all fields
-        let extras = std::mem::replace(&mut project.extras, scanlateit_model::Extras::default());
+        let extras = std::mem::replace(&mut project.extras, easyscanlate_model::Extras::default());
         let view_quads = project.view_quads().clone();
         let styles_map = styles;
         // Note: project was moved partially, but we have its components saved
@@ -459,10 +459,10 @@ fn load_legacy_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
     }
     // reconstruct with new paths
     let ocr = std::mem::replace(&mut project.ocr, OcrResult::from_raw(Vec::new(), 0));
-    let profiles = std::mem::replace(&mut project.profiles, scanlateit_model::Profiles::default());
+    let profiles = std::mem::replace(&mut project.profiles, easyscanlate_model::Profiles::default());
     let styles = project.styles().clone();
     let view_quads = project.view_quads().clone();
-    let extras = std::mem::replace(&mut project.extras, scanlateit_model::Extras::default());
+    let extras = std::mem::replace(&mut project.extras, easyscanlate_model::Extras::default());
     let next_image_id = new_images.iter().map(|m| m.id.0+1).max().unwrap_or(0);
     let rebuilt = Project::from_raw(new_images.clone(), next_image_id, ocr, profiles, styles, view_quads, extras);
     let mut image_paths = HashMap::new();
@@ -472,12 +472,12 @@ fn load_legacy_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
     Ok(LoadResult { project: rebuilt, image_paths, temp_dir: temp, inpaint_files: Vec::new() })
 }
 
-use scanlateit_model::{OcrResult, ImageMeta};
+use easyscanlate_model::{OcrResult, ImageMeta};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scanlateit_model::{EntrySource, NewEntry, Quad, Project, ImageId};
+    use easyscanlate_model::{EntrySource, NewEntry, Quad, Project, ImageId};
 
     #[test]
     fn save_and_load_roundtrip() {
@@ -492,10 +492,10 @@ mod tests {
         let mut images = project.images().to_vec();
         images[0].path = img_path.to_string_lossy().to_string();
         let ocr = std::mem::replace(&mut project.ocr, OcrResult::from_raw(Vec::new(),0));
-        let profiles = std::mem::replace(&mut project.profiles, scanlateit_model::Profiles::default());
+        let profiles = std::mem::replace(&mut project.profiles, easyscanlate_model::Profiles::default());
         let styles = project.styles().clone();
         let view_quads = project.view_quads().clone();
-        let extras = std::mem::replace(&mut project.extras, scanlateit_model::Extras::default());
+        let extras = std::mem::replace(&mut project.extras, easyscanlate_model::Extras::default());
         let project2 = Project::from_raw(images, 1, ocr, profiles, styles, view_quads, extras);
         let mut project = project2;
         project.ocr.append_for_image(id, NewEntry{ source: EntrySource::AutoOcr, text:"hi".into(), score:0.9, quad: Quad{points:[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]]}});

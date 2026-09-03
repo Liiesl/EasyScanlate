@@ -9,7 +9,7 @@
 //!   `auto_inpaint`, `auto_sfx_filter`, `auto_inpaint_model`, `inpaint_backend`,
 //!   `inpaint_radius`, `ocr_*`, `ui_font_size`, `last_provider`, `connections`
 //!   / `api_key`, `hidden_models`, `free_models_only`, `recent_projects`,
-//!   `style_presets` templates) live in `scanlateit-settings`, not here.
+//!   `style_presets` templates) live in `easyscanlate-settings`, not here.
 //!   Preset *templates* (`StylePresets: Vec<Option<EntryStyle>>`) reuse the
 //!   `EntryStyle` type but are user-level config; per-entry styles remain here.
 //! - [`OcrResult`] is append-only; deletion is a soft-delete flag.

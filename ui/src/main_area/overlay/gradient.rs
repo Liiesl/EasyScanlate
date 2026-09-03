@@ -1,7 +1,7 @@
 use iced::advanced::graphics::geometry::{self, Fill, Path, Stroke, Text};
 use iced::{Color, Point, Rectangle, Size, Vector};
 
-use scanlateit_model::TextGradientDir;
+use easyscanlate_model::TextGradientDir;
 
 use crate::main_area::geometry::QuadTransform;
 

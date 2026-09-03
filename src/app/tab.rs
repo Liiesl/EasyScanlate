@@ -12,17 +12,17 @@ use iced::widget::{pane_grid, text_editor};
 use iced::Rectangle;
 
 #[cfg(feature = "inpaint")]
-use scanlateit_inpaint::Engine as InpaintEngine;
-use scanlateit_model::{EntryId, EntryStyle, ProfileId, Project, Quad};
+use easyscanlate_inpaint::Engine as InpaintEngine;
+use easyscanlate_model::{EntryId, EntryStyle, ProfileId, Project, Quad};
 #[cfg(feature = "ocr")]
-use scanlateit_ocr::{self as ocr_engine, OcrCancellationToken, ParallelEngine};
+use easyscanlate_ocr::{self as ocr_engine, OcrCancellationToken, ParallelEngine};
 #[cfg(feature = "segment")]
-use scanlateit_segment::Engine as SegmentEngine;
+use easyscanlate_segment::Engine as SegmentEngine;
 #[cfg(feature = "styling")]
-use scanlateit_styling::{Engine as StylingEngine, JobTracker, StylePrediction};
-use scanlateit_ui::event::{EditOrigin, MainAreaMode, ManualMode, StyleField, TargetProfileSelection, TranslationPanelMode};
-use scanlateit_ui::main_area::decode::Scheduler;
-use scanlateit_ui::LoadedImage;
+use easyscanlate_styling::{Engine as StylingEngine, JobTracker, StylePrediction};
+use easyscanlate_ui::event::{EditOrigin, MainAreaMode, ManualMode, StyleField, TargetProfileSelection, TranslationPanelMode};
+use easyscanlate_ui::main_area::decode::Scheduler;
+use easyscanlate_ui::LoadedImage;
 
 use super::layout::{PaneKind, SidePaneKind, StylingPaneKind, MAIN_AREA_DEFAULT_RATIO, STYLING_DEFAULT_RATIO, STYLING_TOP_RATIO};
 
@@ -77,7 +77,7 @@ pub struct EnginePool {
     #[cfg(feature = "ocr")]
     pub pipeline: Option<ParallelEngine>,
     #[cfg(feature = "ocr")]
-    pub manual_ocr: Option<scanlateit_ocr::Engine>,
+    pub manual_ocr: Option<easyscanlate_ocr::Engine>,
     #[cfg(feature = "inpaint")]
     pub inpaint: Option<InpaintEngine>,
     #[cfg(feature = "inpaint")]
@@ -307,12 +307,12 @@ impl Tab {
             styling_panes,
             translating: false,
             translate_anim_phase: 0.0,
-            translate_lang: scanlateit_ui::translation::LANGUAGES[0].to_string(),
+            translate_lang: easyscanlate_ui::translation::LANGUAGES[0].to_string(),
             translation_panel_mode: TranslationPanelMode::Edit,
             translate_base: None,
             translate_target: TargetProfileSelection::AutoPlaceholder(format!(
                 "{}(auto)",
-                scanlateit_ui::translation::LANGUAGES[0]
+                easyscanlate_ui::translation::LANGUAGES[0]
             )),
         }
     }

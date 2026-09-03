@@ -25,7 +25,7 @@ use iced::touch::Event as TouchEvent;
 use iced::{Element, Event, Font, Length, Point, Rectangle, Size, Vector};
 
 use crate::event::{InpaintToolbarAction, ManualMode, ToolbarAction};
-use scanlateit_model::{EntryId, Quad};
+use easyscanlate_model::{EntryId, Quad};
 
 use self::constants::{
     DOUBLE_CLICK_DELAY, DRAG_THRESHOLD, MIN_INPAINT_EDGE, MIN_OCR_EDGE, SCROLL_LINE_HEIGHT,

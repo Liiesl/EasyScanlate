@@ -68,20 +68,20 @@ use iced::{Color, Element, Font, Subscription, Task, Theme};
 use neverliie_iced_widgets::title_bar::{FrameAction, NativeFrame};
 
 #[cfg(feature = "inpaint")]
-use scanlateit_inpaint::Engine as InpaintEngine;
-use scanlateit_model::{EntryId, EntryStyle, ModelEvent, NewEntry, Project};
-use scanlateit_settings::StylePresets;
+use easyscanlate_inpaint::Engine as InpaintEngine;
+use easyscanlate_model::{EntryId, EntryStyle, ModelEvent, NewEntry, Project};
+use easyscanlate_settings::StylePresets;
 #[cfg(feature = "inpaint")]
-use scanlateit_settings::InpaintBackend;
+use easyscanlate_settings::InpaintBackend;
 #[cfg(feature = "ocr")]
-use scanlateit_ocr::{self as ocr_engine, ParallelEngine};
+use easyscanlate_ocr::{self as ocr_engine, ParallelEngine};
 #[cfg(feature = "styling")]
-use scanlateit_styling::Engine as StylingEngine;
+use easyscanlate_styling::Engine as StylingEngine;
 #[cfg(feature = "segment")]
-use scanlateit_segment::Engine as SegmentEngine;
-use scanlateit_ui::translation as ui_translation;
-use scanlateit_ui::main_area::decode::{DecodedPage, PageDecode, Tier};
-use scanlateit_ui::{
+use easyscanlate_segment::Engine as SegmentEngine;
+use easyscanlate_ui::translation as ui_translation;
+use easyscanlate_ui::main_area::decode::{DecodedPage, PageDecode, Tier};
+use easyscanlate_ui::{
     event::{EditOrigin, MainAreaMode, ManualMode, SettingsTab, TargetProfileSelection, TranslationPanelMode, UiEvent},
     ConnectModal, LoadedImage, UiState,
 };
@@ -131,7 +131,7 @@ pub enum TabMessage {
     #[cfg(feature = "ocr")]
     ParallelEngineReady(Result<ParallelEngine, String>),
     #[cfg(feature = "ocr")]
-    ManualOcrEngineReady(Result<scanlateit_ocr::Engine, String>),
+    ManualOcrEngineReady(Result<easyscanlate_ocr::Engine, String>),
     #[cfg(feature = "ocr")]
     ManualOcrMultiFinished(Result<Vec<(usize, Vec<NewEntry>)>, String>),
     #[cfg(feature = "ocr")]
@@ -144,17 +144,17 @@ pub enum TabMessage {
     #[cfg(feature = "inpaint")]
     InpaintEngineReady(Result<InpaintEngine, String>),
     #[cfg(feature = "inpaint")]
-    ManualMultiInpaintFinished(Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>)>, String>),
+    ManualMultiInpaintFinished(Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<easyscanlate_model::Quad>)>)>, String>),
     #[cfg(feature = "inpaint")]
     AutoInpaintEngineReady(InpaintBackend, Result<InpaintEngine, String>),
     #[cfg(feature = "inpaint")]
-    AutoInpaintFinished(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>),
+    AutoInpaintFinished(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<easyscanlate_model::Quad>)>, String>),
     #[cfg(feature = "inpaint")]
-    AutoInpaintLamaBatchFinished(Vec<(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>)>),
+    AutoInpaintLamaBatchFinished(Vec<(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<easyscanlate_model::Quad>)>, String>)>),
     #[cfg(feature = "inpaint")]
-    AutoInpaintAotBatchFinished(Vec<(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<scanlateit_model::Quad>)>, String>)>),
+    AutoInpaintAotBatchFinished(Vec<(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<easyscanlate_model::Quad>)>, String>)>),
     #[cfg(all(feature = "styling", feature = "inpaint"))]
-    PipelineStyleDetected(usize, EntryId, Result<(EntryStyle, scanlateit_styling::StylePrediction), String>),
+    PipelineStyleDetected(usize, EntryId, Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>),
     #[cfg(feature = "styling")]
     StylingEngineReady(Result<StylingEngine, String>),
     #[cfg(feature = "styling")]
@@ -245,7 +245,7 @@ pub struct App {
     pub(crate) settings_search: String,
     pub(crate) manage_models_open: bool,
     pub(crate) manage_models_search: String,
-    pub(crate) recent_projects: Vec<scanlateit_settings::RecentProject>,
+    pub(crate) recent_projects: Vec<easyscanlate_settings::RecentProject>,
     pub(crate) new_project: Option<NewProjectState>,
     pub frame: NativeFrame,
     pub(crate) ipc_listener: Option<crate::single_instance::Listener>,
@@ -265,7 +265,7 @@ pub struct App {
 impl App {
     pub fn theme(&self) -> Theme {
         use iced::theme::palette::{Extended, Palette};
-        let is_dark = scanlateit_settings::get(|s| s.aurora_is_dark);
+        let is_dark = easyscanlate_settings::get(|s| s.aurora_is_dark);
         let base_palette = if is_dark { Palette::DARK } else { Palette::LIGHT };
         let opaque_bg = base_palette.background;
         let mut transparent_palette = base_palette;
@@ -302,10 +302,10 @@ impl App {
             system_fonts: HashMap::new(),
             installed_fonts: Vec::new(),
             loaded_fonts: HashSet::from([
-                scanlateit_model::ANIME_ACE_FAMILY.to_string(),
-                scanlateit_model::AUGIE_FAMILY.to_string(),
+                easyscanlate_model::ANIME_ACE_FAMILY.to_string(),
+                easyscanlate_model::AUGIE_FAMILY.to_string(),
             ]),
-            presets: scanlateit_settings::get(|s| s.style_presets.clone()),
+            presets: easyscanlate_settings::get(|s| s.style_presets.clone()),
             tx: ui_translation::Session::default(),
             connect_modal: None,
             settings_open: false,
@@ -313,7 +313,7 @@ impl App {
             settings_search: String::new(),
             manage_models_open: false,
             manage_models_search: String::new(),
-            recent_projects: scanlateit_settings::get(|s| s.recent_projects.clone()),
+            recent_projects: easyscanlate_settings::get(|s| s.recent_projects.clone()),
             new_project: None,
             frame,
             pending_close: None,
@@ -325,8 +325,8 @@ impl App {
             update_rx: None,
             update_error: None,
             onboarding: {
-                let (completed, ver) = scanlateit_settings::get(|s| (s.onboarding_completed, s.onboarding_version));
-                let is_completed = completed && ver >= scanlateit_settings::CURRENT_ONBOARDING_VERSION;
+                let (completed, ver) = easyscanlate_settings::get(|s| (s.onboarding_completed, s.onboarding_version));
+                let is_completed = completed && ver >= easyscanlate_settings::CURRENT_ONBOARDING_VERSION;
                 if is_completed { None } else { Some(onboarding::OnboardingState::new()) }
             },
             onboarding_rx: None,
@@ -511,8 +511,8 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
                                 } else {
                                     app.active_tab_mut().status = format!("Created {path_str} but load failed: {e}");
                                 }
-                                scanlateit_settings::touch_recent(path_str.clone());
-                                app.recent_projects = scanlateit_settings::get(|s| s.recent_projects.clone());
+                                easyscanlate_settings::touch_recent(path_str.clone());
+                                app.recent_projects = easyscanlate_settings::get(|s| s.recent_projects.clone());
                                 return Task::none();
                             }
                         },
@@ -840,7 +840,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                                     }
                                     _ => continue,
                                 };
-                                out.push(scanlateit_mmtl::InpaintImageData { image_id, bounds: layer.bounds, width, height, rgba: pixels });
+                                out.push(easyscanlate_mmtl::InpaintImageData { image_id, bounds: layer.bounds, width, height, rgba: pixels });
                             }
                         }
                         out
@@ -848,7 +848,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     return Task::perform(
                         async move {
                             tokio::task::spawn_blocking(move || {
-                                scanlateit_mmtl::save_mmtl(&project, &inpaint, &path).map(|_| path.to_string_lossy().to_string()).map_err(|e| e.to_string())
+                                easyscanlate_mmtl::save_mmtl(&project, &inpaint, &path).map(|_| path.to_string_lossy().to_string()).map_err(|e| e.to_string())
                             }).await.unwrap_or_else(|e| Err(format!("save task failed: {e}")))
                         },
                         move |res| Message::Tab(tid, TabMessage::MmtlSaved(res)),
@@ -1114,7 +1114,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                             loaded.push(LoadedImage { image_id, decode: PageDecode::default(), inpaint: Vec::new() });
                         }
                         debug_assert_eq!(project.image_count(), loaded.len());
-                        scanlateit_mmtl::save_mmtl(&project, &[], &dest_for_task)
+                        easyscanlate_mmtl::save_mmtl(&project, &[], &dest_for_task)
                             .map_err(|e| e.to_string())?;
                         Ok(dest_for_task.to_string_lossy().to_string())
                     })
@@ -1128,10 +1128,10 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::StartOcr) => ocr::handle_start_ocr(app),
         Message::Ui(UiEvent::StopOcr) => ocr::handle_stop_ocr(app),
         Message::FontLoaded => {
-            app.font = Some(Font::with_name(scanlateit_ui::KOREAN_FONT_NAME));
+            app.font = Some(Font::with_name(easyscanlate_ui::KOREAN_FONT_NAME));
             app.active_tab_mut().status = format!(
                 "{} font ready. {}",
-                scanlateit_ui::KOREAN_FONT_NAME,
+                easyscanlate_ui::KOREAN_FONT_NAME,
                 if app.active_tab_mut().images.is_empty() {
                     "Open images to begin."
                 } else {
@@ -1147,7 +1147,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             // installed system-wide (they are embedded in the binary). When
             // installed, `fontdb` already provided the name — dedup case-insensitively
             // to handle `augie` vs `Augie` variations.
-            for bundled in scanlateit_model::BUNDLED_FONTS {
+            for bundled in easyscanlate_model::BUNDLED_FONTS {
                 if !names.iter().any(|n| n.eq_ignore_ascii_case(bundled)) {
                     names.push(bundled.to_string());
                 }
@@ -1391,7 +1391,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             // Per-image emission per decision 4: one EntriesReordered per image
             let ids: Vec<_> = app.active_tab().project.images().iter().map(|m| m.id).collect();
             if ids.is_empty() {
-                let ev = app.active_tab_mut().project.reorder_entries_for_image_with_event(scanlateit_model::ImageId(0));
+                let ev = app.active_tab_mut().project.reorder_entries_for_image_with_event(easyscanlate_model::ImageId(0));
                 handle_model_event(app.active_tab_mut(), ev);
             } else {
                 for image_id in ids {

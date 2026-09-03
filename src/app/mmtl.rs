@@ -6,7 +6,7 @@ use iced::Task;
 use super::tab::Tab;
 use super::{App, Message};
 
-fn extract_inpaint_data(tab: &Tab) -> Vec<scanlateit_mmtl::InpaintImageData> {
+fn extract_inpaint_data(tab: &Tab) -> Vec<easyscanlate_mmtl::InpaintImageData> {
     let mut out = Vec::new();
     for loaded in &tab.images {
         let image_id = loaded.image_id;
@@ -26,7 +26,7 @@ fn extract_inpaint_data(tab: &Tab) -> Vec<scanlateit_mmtl::InpaintImageData> {
                 }
                 _ => continue,
             };
-            out.push(scanlateit_mmtl::InpaintImageData {
+            out.push(easyscanlate_mmtl::InpaintImageData {
                 image_id,
                 bounds: layer.bounds,
                 width,
@@ -94,9 +94,9 @@ pub fn handle_save_picked_for(app: &mut App, tab_id: crate::app::tab::TabId, pic
     do_save_for(tab_id, tab.project.clone(), extract_inpaint_data(tab), path)
 }
 
-fn build_loaded_images(res: scanlateit_mmtl::LoadResult, display: String) -> Result<(scanlateit_model::Project, Vec<scanlateit_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String> {
+fn build_loaded_images(res: easyscanlate_mmtl::LoadResult, display: String) -> Result<(easyscanlate_model::Project, Vec<easyscanlate_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String> {
     let project = res.project;
-    let mut inpaint_map: std::collections::HashMap<scanlateit_model::ImageId, Vec<scanlateit_ui::loaded::InpaintLayer>> = std::collections::HashMap::new();
+    let mut inpaint_map: std::collections::HashMap<easyscanlate_model::ImageId, Vec<easyscanlate_ui::loaded::InpaintLayer>> = std::collections::HashMap::new();
     for (img_id, bounds, png_path) in &res.inpaint_files {
         let data = std::fs::read(png_path).map_err(|e| e.to_string())?;
         let img = image::load_from_memory(&data).map_err(|e| e.to_string())?.to_rgba8();
@@ -105,25 +105,25 @@ fn build_loaded_images(res: scanlateit_mmtl::LoadResult, display: String) -> Res
         let quad = project.inpaint_for(*img_id).find(|p| p.bounds == *bounds).and_then(|p| p.quad).or_else(|| {
             project.inpaint_for(*img_id).find(|p| p.bounds[2] as u32 == w && p.bounds[3] as u32 == h).and_then(|p| p.quad)
         });
-        inpaint_map.entry(*img_id).or_default().push(scanlateit_ui::loaded::InpaintLayer { bounds: *bounds, quad, handle, width: w, height: h });
+        inpaint_map.entry(*img_id).or_default().push(easyscanlate_ui::loaded::InpaintLayer { bounds: *bounds, quad, handle, width: w, height: h });
     }
     let mut out_images = Vec::new();
     for meta in project.images() {
         let layers = inpaint_map.remove(&meta.id).unwrap_or_default();
-        out_images.push(scanlateit_ui::LoadedImage { image_id: meta.id, decode: scanlateit_ui::main_area::decode::PageDecode::default(), inpaint: layers });
+        out_images.push(easyscanlate_ui::LoadedImage { image_id: meta.id, decode: easyscanlate_ui::main_area::decode::PageDecode::default(), inpaint: layers });
     }
     debug_assert_eq!(project.image_count(), out_images.len());
     Ok((project, out_images, display, Some(Arc::new(res.temp_dir))))
 }
 
-fn do_save(project: scanlateit_model::Project, inpaint: Vec<scanlateit_mmtl::InpaintImageData>, path: PathBuf) -> Task<Message> {
+fn do_save(project: easyscanlate_model::Project, inpaint: Vec<easyscanlate_mmtl::InpaintImageData>, path: PathBuf) -> Task<Message> {
     do_save_for(crate::app::tab::TabId(0), project, inpaint, path)
 }
-fn do_save_for(tab_id: crate::app::tab::TabId, project: scanlateit_model::Project, inpaint: Vec<scanlateit_mmtl::InpaintImageData>, path: PathBuf) -> Task<Message> {
+fn do_save_for(tab_id: crate::app::tab::TabId, project: easyscanlate_model::Project, inpaint: Vec<easyscanlate_mmtl::InpaintImageData>, path: PathBuf) -> Task<Message> {
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
-                scanlateit_mmtl::save_mmtl(&project, &inpaint, &path).map(|_| path.to_string_lossy().to_string()).map_err(|e| e.to_string())
+                easyscanlate_mmtl::save_mmtl(&project, &inpaint, &path).map(|_| path.to_string_lossy().to_string()).map_err(|e| e.to_string())
             })
             .await
             .unwrap_or_else(|e| Err(format!("save task failed: {e}")))
@@ -138,8 +138,8 @@ pub fn handle_open_picked(app: &mut App, picked: Option<String>) -> Task<Message
 pub(crate) fn push_project_tab(
     app: &mut App,
     id: crate::app::tab::TabId,
-    project: scanlateit_model::Project,
-    images: Vec<scanlateit_ui::LoadedImage>,
+    project: easyscanlate_model::Project,
+    images: Vec<easyscanlate_ui::LoadedImage>,
     display_path: String,
     temp_dir: Option<Arc<tempfile::TempDir>>,
 ) -> Task<Message> {
@@ -164,8 +164,8 @@ pub(crate) fn push_project_tab(
     let tab = crate::app::tab::Tab::project_from_loaded(id, title, project, images, path.clone(), temp_dir);
     app.tabs.push(tab);
     app.active = app.tabs.len() - 1;
-    scanlateit_settings::touch_recent(display_path.clone());
-    app.recent_projects = scanlateit_settings::get(|s| s.recent_projects.clone());
+    easyscanlate_settings::touch_recent(display_path.clone());
+    app.recent_projects = easyscanlate_settings::get(|s| s.recent_projects.clone());
     // Update status on the newly created tab (project_from_loaded already sets Loaded, keep it)
     // but ensure recent already touched; no extra status override needed.
     if len > 0 {
@@ -195,7 +195,7 @@ pub fn handle_open_picked_for(app: &mut App, tab_id: crate::app::tab::TabId, pic
         async move {
             let path_clone = path.clone();
             tokio::task::spawn_blocking(move || {
-                let res = scanlateit_mmtl::load_mmtl(&path_clone)?;
+                let res = easyscanlate_mmtl::load_mmtl(&path_clone)?;
                 let display = path_clone.to_string_lossy().to_string();
                 build_loaded_images(res, display)
             })
@@ -220,8 +220,8 @@ pub fn handle_saved_for(app: &mut App, tab_id: crate::app::tab::TabId, result: R
                 tab.dirty = false;
                 tab.title = PathBuf::from(&path).file_stem().and_then(|s| s.to_str()).unwrap_or("project").to_string();
             }
-            scanlateit_settings::touch_recent(path.clone());
-            app.recent_projects = scanlateit_settings::get(|s| s.recent_projects.clone());
+            easyscanlate_settings::touch_recent(path.clone());
+            app.recent_projects = easyscanlate_settings::get(|s| s.recent_projects.clone());
             // If there was a pending close for this tab, now close it
             if app.pending_close == Some(tab_id) {
                 if let Some(pos) = app.tabs.iter().position(|t| t.id == tab_id) {
@@ -241,23 +241,23 @@ pub fn handle_saved_for(app: &mut App, tab_id: crate::app::tab::TabId, result: R
     Task::none()
 }
 
-pub fn load_created_project(path_str: String) -> Result<(scanlateit_model::Project, Vec<scanlateit_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String> {
+pub fn load_created_project(path_str: String) -> Result<(easyscanlate_model::Project, Vec<easyscanlate_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String> {
     let path = PathBuf::from(&path_str);
-    let res = scanlateit_mmtl::load_mmtl(&path)?;
+    let res = easyscanlate_mmtl::load_mmtl(&path)?;
     let display = path.to_string_lossy().to_string();
     build_loaded_images(res, display)
 }
 
 pub fn handle_loaded(
     app: &mut App,
-    result: Result<(scanlateit_model::Project, Vec<scanlateit_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String>,
+    result: Result<(easyscanlate_model::Project, Vec<easyscanlate_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String>,
 ) -> Task<Message> {
     handle_loaded_for(app, app.active_tab().id, result)
 }
 pub fn handle_loaded_for(
     app: &mut App,
     tab_id: crate::app::tab::TabId,
-    result: Result<(scanlateit_model::Project, Vec<scanlateit_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String>,
+    result: Result<(easyscanlate_model::Project, Vec<easyscanlate_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String>,
 ) -> Task<Message> {
     match result {
         Ok((project, images, display_path, temp_dir)) => {

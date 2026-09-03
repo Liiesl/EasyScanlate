@@ -8,8 +8,8 @@ use iced::{Font, Point, Rectangle, Size, Vector, Radians};
 use image::RgbaImage;
 use tiny_skia::{FillRule, Mask, Paint, Pixmap, PremultipliedColorU8, Rect, Shader, Transform};
 
-use scanlateit_model::Project;
-use scanlateit_ui::main_area::overlay::{self, OverlayEntry};
+use easyscanlate_model::Project;
+use easyscanlate_ui::main_area::overlay::{self, OverlayEntry};
 
 use super::{App, Message};
 use iced::Task;
@@ -358,7 +358,7 @@ fn rasterize_page(
     base: RgbaImage,
     inpaint_raw: &[( [f32;4], RgbaImage )],
     project: &Project,
-    image_id: scanlateit_model::ImageId,
+    image_id: easyscanlate_model::ImageId,
     font: Font,
 ) -> RgbaImage {
     // 1. composite inpaint onto base (image crate)
@@ -395,13 +395,13 @@ fn rasterize_page(
     let page_g0 = global_offsets.get(page_idx).copied().unwrap_or(0.0);
     let page_g1 = page_g0 + h as f32;
     // owner -> idx map for O(1)
-    let mut owner_to_idx: std::collections::HashMap<scanlateit_model::ImageId, usize> = std::collections::HashMap::new();
+    let mut owner_to_idx: std::collections::HashMap<easyscanlate_model::ImageId, usize> = std::collections::HashMap::new();
     for (i, m) in images.iter().enumerate() {
         owner_to_idx.insert(m.id, i);
     }
 
     let mut texts: Vec<String> = Vec::new();
-    let mut metas: Vec<(scanlateit_model::EntryId, scanlateit_model::Quad, scanlateit_model::EntryStyle)> = Vec::new();
+    let mut metas: Vec<(easyscanlate_model::EntryId, easyscanlate_model::Quad, easyscanlate_model::EntryStyle)> = Vec::new();
 
     for e in project.visible_entries() {
         let orig_quad = project.view_quad(e);
@@ -527,7 +527,7 @@ pub fn handle_export_picked_for(app: &mut App, tab_id: crate::app::tab::TabId, f
     }
 
     // Also need original paths and ids
-    let metas: Vec<(scanlateit_model::ImageId, String)> = project
+    let metas: Vec<(easyscanlate_model::ImageId, String)> = project
         .images()
         .iter()
         .map(|m| (m.id, m.path.clone()))
@@ -548,7 +548,7 @@ pub fn handle_export_picked_for(app: &mut App, tab_id: crate::app::tab::TabId, f
 
 fn export_blocking(
     project: Project,
-    metas: Vec<(scanlateit_model::ImageId, String)>,
+    metas: Vec<(easyscanlate_model::ImageId, String)>,
     inpaint_per_image: Vec<Vec<([f32; 4], RgbaImage)>>,
     folder: PathBuf,
     font: Font,

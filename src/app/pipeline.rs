@@ -1,14 +1,14 @@
 use iced::Task;
-use scanlateit_model::{EntryId, EntryStyle, Quad};
+use easyscanlate_model::{EntryId, EntryStyle, Quad};
 #[cfg(feature = "inpaint")]
-use scanlateit_settings::InpaintBackend;
+use easyscanlate_settings::InpaintBackend;
 
 use super::{App, AutoInpaintJob, Message};
 
 #[cfg(all(feature = "styling", feature = "inpaint"))]
 pub fn dispatch_inpaint(
     app: &mut App,
-    buffered: Vec<(usize, EntryId, Result<(EntryStyle, scanlateit_styling::StylePrediction), String>, Quad, String)>,
+    buffered: Vec<(usize, EntryId, Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>, Quad, String)>,
 ) -> Task<Message> {
     dispatch_inpaint_for(app, app.active_tab().id, buffered)
 }
@@ -16,7 +16,7 @@ pub fn dispatch_inpaint(
 pub fn dispatch_inpaint_for(
     app: &mut App,
     tab_id: crate::app::tab::TabId,
-    buffered: Vec<(usize, EntryId, Result<(EntryStyle, scanlateit_styling::StylePrediction), String>, Quad, String)>,
+    buffered: Vec<(usize, EntryId, Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>, Quad, String)>,
 ) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     let results = if buffered.is_empty() && app.tabs[idx].pipeline_style_results.is_empty() {
@@ -29,14 +29,14 @@ pub fn dispatch_inpaint_for(
     let mut telea_jobs: Vec<AutoInpaintJob> = Vec::new();
     let mut lama_jobs: Vec<AutoInpaintJob> = Vec::new();
     let mut aot_jobs: Vec<AutoInpaintJob> = Vec::new();
-    let effective_model = scanlateit_settings::get(|s| {
-        if !s.auto_style_detect && s.auto_inpaint_model == scanlateit_settings::AutoInpaintModel::Mixed {
-            scanlateit_settings::AutoInpaintModel::Telea
+    let effective_model = easyscanlate_settings::get(|s| {
+        if !s.auto_style_detect && s.auto_inpaint_model == easyscanlate_settings::AutoInpaintModel::Mixed {
+            easyscanlate_settings::AutoInpaintModel::Telea
         } else {
             s.auto_inpaint_model
         }
     });
-    let has_inpaint = scanlateit_settings::get(|s| s.auto_inpaint);
+    let has_inpaint = easyscanlate_settings::get(|s| s.auto_inpaint);
     if !has_inpaint {
         app.tabs[idx].pipeline_style_pending = 0;
         #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
@@ -70,18 +70,18 @@ pub fn dispatch_inpaint_for(
             crate::app::handle_model_event(tab, ev);
         }
         let need = match pred.bg_type {
-            scanlateit_styling::BgType::Solid => None,
-            scanlateit_styling::BgType::Gradient => Some(match effective_model {
-                scanlateit_settings::AutoInpaintModel::Mixed => InpaintBackend::Telea,
-                scanlateit_settings::AutoInpaintModel::Telea => InpaintBackend::Telea,
-                scanlateit_settings::AutoInpaintModel::Lama => InpaintBackend::Lama,
-                scanlateit_settings::AutoInpaintModel::Aot => InpaintBackend::Aot,
+            easyscanlate_styling::BgType::Solid => None,
+            easyscanlate_styling::BgType::Gradient => Some(match effective_model {
+                easyscanlate_settings::AutoInpaintModel::Mixed => InpaintBackend::Telea,
+                easyscanlate_settings::AutoInpaintModel::Telea => InpaintBackend::Telea,
+                easyscanlate_settings::AutoInpaintModel::Lama => InpaintBackend::Lama,
+                easyscanlate_settings::AutoInpaintModel::Aot => InpaintBackend::Aot,
             }),
-            scanlateit_styling::BgType::Artwork => Some(match effective_model {
-                scanlateit_settings::AutoInpaintModel::Mixed => InpaintBackend::Lama,
-                scanlateit_settings::AutoInpaintModel::Telea => InpaintBackend::Telea,
-                scanlateit_settings::AutoInpaintModel::Lama => InpaintBackend::Lama,
-                scanlateit_settings::AutoInpaintModel::Aot => InpaintBackend::Aot,
+            easyscanlate_styling::BgType::Artwork => Some(match effective_model {
+                easyscanlate_settings::AutoInpaintModel::Mixed => InpaintBackend::Lama,
+                easyscanlate_settings::AutoInpaintModel::Telea => InpaintBackend::Telea,
+                easyscanlate_settings::AutoInpaintModel::Lama => InpaintBackend::Lama,
+                easyscanlate_settings::AutoInpaintModel::Aot => InpaintBackend::Aot,
             }),
         };
         if let Some(backend) = need {

@@ -1,11 +1,11 @@
 use iced::Task;
 #[cfg(feature = "ocr")]
 use iced::futures::{SinkExt, StreamExt};
-use scanlateit_model::{NewEntry, Quad};
+use easyscanlate_model::{NewEntry, Quad};
 #[cfg(feature = "ocr")]
-use scanlateit_ocr::{self as ocr, ParallelEngine};
+use easyscanlate_ocr::{self as ocr, ParallelEngine};
 
-use scanlateit_ui::UiState;
+use easyscanlate_ui::UiState;
 
 use super::{App, Message};
 
@@ -63,7 +63,7 @@ pub fn start_ocr_stream_for(app: &mut App, tab_id: super::tab::TabId) -> Task<Me
             })
         })
         .collect();
-    let workers = scanlateit_settings::get(|s| s.ocr_workers.parse::<usize>().unwrap_or(2)).max(1);
+    let workers = easyscanlate_settings::get(|s| s.ocr_workers.parse::<usize>().unwrap_or(2)).max(1);
     let mut session = ocr::RunSession::new(runs, dims, paths, above_paths, below_paths, workers);
     Task::stream(
         iced::stream::try_channel(1, move |mut sender: iced::futures::channel::mpsc::Sender<Message>| async move {
@@ -95,7 +95,7 @@ pub fn commit_per_page(app: &mut App, per_page: Vec<(usize, Vec<NewEntry>)>) {
         let count = entries.len();
         if let Some(ev) = app.active_tab_mut().project.append_ocr_for_image_with_event(image_id, entries) {
             // ocr_total tracks total appended lines, matches ids length
-            if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev {
+            if let easyscanlate_model::ModelEvent::EntriesAdded { ids, .. } = &ev {
                 app.active_tab_mut().ocr_total += ids.len();
             } else {
                 app.active_tab_mut().ocr_total += count;
@@ -112,7 +112,7 @@ pub fn flush_held_boundary(app: &mut App) {
             if let Some(image) = app.active_tab_mut().images.get(candidate.page) {
                 let image_id = image.image_id;
                 if let Some(ev) = app.active_tab_mut().project.append_ocr_for_image_with_event(image_id, vec![candidate.entry]) {
-                    if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev {
+                    if let easyscanlate_model::ModelEvent::EntriesAdded { ids, .. } = &ev {
                         app.active_tab_mut().ocr_total += ids.len();
                     } else {
                         app.active_tab_mut().ocr_total += 1;
@@ -269,7 +269,7 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
                     run_count
                 );
                 if app.engines.pipeline.is_none() {
-                    let (workers, cfg) = scanlateit_settings::get(|s| {
+                    let (workers, cfg) = easyscanlate_settings::get(|s| {
                         let workers = s.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
                         let cfg = ocr::config_from_strings(&s.ocr_text_score, &s.ocr_max_side_len);
                         (workers, cfg)
@@ -317,7 +317,7 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
             let entries = fake_ocr_entries();
             let cnt = entries.len();
             if let Some(ev) = app.active_tab_mut().project.append_ocr_for_image_with_event(image_id, entries) {
-                if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev { added += ids.len(); } else { added += cnt; }
+                if let easyscanlate_model::ModelEvent::EntriesAdded { ids, .. } = &ev { added += ids.len(); } else { added += cnt; }
                 crate::app::handle_model_event(app.active_tab_mut(), ev);
             }
         }
@@ -411,7 +411,7 @@ pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, resul
                     .unwrap_or(0);
                 (quads, width, offset)
             });
-            let (merge_cfg, min_h, max_h) = scanlateit_settings::get(|s| {
+            let (merge_cfg, min_h, max_h) = easyscanlate_settings::get(|s| {
                 (
                     ocr::MergeConfig::from_threshold_str(&s.ocr_merge_threshold),
                     s.ocr_min_text_height
@@ -448,7 +448,7 @@ pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, resul
                 let image_id = match app.tabs[idx].images.get(page).map(|im| im.image_id) { Some(id) => id, None => continue };
                 let cnt = entries.len();
                 if let Some(ev) = app.tabs[idx].project.append_ocr_for_image_with_event(image_id, entries) {
-                    if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev { app.tabs[idx].ocr_total += ids.len(); } else { app.tabs[idx].ocr_total += cnt; }
+                    if let easyscanlate_model::ModelEvent::EntriesAdded { ids, .. } = &ev { app.tabs[idx].ocr_total += ids.len(); } else { app.tabs[idx].ocr_total += cnt; }
                     let ev_clone = ev;
                     crate::app::handle_model_event(&mut app.tabs[idx], ev_clone);
                 }
@@ -467,7 +467,7 @@ pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, resul
                         let image_id = app.tabs[idx].images[candidate.page].image_id;
                         let cnt = 1;
                         if let Some(ev) = app.tabs[idx].project.append_ocr_for_image_with_event(image_id, vec![candidate.entry]) {
-                            if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev { app.tabs[idx].ocr_total += ids.len(); } else { app.tabs[idx].ocr_total += cnt; }
+                            if let easyscanlate_model::ModelEvent::EntriesAdded { ids, .. } = &ev { app.tabs[idx].ocr_total += ids.len(); } else { app.tabs[idx].ocr_total += cnt; }
                             crate::app::handle_model_event(&mut app.tabs[idx], ev);
                         }
                     }
@@ -490,7 +490,7 @@ pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, resul
                     if candidate.page >= tab.images.len() { continue; }
                     let image_id = tab.images[candidate.page].image_id;
                     if let Some(ev) = tab.project.append_ocr_for_image_with_event(image_id, vec![candidate.entry]) {
-                        if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev { tab.ocr_total += ids.len(); } else { tab.ocr_total += 1; }
+                        if let easyscanlate_model::ModelEvent::EntriesAdded { ids, .. } = &ev { tab.ocr_total += ids.len(); } else { tab.ocr_total += 1; }
                         crate::app::handle_model_event(tab, ev);
                     }
                 }
@@ -506,11 +506,11 @@ pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, resul
         crate::app::queue::refresh_queued_statuses(app);
         let cancelled_now = app.tabs[idx].ocr_cancelled;
         if !cancelled_now {
-            let (do_sfx, do_style, do_inpaint, model) = scanlateit_settings::get(|s| {
+            let (do_sfx, do_style, do_inpaint, model) = easyscanlate_settings::get(|s| {
                 (s.auto_sfx_filter, s.auto_style_detect, s.auto_inpaint, s.auto_inpaint_model)
             });
-            let effective_model = if !do_style && model == scanlateit_settings::AutoInpaintModel::Mixed {
-                scanlateit_settings::AutoInpaintModel::Telea
+            let effective_model = if !do_style && model == easyscanlate_settings::AutoInpaintModel::Mixed {
+                easyscanlate_settings::AutoInpaintModel::Telea
             } else {
                 model
             };
@@ -561,10 +561,10 @@ pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, resul
                     #[cfg(feature = "inpaint")]
                     if do_inpaint && !do_style {
                         let kind = match effective_model {
-                            scanlateit_settings::AutoInpaintModel::Telea => EngineKind::InpaintTelea,
-                            scanlateit_settings::AutoInpaintModel::Lama => EngineKind::InpaintLama,
-                            scanlateit_settings::AutoInpaintModel::Aot => EngineKind::InpaintAot,
-                            scanlateit_settings::AutoInpaintModel::Mixed => EngineKind::InpaintTelea,
+                            easyscanlate_settings::AutoInpaintModel::Telea => EngineKind::InpaintTelea,
+                            easyscanlate_settings::AutoInpaintModel::Lama => EngineKind::InpaintLama,
+                            easyscanlate_settings::AutoInpaintModel::Aot => EngineKind::InpaintAot,
+                            easyscanlate_settings::AutoInpaintModel::Mixed => EngineKind::InpaintTelea,
                         };
                         match app.engines.queue.try_acquire_or_enqueue(tab_id, kind) {
                             AcquireResult::Acquired(_) => tasks.push(super::inpaint::dispatch_auto_solo_for(app, tab_id, effective_model)),
@@ -617,10 +617,10 @@ pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, resul
                 #[cfg(feature = "inpaint")]
                 if do_inpaint && !do_style {
                     let kind = match effective_model {
-                        scanlateit_settings::AutoInpaintModel::Telea => EngineKind::InpaintTelea,
-                        scanlateit_settings::AutoInpaintModel::Lama => EngineKind::InpaintLama,
-                        scanlateit_settings::AutoInpaintModel::Aot => EngineKind::InpaintAot,
-                        scanlateit_settings::AutoInpaintModel::Mixed => EngineKind::InpaintTelea,
+                        easyscanlate_settings::AutoInpaintModel::Telea => EngineKind::InpaintTelea,
+                        easyscanlate_settings::AutoInpaintModel::Lama => EngineKind::InpaintLama,
+                        easyscanlate_settings::AutoInpaintModel::Aot => EngineKind::InpaintAot,
+                        easyscanlate_settings::AutoInpaintModel::Mixed => EngineKind::InpaintTelea,
                     };
                     match app.engines.queue.try_acquire_or_enqueue(tab_id, kind) {
                         AcquireResult::Acquired(_) => tasks.push(super::inpaint::dispatch_auto_solo_for(app, tab_id, effective_model)),
@@ -669,7 +669,7 @@ pub fn handle_ocr_stream_failed_for(app: &mut App, tab_id: super::tab::TabId, e:
                 if candidate.page >= app.tabs[idx].images.len() { continue; }
                 let image_id = app.tabs[idx].images[candidate.page].image_id;
                 if let Some(ev) = app.tabs[idx].project.append_ocr_for_image_with_event(image_id, vec![candidate.entry]) {
-                    if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev { app.tabs[idx].ocr_total += ids.len(); } else { app.tabs[idx].ocr_total += 1; }
+                    if let easyscanlate_model::ModelEvent::EntriesAdded { ids, .. } = &ev { app.tabs[idx].ocr_total += ids.len(); } else { app.tabs[idx].ocr_total += 1; }
                     crate::app::handle_model_event(&mut app.tabs[idx], ev);
                 }
             }
@@ -808,7 +808,7 @@ pub fn handle_manual_ocr_selection_for(app: &mut App, tab_id: super::tab::TabId,
                 return Task::none();
             }
         }
-        let cfg = scanlateit_settings::get(|s| ocr::config_with(0.0, s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000)));
+        let cfg = easyscanlate_settings::get(|s| ocr::config_with(0.0, s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000)));
         let cached = app.engines.manual_ocr.clone();
         if let Some(engine) = cached { return start_manual_ocr_selection_for(app, tab_id, valid, engine); }
         if let Some(tab) = app.tab_by_id_mut(tab_id) {
@@ -850,7 +850,7 @@ pub(crate) fn start_manual_ocr_selection_for(app: &mut App, tab_id: super::tab::
         if let Some(tab) = app.tab_by_id_mut(tab_id) { tab.manual_ocring=false; }
         return Task::none();
     }
-    let merge_cfg = scanlateit_settings::get(|s| ocr::MergeConfig::from_threshold_str(&s.ocr_merge_threshold));
+    let merge_cfg = easyscanlate_settings::get(|s| ocr::MergeConfig::from_threshold_str(&s.ocr_merge_threshold));
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || run_manual_ocr_selection(engine, items, merge_cfg))
@@ -993,7 +993,7 @@ pub fn handle_manual_ocr_finished_for(app: &mut App, tab_id: super::tab::TabId, 
                     let image_id = app.tab_by_id(tab_id).unwrap().images[idx].image_id;
                     let tab = app.tab_by_id_mut(tab_id).unwrap();
                     let added = if let Some(ev) = tab.project.append_ocr_for_image_with_event(image_id, entries) {
-                        let n = if let scanlateit_model::ModelEvent::EntriesAdded { ids, .. } = &ev { ids.len() } else { cnt };
+                        let n = if let easyscanlate_model::ModelEvent::EntriesAdded { ids, .. } = &ev { ids.len() } else { cnt };
                         let ev2 = ev;
                         crate::app::handle_model_event(tab, ev2);
                         let rev = tab.project.reorder_entries_for_image_with_event(image_id);

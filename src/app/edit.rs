@@ -1,8 +1,8 @@
 use iced::widget::text_editor;
 use iced::{Rectangle, Task};
-use scanlateit_model::EntryId;
-use scanlateit_ui::event::{EditOrigin, ToolbarAction};
-use scanlateit_ui::panel::results::scroll_to_row;
+use easyscanlate_model::EntryId;
+use easyscanlate_ui::event::{EditOrigin, ToolbarAction};
+use easyscanlate_ui::panel::results::scroll_to_row;
 
 use super::layout::{EDIT_INPUT_ID, PANEL_EDIT_INPUT_ID};
 use super::{App, Message};
@@ -66,7 +66,7 @@ pub fn clear_editing_tab(tab: &mut super::tab::Tab) {
 /// Reseeds the style panel inputs from `style`, closing any open picker and
 /// keeping the raw number strings in sync with the resolved values. Also
 /// clears any hex text buffers so the hex inputs show the canonical value.
-pub fn seed_style_inputs(app: &mut App, style: scanlateit_model::EntryStyle) {
+pub fn seed_style_inputs(app: &mut App, style: easyscanlate_model::EntryStyle) {
     let tab = app.active_tab_mut();
     tab.style_stroke_width = style.stroke_width.to_string();
     tab.style_bg_radius = style.bg_radius.to_string();
@@ -138,7 +138,7 @@ pub fn handle_entry_double_clicked(app: &mut App, pair: (usize, EntryId)) -> Tas
 }
 
 pub fn handle_panel_entry_edit(app: &mut App, pair: (usize, EntryId)) -> Task<Message> {
-    if app.active_tab().translation_panel_mode == scanlateit_ui::event::TranslationPanelMode::Translate {
+    if app.active_tab().translation_panel_mode == easyscanlate_ui::event::TranslationPanelMode::Translate {
         return handle_entry_clicked(app, Some(pair));
     }
     app.active_tab_mut().selected_inpaint = None;
@@ -192,7 +192,7 @@ pub fn handle_entry_toolbar(app: &mut App, index: usize, id: EntryId, action: To
     }
 }
 
-pub fn handle_entry_moved(app: &mut App, index: usize, id: EntryId, quad: scanlateit_model::Quad) -> Task<Message> {
+pub fn handle_entry_moved(app: &mut App, index: usize, id: EntryId, quad: easyscanlate_model::Quad) -> Task<Message> {
     let ok = {
         let tab = app.active_tab();
         index < tab.images.len()

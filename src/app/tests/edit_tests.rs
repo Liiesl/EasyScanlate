@@ -1,7 +1,7 @@
 use crate::app::tests::{app_with_entry, edit_action, start_edit, type_text};
 use crate::app::{update, Message};
-use scanlateit_model::EntryId;
-use scanlateit_ui::event::{EditOrigin, MainAreaMode, ToolbarAction, UiEvent};
+use easyscanlate_model::EntryId;
+use easyscanlate_ui::event::{EditOrigin, MainAreaMode, ToolbarAction, UiEvent};
 use iced::widget::text_editor;
 
 #[test]
@@ -90,7 +90,7 @@ fn panel_edit_submit_clears_editing_state() {
 
 #[test]
 fn moving_an_entry_updates_view_quad_but_not_the_ocr_quad() {
-    use scanlateit_model::Quad;
+    use easyscanlate_model::Quad;
     let (mut app, id) = app_with_entry();
     let moved = Quad {
         points: [[20.0, 25.0], [40.0, 25.0], [40.0, 35.0], [20.0, 35.0]],

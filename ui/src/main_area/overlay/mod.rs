@@ -19,7 +19,7 @@ use iced::advanced::graphics::geometry::{self, Fill, Path, Stroke, Text};
 use iced::advanced::text::Alignment as TextAlignment;
 use iced::{Color, Font, Pixels, Point, Rectangle, Size};
 
-use scanlateit_model::TextAlign;
+use easyscanlate_model::TextAlign;
 
 use crate::color::rgba_to_color;
 use crate::main_area::geometry::{
@@ -526,7 +526,7 @@ mod tests {
 
     #[test]
     fn gradient_t_at_box_corners_for_all_directions() {
-        use scanlateit_model::TextGradientDir;
+        use easyscanlate_model::TextGradientDir;
         let box_rect = Rectangle::new(Point::new(10.0, 20.0), Size::new(100.0, 50.0));
         let tl = Point::new(10.0, 20.0);
         let tr = Point::new(110.0, 20.0);

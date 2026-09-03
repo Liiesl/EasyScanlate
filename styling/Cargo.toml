@@ -1,5 +1,5 @@
 [package]
-name = "scanlateit-styling"
+name = "easyscanlate-styling"
 version.workspace = true
 edition.workspace = true
 
@@ -7,5 +7,5 @@ edition.workspace = true
 image = { workspace = true }
 ndarray = { workspace = true }
 ort = { workspace = true }
-scanlateit-model = { workspace = true }
-scanlateit-settings = { workspace = true }
+easyscanlate-model = { workspace = true }
+easyscanlate-settings = { workspace = true }

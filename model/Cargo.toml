@@ -1,5 +1,5 @@
 [package]
-name = "scanlateit-model"
+name = "easyscanlate-model"
 version.workspace = true
 edition.workspace = true
 

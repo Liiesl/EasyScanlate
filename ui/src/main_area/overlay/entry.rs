@@ -1,4 +1,4 @@
-use scanlateit_model::{EntryId, EntryStyle, Quad};
+use easyscanlate_model::{EntryId, EntryStyle, Quad};
 
 /// View-model entry: what the overlay draws, resolved from the model with the
 /// selected profile's translation and the per-entry style already applied.

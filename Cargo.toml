@@ -1,5 +1,5 @@
 [package]
-name = "scanlateit"
+name = "easyscanlate"
 version = "0.1.0"
 edition = "2024"
 
@@ -44,16 +44,16 @@ toml = "1"
 tempfile = "3"
 
 # Internal path dependencies
-scanlateit-model = { path = "model" }
-scanlateit-settings = { path = "settings" }
-scanlateit-models = { path = "models-store" }
-scanlateit-inpaint = { path = "inpaint" }
-scanlateit-ocr = { path = "ocr" }
-scanlateit-styling = { path = "styling" }
-scanlateit-translation = { path = "translation" }
-scanlateit-segment = { path = "segment" }
-scanlateit-ui = { path = "ui", default-features = false }
-scanlateit-mmtl = { path = "mmtl" }
+easyscanlate-model = { path = "model" }
+easyscanlate-settings = { path = "settings" }
+easyscanlate-models = { path = "models-store" }
+easyscanlate-inpaint = { path = "inpaint" }
+easyscanlate-ocr = { path = "ocr" }
+easyscanlate-styling = { path = "styling" }
+easyscanlate-translation = { path = "translation" }
+easyscanlate-segment = { path = "segment" }
+easyscanlate-ui = { path = "ui", default-features = false }
+easyscanlate-mmtl = { path = "mmtl" }
 neverliie-iced-widgets = { path = "NeverLiieIcedWidgets" }
 rapidocr-core = { version = "0.2.2", default-features = false }
 
@@ -63,15 +63,15 @@ rapidocr-core = { version = "0.2.2", default-features = false }
 # and no rig (translation) are compiled or linked. Disabled subsystems show a
 # "unavailable in this build" status instead of running.
 default = ["ocr", "inpaint", "styling", "translation", "segment", "directml", "file-assoc"]
-ocr = ["dep:scanlateit-ocr", "scanlateit-ui/ocr"]
-inpaint = ["dep:scanlateit-inpaint", "scanlateit-ui/inpaint"]
-styling = ["dep:scanlateit-styling", "scanlateit-ui/styling"]
-translation = ["dep:scanlateit-translation", "scanlateit-ui/translation"]
-segment = ["dep:scanlateit-segment", "scanlateit-ui/segment"]
+ocr = ["dep:easyscanlate-ocr", "easyscanlate-ui/ocr"]
+inpaint = ["dep:easyscanlate-inpaint", "easyscanlate-ui/inpaint"]
+styling = ["dep:easyscanlate-styling", "easyscanlate-ui/styling"]
+translation = ["dep:easyscanlate-translation", "easyscanlate-ui/translation"]
+segment = ["dep:easyscanlate-segment", "easyscanlate-ui/segment"]
 directml = [
-    "scanlateit-ocr/directml",
-    "scanlateit-segment/directml",
-    "scanlateit-inpaint/directml",
+    "easyscanlate-ocr/directml",
+    "easyscanlate-segment/directml",
+    "easyscanlate-inpaint/directml",
 ]
 # Convenience aliases: UI-only iteration (fake white image + fake OCR entries
 # at boot, no ML backends), or exactly one real subsystem at a time.
@@ -89,16 +89,16 @@ image = { workspace = true }
 bytes = { workspace = true }
 rfd = { workspace = true }
 neverliie-iced-widgets = { workspace = true }
-scanlateit-model = { workspace = true }
-scanlateit-settings = { workspace = true }
-scanlateit-models = { workspace = true }
-scanlateit-inpaint = { workspace = true, optional = true }
-scanlateit-ocr = { workspace = true, optional = true }
-scanlateit-styling = { workspace = true, optional = true }
-scanlateit-translation = { workspace = true, optional = true }
-scanlateit-segment = { workspace = true, optional = true }
-scanlateit-ui = { workspace = true }
-scanlateit-mmtl = { workspace = true }
+easyscanlate-model = { workspace = true }
+easyscanlate-settings = { workspace = true }
+easyscanlate-models = { workspace = true }
+easyscanlate-inpaint = { workspace = true, optional = true }
+easyscanlate-ocr = { workspace = true, optional = true }
+easyscanlate-styling = { workspace = true, optional = true }
+easyscanlate-translation = { workspace = true, optional = true }
+easyscanlate-segment = { workspace = true, optional = true }
+easyscanlate-ui = { workspace = true }
+easyscanlate-mmtl = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 fontdb = { workspace = true }

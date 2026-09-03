@@ -28,8 +28,8 @@ use ndarray::{Array4, ArrayD};
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::TensorRef;
-use scanlateit_model::Quad;
-use scanlateit_settings::InpaintBackend;
+use easyscanlate_model::Quad;
+use easyscanlate_settings::InpaintBackend;
 
 /// The fixed square input size of the LaMa model.
 pub const MODEL_EDGE: u32 = 512;
@@ -123,7 +123,7 @@ impl Engine {
         let session = match backend {
             InpaintBackend::Telea => None,
             InpaintBackend::Lama => {
-                let path = scanlateit_settings::resolve_model_path(MODEL_FILE);
+                let path = easyscanlate_settings::resolve_model_path(MODEL_FILE);
                 #[cfg(all(feature = "directml", target_os = "windows"))]
                 let session = {
                     match build_directml(&path, "lama") {
@@ -145,7 +145,7 @@ impl Engine {
                 Some(Arc::new(Mutex::new(session)))
             }
             InpaintBackend::Aot => {
-                let path = scanlateit_settings::resolve_model_path(MODEL_FILE_AOT);
+                let path = easyscanlate_settings::resolve_model_path(MODEL_FILE_AOT);
                 #[cfg(all(feature = "directml", target_os = "windows"))]
                 let session = {
                     match build_directml(&path, "aot") {

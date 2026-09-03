@@ -68,7 +68,7 @@ pub fn view<'a, S: crate::state::UiState + ?Sized>(state: &'a S) -> Element<'a, 
         for rp in recents {
             let path = rp.path.clone();
             let name = rp.name.clone();
-            let rel = scanlateit_settings::format_relative(rp.last_opened);
+            let rel = easyscanlate_settings::format_relative(rp.last_opened);
             let row_btn = button(
                 row![
                     text(name).size(scale::s(13.0)).color(Color::WHITE).width(FillLength),

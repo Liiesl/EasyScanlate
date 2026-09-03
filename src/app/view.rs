@@ -1,8 +1,8 @@
 use iced::{Element, Length};
 use iced::widget::pane_grid;
-use scanlateit_ui::event::UiEvent;
-use scanlateit_ui::{main_area, panel, scale, toolbar};
-use scanlateit_ui::settings as settings_modal;
+use easyscanlate_ui::event::UiEvent;
+use easyscanlate_ui::{main_area, panel, scale, toolbar};
+use easyscanlate_ui::settings as settings_modal;
 
 use super::layout::{CARD_RADIUS, GAP, MAIN_AREA_MIN_WIDTH, OUTER_PADDING, STYLING_MIN_WIDTH};
 use super::{App, Message};
@@ -10,15 +10,15 @@ use super::{App, Message};
 pub fn view(app: &App) -> Element<'_, Message> {
     let inner: Element<'_, UiEvent> = if app.onboarding.is_some() {
         // Onboarding as dedicated page (like Home/Editor) — fills window, not overlay
-        scanlateit_ui::onboarding::view_page(app)
+        easyscanlate_ui::onboarding::view_page(app)
     } else if app.active_is_home() {
-            let base: Element<'_, UiEvent> = iced::widget::container(scanlateit_ui::home::view(app))
+            let base: Element<'_, UiEvent> = iced::widget::container(easyscanlate_ui::home::view(app))
                 .padding(scale::s(OUTER_PADDING))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into();
             let with_new: Element<'_, UiEvent> = if app.new_project.is_some() {
-                scanlateit_ui::new_project::view(app, base)
+                easyscanlate_ui::new_project::view(app, base)
             } else {
                 base
             };
@@ -28,12 +28,12 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 with_new
             };
             let with_connect: Element<'_, UiEvent> = if app.connect_modal.is_some() {
-                scanlateit_ui::connect::view(app, with_settings)
+                easyscanlate_ui::connect::view(app, with_settings)
             } else {
                 with_settings
             };
             if app.manage_models_open {
-                scanlateit_ui::manage_models::view(app, with_connect)
+                easyscanlate_ui::manage_models::view(app, with_connect)
             } else {
                 with_connect
             }
@@ -167,12 +167,12 @@ pub fn view(app: &App) -> Element<'_, Message> {
                     base
                 };
                 let v: Element<'_, UiEvent> = if app.connect_modal.is_some() {
-                    scanlateit_ui::connect::view(app, v)
+                    easyscanlate_ui::connect::view(app, v)
                 } else {
                     v
                 };
                 if app.manage_models_open {
-                    scanlateit_ui::manage_models::view(app, v)
+                    easyscanlate_ui::manage_models::view(app, v)
                 } else {
                     v
                 }
@@ -193,9 +193,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
         inner_mapped
     };
 
-    let aurora_cfg = scanlateit_ui::background::AuroraConfig::from_store();
+    let aurora_cfg = easyscanlate_ui::background::AuroraConfig::from_store();
     let aurora: Element<'_, Message> =
-        scanlateit_ui::background::AuroraBackground::new(aurora_cfg)
+        easyscanlate_ui::background::AuroraBackground::new(aurora_cfg)
             .view()
             .map(Message::from);
     let base_with_aurora: Element<'_, Message> =

@@ -1,6 +1,6 @@
 //! Download helpers built on `fast-down-api`.
 //!
-//! All models are persisted under `scanlateit_settings::models_dir()`.
+//! All models are persisted under `easyscanlate_settings::models_dir()`.
 //! `fast-down-api` handles resumable, concurrent range downloads via `.part`
 //! and `.fd` sidecars next to the target file (`save_dir` + `filename`).
 
@@ -54,7 +54,7 @@ pub struct DownloadHandle {
 /// `overwrite=false` so existing files are kept; set to `true` to force re-download.
 fn config_for(spec: &ModelSpec, overwrite: bool) -> PartialConfig {
     PartialConfig {
-        save_dir: Some(scanlateit_settings::models_dir()),
+        save_dir: Some(easyscanlate_settings::models_dir()),
         // `filename` is `String` in Config, `Option<String>` in PartialConfig
         filename: Some(spec.filename.to_string()),
         overwrite: Some(overwrite),
@@ -68,7 +68,7 @@ fn config_for(spec: &ModelSpec, overwrite: bool) -> PartialConfig {
 
 /// Ensure `models_dir()` exists.
 fn ensure_dir() -> Result<PathBuf, String> {
-    scanlateit_settings::ensure_models_dir().map_err(|e| format!("failed to create models dir: {e}"))
+    easyscanlate_settings::ensure_models_dir().map_err(|e| format!("failed to create models dir: {e}"))
 }
 
 /// Check preconditions for a download. Returns the Url on success.
@@ -94,7 +94,7 @@ fn prepare_download(spec: &ModelSpec) -> Result<Url, String> {
 ///
 /// Use `download_model_with_progress` if you need live progress updates in the UI.
 pub async fn ensure_model(spec: &ModelSpec) -> Result<PathBuf, String> {
-    let path = scanlateit_settings::model_path(spec.filename);
+    let path = easyscanlate_settings::model_path(spec.filename);
     if path.exists() {
         return Ok(path);
     }
@@ -114,7 +114,7 @@ pub async fn download_model_with_overwrite(spec: &ModelSpec, overwrite: bool) ->
 
     // If not overwriting and file already exists, succeed fast
     if !overwrite {
-        let path = scanlateit_settings::model_path(spec.filename);
+        let path = easyscanlate_settings::model_path(spec.filename);
         if path.exists() {
             return Ok(path);
         }
@@ -164,7 +164,7 @@ pub fn download_model_with_progress_overwrite(spec: &ModelSpec, overwrite: bool)
     let (tx, rx) = create_channel();
     let token = create_cancellation_token();
     let cfg = config_for(spec, overwrite);
-    let final_path = scanlateit_settings::model_path(spec.filename);
+    let final_path = easyscanlate_settings::model_path(spec.filename);
 
     download(url, cfg, tx, token.clone());
 
@@ -183,7 +183,7 @@ pub fn download_model_with_progress_overwrite(spec: &ModelSpec, overwrite: bool)
 /// the returned handle's channel is immediately closed — the caller should
 /// check `model_path().exists()` first or use `ensure_model_with_progress`.
 pub fn ensure_model_with_progress(spec: &ModelSpec) -> Result<Option<DownloadHandle>, String> {
-    let path = scanlateit_settings::model_path(spec.filename);
+    let path = easyscanlate_settings::model_path(spec.filename);
     if path.exists() {
         return Ok(None);
     }
@@ -203,7 +203,7 @@ pub async fn download_model_with_sender(
     let url = prepare_download(spec)?;
     let _dir = ensure_dir()?;
     if !overwrite {
-        let path = scanlateit_settings::model_path(spec.filename);
+        let path = easyscanlate_settings::model_path(spec.filename);
         if path.exists() {
             return Ok(path);
         }
@@ -250,7 +250,7 @@ pub async fn ensure_model_with_sender(
     spec: &ModelSpec,
     sender: mpsc::Sender<(f32, u64, u64)>,
 ) -> Result<PathBuf, String> {
-    let path = scanlateit_settings::model_path(spec.filename);
+    let path = easyscanlate_settings::model_path(spec.filename);
     if path.exists() {
         return Ok(path);
     }

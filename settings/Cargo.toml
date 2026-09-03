@@ -1,12 +1,12 @@
 [package]
-name = "scanlateit-settings"
+name = "easyscanlate-settings"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 serde = { workspace = true }
 confy = { workspace = true }
-scanlateit-model = { workspace = true }
+easyscanlate-model = { workspace = true }
 toml = { workspace = true }
 
 [dev-dependencies]

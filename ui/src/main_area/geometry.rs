@@ -2,13 +2,13 @@
 //!
 //! Single source for quad math, scale and layout helpers used by both the
 //! viewer (hit-testing, interaction) and the overlay (painting, warping).
-//! All quad ordering delegates to [`scanlateit_model::Quad::ordered`] so
+//! All quad ordering delegates to [`easyscanlate_model::Quad::ordered`] so
 //! `overlay` and `viewer` never re-implement it.
 
 use iced::advanced::graphics::geometry::{self, Path};
 use iced::{Point, Rectangle, Vector};
 
-use scanlateit_model::Quad;
+use easyscanlate_model::Quad;
 
 /// Viewport/content scale helper: `frame_width / source_width`.
 #[inline]

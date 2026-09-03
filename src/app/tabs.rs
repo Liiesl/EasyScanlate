@@ -1,6 +1,6 @@
 //! Titlebar tab strip — 32px custom frame (`NativeFrame` fill row).
 //!
-//! Renders `scanlateit` (pinned, no ×, with icon) + project tabs (`title • ×`) + `+`
+//! Renders `easyscanlate` (pinned, no ×, with icon) + project tabs (`title • ×`) + `+`
 //! immediately after last tab. Scroll area grows with tabs until 80% of titlebar
 //! then becomes fixed and scrollable. Inactive bg = transparent, active bg =
 //! `PANEL_BG` (`34,36,44,0.78`) with top-only radius 6, no border/underline.
@@ -14,7 +14,7 @@ use iced::widget::{Responsive, button, container, row, scrollable, space, text};
 use iced::{Background, Border, Color, Element, Length, Shadow, Theme};
 
 use super::{App, Message};
-use scanlateit_ui::event::UiEvent;
+use easyscanlate_ui::event::UiEvent;
 
 const ACCENT: Color = Color::from_rgb8(92, 190, 255);
 const PANEL_BG: Color = Color::from_rgba8(34, 36, 44, 0.78);
@@ -128,7 +128,7 @@ fn ghost_add_style(is_dark: bool) -> impl Fn(&Theme, button::Status) -> button::
     }
 }
 
-/// 32px titlebar tab strip — `scanlateit | proj • × | … + | Fill(drag gap)`.
+/// 32px titlebar tab strip — `easyscanlate | proj • × | … + | Fill(drag gap)`.
 ///
 /// `+` is inside the scrollable row immediately after last chip, so it sits
 /// right on the side of rightmost tab. The scroll viewport grows with tab
@@ -143,7 +143,7 @@ pub fn titlebar_view(app: &App) -> Element<'_, Message> {
     // at 80% (Q1). `Responsive` fills the title_content gap between leading
     // and caption buttons (`NeverLiieIcedWidgets/src/title_bar/mod.rs:616-628`).
     Responsive::new(move |size| {
-        let is_dark = scanlateit_settings::get(|s| s.aurora_is_dark);
+        let is_dark = easyscanlate_settings::get(|s| s.aurora_is_dark);
         let max_w = (size.width * 0.80).max(160.0);
 
         // Content width if all chips + `+` were laid out without clipping.
@@ -158,14 +158,14 @@ pub fn titlebar_view(app: &App) -> Element<'_, Message> {
             let is_active = idx == app.active;
             let is_home = tab.is_home() && idx == 0;
 
-            // Title: Home shows `scanlateit` with icon, others show tab.title.
+            // Title: Home shows `easyscanlate` with icon, others show tab.title.
             let title: Element<'_, Message> = if is_home {
                 let icon_elem: Element<'_, Message> =
                     crate::app::chrome::title_icon_handle()
                         .map(|h| iced::widget::image(h).width(14).height(14).into())
                         .unwrap_or_else(|| space::horizontal().width(Length::Fixed(0.0)).into());
                 let label: Element<'_, Message> =
-                    text("scanlateit").size(12).width(Length::Fill).into();
+                    text("easyscanlate").size(12).width(Length::Fill).into();
                 row![icon_elem, label]
                     .spacing(6)
                     .align_y(iced::Alignment::Center)

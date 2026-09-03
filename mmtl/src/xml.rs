@@ -1,4 +1,4 @@
-//! XML serialization for scanlateit-model Project.
+//! XML serialization for easyscanlate-model Project.
 //! Rust-native names, snake_case. Single `project.xml`.
 //!
 //! `ImageMeta.path` is stored zip-relative (`images/<id>_<basename>`) inside
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::Reader;
 use quick_xml::Writer;
-use scanlateit_model::{
+use easyscanlate_model::{
     EntryId, EntrySource, EntryStyle, Extras, ImageId, ImageMeta, InpaintId, InpaintPatch,
     OcrEntry, OcrResult, Profile, ProfileId, Project, Quad, Shape, ShapeKind, TextAlign,
     TextGradientDir,
@@ -976,9 +976,9 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                                 // We'll insert directly via a hack: create new Profile with updated deltas
                                 let mut deltas = prof.deltas().clone();
                                 if let Some(t) = trans {
-                                    deltas.insert(eid, scanlateit_model::profile::EntryDelta{ translation: Some(t)});
+                                    deltas.insert(eid, easyscanlate_model::profile::EntryDelta{ translation: Some(t)});
                                 } else {
-                                    deltas.insert(eid, scanlateit_model::profile::EntryDelta{ translation: None});
+                                    deltas.insert(eid, easyscanlate_model::profile::EntryDelta{ translation: None});
                                 }
                                 // reconstruct profile
                                 let new_prof = Profile::from_raw(prof.id, prof.name.clone(), deltas);
@@ -1044,14 +1044,14 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
 
     // reconstruct Profiles if empty? Default has one profile
     let profiles = if ctx.profiles.is_empty() {
-        scanlateit_model::Profiles::default()
+        easyscanlate_model::Profiles::default()
     } else {
         // ensure selected exists
         let selected = if ctx.profiles.iter().any(|p| p.id==ctx.selected) { ctx.selected } else { ctx.profiles[0].id };
         let next = if ctx.profiles_next_id==0 {
             ctx.profiles.iter().map(|p| p.id.0+1).max().unwrap_or(1)
         } else { ctx.profiles_next_id };
-        scanlateit_model::Profiles::from_raw(ctx.profiles, selected, next)
+        easyscanlate_model::Profiles::from_raw(ctx.profiles, selected, next)
     };
 
     let ocr_next = if ctx.ocr_next_id==0 {
@@ -1072,7 +1072,7 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scanlateit_model::{EntrySource, ImageId, NewEntry, Quad};
+    use easyscanlate_model::{EntrySource, ImageId, NewEntry, Quad};
 
     #[test]
     fn roundtrip_basic() {
@@ -1110,7 +1110,7 @@ mod tests {
         let img = project.add_image("a.jpg", 100.0, 100.0);
         let quad = Quad { points: [[10.0,20.0],[80.0,0.0],[90.0,30.0],[20.0,50.0]] };
         let ev = project.add_inpaint_patch_with_quad(img, quad);
-        assert!(matches!(ev, scanlateit_model::ModelEvent::InpaintAdded { quad: Some(_), .. }));
+        assert!(matches!(ev, easyscanlate_model::ModelEvent::InpaintAdded { quad: Some(_), .. }));
         let xml = to_xml_string(&project).unwrap();
         assert!(xml.contains("<quad>"), "xml should contain quad for inpaint patch");
         let back = from_xml_str(&xml).unwrap();

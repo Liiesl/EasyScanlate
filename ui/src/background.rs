@@ -101,7 +101,7 @@ impl AuroraConfig {
     /// Builds the config from the shared settings store (the source of
     /// truth for the aurora theme), clamping/normalizing like boot did.
     pub fn from_store() -> Self {
-        scanlateit_settings::get(|s| Self {
+        easyscanlate_settings::get(|s| Self {
             color: Self::from_hex(&s.aurora_color).unwrap_or_else(|| Self::default().color),
             blob_count: Self::clamped_blob_count(s.aurora_blob_count),
             is_dark: s.aurora_is_dark,
@@ -663,7 +663,7 @@ fn color_at_position(pos: Point, bounds: Rectangle, config: &AuroraConfig) -> Ui
     let hex = format!("#{r:02x}{g:02x}{b:02x}");
     // The wheel writes the picked color straight into the settings store and
     // announces it with the single SettingsChanged event.
-    let _ = scanlateit_settings::modify(move |s| s.aurora_color = hex);
+    let _ = easyscanlate_settings::modify(move |s| s.aurora_color = hex);
     UiEvent::SettingsChanged
 }
 

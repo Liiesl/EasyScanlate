@@ -38,8 +38,8 @@ fn item_separator<'a>() -> Element<'a, UiEvent> {
 
 /// Writes one change into the shared settings store (write-through) and
 /// returns the single announcement event for the app.
-fn set(f: impl FnOnce(&mut scanlateit_settings::Settings)) -> UiEvent {
-    let _ = scanlateit_settings::modify(f);
+fn set(f: impl FnOnce(&mut easyscanlate_settings::Settings)) -> UiEvent {
+    let _ = easyscanlate_settings::modify(f);
     UiEvent::SettingsChanged
 }
 
@@ -133,7 +133,7 @@ pub fn view<'a, S: UiState + ?Sized>(
             }
 
             // Snapshot hidden set for this provider once per frame (keyed by id).
-            let hidden_set = scanlateit_settings::get(|s| {
+            let hidden_set = easyscanlate_settings::get(|s| {
                 s.hidden_models
                     .get(&provider_id)
                     .cloned()
@@ -204,7 +204,7 @@ pub fn view<'a, S: UiState + ?Sized>(
                 rows.push(item_separator());
             }
             for (idx, (model_id, model_name)) in filtered.iter().enumerate() {
-                let hidden = scanlateit_settings::get(|s| {
+                let hidden = easyscanlate_settings::get(|s| {
                     s.hidden_models
                         .get(&provider_id)
                         .is_some_and(|set| set.contains(model_id))

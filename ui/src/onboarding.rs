@@ -209,7 +209,7 @@ fn inline_form(modal: &crate::connect::ConnectModal) -> Element<'static, UiEvent
 
 fn onboarding_provider_row(
     provider: &crate::translation::Provider,
-    connected: Option<scanlateit_settings::Connection>,
+    connected: Option<easyscanlate_settings::Connection>,
     modal: Option<&crate::connect::ConnectModal>,
 ) -> Element<'static, UiEvent> {
     let is_expanded = modal.is_some_and(|m| m.provider_id == provider.id);
@@ -301,7 +301,7 @@ fn onboarding_provider_row(
 fn onboarding_custom_row(
     id: &'static str,
     label: &'static str,
-    connected: Option<scanlateit_settings::Connection>,
+    connected: Option<easyscanlate_settings::Connection>,
     modal: Option<&crate::connect::ConnectModal>,
 ) -> Element<'static, UiEvent> {
     let is_expanded = modal.is_some_and(|m| m.provider_id == id);
@@ -458,7 +458,7 @@ fn onboarding_recommended_row(
 fn welcome_step() -> Element<'static, UiEvent> {
     column![
         crate::icon::lucide(Icon::Sparkles).size(scale::s(28.0)).color(ACCENT),
-        text("Welcome to Scanlateit").size(scale::s(22.0)).color(Color::WHITE),
+        text("Welcome to EasyScanlate").size(scale::s(22.0)).color(Color::WHITE),
         text("EasyScanlate — manga / manhwa OCR, translation and inpainting.")
             .size(scale::s(12.0))
             .color(MUTED_FG),
@@ -608,11 +608,11 @@ fn models_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent> {
 }
 
 fn preferences_step() -> Element<'static, UiEvent> {
-    // Reuse settings controls but simplified: write-through via scanlateit_settings directly
+    // Reuse settings controls but simplified: write-through via easyscanlate_settings directly
     // Appearance + Automation cards (subset of settings.rs)
-    let is_dark = scanlateit_settings::get(|s| s.aurora_is_dark);
-    let font_size = scanlateit_settings::get(|s| s.ui_font_size);
-    let (auto_style, auto_sfx, auto_inpaint) = scanlateit_settings::get(|s| (s.auto_style_detect, s.auto_sfx_filter, s.auto_inpaint));
+    let is_dark = easyscanlate_settings::get(|s| s.aurora_is_dark);
+    let font_size = easyscanlate_settings::get(|s| s.ui_font_size);
+    let (auto_style, auto_sfx, auto_inpaint) = easyscanlate_settings::get(|s| (s.auto_style_detect, s.auto_sfx_filter, s.auto_inpaint));
 
     let appearance: Element<'static, UiEvent> = container(
         column![
@@ -668,7 +668,7 @@ fn preferences_step() -> Element<'static, UiEvent> {
 fn translation_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent> {
     // Mirrored from Settings → Translation but only connection-related (no free-models toggle, no Manage Models)
     // Inline connect form baked into onboarding (no Settings modal).
-    let connections = scanlateit_settings::get(|s| s.connections.clone());
+    let connections = easyscanlate_settings::get(|s| s.connections.clone());
     let modal_opt = state.connect_modal().cloned();
 
     // Intro

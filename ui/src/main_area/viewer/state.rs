@@ -4,7 +4,7 @@ use std::time::Instant;
 use iced::keyboard;
 use iced::Rectangle;
 
-use scanlateit_model::EntryId;
+use easyscanlate_model::EntryId;
 
 use crate::event::ManualMode;
 

@@ -1,6 +1,6 @@
 //! The settings modal: a centered overlay opened from the toolbar with a
 //! vertical tab list on the left and the selected tab's fields on the right.
-//! Field edits are written straight into the shared `scanlateit_settings`
+//! Field edits are written straight into the shared `easyscanlate_settings`
 //! store (write-through) and announced with the single
 //! [`UiEvent::SettingsChanged`]; the app re-syncs its runtime mirrors from
 //! the store on that one message.
@@ -17,7 +17,7 @@ use iced::{Color, Element, Fill as FillLength, Length};
 use lucide_icons::Icon;
 
 #[cfg(feature = "inpaint")]
-use scanlateit_settings::{AutoInpaintModel, InpaintBackend};
+use easyscanlate_settings::{AutoInpaintModel, InpaintBackend};
 
 use crate::translation::{self, CUSTOM_ANTHROPIC, CUSTOM_OPENAI};
 
@@ -36,8 +36,8 @@ const CARD_BORDER: Color = Color::from_rgba8(255, 255, 255, 0.08);
 
 /// Writes one change into the shared settings store (write-through) and
 /// returns the single announcement event for the app.
-fn set(f: impl FnOnce(&mut scanlateit_settings::Settings)) -> UiEvent {
-    let _ = scanlateit_settings::modify(f);
+fn set(f: impl FnOnce(&mut easyscanlate_settings::Settings)) -> UiEvent {
+    let _ = easyscanlate_settings::modify(f);
     UiEvent::SettingsChanged
 }
 
@@ -186,7 +186,7 @@ fn item_separator<'a>() -> Element<'a, UiEvent> {
 /// masked key / local base URL, otherwise "Not connected".
 fn provider_row_with_connection<'a>(
     provider: &'a translation::Provider,
-    connected: Option<scanlateit_settings::Connection>,
+    connected: Option<easyscanlate_settings::Connection>,
 ) -> Element<'a, UiEvent> {
     let is_local = translation::is_local(&provider.id);
     let status = connected
@@ -244,7 +244,7 @@ fn provider_row_with_connection<'a>(
 /// the settings store.
 #[allow(dead_code)]
 fn provider_row<'a>(provider: &'a translation::Provider) -> Element<'a, UiEvent> {
-    let connected = scanlateit_settings::get(|s| s.connections.get(&provider.id).cloned());
+    let connected = easyscanlate_settings::get(|s| s.connections.get(&provider.id).cloned());
     provider_row_with_connection(provider, connected)
 }
 
@@ -252,7 +252,7 @@ fn provider_row<'a>(provider: &'a translation::Provider) -> Element<'a, UiEvent>
 fn custom_row_with_connection<'a>(
     id: &'static str,
     label: &'static str,
-    connected: Option<scanlateit_settings::Connection>,
+    connected: Option<easyscanlate_settings::Connection>,
 ) -> Element<'a, UiEvent> {
     let status = connected
         .as_ref()
@@ -293,7 +293,7 @@ fn custom_row_with_connection<'a>(
 /// One row of the custom-endpoint section.
 #[allow(dead_code)]
 fn custom_row<'a>(id: &'static str, label: &'static str) -> Element<'a, UiEvent> {
-    let connected = scanlateit_settings::get(|s| s.connections.get(id).cloned());
+    let connected = easyscanlate_settings::get(|s| s.connections.get(id).cloned());
     custom_row_with_connection(id, label, connected)
 }
 
@@ -419,7 +419,7 @@ fn appearance_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
 
     let mut outer: Vec<Element<'static, UiEvent>> = Vec::new();
     if show_font {
-        let raw = scanlateit_settings::get(|s| s.ui_font_size);
+        let raw = easyscanlate_settings::get(|s| s.ui_font_size);
         let font_str = raw.to_string();
         let clamped = scale::clamp_font_size(raw);
         let dec = stepper_button(clamped > scale::MIN_FONT_SIZE, "−", Some(UiEvent::SettingEdit(SettingEdit::UiFontSize(clamped - 1))));
@@ -582,7 +582,7 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
 
             #[cfg(feature = "styling")]
             if show_auto_detect || show_automation_header || query_ref.trim().is_empty() {
-                let auto = scanlateit_settings::get(|s| s.auto_style_detect);
+                let auto = easyscanlate_settings::get(|s| s.auto_style_detect);
                 col.push(
                     column![
                         checkbox(auto)
@@ -596,7 +596,7 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
             }
             #[cfg(feature = "segment")]
             if show_sfx || show_automation_header || query_ref.trim().is_empty() {
-                let auto = scanlateit_settings::get(|s| s.auto_sfx_filter);
+                let auto = easyscanlate_settings::get(|s| s.auto_sfx_filter);
                 col.push(
                     column![
                         checkbox(auto)
@@ -670,7 +670,7 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             col.push(card_header(Icon::Sparkles, "Automation", Some("Style & SFX filtering")).into());
             #[cfg(feature = "styling")]
             if show_auto_detect || show_automation_header || query.trim().is_empty() {
-                let auto = scanlateit_settings::get(|s| s.auto_style_detect);
+                let auto = easyscanlate_settings::get(|s| s.auto_style_detect);
                 col.push(
                     column![
                         checkbox(auto)
@@ -684,7 +684,7 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             }
             #[cfg(feature = "segment")]
             if show_sfx || show_automation_header || query.trim().is_empty() {
-                let auto = scanlateit_settings::get(|s| s.auto_sfx_filter);
+                let auto = easyscanlate_settings::get(|s| s.auto_sfx_filter);
                 col.push(
                     column![
                         checkbox(auto)
@@ -733,9 +733,9 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
     {
         let show_ocr = matches_any(query_ref, &["ocr", "engine", "detection", "recognition", "confidence", "text", "height", "bbox", "merge", "distance", "threshold", "side", "len", "workers", "parallel", "tuning"]);
         if show_ocr {
-            let workers = scanlateit_settings::get(|s| s.ocr_workers.clone());
+            let workers = easyscanlate_settings::get(|s| s.ocr_workers.clone());
             let (text_score, min_bbox_h, max_bbox_h, max_side, merge_thr) =
-                scanlateit_settings::get(|s| {
+                easyscanlate_settings::get(|s| {
                     (
                         s.ocr_text_score.clone(),
                         s.ocr_min_text_height.clone(),
@@ -845,9 +845,9 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     {
         let show_ocr = matches_any(query, &["ocr", "engine", "detection", "recognition", "confidence", "text", "height", "bbox", "merge", "distance", "threshold", "side", "len", "workers", "parallel", "tuning"]);
         if show_ocr {
-            let workers = scanlateit_settings::get(|s| s.ocr_workers.clone());
+            let workers = easyscanlate_settings::get(|s| s.ocr_workers.clone());
             let (text_score, min_bbox_h, max_bbox_h, max_side, merge_thr) =
-                scanlateit_settings::get(|s| {
+                easyscanlate_settings::get(|s| {
                     (
                         s.ocr_text_score.clone(),
                         s.ocr_min_text_height.clone(),
@@ -957,7 +957,7 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
         if show_auto {
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
             {
-                let (auto_inpaint, auto_model, auto_style) = scanlateit_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model, s.auto_style_detect));
+                let (auto_inpaint, auto_model, auto_style) = easyscanlate_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model, s.auto_style_detect));
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
                 col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("After OCR: style-detect → per bg type")).into());
                 col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
@@ -978,7 +978,7 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
             }
             #[cfg(all(feature = "inpaint", not(all(feature = "styling", feature = "segment"))))]
             {
-                let (auto_inpaint, auto_model) = scanlateit_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model));
+                let (auto_inpaint, auto_model) = easyscanlate_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model));
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
                 col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("Bg-aware pipeline")).into());
                 col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
@@ -1002,8 +1002,8 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
         if show_manual {
             #[cfg(feature = "inpaint")]
             {
-                let backend = scanlateit_settings::get(|s| s.inpaint_backend);
-                let radius = scanlateit_settings::get(|s| s.inpaint_radius.clone());
+                let backend = easyscanlate_settings::get(|s| s.inpaint_backend);
+                let radius = easyscanlate_settings::get(|s| s.inpaint_radius.clone());
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
                 col.push(card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Telea vs ONNX")).into());
                 col.push(field_row("Backend", pick_list([InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()).into());
@@ -1033,7 +1033,7 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         if show_auto {
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
             {
-                let (auto_inpaint, auto_model, auto_style) = scanlateit_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model, s.auto_style_detect));
+                let (auto_inpaint, auto_model, auto_style) = easyscanlate_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model, s.auto_style_detect));
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
                 col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("After OCR: style-detect → per bg type")).into());
                 col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
@@ -1054,7 +1054,7 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             }
             #[cfg(all(feature = "inpaint", not(all(feature = "styling", feature = "segment"))))]
             {
-                let (auto_inpaint, auto_model) = scanlateit_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model));
+                let (auto_inpaint, auto_model) = easyscanlate_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model));
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
                 col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("Bg-aware pipeline")).into());
                 col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
@@ -1076,8 +1076,8 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         if show_manual {
             #[cfg(feature = "inpaint")]
             {
-                let backend = scanlateit_settings::get(|s| s.inpaint_backend);
-                let radius = scanlateit_settings::get(|s| s.inpaint_radius.clone());
+                let backend = easyscanlate_settings::get(|s| s.inpaint_backend);
+                let radius = easyscanlate_settings::get(|s| s.inpaint_radius.clone());
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
                 col.push(card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Telea vs ONNX")).into());
                 col.push(field_row("Backend", pick_list([InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()).into());
@@ -1098,7 +1098,7 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
 
 fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
     let (connections, free_only) =
-        scanlateit_settings::get(|s| (s.connections.clone(), s.free_models_only));
+        easyscanlate_settings::get(|s| (s.connections.clone(), s.free_models_only));
 
     let q = query.trim().to_lowercase();
     let query_active = !q.is_empty();
@@ -1341,7 +1341,7 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
 
 fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     let (connections, free_only) =
-        scanlateit_settings::get(|s| (s.connections.clone(), s.free_models_only));
+        easyscanlate_settings::get(|s| (s.connections.clone(), s.free_models_only));
     let q = query.trim().to_lowercase();
     let query_active = !q.is_empty();
     let provider_matches = |id: &str, name: &str| -> bool {

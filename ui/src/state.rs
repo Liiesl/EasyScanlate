@@ -1,12 +1,12 @@
 use iced::widget::text_editor;
 use iced::{Color, Font, Rectangle};
 
-use scanlateit_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
+use easyscanlate_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
 
 use crate::connect::ConnectModal;
 use crate::event::{EditOrigin, MainAreaMode, ManualMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
 use crate::loaded::LoadedImage;
-use scanlateit_model::{ProfileId, Project};
+use easyscanlate_model::{ProfileId, Project};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppView {
@@ -153,7 +153,7 @@ pub trait UiState {
     /// Placeholder name for the current language in translate mode: `"{Lang}(auto)"`.
     fn target_placeholder_name(&self) -> String;
     fn app_view(&self) -> AppView;
-    fn recent_projects(&self) -> &[scanlateit_settings::RecentProject];
+    fn recent_projects(&self) -> &[easyscanlate_settings::RecentProject];
     fn new_project_overlay(&self) -> Option<NewProjectOverlay>;
     fn translation_anim_phase(&self) -> f32;
     // ——— Updates (Velopack) ———

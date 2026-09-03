@@ -1,8 +1,8 @@
 use crate::app::tests::app_with_entry;
 use crate::app::{update, Message};
-use scanlateit_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
-use scanlateit_settings::INITIAL_PRESET_SLOTS;
-use scanlateit_ui::event::UiEvent;
+use easyscanlate_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
+use easyscanlate_settings::INITIAL_PRESET_SLOTS;
+use easyscanlate_ui::event::UiEvent;
 
 #[test]
 fn applying_a_preset_seeds_working_style_and_entry() {

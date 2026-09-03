@@ -1,8 +1,8 @@
-//! Model registry and download helpers for Scanlateit.
+//! Model registry and download helpers for EasyScanlate.
 //!
 //! Models are persisted under the settings directory:
-//! `scanlateit_settings::models_dir()` (e.g. `%APPDATA%\scanlateit\config\models\`
-//! on Windows, `~/.config/scanlateit/config/models/` on Linux) as a sibling
+//! `easyscanlate_settings::models_dir()` (e.g. `%APPDATA%\easyscanlate\config\models\`
+//! on Windows, `~/.config/easyscanlate/config/models/` on Linux) as a sibling
 //! to the `default-config.toml` file. Downloads use `fast-down-api` for
 //! resumable, concurrent range requests.
 

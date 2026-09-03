@@ -1243,6 +1243,154 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
+name = "easyscanlate"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "easyscanlate-inpaint",
+ "easyscanlate-mmtl",
+ "easyscanlate-model",
+ "easyscanlate-models",
+ "easyscanlate-ocr",
+ "easyscanlate-segment",
+ "easyscanlate-settings",
+ "easyscanlate-styling",
+ "easyscanlate-translation",
+ "easyscanlate-ui",
+ "fontdb 0.24.0",
+ "iced",
+ "image",
+ "lucide-icons",
+ "neverliie-iced-widgets",
+ "open",
+ "rfd",
+ "serde",
+ "tempfile",
+ "tiny-skia",
+ "tokio",
+ "velopack",
+ "winreg",
+ "winres",
+]
+
+[[package]]
+name = "easyscanlate-inpaint"
+version = "0.1.0"
+dependencies = [
+ "easyscanlate-model",
+ "easyscanlate-settings",
+ "image",
+ "imageproc",
+ "inpaint",
+ "ndarray 0.17.2",
+ "ort",
+]
+
+[[package]]
+name = "easyscanlate-mmtl"
+version = "0.1.0"
+dependencies = [
+ "easyscanlate-model",
+ "image",
+ "quick-xml 0.36.2",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "zip 2.4.2",
+]
+
+[[package]]
+name = "easyscanlate-model"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "easyscanlate-models"
+version = "0.1.0"
+dependencies = [
+ "easyscanlate-settings",
+ "fast-down-api",
+ "serde",
+ "tokio",
+ "tokio-util",
+ "url",
+]
+
+[[package]]
+name = "easyscanlate-ocr"
+version = "0.1.0"
+dependencies = [
+ "easyscanlate-model",
+ "easyscanlate-settings",
+ "image",
+ "rapidocr-core",
+]
+
+[[package]]
+name = "easyscanlate-segment"
+version = "0.1.0"
+dependencies = [
+ "easyscanlate-model",
+ "easyscanlate-settings",
+ "image",
+ "ndarray 0.17.2",
+ "ort",
+]
+
+[[package]]
+name = "easyscanlate-settings"
+version = "0.1.0"
+dependencies = [
+ "confy",
+ "easyscanlate-model",
+ "serde",
+ "tempfile",
+ "toml 1.1.4+spec-1.1.0",
+]
+
+[[package]]
+name = "easyscanlate-styling"
+version = "0.1.0"
+dependencies = [
+ "easyscanlate-model",
+ "easyscanlate-settings",
+ "image",
+ "ndarray 0.17.2",
+ "ort",
+]
+
+[[package]]
+name = "easyscanlate-translation"
+version = "0.1.0"
+dependencies = [
+ "easyscanlate-settings",
+ "reqwest",
+ "rig",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "easyscanlate-ui"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "easyscanlate-model",
+ "easyscanlate-models",
+ "easyscanlate-segment",
+ "easyscanlate-settings",
+ "easyscanlate-translation",
+ "iced",
+ "image",
+ "lucide-icons",
+ "neverliie-iced-widgets",
+ "open",
+ "tokio",
+]
+
+[[package]]
 name = "either"
 version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5071,154 +5219,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc984f4f9ceb736a7bb755c3e3bd17dc56370af2600c9780dcc48c66453da34d"
 dependencies = [
  "regex",
-]
-
-[[package]]
-name = "scanlateit"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "fontdb 0.24.0",
- "iced",
- "image",
- "lucide-icons",
- "neverliie-iced-widgets",
- "open",
- "rfd",
- "scanlateit-inpaint",
- "scanlateit-mmtl",
- "scanlateit-model",
- "scanlateit-models",
- "scanlateit-ocr",
- "scanlateit-segment",
- "scanlateit-settings",
- "scanlateit-styling",
- "scanlateit-translation",
- "scanlateit-ui",
- "serde",
- "tempfile",
- "tiny-skia",
- "tokio",
- "velopack",
- "winreg",
- "winres",
-]
-
-[[package]]
-name = "scanlateit-inpaint"
-version = "0.1.0"
-dependencies = [
- "image",
- "imageproc",
- "inpaint",
- "ndarray 0.17.2",
- "ort",
- "scanlateit-model",
- "scanlateit-settings",
-]
-
-[[package]]
-name = "scanlateit-mmtl"
-version = "0.1.0"
-dependencies = [
- "image",
- "quick-xml 0.36.2",
- "scanlateit-model",
- "serde",
- "serde_json",
- "tempfile",
- "zip 2.4.2",
-]
-
-[[package]]
-name = "scanlateit-model"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "scanlateit-models"
-version = "0.1.0"
-dependencies = [
- "fast-down-api",
- "scanlateit-settings",
- "serde",
- "tokio",
- "tokio-util",
- "url",
-]
-
-[[package]]
-name = "scanlateit-ocr"
-version = "0.1.0"
-dependencies = [
- "image",
- "rapidocr-core",
- "scanlateit-model",
- "scanlateit-settings",
-]
-
-[[package]]
-name = "scanlateit-segment"
-version = "0.1.0"
-dependencies = [
- "image",
- "ndarray 0.17.2",
- "ort",
- "scanlateit-model",
- "scanlateit-settings",
-]
-
-[[package]]
-name = "scanlateit-settings"
-version = "0.1.0"
-dependencies = [
- "confy",
- "scanlateit-model",
- "serde",
- "tempfile",
- "toml 1.1.4+spec-1.1.0",
-]
-
-[[package]]
-name = "scanlateit-styling"
-version = "0.1.0"
-dependencies = [
- "image",
- "ndarray 0.17.2",
- "ort",
- "scanlateit-model",
- "scanlateit-settings",
-]
-
-[[package]]
-name = "scanlateit-translation"
-version = "0.1.0"
-dependencies = [
- "reqwest",
- "rig",
- "scanlateit-settings",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "scanlateit-ui"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "iced",
- "image",
- "lucide-icons",
- "neverliie-iced-widgets",
- "open",
- "scanlateit-model",
- "scanlateit-models",
- "scanlateit-segment",
- "scanlateit-settings",
- "scanlateit-translation",
- "tokio",
 ]
 
 [[package]]

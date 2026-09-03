@@ -29,12 +29,12 @@ pub use loaded::LoadedImage;
 pub use state::UiState;
 
 /// The translation API used by the UI and the app: the real
-/// `scanlateit_translation` module when the `translation` feature is enabled,
+/// `easyscanlate_translation` module when the `translation` feature is enabled,
 /// otherwise the local [`fake_translation`] mock. Both expose the same
 /// surface, so the translation UI is always live — never a disabled
 /// placeholder.
 #[cfg(feature = "translation")]
-pub use scanlateit_translation as translation;
+pub use easyscanlate_translation as translation;
 #[cfg(not(feature = "translation"))]
 pub mod fake_translation;
 #[cfg(not(feature = "translation"))]

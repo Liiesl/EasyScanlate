@@ -7,7 +7,7 @@ use iced::advanced::text::Text as ParagraphText;
 use iced::{alignment, Color, Font, Pixels, Point, Rectangle, Size, Vector};
 use iced::advanced::text::Alignment as TextAlignment;
 
-use scanlateit_model::TextGradientDir;
+use easyscanlate_model::TextGradientDir;
 
 use super::cache::{FitKey, FIT_CACHE_CAP, font_hash, fnv1a};
 use super::gradient::{gradient_t, lerp_color};

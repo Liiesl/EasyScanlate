@@ -175,7 +175,7 @@ fn forward_to_primary(paths: &[String]) -> Result<(), String> {
 
 /// Parse CLI args into the first `.mmtl` path (case-insensitive) and the
 /// filtered flag list. Handles quoted paths with spaces from Explorer:
-/// `scanlateit.exe "C:\My Projects\proj.mmtl"`.
+/// `EasyScanlate.exe "C:\My Projects\proj.mmtl"`.
 pub fn parse_initial_mmtl(args: &[String]) -> Option<String> {
     for raw in args.iter().skip(1) {
         let t = raw.trim().trim_matches('"').trim();
@@ -219,7 +219,7 @@ pub fn is_mmtl_pathbuf(p: &PathBuf) -> bool {
 #[cfg(windows)]
 fn bring_to_front_best_effort() {
     // Use raw Win32 so we avoid a `windows` crate dep. The window title is
-    // "Scanlateit" (see `src/main.rs:.title("Scanlateit")`). Custom frame
+    // "EasyScanlate" (see `src/main.rs:.title("EasyScanlate")`). Custom frame
     // still creates a normal top-level HWND with that title for the taskbar.
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
@@ -232,7 +232,7 @@ fn bring_to_front_best_effort() {
     }
     const SW_RESTORE: i32 = 9;
     unsafe {
-        let title: Vec<u16> = OsStr::new("Scanlateit")
+        let title: Vec<u16> = OsStr::new("EasyScanlate")
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
@@ -252,12 +252,12 @@ mod tests {
     use super::*;
     #[test]
     fn parse_skips_flags() {
-        let args = vec!["scanlateit".to_string(), "--register".to_string(), "a.mmtl".to_string()];
+        let args = vec!["easyscanlate".to_string(), "--register".to_string(), "a.mmtl".to_string()];
         assert_eq!(parse_initial_mmtl(&args), Some("a.mmtl".to_string()));
     }
     #[test]
     fn parse_quoted_spaces() {
-        let args = vec!["scanlateit".to_string(), "\"C:\\My Proj\\a.mmtl\"".to_string()];
+        let args = vec!["easyscanlate".to_string(), "\"C:\\My Proj\\a.mmtl\"".to_string()];
         assert_eq!(parse_initial_mmtl(&args), Some("C:\\My Proj\\a.mmtl".to_string()));
     }
     #[test]

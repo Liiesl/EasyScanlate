@@ -1,8 +1,8 @@
 use crate::app::tests::app_with_entry;
 use crate::app::translation as translation;
 use crate::app::{update, Message, TabMessage};
-use scanlateit_model::EntryId;
-use scanlateit_ui::event::UiEvent;
+use easyscanlate_model::EntryId;
+use easyscanlate_ui::event::UiEvent;
 use std::collections::BTreeMap;
 
 #[cfg(feature = "translation")]

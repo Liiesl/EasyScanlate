@@ -3,7 +3,7 @@
 //! Window chrome (`GAP`, `OUTER_PADDING`, modal shell, viewer constants) stays
 //! fixed and never goes through here.
 
-use scanlateit_settings::Settings;
+use easyscanlate_settings::Settings;
 
 pub const DEFAULT_FONT_SIZE: f32 = 12.0;
 pub const DEFAULT_FONT_SIZE_U32: u32 = 12;
@@ -17,7 +17,7 @@ pub fn clamp_font_size(v: u32) -> u32 {
 
 #[inline]
 pub fn font_size() -> u32 {
-    let raw = scanlateit_settings::get(|s| s.ui_font_size);
+    let raw = easyscanlate_settings::get(|s| s.ui_font_size);
     clamp_font_size(raw)
 }
 
@@ -53,5 +53,5 @@ pub fn parse_font_size(input: &str) -> Option<u32> {
 
 pub fn set_font_size(v: u32) {
     let v = clamp_font_size(v);
-    let _ = scanlateit_settings::modify(|s: &mut Settings| s.ui_font_size = v);
+    let _ = easyscanlate_settings::modify(|s: &mut Settings| s.ui_font_size = v);
 }

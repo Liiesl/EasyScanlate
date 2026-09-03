@@ -1,5 +1,5 @@
 [package]
-name = "scanlateit-segment"
+name = "easyscanlate-segment"
 version.workspace = true
 edition.workspace = true
 
@@ -7,8 +7,8 @@ edition.workspace = true
 directml = ["ort/directml"]
 
 [dependencies]
-scanlateit-model = { workspace = true }
-scanlateit-settings = { workspace = true }
+easyscanlate-model = { workspace = true }
+easyscanlate-settings = { workspace = true }
 image = { workspace = true }
 ndarray = { workspace = true }
 ort = { workspace = true }

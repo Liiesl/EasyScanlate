@@ -1,7 +1,7 @@
 use iced::advanced::mouse;
 use iced::Point;
 
-use scanlateit_model::{EntryId, Quad};
+use easyscanlate_model::{EntryId, Quad};
 
 use crate::event::{InpaintToolbarAction, ToolbarAction};
 use lucide_icons::Icon;

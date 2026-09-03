@@ -31,7 +31,7 @@ use neverliie_iced_widgets::color_picker::ColorPicker;
 use neverliie_iced_widgets::context_menu::{ContextMenu, Menu};
 use neverliie_iced_widgets::overlay::{Anchor, Position};
 
-use scanlateit_model::{EntryStyle, TextAlign, TextGradientDir};
+use easyscanlate_model::{EntryStyle, TextAlign, TextGradientDir};
 
 use crate::event::{StyleField, UiEvent};
 use crate::main_area::overlay::styled_font;

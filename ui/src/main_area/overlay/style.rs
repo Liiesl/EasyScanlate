@@ -4,7 +4,7 @@ use std::sync::{Mutex, OnceLock};
 use iced::font::{Style as FontStyle, Weight as FontWeight};
 use iced::Font;
 
-use scanlateit_model::EntryStyle;
+use easyscanlate_model::EntryStyle;
 
 use super::fallback::contains_cjk;
 

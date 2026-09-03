@@ -1,7 +1,7 @@
 /target
 /target-*
 /models/
-scanlateit.exe
+EasyScanlate.exe
 settings.json
 lineconfig.yaml
 iced/

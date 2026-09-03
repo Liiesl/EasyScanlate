@@ -1,7 +1,7 @@
 use iced::Task;
 use iced::Rectangle;
-use scanlateit_ui::UiState;
-use scanlateit_ui::event::ManualMode;
+use easyscanlate_ui::UiState;
+use easyscanlate_ui::event::ManualMode;
 
 use super::{App, Message};
 
@@ -49,7 +49,7 @@ pub fn handle_enter(app: &mut App, mode: ManualMode) -> Task<Message> {
         // first entry, stash view mode
         let prev_view = app.active_tab().view_mode;
         app.active_tab_mut().manual_prev_view_mode = Some(prev_view);
-        app.active_tab_mut().view_mode = scanlateit_ui::event::MainAreaMode::View;
+        app.active_tab_mut().view_mode = easyscanlate_ui::event::MainAreaMode::View;
         {
             let tab = app.active_tab();
             eprintln!("[manual] entering mode {:?}, stashed view_mode={:?}", mode, tab.manual_prev_view_mode);

@@ -2,7 +2,7 @@ use iced::keyboard::{key, Key};
 use iced::widget::{space, text_editor};
 use iced::{Background, Border, Color, Element, Font, Length, Size};
 
-use scanlateit_model::EntryStyle;
+use easyscanlate_model::EntryStyle;
 
 use crate::color::rgba_to_color;
 use crate::event::{EditOrigin, UiEvent};

@@ -7,9 +7,9 @@ use iced::widget::{button, center, column, container, mouse_area, opaque, row, s
 use iced::{Color, Element, Length};
 
 use super::{App, Message};
-use scanlateit_ui::event::UiEvent;
-use scanlateit_ui::panel::PANEL_BG;
-use scanlateit_ui::scale;
+use easyscanlate_ui::event::UiEvent;
+use easyscanlate_ui::panel::PANEL_BG;
+use easyscanlate_ui::scale;
 
 const ACCENT: Color = Color::from_rgb8(92, 190, 255);
 const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);

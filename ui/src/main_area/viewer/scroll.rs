@@ -124,7 +124,7 @@ pub fn publish_edit_rect<'a, Message, K>(
     shell: &mut Shell<'_, Message>,
     tiles: &[TileSpec<'a>],
     state: &mut TileViewState,
-    editing: Option<(usize, scanlateit_model::EntryId)>,
+    editing: Option<(usize, easyscanlate_model::EntryId)>,
     on_edit_rect: &Option<K>,
 ) where
     K: Fn(Rectangle) -> Message,
