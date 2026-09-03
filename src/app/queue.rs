@@ -112,7 +112,6 @@ impl Default for EngineQueue {
 }
 
 impl EngineQueue {
-    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -329,7 +328,6 @@ impl EngineQueue {
 
 }
 
-#[allow(dead_code)]
 pub enum AcquireResult {
     Acquired(QueuedJob),
     Queued(QueuedJob, usize),

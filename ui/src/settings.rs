@@ -239,15 +239,6 @@ fn provider_row_with_connection<'a>(
     .into()
 }
 
-/// One row of the supported-provider list: name, connection status and the
-/// Connect/Disconnect button. The connection state is read straight from
-/// the settings store.
-#[allow(dead_code)]
-fn provider_row<'a>(provider: &'a translation::Provider) -> Element<'a, UiEvent> {
-    let connected = easyscanlate_settings::get(|s| s.connections.get(&provider.id).cloned());
-    provider_row_with_connection(provider, connected)
-}
-
 /// One row of the custom-endpoint section with an explicit connection.
 fn custom_row_with_connection<'a>(
     id: &'static str,
@@ -288,13 +279,6 @@ fn custom_row_with_connection<'a>(
     .align_y(iced::Alignment::Center)
     .padding([scale::s(5.0), 0.0])
     .into()
-}
-
-/// One row of the custom-endpoint section.
-#[allow(dead_code)]
-fn custom_row<'a>(id: &'static str, label: &'static str) -> Element<'a, UiEvent> {
-    let connected = easyscanlate_settings::get(|s| s.connections.get(id).cloned());
-    custom_row_with_connection(id, label, connected)
 }
 
 /// One row of the recommended section: provider name with a generic

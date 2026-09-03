@@ -101,12 +101,6 @@ fn panel_editor<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     )
 }
 
-#[allow(dead_code)]
-/// The read-only original text of an entry, boxed like the other inputs.
-fn original_box(entry_text: &str, font: Font) -> Element<'_, UiEvent> {
-    input_box(text(entry_text).size(scale::s(12.0)).font(font))
-}
-
 /// The current profile's text of an entry, boxed like the other inputs;
 /// read-only until clicked, which starts the inline edit.
 fn current_box(value: String, font: Font) -> Element<'static, UiEvent> {

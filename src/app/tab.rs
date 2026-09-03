@@ -59,7 +59,6 @@ impl TabKind {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct AutoInpaintJob {
     pub index: usize,
     pub id: EntryId,
@@ -72,7 +71,6 @@ pub(crate) struct AutoInpaintJob {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Default)]
-#[allow(dead_code)]
 pub struct EnginePool {
     #[cfg(feature = "ocr")]
     pub pipeline: Option<ParallelEngine>,
@@ -345,41 +343,4 @@ impl Tab {
     pub fn is_project(&self) -> bool {
         self.kind.is_project()
     }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers — shared pane defaults (keep in sync with App::new pane setup)
-// ---------------------------------------------------------------------------
-
-#[allow(dead_code)]
-pub(crate) fn default_panes() -> (
-    pane_grid::State<PaneKind>,
-    pane_grid::State<SidePaneKind>,
-    pane_grid::State<StylingPaneKind>,
-) {
-    let panes = {
-        let (mut panes, main) = pane_grid::State::new(PaneKind::MainArea);
-        let (_, split) = panes
-            .split(pane_grid::Axis::Vertical, main, PaneKind::Panel)
-            .expect("initial pane split must succeed");
-        panes.resize(split, MAIN_AREA_DEFAULT_RATIO);
-        panes
-    };
-    let side_panes = {
-        let (mut panes, styling) = pane_grid::State::new(SidePaneKind::Styling);
-        let (_, split) = panes
-            .split(pane_grid::Axis::Vertical, styling, SidePaneKind::Results)
-            .expect("side pane split must succeed");
-        panes.resize(split, STYLING_DEFAULT_RATIO);
-        panes
-    };
-    let styling_panes = {
-        let (mut panes, inspector) = pane_grid::State::new(StylingPaneKind::Inspector);
-        let (_, split) = panes
-            .split(pane_grid::Axis::Horizontal, inspector, StylingPaneKind::Layers)
-            .expect("styling pane split must succeed");
-        panes.resize(split, STYLING_TOP_RATIO);
-        panes
-    };
-    (panes, side_panes, styling_panes)
 }

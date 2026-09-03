@@ -18,16 +18,6 @@ pub const STYLING_DEFAULT_RATIO: f32 = 0.36;
 /// Minimum width of the styling column (left) in the side panel — fixed pixels, not font-scaled.
 pub const STYLING_MIN_WIDTH: f32 = 260.0;
 
-/// Minimum width of the results column (right) in the side panel — fixed pixels, not font-scaled.
-/// Larger than styling because Translate mode shows two text boxes side-by-side.
-#[allow(dead_code)]
-pub const RESULTS_MIN_WIDTH: f32 = 320.0;
-
-/// Minimum width of the whole side panel — fixed pixels, distinct from main area.
-/// Must fit both styling + results + gap.
-#[allow(dead_code)]
-pub const PANEL_MIN_WIDTH: f32 = STYLING_MIN_WIDTH + RESULTS_MIN_WIDTH + GAP; // 592
-
 /// Minimum width of the main area — fixed pixels, different from panel.
 pub const MAIN_AREA_MIN_WIDTH: f32 = 160.0;
 

@@ -50,39 +50,8 @@ fn parse_f32(s: &str) -> f32 {
 fn parse_u64(s: &str) -> u64 {
     s.parse::<u64>().unwrap_or(0)
 }
-#[allow(dead_code)]
-fn parse_u32(s: &str) -> u32 {
-    s.parse::<u32>().unwrap_or(0)
-}
 fn parse_u8(s: &str) -> u8 {
     s.parse::<u8>().unwrap_or(0)
-}
-#[allow(dead_code)]
-fn parse_f32_opt(s: Option<String>) -> f32 {
-    s.as_deref().map(parse_f32).unwrap_or(0.0)
-}
-#[allow(dead_code)]
-fn parse_u64_opt(s: Option<String>) -> u64 {
-    s.as_deref().map(parse_u64).unwrap_or(0)
-}
-
-#[allow(dead_code)]
-fn rgba_to_str(c: [u8; 4]) -> String {
-    format!("{},{},{},{}", c[0], c[1], c[2], c[3])
-}
-#[allow(dead_code)]
-fn str_to_rgba(s: &str) -> [u8; 4] {
-    let parts: Vec<&str> = s.split(',').collect();
-    if parts.len() == 4 {
-        [
-            parse_u8(parts[0].trim()),
-            parse_u8(parts[1].trim()),
-            parse_u8(parts[2].trim()),
-            parse_u8(parts[3].trim()),
-        ]
-    } else {
-        [0, 0, 0, 255]
-    }
 }
 
 // ---------------------------------------------------------------------------

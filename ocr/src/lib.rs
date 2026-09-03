@@ -641,20 +641,6 @@ impl RunResult {
             .sum()
     }
 
-    /// Legacy helper: appends to a slice of per-image projects (drift). Prefer
-    /// `commit_entries(&mut Project)`; this is kept for tests that still use the old shape.
-    #[allow(dead_code)]
-    pub fn commit_entries_to_slice(&self, projects: &mut [Project]) -> usize {
-        self.per_page
-            .iter()
-            .map(|(page, entries)| {
-                projects.get_mut(*page).map_or(0, |project| {
-                    let image_id = project.images().first().map(|m| m.id).unwrap_or(easyscanlate_model::ImageId(0));
-                    project.append_ocr_for_image(image_id, entries.clone())
-                })
-            })
-            .sum()
-    }
 }
 
 impl BoundaryState {
@@ -670,19 +656,6 @@ impl BoundaryState {
             .sum()
     }
 
-    /// Legacy helper for per-image slice.
-    #[allow(dead_code)]
-    pub fn commit_to_slice(&self, projects: &mut [Project]) -> usize {
-        self.candidates
-            .iter()
-            .map(|candidate| {
-                projects.get_mut(candidate.page).map_or(0, |project| {
-                    let image_id = project.images().first().map(|m| m.id).unwrap_or(easyscanlate_model::ImageId(0));
-                    project.append_ocr_for_image(image_id, vec![candidate.entry.clone()])
-                })
-            })
-            .sum()
-    }
 }
 
 /// Assembles one run's raw lines into a commit-ready [`RunResult`], strictly

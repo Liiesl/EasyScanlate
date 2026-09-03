@@ -133,13 +133,6 @@ fn fill_tabs<'a>(gradient: bool, selected: bool) -> Element<'a, UiEvent> {
     .into()
 }
 
-/// Re-export the canonical hex label from `crate::color` so the panel and
-/// preview stay in sync. Kept as a free function for brevity at call sites.
-#[allow(dead_code)]
-fn hex_label(color: Color) -> String {
-    crate::color::hex_label(color)
-}
-
 /// A flat rectangle button filled with `color`; the underlay of the color
 /// picker for `field`. `on_open` is `None` (button disabled) while no entry
 /// is selected.

@@ -22,18 +22,6 @@ mod imp {
     use winreg::enums::HKEY_CURRENT_USER;
     use winreg::RegKey;
 
-    fn classes() -> RegKey {
-        RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(
-            r"Software\Classes",
-            winreg::enums::KEY_READ | winreg::enums::KEY_WRITE,
-        ).unwrap_or_else(|_| {
-            RegKey::predef(HKEY_CURRENT_USER)
-                .create_subkey(r"Software\Classes")
-                .expect("create HKCU\\Software\\Classes")
-                .0
-        })
-    }
-
     fn exe_string() -> Result<String, String> {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         Ok(exe.to_string_lossy().into_owned())
@@ -171,12 +159,6 @@ mod imp {
             .and_then(|k| k.get_value::<String, _>("").ok())
             .map(|v| v == expected)
             .unwrap_or(false)
-    }
-
-    // Ensure the crate's `classes()` helper is not flagged unused when is_registered not called.
-    #[allow(dead_code)]
-    pub fn _classes_helper() {
-        let _ = classes();
     }
 }
 
