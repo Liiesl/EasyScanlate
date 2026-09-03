@@ -286,6 +286,9 @@ impl UiState for ActiveTab<'_> {
     }
 
     fn app_view(&self) -> scanlateit_ui::state::AppView {
+        if self.app.onboarding.is_some() {
+            return scanlateit_ui::state::AppView::Onboarding;
+        }
         if self.tab.is_home() {
             scanlateit_ui::state::AppView::Home
         } else {
@@ -330,6 +333,15 @@ impl UiState for ActiveTab<'_> {
             if n.trim().is_empty() { None } else { Some(n) }
         })
     }
+
+    fn onboarding_open(&self) -> bool { self.app.onboarding.is_some() }
+    fn onboarding_step(&self) -> u8 { self.app.onboarding.as_ref().map(|o| o.step).unwrap_or(0) }
+    fn onboarding_models(&self) -> Vec<(String, String, scanlateit_ui::state::ModelDownloadStatus)> {
+        self.app.onboarding.as_ref().map(|o| o.models.clone()).unwrap_or_default()
+    }
+    fn onboarding_overall_progress(&self) -> f32 { self.app.onboarding.as_ref().map(|o| o.overall_progress()).unwrap_or(0.0) }
+    fn onboarding_downloading(&self) -> bool { self.app.onboarding.as_ref().map(|o| o.downloading).unwrap_or(false) }
+    fn onboarding_all_done(&self) -> bool { self.app.onboarding.as_ref().map(|o| o.is_all_done()).unwrap_or(true) }
 }
 
 // Shim kept for view lifetime: `view.rs` returns `Element<'a, Message>` tied to
@@ -461,6 +473,9 @@ impl UiState for App {
     }
     fn target_placeholder_name(&self) -> String { format!("{}(auto)", self.tabs[self.active].translate_lang) }
     fn app_view(&self) -> scanlateit_ui::state::AppView {
+        if self.onboarding.is_some() {
+            return scanlateit_ui::state::AppView::Onboarding;
+        }
         if self.tabs[self.active].is_home() {
             scanlateit_ui::state::AppView::Home
         } else {
@@ -489,6 +504,12 @@ impl UiState for App {
             if n.trim().is_empty() { None } else { Some(n) }
         })
     }
+    fn onboarding_open(&self) -> bool { self.onboarding.is_some() }
+    fn onboarding_step(&self) -> u8 { self.onboarding.as_ref().map(|o| o.step).unwrap_or(0) }
+    fn onboarding_models(&self) -> Vec<(String, String, scanlateit_ui::state::ModelDownloadStatus)> { self.onboarding.as_ref().map(|o| o.models.clone()).unwrap_or_default() }
+    fn onboarding_overall_progress(&self) -> f32 { self.onboarding.as_ref().map(|o| o.overall_progress()).unwrap_or(0.0) }
+    fn onboarding_downloading(&self) -> bool { self.onboarding.as_ref().map(|o| o.downloading).unwrap_or(false) }
+    fn onboarding_all_done(&self) -> bool { self.onboarding.as_ref().map(|o| o.is_all_done()).unwrap_or(true) }
 }
 
 

@@ -429,6 +429,16 @@ pub struct Settings {
     /// `model` stays pure project data.
     #[serde(default = "default_style_presets")]
     pub style_presets: StylePresets,
+    /// Whether the first-run onboarding wizard has been completed. `false` on
+    /// fresh installs triggers the blocking onboarding overlay (models +
+    /// preferences) before the editor is usable.
+    #[serde(default)]
+    pub onboarding_completed: bool,
+    /// Monotonic version of the onboarding flow. Bumped when the wizard
+    /// structure changes so existing installs can be re-prompted if needed.
+    /// `0` means never completed, `1` is the current version.
+    #[serde(default)]
+    pub onboarding_version: u32,
     /// Stored translation connections, keyed by provider id (`openai`,
     /// `deepseek`, `custom-openai`, ...). A provider is "connected" when it
     /// has an entry here; disconnect removes the entry.
@@ -445,6 +455,8 @@ pub struct Settings {
     #[serde(default)]
     pub hidden_models: BTreeMap<String, BTreeSet<String>>,
 }
+
+pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -472,6 +484,8 @@ impl Default for Settings {
             auto_inpaint_model: AutoInpaintModel::default(),
             recent_projects: Vec::new(),
             style_presets: default_style_presets(),
+            onboarding_completed: false,
+            onboarding_version: 0,
         }
     }
 }
@@ -563,6 +577,72 @@ pub fn ensure_models_dir() -> std::io::Result<std::path::PathBuf> {
     let dir = models_dir();
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
+}
+
+/// Marks onboarding as completed at the current version.
+pub fn mark_onboarding_completed() {
+    let _ = modify(|s| {
+        s.onboarding_completed = true;
+        s.onboarding_version = CURRENT_ONBOARDING_VERSION;
+    });
+}
+
+/// Resets onboarding so the wizard will show again on next boot or immediately.
+pub fn reset_onboarding() {
+    let _ = modify(|s| {
+        s.onboarding_completed = false;
+        s.onboarding_version = 0;
+    });
+}
+
+/// Resolves a model file path preferring the persisted `models_dir()` (where
+/// onboarding downloads land) over the legacy crate-relative `../models`
+/// folder used in development. Returns the first existing file, or the
+/// canonical `models_dir` path if neither exists yet (the download target).
+pub fn resolve_model_path(filename: &str) -> std::path::PathBuf {
+    let canonical = model_path(filename);
+    if canonical.exists() {
+        return canonical;
+    }
+    // Legacy fallback: <workspace>/models/<filename> (ocr/inpaint/etc crate-relative)
+    // Keep for dev where models are checked into /models.
+    let legacy = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../models")
+        .join(filename);
+    // Also try exe-relative models/ (installer layout)
+    let exe_legacy = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("models").join(filename)));
+    if legacy.exists() {
+        return legacy;
+    }
+    if let Some(p) = exe_legacy.as_ref().filter(|p| p.exists()) {
+        return p.clone();
+    }
+    // Fallback to legacy koharu alt used by segment crate
+    let alt = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../onnx-text-styling-classification/panel-bubble-sfx-det")
+        .join(filename);
+    if alt.exists() {
+        return alt;
+    }
+    canonical
+}
+
+/// Variant of `resolve_model_path` that also checks a legacy filename (e.g.
+/// `yolo26s-seg.onnx` replaced by `koharu-yolo26s-seg.onnx`).
+pub fn resolve_model_path_with_legacy(filename: &str, legacy_filename: Option<&str>) -> std::path::PathBuf {
+    let p = resolve_model_path(filename);
+    if p.exists() {
+        return p;
+    }
+    if let Some(legacy) = legacy_filename {
+        let lp = resolve_model_path(legacy);
+        if lp.exists() {
+            return lp;
+        }
+    }
+    p
 }
 
 /// Bump `recent_projects` with `path`, moving it to front and updating
@@ -718,5 +798,21 @@ mod tests {
         let back: Settings = confy::load_path(&path).unwrap();
         assert_eq!(back.last_provider.as_deref(), Some("openai"));
         assert_eq!(back.ocr_workers, "2");
+    }
+
+    #[test]
+    fn onboarding_fields_round_trip() {
+        let settings = Settings {
+            onboarding_completed: true,
+            onboarding_version: CURRENT_ONBOARDING_VERSION,
+            ..Settings::default()
+        };
+        let text = toml::to_string(&settings).unwrap();
+        let back: Settings = toml::from_str(&text).unwrap();
+        assert!(back.onboarding_completed);
+        assert_eq!(back.onboarding_version, CURRENT_ONBOARDING_VERSION);
+        let empty: Settings = toml::from_str("").unwrap();
+        assert!(!empty.onboarding_completed);
+        assert_eq!(empty.onboarding_version, 0);
     }
 }

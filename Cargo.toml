@@ -91,6 +91,7 @@ rfd = { workspace = true }
 neverliie-iced-widgets = { workspace = true }
 scanlateit-model = { workspace = true }
 scanlateit-settings = { workspace = true }
+scanlateit-models = { workspace = true }
 scanlateit-inpaint = { workspace = true, optional = true }
 scanlateit-ocr = { workspace = true, optional = true }
 scanlateit-styling = { workspace = true, optional = true }

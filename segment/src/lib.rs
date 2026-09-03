@@ -94,21 +94,31 @@ impl fmt::Debug for Engine {
 
 impl Engine {
     pub fn build() -> Result<Self, String> {
-        let koharu = Path::new(MODEL_DIR).join(MODEL_FILE_KOHARU);
-        let fallback = Path::new(MODEL_DIR).join(MODEL_FILE_FALLBACK);
+        // Prefer onboarding-downloaded models (koharu-yolo26s-seg.onnx) then legacy names.
+        // Downloaded canonical filename is `koharu-yolo26s-seg.onnx` (registry MODELS).
+        // Keep legacy fallbacks for dev `yolo26s-seg.onnx`, `best.onnx`, and alt folder.
+        let canonical = scanlateit_settings::resolve_model_path_with_legacy(
+            "koharu-yolo26s-seg.onnx",
+            Some(MODEL_FILE_KOHARU),
+        );
+        let fallback = scanlateit_settings::resolve_model_path(MODEL_FILE_FALLBACK);
         let alt = Path::new(MODEL_DIR)
             .join("../onnx-text-styling-classification/panel-bubble-sfx-det")
             .join(MODEL_FILE_KOHARU);
-        let path = if koharu.exists() {
-            koharu
+        let legacy_koharu = Path::new(MODEL_DIR).join(MODEL_FILE_KOHARU);
+        // Priority: canonical (including settings models_dir), then legacy names, then alt.
+        let path = if canonical.exists() {
+            canonical
+        } else if legacy_koharu.exists() {
+            legacy_koharu
         } else if fallback.exists() {
             fallback
         } else if alt.exists() {
             alt
         } else {
             return Err(format!(
-                "segmentation model not found: tried {}, {} and {}",
-                koharu.display(),
+                "segmentation model not found: tried {}, {} and {} (and settings models_dir)",
+                canonical.display(),
                 fallback.display(),
                 alt.display()
             ));

@@ -109,6 +109,7 @@ pub mod tab;
 pub mod tabs;
 pub mod confirm_close;
 pub mod queue;
+pub mod onboarding;
 
 use layout::IMAGE_FILTERS;
 use tab::{AutoInpaintJob, EnginePool, Tab, TabId};
@@ -213,6 +214,9 @@ pub enum Message {
     UpdateDismiss,
     UpdateCheckAgain,
     UpdatePoll,
+    // ——— Onboarding (first-run, blocking) ———
+    OnboardingModelDone { id: String, result: Result<(), String> },
+    OnboardingModelPoll,
 }
 
 impl From<UiEvent> for Message {
@@ -252,6 +256,10 @@ pub struct App {
     pub update_ready: bool,
     pub update_rx: Option<Arc<Mutex<mpsc::Receiver<i16>>>>,
     pub update_error: Option<String>,
+    // ——— Onboarding (first-run, blocking) ———
+    pub onboarding: Option<onboarding::OnboardingState>,
+    pub(crate) onboarding_rx: Option<Arc<Mutex<mpsc::Receiver<(f32, u64, u64)>>>>,
+    pub(crate) onboarding_active_id: Option<String>,
 }
 
 impl App {
@@ -316,6 +324,13 @@ impl App {
             update_ready: false,
             update_rx: None,
             update_error: None,
+            onboarding: {
+                let (completed, ver) = scanlateit_settings::get(|s| (s.onboarding_completed, s.onboarding_version));
+                let is_completed = completed && ver >= scanlateit_settings::CURRENT_ONBOARDING_VERSION;
+                if is_completed { None } else { Some(onboarding::OnboardingState::new()) }
+            },
+            onboarding_rx: None,
+            onboarding_active_id: None,
         }
     }
 
@@ -697,6 +712,53 @@ fn handle_external_opens(app: &mut App, paths: Vec<String>) -> Task<Message> {
 }
 
 pub fn update(app: &mut App, message: Message) -> Task<Message> {
+    // Blocking onboarding: while wizard is open, only onboarding and system messages are allowed.
+    if app.onboarding.is_some() {
+        let allowed = match &message {
+            Message::Ui(ev) => matches!(
+                ev,
+                UiEvent::OnboardingNext
+                    | UiEvent::OnboardingBack
+                    | UiEvent::OnboardingDownloadAll
+                    | UiEvent::OnboardingRetry(_)
+                    | UiEvent::OnboardingToggleTheme
+                    | UiEvent::OnboardingFontSize(_)
+                    | UiEvent::OnboardingToggleAutoStyle
+                    | UiEvent::OnboardingToggleAutoSfx
+                    | UiEvent::OnboardingToggleAutoInpaint
+                    | UiEvent::OnboardingOpenTranslationSettings
+                    | UiEvent::OnboardingSkipTranslation
+                    | UiEvent::OnboardingFinish
+                    | UiEvent::OnboardingReplay
+                    | UiEvent::TranslateConnect(_)
+                    | UiEvent::TranslateDisconnect(_)
+                    | UiEvent::ConnectModalKey(_)
+                    | UiEvent::ConnectModalBaseUrl(_)
+                    | UiEvent::ConnectModalModel(_)
+                    | UiEvent::ConnectModalSubmit
+                    | UiEvent::ConnectModalCancel
+                    | UiEvent::OpenUrl(_)
+                    | UiEvent::SettingsOpen
+                    | UiEvent::SettingsOpenTab(_)
+            ),
+            Message::OnboardingModelDone { .. }
+            | Message::OnboardingModelPoll
+            | Message::Frame(_)
+            | Message::FontLoaded
+            | Message::SystemFonts(_)
+            | Message::StyleFontLoaded(_)
+            | Message::CjkFallbackLoaded(_)
+            | Message::UpdateCheckResult(_)
+            | Message::UpdatePoll
+            | Message::IpcPoll
+            | Message::FetchModels
+            | Message::ModelsFetched(_) => true,
+            _ => false,
+        };
+        if !allowed {
+            return Task::none();
+        }
+    }
     let task = match message {
         Message::IpcPoll => {
             // Drain single-instance listener (secondary forwards via TCP).
@@ -1446,6 +1508,23 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::OpenUrl(url)) => settings::handle_open_url(app, url),
         Message::Ui(UiEvent::SaveProject) => mmtl::handle_save(app),
         Message::Ui(UiEvent::ExportAll) => export::handle_export_all(app),
+        // ——— Onboarding (first-run, blocking) ———
+        Message::Ui(UiEvent::OnboardingNext) => onboarding::handle_next(app),
+        Message::Ui(UiEvent::OnboardingBack) => onboarding::handle_back(app),
+        Message::Ui(UiEvent::OnboardingDownloadAll) => onboarding::handle_download_all(app),
+        Message::Ui(UiEvent::OnboardingRetry(id)) => onboarding::handle_retry(app, id),
+        Message::Ui(UiEvent::OnboardingToggleTheme) => onboarding::handle_toggle_theme(app),
+        Message::Ui(UiEvent::OnboardingFontSize(inc)) => onboarding::handle_font_size(app, inc),
+        Message::Ui(UiEvent::OnboardingToggleAutoStyle) => onboarding::handle_toggle_auto_style(app),
+        Message::Ui(UiEvent::OnboardingToggleAutoSfx) => onboarding::handle_toggle_auto_sfx(app),
+        Message::Ui(UiEvent::OnboardingToggleAutoInpaint) => onboarding::handle_toggle_auto_inpaint(app),
+        Message::Ui(UiEvent::OnboardingOpenTranslationSettings) => {
+            // Deprecated: inline is baked into onboarding; no Settings popup (covered)
+            Task::none()
+        }
+        Message::Ui(UiEvent::OnboardingSkipTranslation) => onboarding::handle_skip_translation(app),
+        Message::Ui(UiEvent::OnboardingFinish) => onboarding::handle_finish(app),
+        Message::Ui(UiEvent::OnboardingReplay) => onboarding::handle_replay(app),
         // ——— Updates (Velopack) ———
         Message::Ui(UiEvent::UpdateCheck) => {
             app.update_error = None;
@@ -1538,6 +1617,8 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        Message::OnboardingModelDone { id, result } => onboarding::handle_model_done(app, id, result),
+        Message::OnboardingModelPoll => onboarding::handle_poll(app),
     };
     task
 }
@@ -1683,6 +1764,10 @@ pub fn subscription(app: &App) -> Subscription<Message> {
 
     if app.update_downloading {
         subs.push(iced::time::every(Duration::from_millis(100)).map(|_| Message::UpdatePoll));
+    }
+
+    if app.onboarding.as_ref().is_some_and(|o| o.downloading) {
+        subs.push(iced::time::every(Duration::from_millis(100)).map(|_| Message::OnboardingModelPoll));
     }
 
     Subscription::batch(subs)

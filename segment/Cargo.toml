@@ -8,6 +8,7 @@ directml = ["ort/directml"]
 
 [dependencies]
 scanlateit-model = { workspace = true }
+scanlateit-settings = { workspace = true }
 image = { workspace = true }
 ndarray = { workspace = true }
 ort = { workspace = true }

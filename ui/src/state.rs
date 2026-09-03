@@ -10,6 +10,7 @@ use scanlateit_model::{ProfileId, Project};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppView {
+    Onboarding,
     Home,
     Editor,
 }
@@ -162,4 +163,19 @@ pub trait UiState {
     fn update_progress(&self) -> i16 { 0 }
     fn update_ready(&self) -> bool { false }
     fn update_notes(&self) -> Option<String> { None }
+    // ——— Onboarding (first-run, blocking) ———
+    fn onboarding_open(&self) -> bool { false }
+    fn onboarding_step(&self) -> u8 { 0 }
+    fn onboarding_models(&self) -> Vec<(String, String, ModelDownloadStatus)> { Vec::new() }
+    fn onboarding_overall_progress(&self) -> f32 { 0.0 }
+    fn onboarding_downloading(&self) -> bool { false }
+    fn onboarding_all_done(&self) -> bool { true }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ModelDownloadStatus {
+    NotStarted,
+    Downloading { percent: f32, downloaded: u64, total: u64 },
+    Done,
+    Failed(String),
 }

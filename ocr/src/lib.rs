@@ -189,7 +189,12 @@ pub fn config() -> RapidOcrConfig {
 /// "max side len (max longer side before resize)" knob. Other pipeline sizes
 /// stay at defaults (30).
 pub fn config_with(text_score: f32, max_side_len: u32) -> RapidOcrConfig {
-    let model_dir = PathBuf::from(MODEL_DIR);
+    // Prefer onboarding-downloaded models in settings models_dir(), fallback to legacy crate-relative ../models.
+    let det_path = scanlateit_settings::resolve_model_path("PP-OCRv6_det_tiny.onnx");
+    let rec_path = scanlateit_settings::resolve_model_path("korean_PP-OCRv5_rec_mobile.onnx");
+    let dict_path = scanlateit_settings::resolve_model_path("korean_dict.txt");
+    // Keep model_dir for error messages fallback, but use resolved paths.
+    let _model_dir = PathBuf::from(MODEL_DIR);
     // Clamp to valid ranges; rapidocr_core::config::RapidOcrConfig::validate
     // would reject 0, so we sanitize here.
     let text_score = if text_score.is_finite() {
@@ -220,7 +225,7 @@ pub fn config_with(text_score: f32, max_side_len: u32) -> RapidOcrConfig {
         min_height: 30,
         width_height_ratio: 8.0,
         det: Some(DetConfig {
-            model_path: model_dir.join("PP-OCRv6_det_tiny.onnx"),
+            model_path: det_path,
             limit_side_len: 736,
             limit_type: LimitType::Min,
             mean: [0.5, 0.5, 0.5],
@@ -234,8 +239,8 @@ pub fn config_with(text_score: f32, max_side_len: u32) -> RapidOcrConfig {
         }),
         cls: None,
         rec: Some(RecConfig {
-            model_path: model_dir.join("korean_PP-OCRv5_rec_mobile.onnx"),
-            dict_path: model_dir.join("korean_dict.txt"),
+            model_path: rec_path,
+            dict_path,
             image_shape: [3, 48, 320],
             batch_size: 6,
         }),

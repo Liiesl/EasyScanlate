@@ -5088,6 +5088,7 @@ dependencies = [
  "scanlateit-inpaint",
  "scanlateit-mmtl",
  "scanlateit-model",
+ "scanlateit-models",
  "scanlateit-ocr",
  "scanlateit-segment",
  "scanlateit-settings",
@@ -5155,6 +5156,7 @@ dependencies = [
  "image",
  "rapidocr-core",
  "scanlateit-model",
+ "scanlateit-settings",
 ]
 
 [[package]]
@@ -5165,6 +5167,7 @@ dependencies = [
  "ndarray 0.17.2",
  "ort",
  "scanlateit-model",
+ "scanlateit-settings",
 ]
 
 [[package]]
@@ -5186,6 +5189,7 @@ dependencies = [
  "ndarray 0.17.2",
  "ort",
  "scanlateit-model",
+ "scanlateit-settings",
 ]
 
 [[package]]
@@ -5210,6 +5214,7 @@ dependencies = [
  "neverliie-iced-widgets",
  "open",
  "scanlateit-model",
+ "scanlateit-models",
  "scanlateit-segment",
  "scanlateit-settings",
  "scanlateit-translation",

@@ -8,5 +8,6 @@ directml = ["rapidocr-core/directml"]
 
 [dependencies]
 scanlateit-model = { workspace = true }
+scanlateit-settings = { workspace = true }
 rapidocr-core = { workspace = true }
 image = { workspace = true }

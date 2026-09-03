@@ -344,4 +344,18 @@ pub enum UiEvent {
     UpdateDownload,
     UpdateApply,
     UpdateDismiss,
+    // ——— Onboarding (first-run, blocking) ———
+    OnboardingNext,
+    OnboardingBack,
+    OnboardingDownloadAll,
+    OnboardingRetry(String),
+    OnboardingToggleTheme,
+    OnboardingFontSize(bool), // true = inc, false = dec
+    OnboardingToggleAutoStyle,
+    OnboardingToggleAutoSfx,
+    OnboardingToggleAutoInpaint,
+    OnboardingOpenTranslationSettings,
+    OnboardingSkipTranslation,
+    OnboardingFinish,
+    OnboardingReplay,
 }

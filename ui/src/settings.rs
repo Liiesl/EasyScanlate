@@ -616,6 +616,24 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
         }
     }
 
+    // ── Onboarding replay card
+    {
+        let show_onboarding = matches_any(query_ref, &["onboarding", "setup", "wizard", "replay", "general"]);
+        if show_onboarding {
+            let col: Vec<Element<'static, UiEvent>> = vec![
+                card_header(Icon::Sparkles, "Onboarding", Some("First-run setup wizard")).into(),
+                column![
+                    text("Replay the first-run setup (models + preferences). The wizard is blocking until all mandatory models are downloaded.").size(scale::s(11.0)).color(MUTED_FG),
+                    button(text("Replay onboarding…").size(scale::s(11.0)))
+                        .padding([scale::s(6.0), scale::s(10.0)])
+                        .style(crate::panel::button_style)
+                        .on_press(UiEvent::OnboardingReplay),
+                ].spacing(scale::s(6.0)).into(),
+            ];
+            cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+        }
+    }
+
     // ── Empty state ───────────────────────────────────────────────
     if cards.is_empty() {
         cards.push(
@@ -681,6 +699,23 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             if col.len() > 1 {
                 cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
+        }
+    }
+    // Onboarding replay card
+    {
+        let show_onboarding = matches_any(query, &["onboarding", "setup", "wizard", "replay", "general"]);
+        if show_onboarding {
+            let col: Vec<Element<'static, UiEvent>> = vec![
+                card_header(Icon::Sparkles, "Onboarding", Some("First-run setup wizard")).into(),
+                column![
+                    text("Replay the first-run setup (models + preferences). The wizard is blocking until all mandatory models are downloaded.").size(scale::s(11.0)).color(MUTED_FG),
+                    button(text("Replay onboarding…").size(scale::s(11.0)))
+                        .padding([scale::s(6.0), scale::s(10.0)])
+                        .style(crate::panel::button_style)
+                        .on_press(UiEvent::OnboardingReplay),
+                ].spacing(scale::s(6.0)).into(),
+            ];
+            cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
         }
     }
     cards

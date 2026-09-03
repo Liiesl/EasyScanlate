@@ -23,6 +23,7 @@ image = { workspace = true }
 neverliie-iced-widgets = { workspace = true }
 scanlateit-model = { workspace = true }
 scanlateit-settings = { workspace = true }
+scanlateit-models = { workspace = true }
 scanlateit-translation = { workspace = true, optional = true }
 scanlateit-segment = { workspace = true, optional = true }
 tokio = { workspace = true }

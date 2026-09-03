@@ -93,7 +93,7 @@ impl fmt::Debug for Engine {
 impl Engine {
     /// Loads the styling model (CPU-only; incompatible with DirectML).
     pub fn build() -> Result<Self, String> {
-        let path = Path::new(MODEL_DIR).join(MODEL_FILE);
+        let path = scanlateit_settings::resolve_model_path(MODEL_FILE);
         let session = Session::builder()
             .map_err(|e| format!("ORT init failed: {e}"))?
             .with_optimization_level(GraphOptimizationLevel::Level3)

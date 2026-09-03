@@ -123,7 +123,7 @@ impl Engine {
         let session = match backend {
             InpaintBackend::Telea => None,
             InpaintBackend::Lama => {
-                let path = Path::new(MODEL_DIR).join(MODEL_FILE);
+                let path = scanlateit_settings::resolve_model_path(MODEL_FILE);
                 #[cfg(all(feature = "directml", target_os = "windows"))]
                 let session = {
                     match build_directml(&path, "lama") {
@@ -145,7 +145,7 @@ impl Engine {
                 Some(Arc::new(Mutex::new(session)))
             }
             InpaintBackend::Aot => {
-                let path = Path::new(MODEL_DIR).join(MODEL_FILE_AOT);
+                let path = scanlateit_settings::resolve_model_path(MODEL_FILE_AOT);
                 #[cfg(all(feature = "directml", target_os = "windows"))]
                 let session = {
                     match build_directml(&path, "aot") {

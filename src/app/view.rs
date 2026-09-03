@@ -8,7 +8,10 @@ use super::layout::{CARD_RADIUS, GAP, MAIN_AREA_MIN_WIDTH, OUTER_PADDING, STYLIN
 use super::{App, Message};
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    let inner: Element<'_, UiEvent> = if app.active_is_home() {
+    let inner: Element<'_, UiEvent> = if app.onboarding.is_some() {
+        // Onboarding as dedicated page (like Home/Editor) — fills window, not overlay
+        scanlateit_ui::onboarding::view_page(app)
+    } else if app.active_is_home() {
             let base: Element<'_, UiEvent> = iced::widget::container(scanlateit_ui::home::view(app))
                 .padding(scale::s(OUTER_PADDING))
                 .width(Length::Fill)
@@ -179,9 +182,13 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let inner_mapped: Element<'_, Message> = inner.map(Message::from);
 
     let framed: Element<'_, Message> = if let Some(window_id) = app.frame.primary_window() {
-        let tab_bar = crate::app::tabs::titlebar_view(app);
-        // Icon merged into first tab (`scanlateit`) per spec — no leading icon.
-        app.frame.view(window_id, "", None, Some(tab_bar), inner_mapped, Message::Frame)
+        if app.onboarding.is_some() {
+            // Onboarding page hides tab bar (blocking, like Home/Editor page spec) — no tabs while setup is mandatory
+            app.frame.view(window_id, "", None, None, inner_mapped, Message::Frame)
+        } else {
+            let tab_bar = crate::app::tabs::titlebar_view(app);
+            app.frame.view(window_id, "", None, Some(tab_bar), inner_mapped, Message::Frame)
+        }
     } else {
         inner_mapped
     };
@@ -200,5 +207,6 @@ pub fn view(app: &App) -> Element<'_, Message> {
         base_with_aurora
     };
 
-    with_close.into()
+    // Onboarding is now a page (inner), not an overlay — no extra Stack here
+    with_close
 }

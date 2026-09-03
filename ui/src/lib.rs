@@ -14,6 +14,7 @@ pub mod loaded;
 pub mod main_area;
 pub mod manage_models;
 pub mod new_project;
+pub mod onboarding;
 pub mod panel;
 pub mod icon;
 pub mod scale;

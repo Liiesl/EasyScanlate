@@ -10,7 +10,7 @@ pub mod download;
 pub mod registry;
 
 pub use download::{
-    download_model, download_model_with_progress, ensure_model, ensure_model_with_progress,
-    DownloadHandle, DownloadProgress,
+    download_model, download_model_with_progress, download_model_with_sender, ensure_model,
+    ensure_model_with_progress, ensure_model_with_sender, DownloadHandle, DownloadProgress,
 };
 pub use registry::{ModelSpec, MODELS, get_model, model_path, models_dir, is_available};
