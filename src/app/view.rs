@@ -1,5 +1,5 @@
 use iced::{Color, Element, Length};
-use iced::widget::{center, column, container, opaque, row, stack, text};
+use iced::widget::{center, column, container, opaque, space, stack, text};
 use iced::widget::pane_grid;
 use easyscanlate_ui::event::UiEvent;
 use easyscanlate_ui::{main_area, panel, scale, toolbar};
@@ -211,19 +211,71 @@ pub fn view(app: &App) -> Element<'_, Message> {
     // Loading splash overlay: Photoshop-style — centered "Opening project…" with
     // top-left cycling status (Unpacking / Parsing / Decoding…). Active tab is
     // already the placeholder (titlebar chip exists), underlying editor is empty until hydrate.
-    let with_loading: Element<'_, Message> = if !app.active_is_home()
-        && app
-            .tabs
-            .get(app.active)
-            .is_some_and(|t| t.loading)
-    {
+    let is_loading = !app.active_is_home()
+        && app.tabs.get(app.active).is_some_and(|t| t.loading);
+    let with_loading: Element<'_, Message> = if is_loading {
         loading_overlay(app, with_close)
     } else {
         with_close
     };
 
+    // Dim titlebar for inner overlays (settings, manage_models, connect, new_project)
+    // while keeping it interactive (visual only, no opaque/mouse_area). The inner
+    // overlays already dim the content area; this adds the matching strip over the
+    // titlebar so the whole window looks dimmed but tabs/drag still work.
+    let has_inner_overlay = (app.settings_open
+        || app.manage_models_open
+        || app.connect_modal.is_some()
+        || app.new_project.is_some())
+        && app.onboarding.is_none()
+        && !is_loading
+        && app.pending_close.is_none();
+    let with_titlebar_dim: Element<'_, Message> = if has_inner_overlay {
+        let h = app.frame.config().title_bar_height;
+        let alpha = if app.manage_models_open {
+            0.55
+        } else if app.connect_modal.is_some() {
+            0.40
+        } else if app.settings_open {
+            0.70
+        } else {
+            0.45
+        };
+        let title_dim = container(
+            space::horizontal()
+                .width(Length::Fill)
+                .height(Length::Fixed(h)),
+        )
+        .width(Length::Fill)
+        .height(Length::Fixed(h))
+        .style(move |_| container::Style {
+            background: Some(
+                Color {
+                    a: alpha,
+                    ..Color::BLACK
+                }
+                .into(),
+            ),
+            ..container::Style::default()
+        });
+        stack![
+            with_loading,
+            column![
+                title_dim,
+                space::vertical()
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+            ]
+            .width(Length::Fill)
+            .height(Length::Fill)
+        ]
+        .into()
+    } else {
+        with_loading
+    };
+
     // Onboarding is now a page (inner), not an overlay — no extra Stack here
-    with_loading
+    with_titlebar_dim
 }
 
 fn splash_status(phase: f32, is_creating: bool) -> String {
@@ -308,20 +360,49 @@ fn loading_overlay<'a>(app: &'a App, base: Element<'a, Message>) -> Element<'a, 
             ..container::Style::default()
         });
 
+    // Split dim: titlebar strip is visual-only (no opaque/mouse_area) so drag
+    // and tab clicks still reach the NativeFrame titlebar underneath. Content
+    // area below remains opaque-blocking.
+    let h = app.frame.config().title_bar_height;
+    let title_dim = container(
+        space::horizontal()
+            .width(Length::Fill)
+            .height(Length::Fixed(h)),
+    )
+    .width(Length::Fill)
+    .height(Length::Fixed(h))
+    .style(|_| container::Style {
+        background: Some(
+            Color {
+                a: 0.45,
+                ..Color::BLACK
+            }
+            .into(),
+        ),
+        ..container::Style::default()
+    });
+
+    let content_dim = container(center(card))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_| container::Style {
+            background: Some(
+                Color {
+                    a: 0.45,
+                    ..Color::BLACK
+                }
+                .into(),
+            ),
+            ..container::Style::default()
+        })
+        .center_x(Length::Fill)
+        .center_y(Length::Fill);
+
     stack![
         base,
-        opaque(
-            center(card).style(|_| container::Style {
-                background: Some(
-                    Color {
-                        a: 0.45,
-                        ..Color::BLACK
-                    }
-                    .into()
-                ),
-                ..container::Style::default()
-            })
-        )
+        column![title_dim, opaque(content_dim)]
+            .width(Length::Fill)
+            .height(Length::Fill)
     ]
     .into()
 }

@@ -116,23 +116,48 @@ pub fn view<'a>(app: &'a App, base: Element<'a, Message>) -> Element<'a, Message
         ..container::Style::default()
     });
 
+    // Split dim: titlebar strip is visual-only so tabs/drag still work while
+    // the modal is open. Content area below remains opaque-blocking with
+    // backdrop click to cancel.
+    let h = app.frame.config().title_bar_height;
+    let title_dim = container(space::horizontal().width(Length::Fill).height(Length::Fixed(h)))
+        .width(Length::Fill)
+        .height(Length::Fixed(h))
+        .style(|_| container::Style {
+            background: Some(
+                Color {
+                    a: 0.45,
+                    ..Color::BLACK
+                }
+                .into(),
+            ),
+            ..container::Style::default()
+        });
+
+    let content_dim = opaque(mouse_area(
+        container(center(opaque(window)))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(|_| container::Style {
+                background: Some(
+                    Color {
+                        a: 0.45,
+                        ..Color::BLACK
+                    }
+                    .into(),
+                ),
+                ..container::Style::default()
+            })
+            .center_x(Length::Fill)
+            .center_y(Length::Fill),
+    )
+    .on_press(Message::Ui(UiEvent::TabCloseCancel)));
+
     stack![
         base,
-        opaque(
-            mouse_area(
-                center(opaque(window)).style(|_theme| container::Style {
-                    background: Some(
-                        Color {
-                            a: 0.45,
-                            ..Color::BLACK
-                        }
-                        .into()
-                    ),
-                    ..container::Style::default()
-                })
-            )
-            .on_press(Message::Ui(UiEvent::TabCloseCancel))
-        )
+        column![title_dim, content_dim]
+            .width(Length::Fill)
+            .height(Length::Fill)
     ]
     .into()
 }
