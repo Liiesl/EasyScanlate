@@ -24,7 +24,7 @@ use easyscanlate_ui::event::{EditOrigin, MainAreaMode, ManualMode, StyleField, T
 use easyscanlate_ui::main_area::decode::Scheduler;
 use easyscanlate_ui::LoadedImage;
 
-use super::layout::{PaneKind, SidePaneKind, StylingPaneKind, MAIN_AREA_DEFAULT_RATIO, STYLING_DEFAULT_RATIO, STYLING_TOP_RATIO};
+use easyscanlate_ui::layout::{PaneKind, SidePaneKind, StylingPaneKind, MAIN_AREA_DEFAULT_RATIO, STYLING_DEFAULT_RATIO, STYLING_TOP_RATIO};
 
 // ---------------------------------------------------------------------------
 // Tab identity

@@ -3,7 +3,9 @@ use iced::widget::text_editor;
 use easyscanlate_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
 use easyscanlate_ui::color::rgba_to_color;
 use easyscanlate_ui::event::{EditOrigin, MainAreaMode, ManualMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
+use easyscanlate_ui::layout::{PaneKind, SidePaneKind, StylingPaneKind};
 use easyscanlate_ui::{ConnectModal, LoadedImage, UiState};
+use easyscanlate_ui::state::TabMeta;
 
 use easyscanlate_model::ModelEvent;
 
@@ -356,6 +358,26 @@ impl UiState for ActiveTab<'_> {
     fn onboarding_overall_progress(&self) -> f32 { self.app.onboarding.as_ref().map(|o| o.overall_progress()).unwrap_or(0.0) }
     fn onboarding_downloading(&self) -> bool { self.app.onboarding.as_ref().map(|o| o.downloading).unwrap_or(false) }
     fn onboarding_all_done(&self) -> bool { self.app.onboarding.as_ref().map(|o| o.is_all_done()).unwrap_or(true) }
+
+    fn tab_metas(&self) -> Vec<TabMeta> {
+        self.app.tabs.iter().enumerate().map(|(idx, t)| TabMeta {
+            id: t.id.0,
+            title: t.title.clone(),
+            dirty: t.dirty,
+            is_home: t.is_home() && idx == 0,
+        }).collect()
+    }
+    fn active_tab_id(&self) -> u64 { self.app.tabs.get(self.app.active).map(|t| t.id.0).unwrap_or(0) }
+    fn pending_close(&self) -> Option<TabMeta> {
+        let id = self.app.pending_close?;
+        let tab = self.app.tab_by_id(id).or_else(|| self.app.tabs.get(self.app.active))?;
+        Some(TabMeta { id: id.0, title: tab.title.clone(), dirty: tab.dirty, is_home: false })
+    }
+    fn titlebar_height(&self) -> f32 { self.app.frame.config().title_bar_height }
+    fn editor_panes(&self) -> Option<(&iced::widget::pane_grid::State<PaneKind>, &iced::widget::pane_grid::State<SidePaneKind>, &iced::widget::pane_grid::State<StylingPaneKind>)> {
+        if self.tab.is_home() { return None; }
+        Some((&self.tab.panes, &self.tab.side_panes, &self.tab.styling_panes))
+    }
 }
 
 // Shim kept for view lifetime: `view.rs` returns `Element<'a, Message>` tied to
@@ -527,6 +549,26 @@ impl UiState for App {
     fn onboarding_overall_progress(&self) -> f32 { self.onboarding.as_ref().map(|o| o.overall_progress()).unwrap_or(0.0) }
     fn onboarding_downloading(&self) -> bool { self.onboarding.as_ref().map(|o| o.downloading).unwrap_or(false) }
     fn onboarding_all_done(&self) -> bool { self.onboarding.as_ref().map(|o| o.is_all_done()).unwrap_or(true) }
+    fn tab_metas(&self) -> Vec<TabMeta> {
+        self.tabs.iter().enumerate().map(|(idx, t)| TabMeta {
+            id: t.id.0,
+            title: t.title.clone(),
+            dirty: t.dirty,
+            is_home: t.is_home() && idx == 0,
+        }).collect()
+    }
+    fn active_tab_id(&self) -> u64 { self.tabs.get(self.active).map(|t| t.id.0).unwrap_or(0) }
+    fn pending_close(&self) -> Option<TabMeta> {
+        let id = self.pending_close?;
+        let tab = self.tab_by_id(id).or_else(|| self.tabs.get(self.active))?;
+        Some(TabMeta { id: id.0, title: tab.title.clone(), dirty: tab.dirty, is_home: false })
+    }
+    fn titlebar_height(&self) -> f32 { self.frame.config().title_bar_height }
+    fn editor_panes(&self) -> Option<(&iced::widget::pane_grid::State<PaneKind>, &iced::widget::pane_grid::State<SidePaneKind>, &iced::widget::pane_grid::State<StylingPaneKind>)> {
+        let tab = self.tabs.get(self.active)?;
+        if tab.is_home() { return None; }
+        Some((&tab.panes, &tab.side_panes, &tab.styling_panes))
+    }
 }
 
 pub(crate) fn handle_model_event(tab: &mut Tab, event: ModelEvent) {

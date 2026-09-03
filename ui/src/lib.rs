@@ -5,9 +5,12 @@
 //! [`UiEvent`]: crate::event::UiEvent
 
 pub mod background;
+pub mod chrome;
 pub mod color;
 pub mod connect;
+pub mod dialog;
 pub mod event;
+pub mod layout;
 pub mod loading_bar;
 pub mod home;
 pub mod loaded;
@@ -19,6 +22,7 @@ pub mod panel;
 pub mod icon;
 pub mod scale;
 pub mod segmented;
+pub mod shell;
 pub mod settings;
 pub mod state;
 pub mod toggler_style;

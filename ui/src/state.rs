@@ -5,8 +5,10 @@ use easyscanlate_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
 
 use crate::connect::ConnectModal;
 use crate::event::{EditOrigin, MainAreaMode, ManualMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
+use crate::layout::{PaneKind, SidePaneKind, StylingPaneKind};
 use crate::loaded::LoadedImage;
 use easyscanlate_model::{ProfileId, Project};
+use iced::widget::pane_grid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppView {
@@ -20,6 +22,14 @@ pub struct NewProjectOverlay {
     pub source_paths: Vec<String>,
     pub original_lang: String,
     pub project_location: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TabMeta {
+    pub id: u64,
+    pub title: String,
+    pub dirty: bool,
+    pub is_home: bool,
 }
 
 /// Read-only view of the app state that the widgets render from. Implemented
@@ -159,6 +169,20 @@ pub trait UiState {
     fn is_loading(&self) -> bool { false }
     fn loading_phase(&self) -> f32 { 0.0 }
     fn loading_title(&self) -> String { String::new() }
+    // ——— Tabs (titlebar) ———
+    fn tab_metas(&self) -> Vec<TabMeta> { Vec::new() }
+    fn active_tab_id(&self) -> u64 { 0 }
+    fn pending_close(&self) -> Option<TabMeta> { None }
+    fn titlebar_height(&self) -> f32 { 32.0 }
+    fn editor_panes(
+        &self,
+    ) -> Option<(
+        &pane_grid::State<PaneKind>,
+        &pane_grid::State<SidePaneKind>,
+        &pane_grid::State<StylingPaneKind>,
+    )> {
+        None
+    }
     // ——— Updates (Velopack) ———
     fn update_current_version(&self) -> String { String::new() }
     fn update_available_version(&self) -> Option<String> { None }

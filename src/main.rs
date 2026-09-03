@@ -112,7 +112,7 @@ fn main() -> iced::Result {
     );
 
     let settings = frame.window_settings(iced::window::Settings {
-        size: Size::new(1400.0, 900.0),
+        size: Size::new(1024.0, 600.0),
         ..iced::window::Settings::default()
     });
 
