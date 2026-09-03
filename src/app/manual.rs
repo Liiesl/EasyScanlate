@@ -221,7 +221,8 @@ pub fn handle_start(app: &mut App) -> Task<Message> {
             #[cfg(feature = "ocr")]
             {
                 eprintln!("[manual] -> handle_manual_ocr_selection with {} sels", sels.len());
-                return super::ocr::handle_manual_ocr_selection(app, sels);
+                let tid = app.active_tab().id;
+                return super::ocr::handle_manual_ocr_selection(app, tid, sels);
             }
             #[cfg(not(feature = "ocr"))]
             {

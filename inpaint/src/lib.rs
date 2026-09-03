@@ -50,7 +50,6 @@ pub const AOT_PAD: u32 = 8;
 /// before padding (mirrors `aot_inference.py: potentially` max_size=1024).
 pub const AOT_MAX_SIZE: u32 = 1024;
 
-const MODEL_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../models");
 const MODEL_FILE: &str = "lama-manga_int8.onnx";
 const MODEL_FILE_AOT: &str = "inpainting_aot.onnx";
 

@@ -112,6 +112,7 @@ impl Default for EngineQueue {
 }
 
 impl EngineQueue {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -139,14 +140,8 @@ impl EngineQueue {
     pub fn pending_len(&self) -> usize {
         self.pending.len()
     }
-    pub fn running_len(&self) -> usize {
-        self.running.len()
-    }
     pub fn pending_jobs(&self) -> Vec<QueuedJob> {
         self.pending.iter().cloned().collect()
-    }
-    pub fn running_jobs(&self) -> Vec<QueuedJob> {
-        self.running.clone()
     }
 
     /// 1-indexed position of `id` in pending, or None if not pending (maybe running).
@@ -157,19 +152,7 @@ impl EngineQueue {
             .map(|p| p + 1)
     }
 
-    /// 1-indexed position of the pending job for `tab_id` + `kind`, if any.
-    pub fn position_for(&self, tab_id: TabId, kind: EngineKind) -> Option<usize> {
-        self.pending
-            .iter()
-            .position(|j| j.tab_id == tab_id && j.kind == kind)
-            .map(|p| p + 1)
-    }
 
-    /// True if ANY pending job fits in remaining capacity (backfill).
-    pub fn can_dispatch(&self) -> bool {
-        let rem = self.remaining();
-        self.pending.iter().any(|j| j.weight() <= rem)
-    }
 
     /// Backfill pop: scan pending in priority order (lower priority value first,
     /// FIFO tie-break via id) and pop the first job whose weight fits.
@@ -344,18 +327,9 @@ impl EngineQueue {
         AcquireResult::Queued(job, pos)
     }
 
-    /// Release and then report remaining capacity for UI.
-    pub fn status_line(&self) -> String {
-        format!(
-            "pool {}/{} pending {} running {}",
-            self.used,
-            POOL_CAPACITY,
-            self.pending_len(),
-            self.running_len()
-        )
-    }
 }
 
+#[allow(dead_code)]
 pub enum AcquireResult {
     Acquired(QueuedJob),
     Queued(QueuedJob, usize),
@@ -442,7 +416,7 @@ fn dispatch_ocr(app: &mut crate::app::App, tab_id: super::tab::TabId) -> Task<cr
             let data = app.tabs[idx].pending_manual_multi_ocr.take().unwrap();
             let cached = app.engines.manual_ocr.clone();
             if let Some(engine) = cached {
-                return crate::app::ocr::start_manual_ocr_selection_for(app, tab_id, data, engine);
+                return crate::app::ocr::start_manual_ocr_selection(app, tab_id, data, engine);
             } else {
                 let cfg = easyscanlate_settings::get(|s| easyscanlate_ocr::config_with(0.0, s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000)));
                 app.tabs[idx].pending_manual_multi_ocr = Some(data);
@@ -457,7 +431,7 @@ fn dispatch_ocr(app: &mut crate::app::App, tab_id: super::tab::TabId) -> Task<cr
     }
     // otherwise pipeline OCR
     if app.engines.pipeline.is_some() {
-        return crate::app::ocr::maybe_start_ocr_for(app, tab_id);
+        return crate::app::ocr::maybe_start_ocr(app, tab_id);
     }
     // need to build pipeline
     let (workers, cfg) = easyscanlate_settings::get(|s| {
@@ -478,13 +452,13 @@ fn dispatch_ocr(_app: &mut crate::app::App, _tab_id: super::tab::TabId) -> Task<
 }
 
 fn dispatch_segment(app: &mut crate::app::App, tab_id: super::tab::TabId) -> Task<crate::app::Message> {
-    crate::app::segment::start_segment_filter_for(app, tab_id)
+    crate::app::segment::start_segment_filter(app, tab_id)
 }
 
 fn dispatch_style(app: &mut crate::app::App, tab_id: super::tab::TabId) -> Task<crate::app::Message> {
     #[cfg(feature = "styling")]
     {
-        return crate::app::styling::classify_for(app, tab_id);
+        return crate::app::styling::classify(app, tab_id);
     }
     #[cfg(not(feature = "styling"))]
     {
@@ -519,7 +493,7 @@ fn dispatch_inpaint(
                 easyscanlate_settings::InpaintBackend::Lama => app.tabs[idx].pending_auto_lama_jobs = None,
                 easyscanlate_settings::InpaintBackend::Aot => app.tabs[idx].pending_auto_aot_jobs = None,
             }
-            return crate::app::inpaint::dispatch_auto_for(app, tab_id, jobs, backend);
+            return crate::app::inpaint::dispatch_auto(app, tab_id, jobs, backend);
         }
         // Fallback: manual inpaint queued via InpaintTelea/Lama/Aot kind
         if app.tabs[idx].pending_manual_multi.is_some() {
@@ -530,7 +504,7 @@ fn dispatch_inpaint(
             let cached = app.engines.inpaint.clone().filter(|e| e.backend() == backend && e.radius() == radius);
             if let Some(engine) = cached {
                 // use helper that takes tab_id-aware start
-                return crate::app::inpaint::start_inpaint_selection_for(app, tab_id, engine, data);
+                return crate::app::inpaint::start_inpaint_selection(app, tab_id, engine, data);
             } else {
                 // store back for engine-ready path and build
                 app.tabs[idx].pending_manual_multi = Some(data);
@@ -552,7 +526,7 @@ fn dispatch_inpaint(
             let radius = easyscanlate_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
             let cached = app.engines.inpaint.clone().filter(|e| e.backend() == backend && e.radius() == radius);
             if let Some(engine) = cached {
-                return crate::app::inpaint::start_background_stitch_for(app, tab_id, engine, job, pad, prev, next);
+                return crate::app::inpaint::start_background_stitch(app, tab_id, engine, job, pad, prev, next);
             } else {
                 app.tabs[idx].pending_background_stitch = Some((job, pad, prev, next));
                 app.tabs[idx].status = match backend {

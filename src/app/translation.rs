@@ -84,22 +84,6 @@ fn resolve_base_id(app: &App) -> Option<easyscanlate_model::ProfileId> {
     Some(tab.project.profiles.selected_id())
 }
 
-fn resolve_target_name(app: &App) -> String {
-    use easyscanlate_ui::event::TargetProfileSelection;
-    let tab = app.active_tab();
-    match &tab.translate_target {
-        TargetProfileSelection::Existing(id) => {
-            tab.project
-                .profiles
-                .iter()
-                .find(|p| &p.id == id)
-                .map(|p| p.name.clone())
-                .unwrap_or_else(|| capitalized_profile_name(&tab.translate_lang))
-        }
-        TargetProfileSelection::AutoPlaceholder(name) => name.clone(),
-    }
-}
-
 pub fn handle_translate(app: &mut App) -> Task<Message> {
     if app.active_state().is_bulk_busy() {
         app.active_tab_mut().status = "Wait for current task to finish.".to_string();
@@ -187,156 +171,6 @@ pub fn handle_translate(app: &mut App) -> Task<Message> {
     )
 }
 
-pub fn handle_translate_finished(
-    app: &mut App,
-    jobs: Vec<(usize, EntryId, String, String)>,
-    result: Result<Vec<String>, String>,
-) -> Task<Message> {
-    app.active_tab_mut().translating = false;
-    app.active_tab_mut().translate_anim_phase = 0.0;
-    match result {
-        Ok(translations) => {
-            let is_translate_mode = app.active_tab_mut().translation_panel_mode == easyscanlate_ui::event::TranslationPanelMode::Translate;
-            let profile_name = if is_translate_mode {
-                resolve_target_name(app)
-            } else {
-                capitalized_profile_name(&app.active_tab_mut().translate_lang)
-            };
-            if translations.len() != jobs.len() {
-                let mut saved = 0usize;
-                for ((_, entry_id, _path, _text), translation) in
-                    jobs.iter().zip(translations.iter())
-                {
-                    if translation.is_empty() {
-                        continue;
-                    }
-                    let (_, evs) = app.active_tab_mut().project.store_translation_with_event(&profile_name, *entry_id, Some(translation.clone()));
-                    for ev in evs { crate::app::handle_model_event(app.active_tab_mut(), ev); }
-                    saved += 1;
-                }
-                app.active_tab_mut().status = format!(
-                    "Translated {saved} of {} line(s) into '{profile_name}' (count mismatch, partial).",
-                    jobs.len()
-                );
-            } else {
-                let mut saved = 0usize;
-                let mut skipped = 0usize;
-                for ((_, entry_id, _path, _text), translation) in
-                    jobs.iter().zip(translations.iter())
-                {
-                    if translation.is_empty() {
-                        skipped += 1;
-                        continue;
-                    }
-                    let (_, evs) = app.active_tab_mut().project.store_translation_with_event(&profile_name, *entry_id, Some(translation.clone()));
-                    for ev in evs { crate::app::handle_model_event(app.active_tab_mut(), ev); }
-                    saved += 1;
-                }
-                if skipped > 0 {
-                    app.active_tab_mut().status = format!(
-                        "Translated {saved} of {} line(s) into '{profile_name}' ({skipped} still missing after retry, skipped).",
-                        jobs.len()
-                    );
-                } else {
-                    app.active_tab_mut().status = format!(
-                        "Translated {saved} line(s) into '{profile_name}'."
-                    );
-                }
-            }
-            // In Translate mode, update selection from AutoPlaceholder to Existing if needed
-            if is_translate_mode {
-                if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.active_tab_mut().translate_target.clone() {
-                    if name == profile_name {
-                        if let Some(id) = app.active_tab_mut().project.profiles.find_by_name(&name) {
-                            let base = resolve_base_id(app);
-                            if Some(id) != base {
-                                app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::Existing(id);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            app.active_tab_mut().status = e;
-        }
-    }
-    Task::none()
-}
-
-pub fn handle_retranslate_finished(
-    app: &mut App,
-    index: usize,
-    entry_id: EntryId,
-    result: Result<String, String>,
-) -> Task<Message> {
-    app.active_tab_mut().translating = false;
-    app.active_tab_mut().translate_anim_phase = 0.0;
-    match result {
-        Ok(mut text) => {
-            if text.len() >= 2 {
-                let quoted = (text.starts_with('"') && text.ends_with('"'))
-                    || (text.starts_with('\'') && text.ends_with('\''));
-                if quoted {
-                    text = text[1..text.len() - 1].to_string();
-                }
-            }
-            // Translate mode: write into target profile (base -> target)
-            if app.active_tab().translation_panel_mode == easyscanlate_ui::event::TranslationPanelMode::Translate {
-                let target_name = resolve_target_name(app);
-                let base_id = resolve_base_id(app);
-                if index >= app.active_tab().images.len() {
-                    app.active_tab_mut().status = "Retranslated, but that image is gone.".to_string();
-                    return Task::none();
-                }
-                let equals_original = app
-                    .active_tab()
-                    .project
-                    .entry_including_deleted(entry_id)
-                    .is_some_and(|entry| entry.text == text);
-                let stored = if equals_original { None } else { Some(text) };
-                let (_target_id, evs) = app.active_tab_mut().project.store_translation_with_event(&target_name, entry_id, stored.clone());
-                for ev in evs { crate::app::handle_model_event(app.active_tab_mut(), ev); }
-                // Update target selection to Existing if it was placeholder
-                if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.active_tab().translate_target.clone() {
-                    if name == target_name {
-                        if let Some(id) = app.active_tab().project.profiles.find_by_name(&name) {
-                            if Some(id) != base_id {
-                                app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::Existing(id);
-                            }
-                        }
-                    }
-                }
-                app.active_tab_mut().status = format!("Retranslated 1 line into '{target_name}'.");
-                return Task::none();
-            }
-            if index >= app.active_tab().images.len() {
-                app.active_tab_mut().status = "Retranslated, but that image is gone.".to_string();
-                return Task::none();
-            }
-            let equals_original = app
-                .active_tab()
-                .project
-                .entry_including_deleted(entry_id)
-                .is_some_and(|entry| entry.text == text);
-            let stored = if equals_original { None } else { Some(text) };
-            let forked_name = if let Some((name, evs)) = app.active_tab_mut().project.fork_for_edit_with_event() {
-                for ev in evs { crate::app::handle_model_event(app.active_tab_mut(), ev); }
-                Some(name)
-            } else { None };
-            let ev = app.active_tab_mut().project.set_translation_with_event(entry_id, stored.clone());
-            crate::app::handle_model_event(app.active_tab_mut(), ev);
-            let label = forked_name
-                .unwrap_or_else(|| app.active_tab_mut().project.profiles.selected().name.clone());
-            app.active_tab_mut().status = format!("Retranslated 1 line into '{label}'.");
-        }
-        Err(e) => {
-            app.active_tab_mut().status = e;
-        }
-    }
-    Task::none()
-}
-
 pub fn handle_retranslate_entry(app: &mut App, index: usize, entry_id: EntryId) -> Task<Message> {
     if app.active_state().is_bulk_busy() {
         app.active_tab_mut().status = "Wait for current task to finish.".to_string();
@@ -347,13 +181,13 @@ pub fn handle_retranslate_entry(app: &mut App, index: usize, entry_id: EntryId) 
         let (image_id, entry_text, entry_image_id) = {
             let tab = app.active_tab();
             let Some(image) = tab.images.get(index) else {
-                drop(tab);
+                let _ = tab;
                 app.active_tab_mut().status = "That result no longer exists.".to_string();
                 return Task::none();
             };
             let image_id = image.image_id;
             let Some(entry) = tab.project.entry(entry_id) else {
-                drop(tab);
+                let _ = tab;
                 app.active_tab_mut().status = "That result no longer exists.".to_string();
                 return Task::none();
             };
@@ -582,7 +416,7 @@ pub fn handle_connect_modal_cancel(app: &mut App) -> Task<Message> {
     Task::none()
 }
 
-pub fn handle_translate_finished_for(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<(usize, EntryId, String, String)>, result: Result<Vec<String>, String>) -> Task<Message> {
+pub fn handle_translate_finished(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<(usize, EntryId, String, String)>, result: Result<Vec<String>, String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     app.tabs[idx].translating = false;
     app.tabs[idx].translate_anim_phase = 0.0;
@@ -649,7 +483,7 @@ pub fn handle_translate_finished_for(app: &mut App, tab_id: crate::app::tab::Tab
     }
     Task::none()
 }
-pub fn handle_retranslate_finished_for(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, entry_id: EntryId, result: Result<String, String>) -> Task<Message> {
+pub fn handle_retranslate_finished(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, entry_id: EntryId, result: Result<String, String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     app.tabs[idx].translating = false;
     app.tabs[idx].translate_anim_phase = 0.0;

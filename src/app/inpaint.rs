@@ -1,5 +1,5 @@
 use iced::Task;
-use easyscanlate_model::{EntryId, Quad};
+use easyscanlate_model::Quad;
 #[cfg(feature = "inpaint")]
 use easyscanlate_inpaint::Engine as InpaintEngine;
 #[cfg(feature = "inpaint")]
@@ -73,98 +73,9 @@ pub fn start_inpaint(
     )
 }
 
-#[cfg(feature = "inpaint")]
-fn start_background_stitch(
-    app: &mut App,
-    engine: InpaintEngine,
-    job: AutoInpaintJob,
-    pad: f32,
-    prev: Option<String>,
-    next: Option<String>,
-) -> Task<Message> {
-    let tid = app.active_tab().id;
-    app.active_tab_mut().inpainting = true;
-    app.active_tab_mut().status = "inpainting background (stitched)...".to_string();
-    Task::perform(
-        async move {
-            let result = tokio::task::spawn_blocking(move || {
-                run_auto_job_with_stitch(&engine, &job, pad, prev.as_deref(), next.as_deref())
-            })
-            .await
-            .unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")));
-            let grouped: Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>)>, String> = result.map(|v| {
-                let mut map: std::collections::HashMap<usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>> = std::collections::HashMap::new();
-                for (idx, img, b, q) in v {
-                    map.entry(idx).or_default().push((img, b, q));
-                }
-                let mut out: Vec<_> = map.into_iter().collect();
-                out.sort_by_key(|(idx, _)| *idx);
-                out
-            });
-            grouped
-        },
-        move |res| Message::Tab(tid, crate::app::TabMessage::ManualMultiInpaintFinished(res)),
-    )
-}
 
-#[cfg(feature = "inpaint")]
-pub fn dispatch_auto(app: &mut App, jobs: Vec<AutoInpaintJob>, backend: InpaintBackend) -> Task<Message> {
-    dispatch_auto_for(app, app.active_tab().id, jobs, backend)
-}
 
-#[cfg(feature = "inpaint")]
-pub fn dispatch_auto_solo(app: &mut App, effective_model: easyscanlate_settings::AutoInpaintModel) -> Task<Message> {
-    dispatch_auto_solo_for(app, app.active_tab().id, effective_model)
-}
 
-#[cfg(feature = "inpaint")]
-pub fn handle_inpaint_engine_ready(app: &mut App, result: Result<InpaintEngine, String>) -> Task<Message> {
-    handle_inpaint_engine_ready_for(app, app.active_tab().id, result)
-}
-
-#[cfg(feature = "inpaint")]
-pub fn handle_auto_engine_ready(app: &mut App, backend: InpaintBackend, result: Result<InpaintEngine, String>) -> Task<Message> {
-    handle_auto_engine_ready_for(app, app.active_tab().id, backend, result)
-}
-
-#[cfg(feature = "inpaint")]
-pub fn handle_auto_finished(app: &mut App, index: usize, id: EntryId, result: Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<Quad>)>, String>) -> Task<Message> {
-    handle_auto_finished_for(app, app.active_tab().id, index, id, result)
-}
-
-#[cfg(feature = "inpaint")]
-fn apply_patches(app: &mut App, patches: Vec<(usize, image::RgbaImage, [f32; 4], Option<Quad>)>) {
-    let mut pending_evs: Vec<(easyscanlate_model::ImageId, [f32; 4], Option<Quad>)> = Vec::new();
-    let mut affected = std::collections::HashSet::new();
-    for (target_idx, patch, bounds, quad) in patches {
-        let Some(image_id) = app.active_tab_mut().images.get(target_idx).map(|i| i.image_id) else { continue; };
-        if let Some(image) = app.active_tab_mut().images.get_mut(target_idx) {
-            let (width, height) = (patch.width(), patch.height());
-            let layer = InpaintLayer {
-                bounds,
-                quad,
-                handle: iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(patch.into_raw())),
-                width,
-                height,
-            };
-            image.inpaint.push(layer);
-            pending_evs.push((image_id, bounds, quad));
-            affected.insert(target_idx);
-        }
-    }
-    for (image_id, bounds, quad) in pending_evs {
-        let ev = app.active_tab_mut().project.add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad);
-        crate::app::handle_model_event(app.active_tab_mut(), ev);
-    }
-    if !affected.is_empty() {
-        app.active_tab_mut().show_inpaint = true;
-    }
-}
-
-#[cfg(feature = "inpaint")]
-pub fn handle_auto_batch(app: &mut App, batch: Vec<(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<Quad>)>, String>)>) -> Task<Message> {
-    handle_auto_batch_for(app, app.active_tab().id, batch)
-}
 
 
 
@@ -423,7 +334,6 @@ fn run_auto_job_with_stitch(
                 if remaining > 0 && avail_bottom2 > extra2 {
                     let add = remaining.min(avail_bottom2 - extra2);
                     extra2 += add;
-                    remaining -= add;
                 }
             }
             h0 = raw_h0 + extra0;
@@ -739,7 +649,7 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
             (path, q)
         };
         {
-            let style = {
+            let _style = {
                 let mut s = app.active_tab().style_working.clone();
                 s.bg_color = [0, 0, 0, 0];
                 s
@@ -801,7 +711,7 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
         let cached = app.engines.inpaint.clone().filter(|engine| engine.backend() == backend && engine.radius() == radius);
         let tid = app.active_tab().id;
         return match cached {
-            Some(engine) => start_background_stitch(app, engine, job, pad, prev, next),
+            Some(engine) => start_background_stitch(app, tid, engine, job, pad, prev, next),
             None => {
                 app.active_tab_mut().pending_background_stitch = Some((job, pad, prev, next));
                 app.active_tab_mut().status = match backend {
@@ -837,7 +747,7 @@ pub fn handle_inpaint_clicked(app: &mut App, selection: Option<(usize, usize)>) 
             let (image_id, inpaint_len) = {
                 let tab = app.active_tab();
                 let Some(img) = tab.images.get(image_index) else {
-                    drop(tab);
+                    let _ = tab;
                     app.active_tab_mut().status = "That inpaint layer no longer exists.".to_string();
                     return Task::none();
                 };
@@ -887,7 +797,7 @@ pub fn handle_inpaint_delete(app: &mut App, image_index: usize, patch_idx: usize
     };
     let image_id = image.image_id;
     let inpaint_len = image.inpaint.len();
-    drop(image);
+    let _ = image;
     let extras_len = app
         .active_tab()
         .project
@@ -1194,7 +1104,8 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
     // Store pending for engine build path (weight already reserved via queue)
     if let Some(engine) = cached {
         eprintln!("[manual::inpaint] using cached engine -> start_inpaint_selection");
-        return start_inpaint_selection(app, engine, data);
+        let tid = app.active_tab().id;
+        return start_inpaint_selection(app, tid, engine, data);
     } else {
         eprintln!("[manual::inpaint] no cached engine -> pending_manual_multi len={} status loading", data.len());
         let tid = app.active_tab().id;
@@ -1208,28 +1119,7 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
     }
 }
 
-#[cfg(feature = "inpaint")]
-fn start_inpaint_selection(app: &mut App, engine: InpaintEngine, data: Vec<(usize, String, [f32; 4], Vec<Quad>)>) -> Task<Message> {
-    eprintln!("[manual::multi] start_inpaint_selection data={} backend={:?} radius={}", data.len(), engine.backend(), engine.radius());
-    for (i, (idx, path, rect, quads)) in data.iter().enumerate() {
-        eprintln!("[manual::multi]   data {}: idx={} path={} rect={:?} quads={}", i, idx, path, rect, quads.len());
-    }
-    let tid = app.active_tab().id;
-    app.active_tab_mut().inpainting = true;
-    app.active_tab_mut().status = format!("Inpainting {} selection(s) (multi)...", data.len());
-    Task::perform(
-        async move {
-            eprintln!("[manual::multi] spawn_blocking run_inpaint_selection");
-            let r = tokio::task::spawn_blocking(move || run_inpaint_selection(&engine, data))
-                .await
-                .unwrap_or_else(|e| Err(format!("inpaint multi task cancelled: {e}")));
-            eprintln!("[manual::multi] spawn_blocking done is_ok={}", r.is_ok());
-            if let Err(e) = &r { eprintln!("[manual::multi] error: {}", e); }
-            r
-        },
-        move |res| Message::Tab(tid, crate::app::TabMessage::ManualMultiInpaintFinished(res)),
-    )
-}
+
 
 #[cfg(feature = "inpaint")]
 fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<(usize, String, [f32; 4], Vec<Quad>)>) -> Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<Quad>)>)>, String> {
@@ -1408,8 +1298,8 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<(usize, String, [f32;
                 let orig_w = bw / scale;
                 let orig_h = bh / scale;
                 // resize patch back to orig size (inverse scale)
-                let pw = (orig_w.round() as u32).max(1).min(patch_img.width());
-                let ph = (orig_h.round() as u32).max(1).min(patch_img.height());
+                let _pw = (orig_w.round() as u32).max(1).min(patch_img.width());
+                let _ph = (orig_h.round() as u32).max(1).min(patch_img.height());
                 // patch_img is bounds size in canvas coords; resize to orig_w/h
                 let resized = if (orig_w as u32) != patch_img.width() || (orig_h as u32) != patch_img.height() {
                     let ow = orig_w.round().clamp(1.0, 5000.0) as u32;
@@ -1446,11 +1336,8 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<(usize, String, [f32;
             path: String,
             img_w: u32,
             img_h: u32,
-            min_x: u32,
-            max_x: u32,
             min_y: u32,
             max_y: u32,
-            w_span: u32,
             h_span: u32,
             cx: f32,
             cy: f32,
@@ -1462,15 +1349,14 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<(usize, String, [f32;
             let max_x = list.iter().map(|s| s.x0 + s.w).max().unwrap();
             let min_y = list.iter().map(|s| s.y0).min().unwrap();
             let max_y = list.iter().map(|s| s.y0 + s.h).max().unwrap();
-            let w_span = max_x - min_x;
             let h_span = max_y - min_y;
             let cx = (min_x as f32 + max_x as f32)*0.5;
             let cy = (min_y as f32 + max_y as f32)*0.5;
             let img_w = list[0].img_w;
             let img_h = list[0].img_h;
             let path = list[0].path.clone();
-            img_groups.push(ImgGroup { idx:*didx, path, img_w, img_h, min_x, max_x, min_y, max_y, w_span, h_span, cx, cy });
-            eprintln!("[manual::multi]   img_group idx={} bbox [{},{},{},{}] w_span={} h_span={} cx={:.1} cy={:.1} img={}x{}", didx, min_x, min_y, max_x, max_y, w_span, h_span, cx, cy, img_w, img_h);
+            img_groups.push(ImgGroup { idx:*didx, path, img_w, img_h, min_y, max_y, h_span, cx, cy });
+            eprintln!("[manual::multi]   img_group idx={} bbox [{},{},{},{}] h_span={} cx={:.1} cy={:.1} img={}x{}", didx, min_x, min_y, max_x, max_y, h_span, cx, cy, img_w, img_h);
         }
         // Allocate window heights to fill 512 if stitch multiple
         // For single distinct, window is single 512 window centered on bbox
@@ -1577,7 +1463,7 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<(usize, String, [f32;
             if extra_needed > 0 {
                 // Simple distribution: split extra_needed equally, capped by avail
                 // First compute total avail
-                let avails: Vec<u32> = img_groups.iter().map(|g| (g.min_y + (g.img_h - g.max_y)) ).collect();
+                let avails: Vec<u32> = img_groups.iter().map(|g| g.min_y + (g.img_h - g.max_y) ).collect();
                 let total_avail: u32 = avails.iter().sum();
                 eprintln!("[manual::multi]   avails {:?} total_avail {}", avails, total_avail);
                 if total_avail >= extra_needed {
@@ -1621,13 +1507,6 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<(usize, String, [f32;
                 w_src: u32,
                 h_src: u32,
                 off_y: u32,
-                // for mapping sels
-                min_x: u32,
-                max_x: u32,
-                min_y: u32,
-                max_y: u32,
-                cx: f32,
-                cy: f32,
             }
             let mut pieces_win: Vec<PieceWin> = Vec::new();
             let mut off_y: u32 = 0;
@@ -1661,8 +1540,8 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<(usize, String, [f32;
                 let w_src = CANVAS.min(ig.img_w);
                 let mut x_src = (ig.cx - w_src as f32*0.5).round() as i32;
                 x_src = x_src.clamp(0, ig.img_w as i32 - w_src as i32).max(0);
-                eprintln!("[manual::multi]   piece win idx={} h_span={} extra={} top={} bottom={} y_src={} h_src={} x_src={} w_src={} off_y={} min/max [{},{}] [{},{}]", ig.idx, ig.h_span, extra, top_extra, bottom_extra, y_src, h_src, x_src, w_src, off_y, ig.min_x, ig.max_x, ig.min_y, ig.max_y);
-                pieces_win.push(PieceWin { idx: ig.idx, path: ig.path.clone(), img_w: ig.img_w, img_h: ig.img_h, x_src, y_src, w_src, h_src, off_y, min_x: ig.min_x, max_x: ig.max_x, min_y: ig.min_y, max_y: ig.max_y, cx: ig.cx, cy: ig.cy });
+                eprintln!("[manual::multi]   piece win idx={} h_span={} extra={} top={} bottom={} y_src={} h_src={} x_src={} w_src={} off_y={} [{},{}]", ig.idx, ig.h_span, extra, top_extra, bottom_extra, y_src, h_src, x_src, w_src, off_y, ig.min_y, ig.max_y);
+                pieces_win.push(PieceWin { idx: ig.idx, path: ig.path.clone(), img_w: ig.img_w, img_h: ig.img_h, x_src, y_src, w_src, h_src, off_y });
                 off_y += h_src;
             }
             let total_h_stitched: u32 = pieces_win.iter().map(|p| p.h_src).sum();
@@ -1805,66 +1684,15 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<(usize, String, [f32;
 }
 
 #[cfg(feature = "inpaint")]
-pub fn handle_inpaint_finished(app: &mut App, result: Result<Vec<(usize, Vec<(image::RgbaImage, [f32;4], Option<Quad>)>)>, String>) -> Task<Message> {
-    eprintln!("[manual::multi] handle_inpaint_finished result.is_ok={} inpainting was {}", result.is_ok(), app.active_tab_mut().inpainting);
-    app.active_tab_mut().inpainting = false;
-    match result {
-        Ok(per_image_patches) => {
-            eprintln!("[manual::multi] finished per_image len={}", per_image_patches.len());
-            for (idx, patches) in &per_image_patches {
-                eprintln!("[manual::multi]   idx={} patches={}", idx, patches.len());
-                for (pi, (patch, bounds, quad)) in patches.iter().enumerate() {
-                    eprintln!("[manual::multi]     patch {}: bounds={:?} patch={}x{} quad={:?}", pi, bounds, patch.width(), patch.height(), quad.map(|q| q.points));
-                }
-            }
-            let mut total=0usize;
-            let mut pending_evs = Vec::new();
-            for (idx, patches) in per_image_patches {
-                let Some(image_id) = app.active_tab_mut().images.get(idx).map(|i| i.image_id) else {
-                    eprintln!("[manual::multi]   idx {} no image_id -> skip", idx);
-                    continue;
-                };
-                let Some(image) = app.active_tab_mut().images.get_mut(idx) else {
-                    eprintln!("[manual::multi]   idx {} no image -> skip", idx);
-                    continue;
-                };
-                for (patch, bounds, quad) in patches {
-                    total+=1;
-                    eprintln!("[manual::multi]   pushing layer idx={} bounds={:?} quad={:?} patch={}x{}", idx, bounds, quad.map(|q| q.points), patch.width(), patch.height());
-                    let (width,height)=(patch.width(), patch.height());
-                    let layer = InpaintLayer { bounds, quad, handle: iced::widget::image::Handle::from_rgba(width,height, bytes::Bytes::from(patch.into_raw())), width, height };
-                    image.inpaint.push(layer);
-                    pending_evs.push((image_id, bounds, quad));
-                }
-            }
-            for (image_id, bounds, quad) in pending_evs {
-                eprintln!("[manual::multi]   add_inpaint_patch image_id={:?} bounds={:?} quad={:?}", image_id, bounds, quad.map(|q| q.points));
-                let ev = app.active_tab_mut().project.add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad);
-                crate::app::handle_model_event(app.active_tab_mut(), ev);
-            }
-            app.active_tab_mut().show_inpaint = true;
-            // keep manual mode active but selections already cleared; status update
-            app.active_tab_mut().status = format!("Inpainted {total} region(s) (multi).");
-            eprintln!("[manual::multi] done total={} show_inpaint=true status={}", total, app.active_tab_mut().status);
-        }
-        Err(e) => {
-            eprintln!("[manual::multi] failed: {}", e);
-            app.active_tab_mut().status = format!("Multi inpaint failed: {e}");
-        }
-    }
-    Task::none()
-}
-
-#[cfg(feature = "inpaint")]
-pub fn handle_inpaint_engine_ready_for(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<InpaintEngine, String>) -> Task<Message> {
+pub fn handle_inpaint_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<InpaintEngine, String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     match result {
         Ok(engine) => {
             app.engines.inpaint = Some(engine.clone());
             let data = app.tabs[idx].pending_manual_multi.take();
-            if let Some(d) = data { return start_inpaint_selection_for(app, tab_id, engine, d); }
+            if let Some(d) = data { return start_inpaint_selection(app, tab_id, engine, d); }
             let bg = app.tabs[idx].pending_background_stitch.take();
-            if let Some((job, pad, prev, next)) = bg { return start_background_stitch_for(app, tab_id, engine, job, pad, prev, next); }
+            if let Some((job, pad, prev, next)) = bg { return start_background_stitch(app, tab_id, engine, job, pad, prev, next); }
             Task::none()
         }
         Err(e) => {
@@ -1886,7 +1714,7 @@ pub fn handle_inpaint_engine_ready_for(app: &mut App, tab_id: crate::app::tab::T
     }
 }
 #[cfg(feature = "inpaint")]
-pub fn handle_auto_engine_ready_for(app: &mut App, tab_id: crate::app::tab::TabId, backend: InpaintBackend, result: Result<InpaintEngine, String>) -> Task<Message> {
+pub fn handle_auto_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, backend: InpaintBackend, result: Result<InpaintEngine, String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     match result {
         Ok(engine) => {
@@ -1894,17 +1722,17 @@ pub fn handle_auto_engine_ready_for(app: &mut App, tab_id: crate::app::tab::TabI
                 InpaintBackend::Telea => {
                     app.engines.auto_telea = Some(engine.clone());
                     let jobs = app.tabs[idx].pending_auto_telea_jobs.take();
-                    if let Some(j) = jobs { return dispatch_auto_for(app, tab_id, j, InpaintBackend::Telea); }
+                    if let Some(j) = jobs { return dispatch_auto(app, tab_id, j, InpaintBackend::Telea); }
                 }
                 InpaintBackend::Lama => {
                     app.engines.auto_lama = Some(engine.clone());
                     let jobs = app.tabs[idx].pending_auto_lama_jobs.take();
-                    if let Some(j) = jobs { return dispatch_auto_for(app, tab_id, j, InpaintBackend::Lama); }
+                    if let Some(j) = jobs { return dispatch_auto(app, tab_id, j, InpaintBackend::Lama); }
                 }
                 InpaintBackend::Aot => {
                     app.engines.auto_aot = Some(engine.clone());
                     let jobs = app.tabs[idx].pending_auto_aot_jobs.take();
-                    if let Some(j) = jobs { return dispatch_auto_for(app, tab_id, j, InpaintBackend::Aot); }
+                    if let Some(j) = jobs { return dispatch_auto(app, tab_id, j, InpaintBackend::Aot); }
                 }
             }
             Task::none()
@@ -1932,7 +1760,7 @@ pub fn handle_auto_engine_ready_for(app: &mut App, tab_id: crate::app::tab::TabI
     }
 }
 #[cfg(feature = "inpaint")]
-pub fn handle_auto_finished_for(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, id: easyscanlate_model::EntryId, result: Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<easyscanlate_model::Quad>)>, String>) -> Task<Message> {
+pub fn handle_auto_finished(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, id: easyscanlate_model::EntryId, result: Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<easyscanlate_model::Quad>)>, String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     app.tabs[idx].auto_inpaint_pending = app.tabs[idx].auto_inpaint_pending.saturating_sub(1);
     let pending = app.tabs[idx].auto_inpaint_pending;
@@ -1993,7 +1821,7 @@ pub fn handle_auto_finished_for(app: &mut App, tab_id: crate::app::tab::TabId, i
     Task::none()
 }
 #[cfg(feature = "inpaint")]
-pub fn handle_auto_batch_for(app: &mut App, tab_id: crate::app::tab::TabId, batch: Vec<(usize, easyscanlate_model::EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<easyscanlate_model::Quad>)>, String>)>) -> Task<Message> {
+pub fn handle_auto_batch(app: &mut App, tab_id: crate::app::tab::TabId, batch: Vec<(usize, easyscanlate_model::EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<easyscanlate_model::Quad>)>, String>)>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     for (_index, id, result) in batch {
         app.tabs[idx].auto_inpaint_pending = app.tabs[idx].auto_inpaint_pending.saturating_sub(1);
@@ -2040,7 +1868,7 @@ pub fn handle_auto_batch_for(app: &mut App, tab_id: crate::app::tab::TabId, batc
     Task::none()
 }
 #[cfg(feature = "inpaint")]
-pub fn handle_inpaint_finished_for(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<Vec<(usize, Vec<(image::RgbaImage, [f32;4], Option<easyscanlate_model::Quad>)>)>, String>) -> Task<Message> {
+pub fn handle_inpaint_finished(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<Vec<(usize, Vec<(image::RgbaImage, [f32;4], Option<easyscanlate_model::Quad>)>)>, String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     app.tabs[idx].inpainting = false;
     match result {
@@ -2083,7 +1911,7 @@ pub fn handle_inpaint_finished_for(app: &mut App, tab_id: crate::app::tab::TabId
     Task::none()
 }
 #[cfg(feature = "inpaint")]
-pub fn dispatch_auto_for(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<AutoInpaintJob>, backend: InpaintBackend) -> Task<Message> {
+pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<AutoInpaintJob>, backend: InpaintBackend) -> Task<Message> {
     if jobs.is_empty() { return Task::none(); }
     // queue gate — weights 1/4/3 backfill + priority (cap 5)
     {
@@ -2188,7 +2016,7 @@ pub fn dispatch_auto_for(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Ve
     }
 }
 #[cfg(feature = "inpaint")]
-pub fn dispatch_auto_solo_for(app: &mut App, tab_id: crate::app::tab::TabId, effective_model: easyscanlate_settings::AutoInpaintModel) -> Task<Message> {
+pub fn dispatch_auto_solo(app: &mut App, tab_id: crate::app::tab::TabId, effective_model: easyscanlate_settings::AutoInpaintModel) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     let mut jobs: Vec<AutoInpaintJob> = Vec::new();
     {
@@ -2209,32 +2037,25 @@ pub fn dispatch_auto_solo_for(app: &mut App, tab_id: crate::app::tab::TabId, eff
         crate::app::handle_model_event(&mut app.tabs[idx], ev);
     }
     let backend = match effective_model { easyscanlate_settings::AutoInpaintModel::Telea=>InpaintBackend::Telea, easyscanlate_settings::AutoInpaintModel::Lama=>InpaintBackend::Lama, easyscanlate_settings::AutoInpaintModel::Aot=>InpaintBackend::Aot, easyscanlate_settings::AutoInpaintModel::Mixed=>InpaintBackend::Telea };
-    dispatch_auto_for(app, tab_id, jobs, backend)
+    dispatch_auto(app, tab_id, jobs, backend)
 }
 #[cfg(feature = "inpaint")]
-pub(crate) fn start_inpaint_selection_for(app: &mut App, tab_id: crate::app::tab::TabId, engine: InpaintEngine, data: Vec<(usize, String, [f32;4], Vec<easyscanlate_model::Quad>)>) -> Task<Message> {
+pub(crate) fn start_inpaint_selection(app: &mut App, tab_id: crate::app::tab::TabId, engine: InpaintEngine, data: Vec<(usize, String, [f32;4], Vec<easyscanlate_model::Quad>)>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     app.tabs[idx].inpainting = true;
     app.tabs[idx].status = "inpainting...".to_string();
     let tid = tab_id;
     Task::perform(
         async move {
-            tokio::task::spawn_blocking(move || {
-                let mut out: std::collections::HashMap<usize, Vec<(image::RgbaImage, [f32;4], Option<easyscanlate_model::Quad>)>> = std::collections::HashMap::new();
-                for (idx, path, rect, quads) in data {
-                    let res = engine.run_blocking(&path, rect, &quads)?;
-                    for (img,b,q) in res { out.entry(idx).or_default().push((img,b,q)); }
-                }
-                let mut vec: Vec<(usize, Vec<(image::RgbaImage, [f32;4], Option<easyscanlate_model::Quad>)>)> = out.into_iter().collect();
-                vec.sort_by_key(|(i,_)| *i);
-                Ok(vec)
-            }).await.unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")))
+            tokio::task::spawn_blocking(move || run_inpaint_selection(&engine, data))
+                .await
+                .unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")))
         },
         move |res| Message::Tab(tid, crate::app::TabMessage::ManualMultiInpaintFinished(res)),
     )
 }
 #[cfg(feature = "inpaint")]
-pub(crate) fn start_background_stitch_for(app: &mut App, tab_id: crate::app::tab::TabId, engine: InpaintEngine, job: AutoInpaintJob, pad: f32, prev: Option<String>, next: Option<String>) -> Task<Message> {
+pub(crate) fn start_background_stitch(app: &mut App, tab_id: crate::app::tab::TabId, engine: InpaintEngine, job: AutoInpaintJob, pad: f32, prev: Option<String>, next: Option<String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     app.tabs[idx].inpainting = true;
     app.tabs[idx].status = "inpainting background (stitched)...".to_string();

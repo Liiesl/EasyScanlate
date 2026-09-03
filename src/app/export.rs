@@ -493,10 +493,7 @@ pub fn handle_export_all(app: &mut App) -> Task<Message> {
     )
 }
 
-pub fn handle_export_picked(app: &mut App, folder: Option<String>) -> Task<Message> {
-    handle_export_picked_for(app, app.active_tab().id, folder)
-}
-pub fn handle_export_picked_for(app: &mut App, tab_id: crate::app::tab::TabId, folder: Option<String>) -> Task<Message> {
+pub fn handle_export_picked(app: &mut App, tab_id: crate::app::tab::TabId, folder: Option<String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     let Some(folder_str) = folder else {
         app.tabs[idx].status = "Export cancelled.".to_string();
@@ -661,10 +658,7 @@ fn export_blocking(
     }
 }
 
-pub fn handle_export_finished(app: &mut App, result: Result<String, String>) -> Task<Message> {
-    handle_export_finished_for(app, app.active_tab().id, result)
-}
-pub fn handle_export_finished_for(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<String, String>) -> Task<Message> {
+pub fn handle_export_finished(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<String, String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     match result {
         Ok(msg) => app.tabs[idx].status = msg,

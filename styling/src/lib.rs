@@ -12,7 +12,6 @@
 //! no aspect-ratio letterboxing), normalized, and classified.
 
 use std::fmt;
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use image::RgbImage;
@@ -30,7 +29,6 @@ pub use tracker::JobTracker;
 pub const MODEL_WIDTH: u32 = 160;
 pub const MODEL_HEIGHT: u32 = 64;
 
-const MODEL_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../models");
 const MODEL_FILE: &str = "text_styling_model.onnx";
 
 /// ImageNet normalization constants the model was trained with.

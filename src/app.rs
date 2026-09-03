@@ -481,7 +481,7 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
     match &msg {
         TabMessage::MmtlLoaded(_) | TabMessage::RecentPickedToLoad(_) | TabMessage::CreateProjectPicked(_) => {
             return match msg {
-                TabMessage::MmtlLoaded(res) => mmtl::handle_loaded_for(app, tab_id, res),
+                TabMessage::MmtlLoaded(res) => mmtl::handle_loaded(app, tab_id, res),
                 TabMessage::RecentPickedToLoad(res) => {
                     match res {
                         Ok((project, images, display, temp_dir)) => {
@@ -587,15 +587,15 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
             tab.scheduler.settle_with_project(&mut tab.images, &project_clone, move |i, r| Message::Tab(tid, TabMessage::FullDecoded(i, r)))
         }
         #[cfg(feature = "ocr")]
-        TabMessage::ParallelEngineReady(result) => ocr::handle_parallel_ready_for(app, tab_id, result),
+        TabMessage::ParallelEngineReady(result) => ocr::handle_parallel_ready(app, tab_id, result),
         #[cfg(feature = "ocr")]
-        TabMessage::ManualOcrEngineReady(result) => ocr::handle_manual_ocr_engine_ready_for(app, tab_id, result),
+        TabMessage::ManualOcrEngineReady(result) => ocr::handle_manual_ocr_engine_ready(app, tab_id, result),
         #[cfg(feature = "ocr")]
-        TabMessage::ManualOcrMultiFinished(result) => ocr::handle_manual_ocr_finished_for(app, tab_id, result),
+        TabMessage::ManualOcrMultiFinished(result) => ocr::handle_manual_ocr_finished(app, tab_id, result),
         #[cfg(feature = "ocr")]
-        TabMessage::OcrStreamRun(result) => ocr::handle_ocr_stream_run_for(app, tab_id, result),
+        TabMessage::OcrStreamRun(result) => ocr::handle_ocr_stream_run(app, tab_id, result),
         #[cfg(feature = "ocr")]
-        TabMessage::OcrStreamFailed(e) => ocr::handle_ocr_stream_failed_for(app, tab_id, e),
+        TabMessage::OcrStreamFailed(e) => ocr::handle_ocr_stream_failed(app, tab_id, e),
         #[cfg(feature = "ocr")]
         TabMessage::OcrTick => {
             // OcrTick is per-tab; nothing to do besides ensure still running
@@ -610,32 +610,32 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
             Task::none()
         }
         #[cfg(feature = "inpaint")]
-        TabMessage::InpaintEngineReady(result) => inpaint::handle_inpaint_engine_ready_for(app, tab_id, result),
+        TabMessage::InpaintEngineReady(result) => inpaint::handle_inpaint_engine_ready(app, tab_id, result),
         #[cfg(feature = "styling")]
-        TabMessage::StylingEngineReady(result) => styling::handle_styling_ready_for(app, tab_id, result),
+        TabMessage::StylingEngineReady(result) => styling::handle_styling_ready(app, tab_id, result),
         #[cfg(feature = "styling")]
-        TabMessage::StyleDetected(index, id, result) => styling::handle_style_detected_for(app, tab_id, index, id, result),
+        TabMessage::StyleDetected(index, id, result) => styling::handle_style_detected(app, tab_id, index, id, result),
         #[cfg(all(feature = "styling", feature = "inpaint"))]
-        TabMessage::PipelineStyleDetected(index, id, result) => styling::handle_pipeline_style_detected_for(app, tab_id, index, id, result),
+        TabMessage::PipelineStyleDetected(index, id, result) => styling::handle_pipeline_style_detected(app, tab_id, index, id, result),
         #[cfg(feature = "inpaint")]
-        TabMessage::AutoInpaintEngineReady(backend, result) => inpaint::handle_auto_engine_ready_for(app, tab_id, backend, result),
+        TabMessage::AutoInpaintEngineReady(backend, result) => inpaint::handle_auto_engine_ready(app, tab_id, backend, result),
         #[cfg(feature = "inpaint")]
-        TabMessage::AutoInpaintFinished(index, id, result) => inpaint::handle_auto_finished_for(app, tab_id, index, id, result),
+        TabMessage::AutoInpaintFinished(index, id, result) => inpaint::handle_auto_finished(app, tab_id, index, id, result),
         #[cfg(feature = "inpaint")]
-        TabMessage::AutoInpaintLamaBatchFinished(batch) => inpaint::handle_auto_batch_for(app, tab_id, batch),
+        TabMessage::AutoInpaintLamaBatchFinished(batch) => inpaint::handle_auto_batch(app, tab_id, batch),
         #[cfg(feature = "inpaint")]
-        TabMessage::AutoInpaintAotBatchFinished(batch) => inpaint::handle_auto_batch_for(app, tab_id, batch),
+        TabMessage::AutoInpaintAotBatchFinished(batch) => inpaint::handle_auto_batch(app, tab_id, batch),
         #[cfg(feature = "segment")]
-        TabMessage::SegmentEngineReady(result) => segment::handle_engine_ready_for(app, tab_id, result),
+        TabMessage::SegmentEngineReady(result) => segment::handle_engine_ready(app, tab_id, result),
         #[cfg(feature = "segment")]
-        TabMessage::SegmentFiltered(result) => segment::handle_filtered_for(app, tab_id, result),
+        TabMessage::SegmentFiltered(result) => segment::handle_filtered(app, tab_id, result),
         #[cfg(feature = "inpaint")]
-        TabMessage::ManualMultiInpaintFinished(result) => inpaint::handle_inpaint_finished_for(app, tab_id, result),
-        TabMessage::TranslateFinished(jobs, result) => translation::handle_translate_finished_for(app, tab_id, jobs, result),
-        TabMessage::RetranslateFinished((index, entry_id), result) => translation::handle_retranslate_finished_for(app, tab_id, index, entry_id, result),
-        TabMessage::MmtlSavePicked(picked) => mmtl::handle_save_picked_for(app, tab_id, picked),
-        TabMessage::MmtlOpenPicked(picked) => mmtl::handle_open_picked_for(app, tab_id, picked),
-        TabMessage::MmtlSaved(result) => mmtl::handle_saved_for(app, tab_id, result),
+        TabMessage::ManualMultiInpaintFinished(result) => inpaint::handle_inpaint_finished(app, tab_id, result),
+        TabMessage::TranslateFinished(jobs, result) => translation::handle_translate_finished(app, tab_id, jobs, result),
+        TabMessage::RetranslateFinished((index, entry_id), result) => translation::handle_retranslate_finished(app, tab_id, index, entry_id, result),
+        TabMessage::MmtlSavePicked(picked) => mmtl::handle_save_picked(app, tab_id, picked),
+        TabMessage::MmtlOpenPicked(picked) => mmtl::handle_open_picked(app, tab_id, picked),
+        TabMessage::MmtlSaved(result) => mmtl::handle_saved(app, tab_id, result),
         TabMessage::NewProjectSourcePicked(result) => {
             match result {
                 Ok(files) if !files.is_empty() => {
@@ -660,8 +660,8 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
             if let Some(p) = picked { if let Some(np) = app.new_project.as_mut() { np.project_location = Some(p); } }
             Task::none()
         }
-        TabMessage::ExportFolderPicked(picked) => export::handle_export_picked_for(app, tab_id, picked),
-        TabMessage::ExportFinished(result) => export::handle_export_finished_for(app, tab_id, result),
+        TabMessage::ExportFolderPicked(picked) => export::handle_export_picked(app, tab_id, picked),
+        TabMessage::ExportFinished(result) => export::handle_export_finished(app, tab_id, result),
         TabMessage::MmtlLoaded(_) | TabMessage::CreateProjectPicked(_) | TabMessage::RecentPickedToLoad(_) => {
             unreachable!("MmtlLoaded/Create/Recent are handled before the idx guard")
         }

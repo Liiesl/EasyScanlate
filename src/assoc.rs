@@ -18,7 +18,7 @@ pub const PROG_DESC: &str = "Manga OCR Tool Project";
 
 #[cfg(all(windows, feature = "file-assoc"))]
 mod imp {
-    use super::{EXT, PROG_DESC, PROG_ID};
+    use super::{PROG_DESC, PROG_ID};
     use winreg::enums::HKEY_CURRENT_USER;
     use winreg::RegKey;
 

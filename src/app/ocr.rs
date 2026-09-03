@@ -5,17 +5,10 @@ use easyscanlate_model::{NewEntry, Quad};
 #[cfg(feature = "ocr")]
 use easyscanlate_ocr::{self as ocr, ParallelEngine};
 
-use easyscanlate_ui::UiState;
-
 use super::{App, Message};
 
 #[cfg(feature = "ocr")]
-pub fn start_ocr_stream(app: &mut App) -> Task<Message> {
-    start_ocr_stream_for(app, app.active_tab().id)
-}
-
-#[cfg(feature = "ocr")]
-pub fn start_ocr_stream_for(app: &mut App, tab_id: super::tab::TabId) -> Task<Message> {
+pub fn start_ocr_stream(app: &mut App, tab_id: super::tab::TabId) -> Task<Message> {
     let pipeline = app
         .engines
         .pipeline
@@ -86,55 +79,12 @@ pub fn start_ocr_stream_for(app: &mut App, tab_id: super::tab::TabId) -> Task<Me
 }
 
 #[cfg(feature = "ocr")]
-pub fn commit_per_page(app: &mut App, per_page: Vec<(usize, Vec<NewEntry>)>) {
-    for (page, entries) in per_page {
-        let Some(image) = app.active_tab_mut().images.get(page) else {
-            continue;
-        };
-        let image_id = image.image_id;
-        let count = entries.len();
-        if let Some(ev) = app.active_tab_mut().project.append_ocr_for_image_with_event(image_id, entries) {
-            // ocr_total tracks total appended lines, matches ids length
-            if let easyscanlate_model::ModelEvent::EntriesAdded { ids, .. } = &ev {
-                app.active_tab_mut().ocr_total += ids.len();
-            } else {
-                app.active_tab_mut().ocr_total += count;
-            }
-            crate::app::handle_model_event(app.active_tab_mut(), ev);
-        }
-    }
-}
-
-#[cfg(feature = "ocr")]
-pub fn flush_held_boundary(app: &mut App) {
-    if let Some(state) = app.active_tab_mut().held_boundary.take() {
-        for candidate in state.candidates {
-            if let Some(image) = app.active_tab_mut().images.get(candidate.page) {
-                let image_id = image.image_id;
-                if let Some(ev) = app.active_tab_mut().project.append_ocr_for_image_with_event(image_id, vec![candidate.entry]) {
-                    if let easyscanlate_model::ModelEvent::EntriesAdded { ids, .. } = &ev {
-                        app.active_tab_mut().ocr_total += ids.len();
-                    } else {
-                        app.active_tab_mut().ocr_total += 1;
-                    }
-                    crate::app::handle_model_event(app.active_tab_mut(), ev);
-                }
-            }
-        }
-    }
-}
-
-#[cfg(feature = "ocr")]
-pub fn maybe_start_ocr(app: &mut App) -> Task<Message> {
-    maybe_start_ocr_for(app, app.active_tab().id)
-}
-#[cfg(feature = "ocr")]
-pub fn maybe_start_ocr_for(app: &mut App, tab_id: super::tab::TabId) -> Task<Message> {
+pub fn maybe_start_ocr(app: &mut App, tab_id: super::tab::TabId) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     if app.tabs[idx].running && app.engines.pipeline.is_some() {
         let token = app.engines.pipeline.as_ref().map(|pipeline| pipeline.cancellation_token().clone());
         app.tabs[idx].cancel = token;
-        start_ocr_stream_for(app, tab_id)
+        start_ocr_stream(app, tab_id)
     } else if !app.tabs[idx].running {
         if let Some(pipeline) = app.engines.pipeline.take() {
             pipeline.cancel();
@@ -143,28 +93,6 @@ pub fn maybe_start_ocr_for(app: &mut App, tab_id: super::tab::TabId) -> Task<Mes
     } else {
         Task::none()
     }
-}
-
-#[cfg(feature = "ocr")]
-pub fn finalize_run(app: &mut App) {
-    flush_held_boundary(app);
-    let (total, failed, cancelled) = {
-        let tab = app.active_tab();
-        (tab.ocr_total, tab.ocr_failed, tab.ocr_cancelled)
-    };
-    app.active_tab_mut().running = false;
-    app.active_tab_mut().cancel = None;
-    app.engines.pipeline = None;
-    app.active_tab_mut().status = if cancelled {
-        "OCR cancelled.".to_string()
-    } else if failed > 0 {
-        format!(
-            "OCR done: {} line(s), {} run(s) failed.",
-            total, failed
-        )
-    } else {
-        format!("OCR done: {} line(s).", total)
-    };
 }
 
 pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
@@ -282,7 +210,7 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
                         move |res| Message::Tab(tid, crate::app::TabMessage::ParallelEngineReady(res)),
                     );
                 }
-                return maybe_start_ocr_for(app, tab_id);
+                return maybe_start_ocr(app, tab_id);
             }
             AcquireResult::Queued(_, pos) => {
                 let idx = app.tabs.iter().position(|t| t.id == tab_id).unwrap();
@@ -328,15 +256,11 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
 }
 
 #[cfg(feature = "ocr")]
-pub fn handle_parallel_ready(app: &mut App, result: Result<ParallelEngine, String>) -> Task<Message> {
-    handle_parallel_ready_for(app, app.active_tab().id, result)
-}
-#[cfg(feature = "ocr")]
-pub fn handle_parallel_ready_for(app: &mut App, tab_id: super::tab::TabId, result: Result<ParallelEngine, String>) -> Task<Message> {
+pub fn handle_parallel_ready(app: &mut App, tab_id: super::tab::TabId, result: Result<ParallelEngine, String>) -> Task<Message> {
     match result {
         Ok(pipeline) => {
             app.engines.pipeline = Some(pipeline.clone());
-            maybe_start_ocr_for(app, tab_id)
+            maybe_start_ocr(app, tab_id)
         }
         Err(e) => {
             if let Some(tab) = app.tab_by_id_mut(tab_id) {
@@ -381,11 +305,7 @@ pub fn handle_stop_ocr(app: &mut App) -> Task<Message> {
 }
 
 #[cfg(feature = "ocr")]
-pub fn handle_ocr_stream_run(app: &mut App, result: Result<ocr::RunEvent, String>) -> Task<Message> {
-    handle_ocr_stream_run_for(app, app.active_tab().id, result)
-}
-#[cfg(feature = "ocr")]
-pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, result: Result<ocr::RunEvent, String>) -> Task<Message> {
+pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: Result<ocr::RunEvent, String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     app.tabs[idx].pending = app.tabs[idx].pending.saturating_sub(1);
     match result {
@@ -528,7 +448,7 @@ pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, resul
                     }
                     match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Segment) {
                         AcquireResult::Acquired(_) => {
-                            tasks.push(super::segment::start_segment_filter_for(app, tab_id));
+                            tasks.push(super::segment::start_segment_filter(app, tab_id));
                         }
                         AcquireResult::Queued(_, pos) => {
                             let used = app.engines.queue.used_weight();
@@ -549,7 +469,7 @@ pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, resul
                     #[cfg(feature = "styling")]
                     if do_style && !do_inpaint {
                         match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Style) {
-                            AcquireResult::Acquired(_) => tasks.push(super::styling::classify_for(app, tab_id)),
+                            AcquireResult::Acquired(_) => tasks.push(super::styling::classify(app, tab_id)),
                             AcquireResult::Queued(_, pos) => {
                                 let used = app.engines.queue.used_weight();
                                 if let Some(t) = app.tab_by_id_mut(tab_id) {
@@ -567,7 +487,7 @@ pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, resul
                             easyscanlate_settings::AutoInpaintModel::Mixed => EngineKind::InpaintTelea,
                         };
                         match app.engines.queue.try_acquire_or_enqueue(tab_id, kind) {
-                            AcquireResult::Acquired(_) => tasks.push(super::inpaint::dispatch_auto_solo_for(app, tab_id, effective_model)),
+                            AcquireResult::Acquired(_) => tasks.push(super::inpaint::dispatch_auto_solo(app, tab_id, effective_model)),
                             AcquireResult::Queued(_, pos) => {
                                 let used = app.engines.queue.used_weight();
                                 if let Some(t) = app.tab_by_id_mut(tab_id) {
@@ -579,7 +499,7 @@ pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, resul
                     #[cfg(all(feature = "styling", feature = "inpaint"))]
                     if do_style && do_inpaint {
                         match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Style) {
-                            AcquireResult::Acquired(_) => tasks.push(super::styling::classify_for(app, tab_id)),
+                            AcquireResult::Acquired(_) => tasks.push(super::styling::classify(app, tab_id)),
                             AcquireResult::Queued(_, pos) => {
                                 let used = app.engines.queue.used_weight();
                                 if let Some(t) = app.tab_by_id_mut(tab_id) {
@@ -593,7 +513,7 @@ pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, resul
                 #[cfg(all(feature = "styling", feature = "inpaint"))]
                 if do_style && do_inpaint {
                     match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Style) {
-                        AcquireResult::Acquired(_) => tasks.push(super::styling::classify_for(app, tab_id)),
+                        AcquireResult::Acquired(_) => tasks.push(super::styling::classify(app, tab_id)),
                         AcquireResult::Queued(_, pos) => {
                                 let used = app.engines.queue.used_weight();
                                 if let Some(t) = app.tab_by_id_mut(tab_id) {
@@ -605,7 +525,7 @@ pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, resul
                 #[cfg(feature = "styling")]
                 if do_style && !do_inpaint {
                     match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Style) {
-                        AcquireResult::Acquired(_) => tasks.push(super::styling::classify_for(app, tab_id)),
+                        AcquireResult::Acquired(_) => tasks.push(super::styling::classify(app, tab_id)),
                         AcquireResult::Queued(_, pos) => {
                                 let used = app.engines.queue.used_weight();
                                 if let Some(t) = app.tab_by_id_mut(tab_id) {
@@ -623,7 +543,7 @@ pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, resul
                         easyscanlate_settings::AutoInpaintModel::Mixed => EngineKind::InpaintTelea,
                     };
                     match app.engines.queue.try_acquire_or_enqueue(tab_id, kind) {
-                        AcquireResult::Acquired(_) => tasks.push(super::inpaint::dispatch_auto_solo_for(app, tab_id, effective_model)),
+                        AcquireResult::Acquired(_) => tasks.push(super::inpaint::dispatch_auto_solo(app, tab_id, effective_model)),
                         AcquireResult::Queued(_, pos) => {
                                 let used = app.engines.queue.used_weight();
                                 if let Some(t) = app.tab_by_id_mut(tab_id) {
@@ -653,11 +573,7 @@ pub fn handle_ocr_stream_run_for(app: &mut App, tab_id: super::tab::TabId, resul
 }
 
 #[cfg(feature = "ocr")]
-pub fn handle_ocr_stream_failed(app: &mut App, e: String) -> Task<Message> {
-    handle_ocr_stream_failed_for(app, app.active_tab().id, e)
-}
-#[cfg(feature = "ocr")]
-pub fn handle_ocr_stream_failed_for(app: &mut App, tab_id: super::tab::TabId, e: String) -> Task<Message> {
+pub fn handle_ocr_stream_failed(app: &mut App, tab_id: super::tab::TabId, e: String) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none()};
     app.tabs[idx].ocr_failed += 1;
     if e == "cancelled" {
@@ -706,17 +622,13 @@ pub fn handle_ocr_stream_failed_for(app: &mut App, tab_id: super::tab::TabId, e:
 
 
 #[cfg(feature = "ocr")]
-pub fn handle_manual_ocr_engine_ready(app: &mut App, result: Result<ocr::Engine, String>) -> Task<Message> {
-    handle_manual_ocr_engine_ready_for(app, app.active_tab().id, result)
-}
-#[cfg(feature = "ocr")]
-pub fn handle_manual_ocr_engine_ready_for(app: &mut App, tab_id: super::tab::TabId, result: Result<ocr::Engine, String>) -> Task<Message> {
+pub fn handle_manual_ocr_engine_ready(app: &mut App, tab_id: super::tab::TabId, result: Result<ocr::Engine, String>) -> Task<Message> {
     match result {
         Ok(engine) => {
             app.engines.manual_ocr = Some(engine.clone());
             if let Some(tab) = app.tab_by_id_mut(tab_id) {
                 if let Some(multi) = tab.pending_manual_multi_ocr.take() {
-                    return start_manual_ocr_selection_for(app, tab_id, multi, engine.clone());
+                    return start_manual_ocr_selection(app, tab_id, multi, engine.clone());
                 }
             }
             Task::none()
@@ -753,10 +665,7 @@ pub fn handle_manual_ocr_engine_ready_for(app: &mut App, tab_id: super::tab::Tab
 
 
 
-pub fn handle_manual_ocr_selection(app: &mut App, selections: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
-    handle_manual_ocr_selection_for(app, app.active_tab().id, selections)
-}
-pub fn handle_manual_ocr_selection_for(app: &mut App, tab_id: super::tab::TabId, selections: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
+pub fn handle_manual_ocr_selection(app: &mut App, tab_id: super::tab::TabId, selections: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
     #[cfg(feature = "ocr")]
     {
         if selections.is_empty() { return Task::none(); }
@@ -810,7 +719,7 @@ pub fn handle_manual_ocr_selection_for(app: &mut App, tab_id: super::tab::TabId,
         }
         let cfg = easyscanlate_settings::get(|s| ocr::config_with(0.0, s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000)));
         let cached = app.engines.manual_ocr.clone();
-        if let Some(engine) = cached { return start_manual_ocr_selection_for(app, tab_id, valid, engine); }
+        if let Some(engine) = cached { return start_manual_ocr_selection(app, tab_id, valid, engine); }
         if let Some(tab) = app.tab_by_id_mut(tab_id) {
             tab.pending_manual_multi_ocr = Some(valid);
             tab.status = "Loading OCR engine for manual OCR…".to_string();
@@ -826,11 +735,7 @@ pub fn handle_manual_ocr_selection_for(app: &mut App, tab_id: super::tab::TabId,
 }
 
 #[cfg(feature = "ocr")]
-fn start_manual_ocr_selection(app: &mut App, selections: Vec<(usize, iced::Rectangle)>, engine: ocr::Engine) -> Task<Message> {
-    start_manual_ocr_selection_for(app, app.active_tab().id, selections, engine)
-}
-#[cfg(feature = "ocr")]
-pub(crate) fn start_manual_ocr_selection_for(app: &mut App, tab_id: super::tab::TabId, selections: Vec<(usize, iced::Rectangle)>, engine: ocr::Engine) -> Task<Message> {
+pub(crate) fn start_manual_ocr_selection(app: &mut App, tab_id: super::tab::TabId, selections: Vec<(usize, iced::Rectangle)>, engine: ocr::Engine) -> Task<Message> {
     if let Some(tab) = app.tab_by_id_mut(tab_id) {
         tab.manual_ocring = true;
         tab.status = format!("Manual OCR on {} selection(s)...", selections.len());
@@ -881,7 +786,7 @@ fn run_manual_ocr_selection(engine: ocr::Engine, items: Vec<(usize, String, iced
         // cluster rects
         let mut clusters: Vec<Cluster> = Vec::new();
         for (_, r) in rects {
-            let mut cur = Cluster { x0: r.x, y0: r.y, x1: r.x + r.width, y1: r.y + r.height };
+            let cur = Cluster { x0: r.x, y0: r.y, x1: r.x + r.width, y1: r.y + r.height };
             // try to merge with existing clusters if touching
             let mut merged_indices: Vec<usize> = Vec::new();
             for (ci, c) in clusters.iter().enumerate() {
@@ -960,15 +865,12 @@ fn run_manual_ocr_selection(engine: ocr::Engine, items: Vec<(usize, String, iced
     Ok(out)
 }
 
-pub fn handle_manual_ocr_finished(app: &mut App, result: Result<Vec<(usize, Vec<NewEntry>)>, String>) -> Task<Message> {
-    handle_manual_ocr_finished_for(app, app.active_tab().id, result)
-}
-pub fn handle_manual_ocr_finished_for(app: &mut App, tab_id: super::tab::TabId, result: Result<Vec<(usize, Vec<NewEntry>)>, String>) -> Task<Message> {
+pub fn handle_manual_ocr_finished(app: &mut App, tab_id: super::tab::TabId, result: Result<Vec<(usize, Vec<NewEntry>)>, String>) -> Task<Message> {
     #[cfg(feature = "ocr")]
     {
         if let Some(tab) = app.tab_by_id_mut(tab_id) { tab.manual_ocring = false; }
         // Free queue weight for manual OCR (same kind as pipeline OCR) and backfill promote
-        let mut freed = app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Ocr).is_some();
+        let freed = app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Ocr).is_some();
         let mut promote_task = Task::none();
         let mut refresh_needed = false;
         if freed {

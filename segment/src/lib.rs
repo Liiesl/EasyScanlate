@@ -233,13 +233,7 @@ fn run_session(session: &mut Session, input: Array4<f32>) -> Result<Vec<ArrayD<f
         .collect()
 }
 
-fn sigmoid(x: f32) -> f32 {
-    if x >= 0.0 {
-        1.0 / (1.0 + (-x).exp())
-    } else {
-        x.exp() / (1.0 + x.exp())
-    }
-}
+
 
 
 /// Decode Koharu outputs. Pure translation of `grid_pages.py:50-102`.

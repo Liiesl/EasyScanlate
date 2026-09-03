@@ -8,13 +8,6 @@ use super::{App, AutoInpaintJob, Message};
 #[cfg(all(feature = "styling", feature = "inpaint"))]
 pub fn dispatch_inpaint(
     app: &mut App,
-    buffered: Vec<(usize, EntryId, Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>, Quad, String)>,
-) -> Task<Message> {
-    dispatch_inpaint_for(app, app.active_tab().id, buffered)
-}
-#[cfg(all(feature = "styling", feature = "inpaint"))]
-pub fn dispatch_inpaint_for(
-    app: &mut App,
     tab_id: crate::app::tab::TabId,
     buffered: Vec<(usize, EntryId, Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>, Quad, String)>,
 ) -> Task<Message> {
@@ -96,13 +89,13 @@ pub fn dispatch_inpaint_for(
     app.tabs[idx].pipeline_style_pending = 0;
     let mut tasks: Vec<Task<Message>> = Vec::new();
     if !telea_jobs.is_empty() {
-        tasks.push(super::inpaint::dispatch_auto_for(app, tab_id, telea_jobs, InpaintBackend::Telea));
+        tasks.push(super::inpaint::dispatch_auto(app, tab_id, telea_jobs, InpaintBackend::Telea));
     }
     if !lama_jobs.is_empty() {
-        tasks.push(super::inpaint::dispatch_auto_for(app, tab_id, lama_jobs, InpaintBackend::Lama));
+        tasks.push(super::inpaint::dispatch_auto(app, tab_id, lama_jobs, InpaintBackend::Lama));
     }
     if !aot_jobs.is_empty() {
-        tasks.push(super::inpaint::dispatch_auto_for(app, tab_id, aot_jobs, InpaintBackend::Aot));
+        tasks.push(super::inpaint::dispatch_auto(app, tab_id, aot_jobs, InpaintBackend::Aot));
     }
     if tasks.is_empty() {
         #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]

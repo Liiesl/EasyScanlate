@@ -42,7 +42,7 @@ pub fn handle_save(app: &mut App) -> Task<Message> {
     let tab = app.active_tab();
     let tab_id = tab.id;
     if let Some(path) = tab.mmtl_path.clone() {
-        return do_save_for(tab_id, tab.project.clone(), extract_inpaint_data(tab), path);
+        return do_save(tab_id, tab.project.clone(), extract_inpaint_data(tab), path);
     }
     handle_save_as(app)
 }
@@ -76,10 +76,7 @@ pub fn handle_open(_app: &mut App) -> Task<Message> {
     )
 }
 
-pub fn handle_save_picked(app: &mut App, picked: Option<String>) -> Task<Message> {
-    handle_save_picked_for(app, app.active_tab().id, picked)
-}
-pub fn handle_save_picked_for(app: &mut App, tab_id: crate::app::tab::TabId, picked: Option<String>) -> Task<Message> {
+pub fn handle_save_picked(app: &mut App, tab_id: crate::app::tab::TabId, picked: Option<String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     let Some(path_str) = picked else {
         app.tabs[idx].status = "Save cancelled.".to_string();
@@ -91,7 +88,7 @@ pub fn handle_save_picked_for(app: &mut App, tab_id: crate::app::tab::TabId, pic
         tab.mmtl_path = Some(path.clone());
     }
     let tab = &app.tabs[idx];
-    do_save_for(tab_id, tab.project.clone(), extract_inpaint_data(tab), path)
+    do_save(tab_id, tab.project.clone(), extract_inpaint_data(tab), path)
 }
 
 fn build_loaded_images(res: easyscanlate_mmtl::LoadResult, display: String) -> Result<(easyscanlate_model::Project, Vec<easyscanlate_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String> {
@@ -116,10 +113,7 @@ fn build_loaded_images(res: easyscanlate_mmtl::LoadResult, display: String) -> R
     Ok((project, out_images, display, Some(Arc::new(res.temp_dir))))
 }
 
-fn do_save(project: easyscanlate_model::Project, inpaint: Vec<easyscanlate_mmtl::InpaintImageData>, path: PathBuf) -> Task<Message> {
-    do_save_for(crate::app::tab::TabId(0), project, inpaint, path)
-}
-fn do_save_for(tab_id: crate::app::tab::TabId, project: easyscanlate_model::Project, inpaint: Vec<easyscanlate_mmtl::InpaintImageData>, path: PathBuf) -> Task<Message> {
+fn do_save(tab_id: crate::app::tab::TabId, project: easyscanlate_model::Project, inpaint: Vec<easyscanlate_mmtl::InpaintImageData>, path: PathBuf) -> Task<Message> {
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
@@ -132,9 +126,6 @@ fn do_save_for(tab_id: crate::app::tab::TabId, project: easyscanlate_model::Proj
     )
 }
 
-pub fn handle_open_picked(app: &mut App, picked: Option<String>) -> Task<Message> {
-    handle_open_picked_for(app, app.active_tab().id, picked)
-}
 pub(crate) fn push_project_tab(
     app: &mut App,
     id: crate::app::tab::TabId,
@@ -180,7 +171,7 @@ pub(crate) fn push_project_tab(
     Task::none()
 }
 
-pub fn handle_open_picked_for(app: &mut App, tab_id: crate::app::tab::TabId, picked: Option<String>) -> Task<Message> {
+pub fn handle_open_picked(app: &mut App, tab_id: crate::app::tab::TabId, picked: Option<String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     let Some(path_str) = picked else {
         app.tabs[idx].status = "Open cancelled.".to_string();
@@ -206,10 +197,7 @@ pub fn handle_open_picked_for(app: &mut App, tab_id: crate::app::tab::TabId, pic
     )
 }
 
-pub fn handle_saved(app: &mut App, result: Result<String, String>) -> Task<Message> {
-    handle_saved_for(app, app.active_tab().id, result)
-}
-pub fn handle_saved_for(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<String, String>) -> Task<Message> {
+pub fn handle_saved(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<String, String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     match result {
         Ok(path) => {
@@ -250,12 +238,6 @@ pub fn load_created_project(path_str: String) -> Result<(easyscanlate_model::Pro
 
 pub fn handle_loaded(
     app: &mut App,
-    result: Result<(easyscanlate_model::Project, Vec<easyscanlate_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String>,
-) -> Task<Message> {
-    handle_loaded_for(app, app.active_tab().id, result)
-}
-pub fn handle_loaded_for(
-    app: &mut App,
     tab_id: crate::app::tab::TabId,
     result: Result<(easyscanlate_model::Project, Vec<easyscanlate_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String>,
 ) -> Task<Message> {
@@ -263,7 +245,7 @@ pub fn handle_loaded_for(
         Ok((project, images, display_path, temp_dir)) => {
             debug_assert_eq!(project.image_count(), images.len(), "project/images parity must hold after load");
             // New-tab flow: push Tab::project_from_loaded (P4). Dedup handled inside.
-            // tab_id is the freshly allocated id from handle_open_picked_for / HomeRecent / Create.
+            // tab_id is the freshly allocated id from handle_open_picked / HomeRecent / Create.
             // If the caller was a stale reuse (e.g. legacy flat), tab_id may already be in tabs —
             // still push with that id? Prefer to mint fresh if collision.
             let fresh_id = if app.tabs.iter().any(|t| t.id == tab_id) {

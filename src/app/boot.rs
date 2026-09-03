@@ -216,7 +216,7 @@ pub fn boot(
                 format!("Missing: {}", path.display());
             Task::none()
         } else {
-            let display = path.to_string_lossy().to_string();
+            let _display = path.to_string_lossy().to_string();
             let new_id = crate::app::tab::TabId(app.next_tab_id);
             app.next_tab_id += 1;
             // Show loading feedback on the Home tab until the new tab appears.

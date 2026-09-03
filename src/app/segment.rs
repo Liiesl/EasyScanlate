@@ -5,10 +5,7 @@ use easyscanlate_segment::Engine as SegmentEngine;
 
 use super::{App, Message};
 
-pub fn start_segment_filter(app: &mut App) -> Task<Message> {
-    start_segment_filter_for(app, app.active_tab().id)
-}
-pub fn start_segment_filter_for(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Message> {
+pub fn start_segment_filter(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Message> {
     #[cfg(feature = "segment")]
     {
         let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none() };
@@ -169,11 +166,7 @@ fn run_segment_filter_blocking(
 }
 
 #[cfg(feature = "segment")]
-pub fn handle_engine_ready(app: &mut App, result: Result<SegmentEngine, String>) -> Task<Message> {
-    handle_engine_ready_for(app, app.active_tab().id, result)
-}
-#[cfg(feature = "segment")]
-pub fn handle_engine_ready_for(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<SegmentEngine, String>) -> Task<Message> {
+pub fn handle_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<SegmentEngine, String>) -> Task<Message> {
     match result {
         Ok(engine) => {
             app.engines.segment = Some(engine.clone());
@@ -223,13 +216,6 @@ pub fn handle_engine_ready_for(app: &mut App, tab_id: crate::app::tab::TabId, re
 #[cfg(feature = "segment")]
 pub fn handle_filtered(
     app: &mut App,
-    result: Result<Vec<(usize, EntryId)>, String>,
-) -> Task<Message> {
-    handle_filtered_for(app, app.active_tab().id, result)
-}
-#[cfg(feature = "segment")]
-pub fn handle_filtered_for(
-    app: &mut App,
     tab_id: crate::app::tab::TabId,
     result: Result<Vec<(usize, EntryId)>, String>,
 ) -> Task<Message> {
@@ -273,7 +259,7 @@ pub fn handle_filtered_for(
                     {
                         use crate::app::queue::{AcquireResult, EngineKind};
                         match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Style) {
-                            AcquireResult::Acquired(_) => tasks.push(super::styling::classify_for(app, tab_id)),
+                            AcquireResult::Acquired(_) => tasks.push(super::styling::classify(app, tab_id)),
                             AcquireResult::Queued(_, pos) => {
                                 let used = app.engines.queue.used_weight();
                                 if let Some(t) = app.tab_by_id_mut(tab_id) {
@@ -300,7 +286,7 @@ pub fn handle_filtered_for(
                             easyscanlate_settings::AutoInpaintModel::Mixed => EngineKind::InpaintTelea,
                         };
                         match app.engines.queue.try_acquire_or_enqueue(tab_id, kind) {
-                            AcquireResult::Acquired(_) => tasks.push(super::inpaint::dispatch_auto_solo_for(app, tab_id, eff)),
+                            AcquireResult::Acquired(_) => tasks.push(super::inpaint::dispatch_auto_solo(app, tab_id, eff)),
                             AcquireResult::Queued(_, pos) => {
                                 let used = app.engines.queue.used_weight();
                                 if let Some(t) = app.tab_by_id_mut(tab_id) {
@@ -320,7 +306,7 @@ pub fn handle_filtered_for(
                         {
                             use crate::app::queue::{AcquireResult, EngineKind};
                             match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Style) {
-                                AcquireResult::Acquired(_) => tasks.push(super::styling::classify_for(app, tab_id)),
+                                AcquireResult::Acquired(_) => tasks.push(super::styling::classify(app, tab_id)),
                                 AcquireResult::Queued(_, pos) => {
                                 let used = app.engines.queue.used_weight();
                                 if let Some(t) = app.tab_by_id_mut(tab_id) {

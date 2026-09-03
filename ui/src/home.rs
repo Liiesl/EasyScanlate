@@ -6,7 +6,6 @@ use crate::panel::PANEL_BG;
 use crate::scale;
 
 const SIDEBAR_WIDTH: f32 = 200.0;
-const ACCENT: Color = Color::from_rgb8(92, 190, 255);
 
 fn sidebar_button(label: &str, event: UiEvent) -> Element<'_, UiEvent> {
     button(text(label).size(scale::s(13.0)).width(FillLength).center())

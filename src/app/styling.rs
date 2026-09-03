@@ -9,100 +9,7 @@ use easyscanlate_ui::UiState;
 use super::{App, Message};
 use super::edit::seed_style_inputs;
 
-#[cfg(feature = "styling")]
-fn collect_jobs(app: &App) -> Vec<(usize, EntryId, String, Quad)> {
-    let tab = app.active_tab();
-    let mut jobs: Vec<(usize, EntryId, String, Quad)> = Vec::new();
-    for (index, image) in tab.images.iter().enumerate() {
-        let image_id = image.image_id;
-        let path = tab.project.image(image_id).map(|m| m.path.clone()).unwrap_or_default();
-        for entry in tab.project.visible_for(image_id).collect::<Vec<_>>() {
-            if tab.styling.is_done(index, entry.id) {
-                continue;
-            }
-            jobs.push((index, entry.id, path.clone(), tab.project.view_quad(entry)));
-        }
-    }
-    jobs
-}
 
-#[cfg(feature = "styling")]
-pub fn classify(app: &mut App) -> Task<Message> {
-    classify_for(app, app.active_tab().id)
-}
-
-#[cfg(feature = "styling")]
-fn start_jobs(app: &mut App, engine: StylingEngine, deferred: bool) -> Task<Message> {
-    let jobs = collect_jobs(app);
-    if jobs.is_empty() {
-        if deferred {
-            #[cfg(all(feature = "styling", feature = "inpaint"))]
-            { return super::pipeline::dispatch_inpaint(app, Vec::new()); }
-        }
-        return Task::none();
-    }
-    for (index, id, _, _) in &jobs { app.active_tab_mut().styling.mark_done(*index, *id); }
-    if deferred {
-        #[cfg(all(feature = "styling", feature = "inpaint"))]
-        {
-            app.active_tab_mut().pipeline_style_pending = jobs.len();
-            app.active_tab_mut().pipeline_style_results = Vec::with_capacity(jobs.len());
-            #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-            { app.active_tab_mut().pipeline_active = true; }
-            app.active_tab_mut().status = format!("Classifying {} entries (deferred for bg-aware inpaint)...", jobs.len());
-            let tid = app.active_tab().id;
-            let tasks: Vec<Task<Message>> = jobs
-                .into_iter()
-                .map(|(index, id, path, quad)| {
-                    let engine = engine.clone();
-                    let qc = quad;
-                    Task::perform(
-                        async move {
-                            let res = tokio::task::spawn_blocking(move || engine.classify_entry_with_prediction(&path, &qc))
-                                .await
-                                .unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
-                            (index, id, res)
-                        },
-                        move |(index, id, result)| Message::Tab(tid, crate::app::TabMessage::PipelineStyleDetected(index, id, result)),
-                    )
-                })
-                .collect();
-            return Task::batch(tasks);
-        }
-    }
-    let tid2 = app.active_tab().id;
-    let tasks: Vec<Task<Message>> = jobs
-        .into_iter()
-        .map(|(index, id, path, quad)| {
-            let engine = engine.clone();
-            Task::perform(
-                async move {
-                    let classified = tokio::task::spawn_blocking(move || engine.classify_entry(&path, &quad))
-                        .await
-                        .unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
-                    (index, id, classified)
-                },
-                move |(index, id, result)| Message::Tab(tid2, crate::app::TabMessage::StyleDetected(index, id, result)),
-            )
-        })
-        .collect();
-    Task::batch(tasks)
-}
-
-#[cfg(feature = "styling")]
-pub fn handle_styling_ready(app: &mut App, result: Result<StylingEngine, String>) -> Task<Message> {
-    handle_styling_ready_for(app, app.active_tab().id, result)
-}
-
-#[cfg(feature = "styling")]
-pub fn handle_style_detected(app: &mut App, index: usize, id: EntryId, result: Result<EntryStyle, String>) -> Task<Message> {
-    handle_style_detected_for(app, app.active_tab().id, index, id, result)
-}
-
-#[cfg(all(feature = "styling", feature = "inpaint"))]
-pub fn handle_pipeline_style_detected(app: &mut App, index: usize, id: EntryId, result: Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>) -> Task<Message> {
-    handle_pipeline_style_detected_for(app, app.active_tab().id, index, id, result)
-}
 
 // ---- UI handlers ----
 
@@ -372,7 +279,7 @@ pub fn handle_auto_detect(app: &mut App) -> Task<Message> {
 
 // ---- TabId-aware wrappers for Phase 2 ----
 #[cfg(feature = "styling")]
-fn collect_jobs_for(app: &App, tab_id: crate::app::tab::TabId) -> Vec<(usize, EntryId, String, Quad)> {
+fn collect_jobs(app: &App, tab_id: crate::app::tab::TabId) -> Vec<(usize, EntryId, String, Quad)> {
     let tab = match app.tab_by_id(tab_id) { Some(t) => t, None => return Vec::new() };
     let mut jobs: Vec<(usize, EntryId, String, Quad)> = Vec::new();
     for (index, image) in tab.images.iter().enumerate() {
@@ -386,7 +293,7 @@ fn collect_jobs_for(app: &App, tab_id: crate::app::tab::TabId) -> Vec<(usize, En
     jobs
 }
 #[cfg(feature = "styling")]
-pub fn classify_for(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Message> {
+pub fn classify(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Message> {
     // queue gate — weight 2, backfill + priority (cap 5)
     {
         use crate::app::queue::{AcquireResult, EngineKind};
@@ -412,7 +319,7 @@ pub fn classify_for(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Messa
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     let engine_opt = app.tabs[idx].styling.engine().cloned();
     match engine_opt {
-        Some(engine) => start_jobs_for(app, tab_id, engine, deferred),
+        Some(engine) => start_jobs(app, tab_id, engine, deferred),
         None => {
             app.tabs[idx].styling.mark_building();
             if deferred {
@@ -425,13 +332,13 @@ pub fn classify_for(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Messa
     }
 }
 #[cfg(feature = "styling")]
-fn start_jobs_for(app: &mut App, tab_id: crate::app::tab::TabId, engine: StylingEngine, deferred: bool) -> Task<Message> {
-    let jobs = collect_jobs_for(app, tab_id);
+fn start_jobs(app: &mut App, tab_id: crate::app::tab::TabId, engine: StylingEngine, deferred: bool) -> Task<Message> {
+    let jobs = collect_jobs(app, tab_id);
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     if jobs.is_empty() {
         if deferred {
             #[cfg(all(feature = "styling", feature = "inpaint"))]
-            { return super::pipeline::dispatch_inpaint_for(app, tab_id, Vec::new()); }
+            { return super::pipeline::dispatch_inpaint(app, tab_id, Vec::new()); }
         }
         return Task::none();
     }
@@ -473,7 +380,7 @@ fn start_jobs_for(app: &mut App, tab_id: crate::app::tab::TabId, engine: Styling
     Task::batch(tasks)
 }
 #[cfg(feature = "styling")]
-pub fn handle_styling_ready_for(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<StylingEngine, String>) -> Task<Message> {
+pub fn handle_styling_ready(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<StylingEngine, String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     match result {
         Ok(engine) => {
@@ -500,11 +407,11 @@ pub fn handle_styling_ready_for(app: &mut App, tab_id: crate::app::tab::TabId, r
             }
             if is_pipeline {
                 #[cfg(all(feature = "styling", feature = "inpaint"))]
-                { return start_jobs_for(app, tab_id, engine, true); }
+                { return start_jobs(app, tab_id, engine, true); }
                 #[cfg(not(all(feature = "styling", feature = "inpaint")))]
                 { let _ = engine; return Task::none(); }
             } else {
-                return start_jobs_for(app, tab_id, engine, false);
+                return start_jobs(app, tab_id, engine, false);
             }
         }
         Err(e) => {
@@ -521,7 +428,7 @@ pub fn handle_styling_ready_for(app: &mut App, tab_id: crate::app::tab::TabId, r
     }
 }
 #[cfg(feature = "styling")]
-pub fn handle_style_detected_for(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, id: EntryId, result: Result<EntryStyle, String>) -> Task<Message> {
+pub fn handle_style_detected(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, id: EntryId, result: Result<EntryStyle, String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     // For single style detect (manual), free queue weight after completion
     let is_queued_style = app.engines.queue.running_for(tab_id, crate::app::queue::EngineKind::Style).is_some();
@@ -550,7 +457,7 @@ pub fn handle_style_detected_for(app: &mut App, tab_id: crate::app::tab::TabId, 
     Task::none()
 }
 #[cfg(all(feature = "styling", feature = "inpaint"))]
-pub fn handle_pipeline_style_detected_for(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, id: EntryId, result: Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>) -> Task<Message> {
+pub fn handle_pipeline_style_detected(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, id: EntryId, result: Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     let (quad, path) = {
         let tab = &app.tabs[idx];
@@ -565,8 +472,8 @@ pub fn handle_pipeline_style_detected_for(app: &mut App, tab_id: crate::app::tab
         app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Style);
         crate::app::queue::refresh_queued_statuses(app);
         let buffered = std::mem::take(&mut app.tabs[idx].pipeline_style_results);
-        // dispatch_inpaint_for will enqueue inpaint jobs via queue (backfill + priority)
-        let inpaint_task = super::pipeline::dispatch_inpaint_for(app, tab_id, buffered);
+        // dispatch_inpaint will enqueue inpaint jobs via queue (backfill + priority)
+        let inpaint_task = super::pipeline::dispatch_inpaint(app, tab_id, buffered);
         let promote = crate::app::queue::dispatch_pending(app);
         return Task::batch([inpaint_task, promote]);
     }
