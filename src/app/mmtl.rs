@@ -126,6 +126,44 @@ fn do_save(tab_id: crate::app::tab::TabId, project: easyscanlate_model::Project,
     )
 }
 
+fn find_tab_by_path(app: &App, path: &PathBuf) -> Option<usize> {
+    app.tabs.iter().position(|t| {
+        t.mmtl_path.as_deref() == Some(path.as_path())
+            || t.loading_path.as_deref() == Some(path.as_path())
+    })
+}
+
+fn dedup_activate(app: &mut App, path: &PathBuf) -> bool {
+    if let Some(idx) = find_tab_by_path(app, path) {
+        app.active = idx;
+        // If it's a loading placeholder, keep its "Loading..." status; otherwise show Already open.
+        if !app.tabs[idx].loading {
+            app.tabs[idx].status = format!("Already open: {}", app.tabs[idx].title);
+        }
+        return true;
+    }
+    false
+}
+
+/// Try to create an instant loading placeholder tab for `path`. Returns `Some(id)` if a new
+/// placeholder was created and activated, `None` if dedup activated an existing tab (no new tab).
+pub(crate) fn create_loading_tab(app: &mut App, path: PathBuf) -> Option<crate::app::tab::TabId> {
+    if dedup_activate(app, &path) {
+        return None;
+    }
+    let id = crate::app::tab::TabId(app.next_tab_id);
+    app.next_tab_id += 1;
+    let title = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("project")
+        .to_string();
+    let tab = crate::app::tab::Tab::loading_placeholder(id, title, path);
+    app.tabs.push(tab);
+    app.active = app.tabs.len() - 1;
+    Some(id)
+}
+
 pub(crate) fn push_project_tab(
     app: &mut App,
     id: crate::app::tab::TabId,
@@ -135,14 +173,95 @@ pub(crate) fn push_project_tab(
     temp_dir: Option<Arc<tempfile::TempDir>>,
 ) -> Task<Message> {
     let path = PathBuf::from(&display_path);
-    // Dedup: if already open, just activate it.
-    if let Some(idx) = app
-        .tabs
-        .iter()
-        .position(|t| t.mmtl_path.as_deref() == Some(path.as_path()))
-    {
+
+    // Hydration path: `id` is a loading placeholder that was created optimistically.
+    if let Some(idx) = app.tabs.iter().position(|t| t.id == id) {
+        if app.tabs[idx].loading {
+            // Another non-placeholder tab already has this path (race: opened elsewhere while loading).
+            // Remove the placeholder and activate the existing one.
+            if let Some(other_idx) = app
+                .tabs
+                .iter()
+                .position(|t| t.id != id && t.mmtl_path.as_deref() == Some(path.as_path()))
+            {
+                // Remove placeholder
+                let ph_pos = app.tabs.iter().position(|t| t.id == id).unwrap();
+                app.tabs.remove(ph_pos);
+                // Adjust active if needed
+                if app.active >= app.tabs.len() {
+                    app.active = app.tabs.len().saturating_sub(1);
+                } else if ph_pos < app.active {
+                    app.active -= 1;
+                } else if ph_pos == app.active {
+                    // active was placeholder, switch to existing (re-find)
+                    if let Some(new_other) = app.tabs.iter().position(|t| t.mmtl_path.as_deref() == Some(path.as_path())) {
+                        app.active = new_other;
+                    }
+                }
+                // dedup_activate semantics
+                if let Some(nidx) = find_tab_by_path(app, &path) {
+                    app.active = nidx;
+                    app.tabs[nidx].status = format!("Already open: {}", app.tabs[nidx].title);
+                } else {
+                    // fallback: activate other_idx adjusted
+                    let _ = other_idx;
+                }
+                easyscanlate_settings::touch_recent(display_path.clone());
+                app.recent_projects = easyscanlate_settings::get(|s| s.recent_projects.clone());
+                return Task::none();
+            }
+            // Normal hydration: fill placeholder in place.
+            let len = images.len();
+            let project_clone = project.clone();
+            {
+                let tab = &mut app.tabs[idx];
+                tab.hydrate_from_loaded(project, images, path.clone(), temp_dir);
+            }
+            app.active = idx;
+            easyscanlate_settings::touch_recent(display_path.clone());
+            app.recent_projects = easyscanlate_settings::get(|s| s.recent_projects.clone());
+            if len > 0 {
+                let tid = app.tabs[idx].id;
+                let new_tab = &mut app.tabs[idx];
+                return new_tab.scheduler.decode_thumbs_with_project(
+                    &mut new_tab.images,
+                    &project_clone,
+                    move |i, r| Message::Tab(tid, crate::app::TabMessage::ThumbDecoded(i, r)),
+                );
+            }
+            return Task::none();
+        }
+    }
+
+    // Non-hydration (legacy or placeholder was closed before load finished).
+    // Dedup: if already open, just activate it and discard this load.
+    if let Some(idx) = find_tab_by_path(app, &path) {
         app.active = idx;
-        app.tabs[idx].status = format!("Already open: {}", app.tabs[idx].title);
+        if !app.tabs[idx].loading {
+            app.tabs[idx].status = format!("Already open: {}", app.tabs[idx].title);
+        }
+        // If there was a stray loading placeholder with `id` that is not the dedup target,
+        // remove it (it was created optimistically but now deduped).
+        if let Some(ph_idx) = app.tabs.iter().position(|t| t.id == id && t.loading) {
+            // Only remove if it's not the dedup target
+            if ph_idx != idx {
+                let remove_pos = ph_idx;
+                app.tabs.remove(remove_pos);
+                if app.active > remove_pos {
+                    app.active -= 1;
+                } else if app.active == remove_pos {
+                    app.active = idx.min(app.tabs.len().saturating_sub(1));
+                    if ph_idx < idx {
+                        // idx shifted
+                        if let Some(new_idx) = find_tab_by_path(app, &path) {
+                            app.active = new_idx;
+                        }
+                    }
+                }
+            }
+        }
+        easyscanlate_settings::touch_recent(display_path.clone());
+        app.recent_projects = easyscanlate_settings::get(|s| s.recent_projects.clone());
         return Task::none();
     }
     let title = path
@@ -152,7 +271,15 @@ pub(crate) fn push_project_tab(
         .to_string();
     let len = images.len();
     let project_clone = project.clone();
-    let tab = crate::app::tab::Tab::project_from_loaded(id, title, project, images, path.clone(), temp_dir);
+    // If `id` collides with an existing non-loading tab, mint a fresh one.
+    let use_id = if app.tabs.iter().any(|t| t.id == id) {
+        let nid = crate::app::tab::TabId(app.next_tab_id);
+        app.next_tab_id += 1;
+        nid
+    } else {
+        id
+    };
+    let tab = crate::app::tab::Tab::project_from_loaded(use_id, title, project, images, path.clone(), temp_dir);
     app.tabs.push(tab);
     app.active = app.tabs.len() - 1;
     easyscanlate_settings::touch_recent(display_path.clone());
@@ -172,16 +299,19 @@ pub(crate) fn push_project_tab(
 }
 
 pub fn handle_open_picked(app: &mut App, tab_id: crate::app::tab::TabId, picked: Option<String>) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    let idx_opt = app.tabs.iter().position(|t| t.id == tab_id);
     let Some(path_str) = picked else {
-        app.tabs[idx].status = "Open cancelled.".to_string();
+        if let Some(idx) = idx_opt {
+            app.tabs[idx].status = "Open cancelled.".to_string();
+        } else {
+            app.active_tab_mut().status = "Open cancelled.".to_string();
+        }
         return Task::none();
     };
     let path = PathBuf::from(path_str);
-    app.tabs[idx].status = format!("Loading {}...", path.display());
-    // Allocate a fresh TabId for the new project tab.
-    let new_id = crate::app::tab::TabId(app.next_tab_id);
-    app.next_tab_id += 1;
+    let Some(new_id) = create_loading_tab(app, path.clone()) else {
+        return Task::none();
+    };
     Task::perform(
         async move {
             let path_clone = path.clone();
@@ -251,9 +381,9 @@ pub fn handle_external_opens(app: &mut App, paths: Vec<String>) -> Task<Message>
             app.active_tab_mut().status = format!("Missing: {}", path.display());
             continue;
         }
-        let new_id = crate::app::tab::TabId(app.next_tab_id);
-        app.next_tab_id += 1;
-        app.active_tab_mut().status = format!("Loading {}...", path.display());
+        let Some(new_id) = create_loading_tab(app, path.clone()) else {
+            continue;
+        };
         let path_clone = path.clone();
         tasks.push(Task::perform(
             async move {
@@ -275,23 +405,19 @@ pub fn handle_loaded(
     match result {
         Ok((project, images, display_path, temp_dir)) => {
             debug_assert_eq!(project.image_count(), images.len(), "project/images parity must hold after load");
-            // New-tab flow: push Tab::project_from_loaded (P4). Dedup handled inside.
-            // tab_id is the freshly allocated id from handle_open_picked / HomeRecent / Create.
-            // If the caller was a stale reuse (e.g. legacy flat), tab_id may already be in tabs —
-            // still push with that id? Prefer to mint fresh if collision.
-            let fresh_id = if app.tabs.iter().any(|t| t.id == tab_id) {
-                let nid = crate::app::tab::TabId(app.next_tab_id);
-                app.next_tab_id += 1;
-                nid
-            } else {
-                tab_id
-            };
-            return push_project_tab(app, fresh_id, project, images, display_path, temp_dir);
+            return push_project_tab(app, tab_id, project, images, display_path, temp_dir);
         }
         Err(e) => {
-            // Route error to the requestor tab if it still exists, else active.
+            // If this was a loading placeholder, keep the tab but mark it failed so the
+            // user sees the error in the tab's status/overlay and can close it.
             if let Some(idx) = app.tabs.iter().position(|t| t.id == tab_id) {
-                app.tabs[idx].status = format!("Load failed: {e}");
+                let tab = &mut app.tabs[idx];
+                if tab.loading {
+                    tab.loading = false;
+                    tab.loading_path = None;
+                    tab.loading_phase = 0.0;
+                }
+                tab.status = format!("Load failed: {e}");
             } else {
                 app.active_tab_mut().status = format!("Load failed: {e}");
             }

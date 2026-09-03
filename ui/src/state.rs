@@ -156,6 +156,9 @@ pub trait UiState {
     fn recent_projects(&self) -> &[easyscanlate_settings::RecentProject];
     fn new_project_overlay(&self) -> Option<NewProjectOverlay>;
     fn translation_anim_phase(&self) -> f32;
+    fn is_loading(&self) -> bool { false }
+    fn loading_phase(&self) -> f32 { 0.0 }
+    fn loading_title(&self) -> String { String::new() }
     // ——— Updates (Velopack) ———
     fn update_current_version(&self) -> String { String::new() }
     fn update_available_version(&self) -> Option<String> { None }

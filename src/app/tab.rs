@@ -193,6 +193,11 @@ pub struct Tab {
     pub translation_panel_mode: TranslationPanelMode,
     pub translate_base: Option<ProfileId>,
     pub translate_target: TargetProfileSelection,
+
+    // project open loading placeholder (instant tab + overlay)
+    pub loading: bool,
+    pub loading_path: Option<std::path::PathBuf>,
+    pub loading_phase: f32,
 }
 
 impl Tab {
@@ -312,6 +317,9 @@ impl Tab {
                 "{}(auto)",
                 easyscanlate_ui::translation::LANGUAGES[0]
             )),
+            loading: false,
+            loading_path: None,
+            loading_phase: 0.0,
         }
     }
 
@@ -342,5 +350,49 @@ impl Tab {
     }
     pub fn is_project(&self) -> bool {
         self.kind.is_project()
+    }
+
+    pub fn is_loading(&self) -> bool {
+        self.loading
+    }
+
+    /// Instant placeholder shown while the `.mmtl` is being extracted off the UI thread.
+    /// Title is file_stem, `loading_path` is canonical for dedup/spam guard.
+    pub fn loading_placeholder(
+        id: TabId,
+        title: String,
+        path: std::path::PathBuf,
+    ) -> Self {
+        let mut tab = Self::home(id);
+        tab.kind = TabKind::Project;
+        tab.title = title;
+        tab.mmtl_path = Some(path.clone());
+        tab.loading = true;
+        tab.loading_path = Some(path.clone());
+        tab.loading_phase = 0.0;
+        tab.status = format!("Loading {}...", path.display());
+        tab.dirty = false;
+        tab
+    }
+
+    /// Hydrate a previously created `loading_placeholder` with the real project/images.
+    pub fn hydrate_from_loaded(
+        &mut self,
+        project: Project,
+        images: Vec<LoadedImage>,
+        mmtl_path: std::path::PathBuf,
+        mmtl_temp_dir: Option<Arc<tempfile::TempDir>>,
+    ) {
+        self.project = project;
+        self.images = images;
+        self.mmtl_path = Some(mmtl_path);
+        self.mmtl_temp_dir = mmtl_temp_dir;
+        self.loading = false;
+        self.loading_path = None;
+        self.loading_phase = 0.0;
+        self.dirty = false;
+        let n = self.images.len();
+        // Keep title already set (file_stem); update status like project_from_loaded.
+        self.status = format!("Loaded {} ({} image(s))", self.title, n);
     }
 }

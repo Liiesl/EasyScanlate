@@ -78,6 +78,7 @@ pub enum TabMessage {
     #[cfg(feature = "ocr")]
     OcrTick,
     TranslateTick,
+    LoadingTick,
     #[cfg(feature = "inpaint")]
     InpaintEngineReady(Result<InpaintEngine, String>),
     #[cfg(feature = "inpaint")]
@@ -316,7 +317,13 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
                         }
                         Err(e) => {
                             if let Some(idx) = app.tabs.iter().position(|t| t.id == tab_id) {
-                                app.tabs[idx].status = format!("Load failed: {e}");
+                                let tab = &mut app.tabs[idx];
+                                if tab.loading {
+                                    tab.loading = false;
+                                    tab.loading_path = None;
+                                    tab.loading_phase = 0.0;
+                                }
+                                tab.status = format!("Load failed: {e}");
                             } else {
                                 app.active_tab_mut().status = format!("Load failed: {e}");
                             }
@@ -333,7 +340,13 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
                             }
                             Err(e) => {
                                 if let Some(idx) = app.tabs.iter().position(|t| t.id == tab_id) {
-                                    app.tabs[idx].status = format!("Created {path_str} but load failed: {e}");
+                                    let tab = &mut app.tabs[idx];
+                                    if tab.loading {
+                                        tab.loading = false;
+                                        tab.loading_path = None;
+                                        tab.loading_phase = 0.0;
+                                    }
+                                    tab.status = format!("Created {path_str} but load failed: {e}");
                                 } else {
                                     app.active_tab_mut().status = format!("Created {path_str} but load failed: {e}");
                                 }
@@ -344,7 +357,13 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
                         },
                         Err(e) => {
                             if let Some(idx) = app.tabs.iter().position(|t| t.id == tab_id) {
-                                app.tabs[idx].status = format!("Create failed: {e}");
+                                let tab = &mut app.tabs[idx];
+                                if tab.loading {
+                                    tab.loading = false;
+                                    tab.loading_path = None;
+                                    tab.loading_phase = 0.0;
+                                }
+                                tab.status = format!("Create failed: {e}");
                             } else {
                                 app.active_tab_mut().status = format!("Create failed: {e}");
                             }
@@ -435,6 +454,14 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
             }
             Task::none()
         }
+        TabMessage::LoadingTick => {
+            if app.tabs[idx].loading {
+                app.tabs[idx].loading_phase = (app.tabs[idx].loading_phase + 0.016) % 6.0;
+            } else {
+                app.tabs[idx].loading_phase = 0.0;
+            }
+            Task::none()
+        }
         #[cfg(feature = "inpaint")]
         TabMessage::InpaintEngineReady(result) => inpaint::handle_inpaint_engine_ready(app, tab_id, result),
         #[cfg(feature = "styling")]
@@ -514,7 +541,9 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             | Message::UpdatePoll
             | Message::IpcPoll
             | Message::FetchModels
-            | Message::ModelsFetched(_) => true,
+            | Message::ModelsFetched(_)
+            | Message::Tab(_, _)
+            | Message::ExternalOpen(_) => true,
             _ => false,
         };
         if !allowed {
@@ -553,10 +582,10 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                 app.active_tab_mut().status = format!("Missing: {path}");
                 return Task::none();
             }
-            app.active_tab_mut().status = format!("Loading {}...", p.display());
+            let Some(new_id) = mmtl::create_loading_tab(app, p.clone()) else {
+                return Task::none();
+            };
             let path_clone = p.clone();
-            let new_id = TabId(app.next_tab_id);
-            app.next_tab_id += 1;
             Task::perform(
                 async move {
                     tokio::task::spawn_blocking(move || mmtl::load_created_project(path_clone.to_string_lossy().to_string()))

@@ -88,6 +88,9 @@ fn ticks_subscriptions(app: &App) -> Vec<Subscription<Message>> {
         if tab.translating {
             subs.push(iced::time::every(Duration::from_millis(16)).with(tid).map(|(tid, _)| Message::Tab(tid, TabMessage::TranslateTick)));
         }
+        if tab.loading {
+            subs.push(iced::time::every(Duration::from_millis(16)).with(tid).map(|(tid, _)| Message::Tab(tid, TabMessage::LoadingTick)));
+        }
     }
     subs
 }

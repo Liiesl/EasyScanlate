@@ -314,6 +314,18 @@ impl UiState for ActiveTab<'_> {
         self.tab.translate_anim_phase
     }
 
+    fn is_loading(&self) -> bool {
+        self.tab.loading
+    }
+
+    fn loading_phase(&self) -> f32 {
+        self.tab.loading_phase
+    }
+
+    fn loading_title(&self) -> String {
+        self.tab.title.clone()
+    }
+
     fn update_current_version(&self) -> String {
         crate::updater::get_current_version()
     }
@@ -493,6 +505,9 @@ impl UiState for App {
         })
     }
     fn translation_anim_phase(&self) -> f32 { self.tabs[self.active].translate_anim_phase }
+    fn is_loading(&self) -> bool { self.tabs[self.active].loading }
+    fn loading_phase(&self) -> f32 { self.tabs[self.active].loading_phase }
+    fn loading_title(&self) -> String { self.tabs[self.active].title.clone() }
     fn update_current_version(&self) -> String { crate::updater::get_current_version() }
     fn update_available_version(&self) -> Option<String> {
         self.update_info.as_ref().map(|i| i.TargetFullRelease.Version.to_string())

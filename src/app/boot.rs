@@ -210,20 +210,14 @@ pub fn boot(
         |info| Message::UpdateCheckResult(Box::new(info)),
     );
 
-    // CLI open: if an .mmtl was passed on the command line, load it into a
-    // new project tab immediately (mirrors ManhwaOCR main.py:216-226 which
-    // skips Home when sys.argv[1] is .mmtl). Missing file → status error.
+    // CLI open: if an .mmtl was passed on the command line, open a loading tab
+    // immediately so feedback is instant (mirrors ManhwaOCR main.py:216-226).
     let cli_task = if let Some(path) = initial_mmtl {
         if !path.exists() {
             app.active_tab_mut().status =
                 format!("Missing: {}", path.display());
             Task::none()
-        } else {
-            let _display = path.to_string_lossy().to_string();
-            let new_id = crate::app::tab::TabId(app.next_tab_id);
-            app.next_tab_id += 1;
-            // Show loading feedback on the Home tab until the new tab appears.
-            app.active_tab_mut().status = format!("Loading {}...", path.display());
+        } else if let Some(new_id) = crate::app::mmtl::create_loading_tab(&mut app, path.clone()) {
             let path_clone = path.clone();
             Task::perform(
                 async move {
@@ -237,6 +231,8 @@ pub fn boot(
                 },
                 move |res| Message::Tab(new_id, crate::app::TabMessage::RecentPickedToLoad(res)),
             )
+        } else {
+            Task::none()
         }
     } else {
         Task::none()

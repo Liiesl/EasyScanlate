@@ -162,9 +162,14 @@ pub fn handle_create(app: &mut App) -> Task<Message> {
     let files = np.source_files.clone();
     let dest_for_task = unique_dest.clone();
     app.new_project = None;
-    app.active_tab_mut().status = format!("Creating {}...", unique_dest.display());
-    let new_id = TabId(app.next_tab_id);
-    app.next_tab_id += 1;
+    // Create instant loading placeholder tab so the user sees feedback right away.
+    let Some(new_id) = crate::app::mmtl::create_loading_tab(app, unique_dest.clone()) else {
+        return Task::none();
+    };
+    // Override status to "Creating ..." instead of "Loading ..."
+    if let Some(idx) = app.tabs.iter().position(|t| t.id == new_id) {
+        app.tabs[idx].status = format!("Creating {}...", unique_dest.display());
+    }
     Task::perform(
         async move {
             let res: Result<String, String> = tokio::task::spawn_blocking(move || -> Result<String, String> {

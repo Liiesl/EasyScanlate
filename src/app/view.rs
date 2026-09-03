@@ -1,4 +1,5 @@
-use iced::{Element, Length};
+use iced::{Color, Element, Length};
+use iced::widget::{center, column, container, opaque, row, stack, text};
 use iced::widget::pane_grid;
 use easyscanlate_ui::event::UiEvent;
 use easyscanlate_ui::{main_area, panel, scale, toolbar};
@@ -207,6 +208,120 @@ pub fn view(app: &App) -> Element<'_, Message> {
         base_with_aurora
     };
 
+    // Loading splash overlay: Photoshop-style — centered "Opening project…" with
+    // top-left cycling status (Unpacking / Parsing / Decoding…). Active tab is
+    // already the placeholder (titlebar chip exists), underlying editor is empty until hydrate.
+    let with_loading: Element<'_, Message> = if !app.active_is_home()
+        && app
+            .tabs
+            .get(app.active)
+            .is_some_and(|t| t.loading)
+    {
+        loading_overlay(app, with_close)
+    } else {
+        with_close
+    };
+
     // Onboarding is now a page (inner), not an overlay — no extra Stack here
-    with_close
+    with_loading
+}
+
+fn splash_status(phase: f32, is_creating: bool) -> String {
+    // 6s loop → 5 stages @ 1.2s each, matches LoadingTick 60fps cycle.
+    let t = phase.rem_euclid(6.0);
+    let idx = (t / 1.2) as usize;
+    if is_creating {
+        match idx {
+            0 => "Collecting sources…",
+            1 => "Laying out pages…",
+            2 => "Writing archive…",
+            3 => "Finalizing project…",
+            _ => "Almost there…",
+        }
+    } else {
+        match idx {
+            0 => "Unpacking archive…",
+            1 => "Parsing manifest…",
+            2 => "Decoding pages…",
+            3 => "Hydrating workspace…",
+            _ => "Almost there…",
+        }
+    }
+    .to_string()
+}
+
+fn loading_overlay<'a>(app: &'a App, base: Element<'a, Message>) -> Element<'a, Message> {
+    let tab = &app.tabs[app.active];
+    let phase = tab.loading_phase;
+
+    let lower = tab.status.to_lowercase();
+    let is_failed = lower.contains("failed") || lower.contains("error");
+    let is_creating = !is_failed && lower.contains("creating");
+
+    let status_text = if is_failed {
+        tab.status.clone()
+    } else {
+        splash_status(phase, is_creating)
+    };
+    let status_color = if is_failed {
+        Color::from_rgb8(240, 200, 80)
+    } else {
+        Color::from_rgb8(148, 163, 184)
+    };
+
+    let status_row: Element<'_, Message> = text(status_text)
+        .size(scale::s(11.0))
+        .color(status_color)
+        .into();
+
+    let headline: Element<'_, Message> = container(
+        text("Opening project…")
+            .size(scale::s(22.0))
+            .color(Color::WHITE),
+    )
+    .width(Length::Fill)
+    .center_x(Length::Fill)
+    .into();
+
+    let center_block: Element<'_, Message> = container(headline)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .into();
+
+    let card_content = column![status_row, center_block]
+        .spacing(scale::s(8.0))
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+    let card = container(card_content)
+        .width(Length::Fixed(scale::s(520.0)))
+        .height(Length::Fixed(scale::s(280.0)))
+        .padding(scale::s(18.0))
+        .style(|_| container::Style {
+            background: Some(panel::PANEL_BG.into()),
+            border: iced::Border::default()
+                .rounded(scale::s(16.0))
+                .color(Color::from_rgba8(255, 255, 255, 0.08))
+                .width(scale::s(1.0)),
+            ..container::Style::default()
+        });
+
+    stack![
+        base,
+        opaque(
+            center(card).style(|_| container::Style {
+                background: Some(
+                    Color {
+                        a: 0.45,
+                        ..Color::BLACK
+                    }
+                    .into()
+                ),
+                ..container::Style::default()
+            })
+        )
+    ]
+    .into()
 }
