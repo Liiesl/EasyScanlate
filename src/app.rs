@@ -145,8 +145,8 @@ pub enum Message {
     /// External open requests (CLI forward, drag-drop, IPC). Each string is
     /// a raw path that may contain quotes/spaces.
     ExternalOpen(Vec<String>),
-    // ——— Updates (Velopack) ———
-    UpdateCheckResult(Box<Option<velopack::UpdateInfo>>),
+    // ——— Updates (Velopack; stubbed when the `updates` feature is off) ———
+    UpdateCheckResult(Box<Option<crate::updater::UpdateInfo>>),
     UpdateDownloadStart,
     UpdateApply,
     UpdateDismiss,
@@ -188,7 +188,8 @@ pub struct App {
     pub frame: NativeFrame,
     pub(crate) ipc_listener: Option<crate::single_instance::Listener>,
     // ——— Updates (Velopack, per-user, GithubSource Liiesl/EasyScanlate) ———
-    pub update_info: Option<velopack::UpdateInfo>,
+    // Type is `velopack::UpdateInfo` with `updates`, empty stub without.
+    pub update_info: Option<crate::updater::UpdateInfo>,
     pub update_downloading: bool,
     pub update_progress: i16,
     pub update_ready: bool,
@@ -263,9 +264,18 @@ impl App {
             update_rx: None,
             update_error: None,
             onboarding: {
-                let (completed, ver) = easyscanlate_settings::get(|s| (s.onboarding_completed, s.onboarding_version));
-                let is_completed = completed && ver >= easyscanlate_settings::CURRENT_ONBOARDING_VERSION;
-                if is_completed { None } else { Some(onboarding::OnboardingState::new()) }
+                // No `models` feature (e.g. test-ui): bypass the blocking
+                // download wizard entirely — there is nothing to download.
+                #[cfg(not(feature = "models"))]
+                {
+                    None
+                }
+                #[cfg(feature = "models")]
+                {
+                    let (completed, ver) = easyscanlate_settings::get(|s| (s.onboarding_completed, s.onboarding_version));
+                    let is_completed = completed && ver >= easyscanlate_settings::CURRENT_ONBOARDING_VERSION;
+                    if is_completed { None } else { Some(onboarding::OnboardingState::new()) }
+                }
             },
             onboarding_rx: None,
             onboarding_active_id: None,

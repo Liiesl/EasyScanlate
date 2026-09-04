@@ -553,13 +553,14 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
     let query_ref = query.as_str();
     let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
 
-    // ── Automation card: auto-detect / SFX (inpaint moved to Inpaint tab) ──
+    // ── Automation card: auto-detect / SFX / auto-inpaint mirror ──
     {
         // collect whether any automation sub-field matches
         let show_auto_detect = matches_any(query_ref, &["automation", "auto", "detect", "style", "classify", "onnx", "styling"]);
         let show_sfx = matches_any(query_ref, &["automation", "auto", "sfx", "filter", "balloon", "segment", "manga"]);
+        let show_inpaint = matches_any(query_ref, &["automation", "auto", "inpaint", "bg-aware"]);
         let show_automation_header = matches_any(query_ref, &["automation", "general", "auto"]);
-        let show_any = show_automation_header || show_auto_detect || show_sfx;
+        let show_any = show_automation_header || show_auto_detect || show_sfx || show_inpaint;
         if show_any {
             let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
             col.push(card_header(Icon::Sparkles, "Automation", Some("Style & SFX filtering")).into());
@@ -591,6 +592,18 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
                     ].spacing(scale::s(4.0)).into()
                 );
                 if col.len() > 2 { col.push(item_separator()); }
+            }
+            #[cfg(feature = "inpaint")]
+            if show_inpaint || show_automation_header || query_ref.trim().is_empty() {
+                if col.len() > 1 { col.push(item_separator()); }
+                let auto = easyscanlate_settings::get(|s| s.auto_inpaint);
+                col.push(
+                    checkbox(auto)
+                        .label("Auto inpaint (bg-aware)")
+                        .text_size(scale::s(12.0))
+                        .on_toggle(|v| set(move |s| s.auto_inpaint = v))
+                        .into()
+                );
             }
 
             // only push card if it actually has content beyond header
@@ -647,8 +660,9 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     {
         let show_auto_detect = matches_any(query, &["automation", "auto", "detect", "style", "classify", "onnx", "styling"]);
         let show_sfx = matches_any(query, &["automation", "auto", "sfx", "filter", "balloon", "segment", "manga"]);
+        let show_inpaint = matches_any(query, &["automation", "auto", "inpaint", "bg-aware"]);
         let show_automation_header = matches_any(query, &["automation", "general", "auto"]);
-        let show_any = show_automation_header || show_auto_detect || show_sfx;
+        let show_any = show_automation_header || show_auto_detect || show_sfx || show_inpaint;
         if show_any {
             let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
             col.push(card_header(Icon::Sparkles, "Automation", Some("Style & SFX filtering")).into());
@@ -679,6 +693,18 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                     ].spacing(scale::s(4.0)).into()
                 );
                 if col.len() > 2 { col.push(item_separator()); }
+            }
+            #[cfg(feature = "inpaint")]
+            if show_inpaint || show_automation_header || query.trim().is_empty() {
+                if col.len() > 1 { col.push(item_separator()); }
+                let auto = easyscanlate_settings::get(|s| s.auto_inpaint);
+                col.push(
+                    checkbox(auto)
+                        .label("Auto inpaint (bg-aware)")
+                        .text_size(scale::s(12.0))
+                        .on_toggle(|v| set(move |s| s.auto_inpaint = v))
+                        .into()
+                );
             }
             if col.len() > 1 {
                 cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());

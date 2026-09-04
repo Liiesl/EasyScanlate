@@ -161,6 +161,10 @@ pub struct Tab {
     #[cfg(feature = "inpaint")]
     pub auto_inpaint_pending: usize,
     #[cfg(feature = "inpaint")]
+    pub auto_inpaint_total: usize,
+    #[cfg(feature = "segment")]
+    pub pipeline_seg_done: bool,
+    #[cfg(feature = "inpaint")]
     pub pending_auto_telea_jobs: Option<Vec<AutoInpaintJob>>,
     #[cfg(feature = "inpaint")]
     pub pending_auto_lama_jobs: Option<Vec<AutoInpaintJob>>,
@@ -286,6 +290,10 @@ impl Tab {
             pipeline_style_results: Vec::new(),
             #[cfg(feature = "inpaint")]
             auto_inpaint_pending: 0,
+            #[cfg(feature = "inpaint")]
+            auto_inpaint_total: 0,
+            #[cfg(feature = "segment")]
+            pipeline_seg_done: false,
             #[cfg(feature = "inpaint")]
             pending_auto_telea_jobs: None,
             #[cfg(feature = "inpaint")]

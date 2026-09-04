@@ -59,10 +59,11 @@ rapidocr-core = { version = "0.2.2", default-features = false }
 
 [features]
 # Subsystem switches. Building without one (e.g. `--no-default-features
-# --features test-ui`) skips that crate entirely: no ort (ocr/inpaint/styling)
-# and no rig (translation) are compiled or linked. Disabled subsystems show a
+# --features test-ui`) skips that crate entirely: no ort (ocr/inpaint/styling),
+# no rig (translation), no velopack (`updates`) and no fast-down/reqwest
+# (`models`) are compiled or linked. Disabled subsystems show a
 # "unavailable in this build" status instead of running.
-default = ["ocr", "inpaint", "styling", "translation", "segment", "directml", "file-assoc"]
+default = ["ocr", "inpaint", "styling", "translation", "segment", "directml", "file-assoc", "updates", "models"]
 ocr = ["dep:easyscanlate-ocr", "easyscanlate-ui/ocr"]
 inpaint = ["dep:easyscanlate-inpaint", "easyscanlate-ui/inpaint"]
 styling = ["dep:easyscanlate-styling", "easyscanlate-ui/styling"]
@@ -75,6 +76,13 @@ directml = [
 ]
 # Convenience aliases: UI-only iteration (fake white image + fake OCR entries
 # at boot, no ML backends), or exactly one real subsystem at a time.
+# NOTE: `test-ui` intentionally enables neither `updates` (velopack) nor
+# `models` (models-store → fast-down-api → reqwest). Build it with
+# `--no-default-features --features test-ui` for the lean graph; plain
+# `--features test-ui` on top of `default` still pulls the full weight
+# because Cargo features are additive and cannot disable defaults.
+updates = ["dep:velopack"]
+models = ["dep:easyscanlate-models"]
 test-ui = []
 test-ocr = ["ocr"]
 test-inpaint = ["inpaint"]
@@ -91,7 +99,7 @@ rfd = { workspace = true }
 neverliie-iced-widgets = { workspace = true }
 easyscanlate-model = { workspace = true }
 easyscanlate-settings = { workspace = true }
-easyscanlate-models = { workspace = true }
+easyscanlate-models = { workspace = true, optional = true }
 easyscanlate-inpaint = { workspace = true, optional = true }
 easyscanlate-ocr = { workspace = true, optional = true }
 easyscanlate-styling = { workspace = true, optional = true }
@@ -107,7 +115,7 @@ open = { workspace = true }
 serde = { workspace = true }
 lucide-icons = { workspace = true }
 winreg = { version = "0.53", optional = true }
-velopack = "1.2"
+velopack = { version = "1.2", optional = true }
 
 [profile.dev.package."*"]
 debug = "line-tables-only"

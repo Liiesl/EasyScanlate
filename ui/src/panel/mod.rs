@@ -18,7 +18,7 @@ use crate::event::UiEvent;
 use crate::scale;
 use crate::state::UiState;
 
-pub const PANEL_BG: Color = Color::from_rgba8(34, 36, 44, 0.78);
+pub const PANEL_BG: Color = Color::from_rgba8(34, 36, 44, 0.70);
 pub const PANEL_BG_SOLID: Color = Color::from_rgb8(34, 36, 44);
 pub use crate::segmented::MUTED_FG;
 
@@ -40,9 +40,9 @@ pub fn button_style(
     use iced::widget::button::Status;
     let bg = match status {
         Status::Active => PANEL_BG,
-        Status::Hovered => Color::from_rgba8(46, 48, 62, 0.90),
-        Status::Pressed => Color::from_rgba8(55, 57, 72, 0.95),
-        Status::Disabled => Color::from_rgba8(34, 36, 44, 0.40),
+        Status::Hovered => Color::from_rgba8(46, 48, 62, 0.82),
+        Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
+        Status::Disabled => Color::from_rgba8(34, 36, 44, 0.35),
     };
     let txt = match status {
         Status::Disabled => crate::segmented::MUTED_FG,

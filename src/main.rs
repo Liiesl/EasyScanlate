@@ -7,7 +7,7 @@ use iced::Size;
 use lucide_icons::LUCIDE_FONT_BYTES;
 use neverliie_iced_widgets::title_bar::{NativeFrame, NativeFrameConfig};
 use std::path::PathBuf;
-#[cfg(windows)]
+#[cfg(all(windows, feature = "updates"))]
 use velopack::VelopackApp;
 
 fn print_help() {
@@ -49,7 +49,8 @@ Examples:
 
 fn main() -> iced::Result {
     // ---- Velopack lifecycle (must be first, handles install/update/uninstall and exits) ----
-    #[cfg(windows)]
+    // Skipped when the `updates` feature is off (e.g. test-ui builds).
+    #[cfg(all(windows, feature = "updates"))]
     VelopackApp::build().run();
 
     // ---- CLI flags (handled before iced / single-instance) ----------------

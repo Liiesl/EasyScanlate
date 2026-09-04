@@ -12,6 +12,186 @@ use easyscanlate_model::ModelEvent;
 use super::App;
 use super::tab::Tab;
 
+/// Stage weights for the unified Start OCR progress: OCR x5, SFX segment x2,
+/// style classify x1, auto-inpaint x3. Normalized over the enabled stages.
+const OCR_W: f32 = 5.0;
+const SEG_W: f32 = 2.0;
+const STYLE_W: f32 = 1.0;
+const INPAINT_W: f32 = 3.0;
+
+pub(crate) fn pipeline_progress_for_tab(tab: &Tab) -> Option<f32> {
+    // Pipeline-originated busy only (exclude manual translate/inpaint and
+    // manual single style detect so the Start button stays plain for those).
+    let ocr_busy = tab.running;
+    #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+    let chain_busy = tab.pipeline_active;
+    #[cfg(not(all(feature = "styling", feature = "inpaint", feature = "segment")))]
+    let chain_busy = {
+        #[cfg(all(feature = "styling", feature = "inpaint"))]
+        {
+            tab.pipeline_style_pending > 0
+        }
+        #[cfg(not(all(feature = "styling", feature = "inpaint")))]
+        {
+            false
+        }
+    };
+    #[cfg(feature = "segment")]
+    let seg_busy = tab.segment_filtering;
+    #[cfg(not(feature = "segment"))]
+    let seg_busy = false;
+    #[cfg(all(feature = "styling", feature = "inpaint"))]
+    let style_pending_busy =
+        tab.pipeline_style_pending > 0 || !tab.pipeline_style_results.is_empty();
+    #[cfg(not(all(feature = "styling", feature = "inpaint")))]
+    let style_pending_busy = false;
+    #[cfg(feature = "styling")]
+    let style_building = tab.styling.is_building();
+    #[cfg(not(feature = "styling"))]
+    let style_building = false;
+    // Only count a styling build as pipeline progress when it belongs to the
+    // chain (raw OCR running, chain active, or deferred style jobs exist).
+    // A manual single AutoDetect otherwise leaves the button plain.
+    let style_busy = style_pending_busy || (style_building && (ocr_busy || chain_busy || style_pending_busy));
+    #[cfg(feature = "inpaint")]
+    let inpaint_busy = tab.auto_inpaint_pending > 0
+        || tab.pending_auto_telea_jobs.is_some()
+        || tab.pending_auto_lama_jobs.is_some()
+        || tab.pending_auto_aot_jobs.is_some();
+    #[cfg(not(feature = "inpaint"))]
+    let inpaint_busy = false;
+
+    if !(ocr_busy || chain_busy || seg_busy || style_busy || inpaint_busy) {
+        return None;
+    }
+
+    let (do_sfx, do_style, do_inpaint) = easyscanlate_settings::get(|s| {
+        (s.auto_sfx_filter, s.auto_style_detect, s.auto_inpaint)
+    });
+    #[cfg(not(feature = "segment"))]
+    let do_sfx = { let _ = &do_sfx; false };
+    #[cfg(not(feature = "styling"))]
+    let do_style = { let _ = &do_style; false };
+    #[cfg(not(feature = "inpaint"))]
+    let do_inpaint = { let _ = &do_inpaint; false };
+
+    #[cfg(feature = "ocr")]
+    let ocr_enabled = tab.ocr_runs > 0 || tab.running;
+    #[cfg(not(feature = "ocr"))]
+    let ocr_enabled = false;
+
+    let mut weighted = 0.0f32;
+    let mut divisor = 0.0f32;
+
+    // OCR fraction from run counts.
+    let ocr_frac = {
+        #[cfg(feature = "ocr")]
+        {
+            if tab.ocr_runs == 0 {
+                0.0
+            } else {
+                let done = tab.ocr_runs.saturating_sub(tab.pending) as f32;
+                (done / tab.ocr_runs as f32).clamp(0.0, 1.0)
+            }
+        }
+        #[cfg(not(feature = "ocr"))]
+        {
+            0.0
+        }
+    };
+    if ocr_enabled {
+        weighted += OCR_W * ocr_frac;
+        divisor += OCR_W;
+    }
+
+    // SFX segment is a single blocking job: 0 while filtering/not started, 1 when done.
+    if do_sfx {
+        #[cfg(feature = "segment")]
+        {
+            let frac = if tab.segment_filtering {
+                0.0
+            } else if ocr_frac < 1.0 {
+                0.0
+            } else if tab.pipeline_seg_done {
+                1.0
+            } else {
+                0.0
+            };
+            weighted += SEG_W * frac;
+            divisor += SEG_W;
+        }
+    }
+
+    // Style classify: incremental while deferred, else 0/1 step.
+    if do_style {
+        #[cfg(feature = "styling")]
+        {
+            #[cfg(all(feature = "styling", feature = "inpaint"))]
+            let deferred_active = tab.pipeline_style_pending > 0
+                || !tab.pipeline_style_results.is_empty();
+            #[cfg(not(all(feature = "styling", feature = "inpaint")))]
+            let deferred_active = false;
+            let frac = if deferred_active {
+                #[cfg(all(feature = "styling", feature = "inpaint"))]
+                {
+                    let total =
+                        tab.pipeline_style_pending + tab.pipeline_style_results.len();
+                    if total == 0 {
+                        1.0
+                    } else {
+                        tab.pipeline_style_results.len() as f32 / total as f32
+                    }
+                }
+                #[cfg(not(all(feature = "styling", feature = "inpaint")))]
+                {
+                    0.0
+                }
+            } else if tab.styling.is_building() {
+                0.0
+            } else if ocr_frac < 1.0 {
+                0.0
+            } else {
+                1.0
+            };
+            weighted += STYLE_W * frac.clamp(0.0, 1.0);
+            divisor += STYLE_W;
+        }
+    }
+
+    // Auto-inpaint: incremental from total vs remaining.
+    if do_inpaint {
+        #[cfg(feature = "inpaint")]
+        {
+            let queued = tab.pending_auto_telea_jobs.is_some()
+                || tab.pending_auto_lama_jobs.is_some()
+                || tab.pending_auto_aot_jobs.is_some();
+            let frac = if tab.auto_inpaint_pending > 0 || tab.auto_inpaint_total > 0 || queued
+            {
+                if tab.auto_inpaint_total == 0 {
+                    0.0
+                } else {
+                    let done = tab
+                        .auto_inpaint_total
+                        .saturating_sub(tab.auto_inpaint_pending)
+                        as f32;
+                    (done / tab.auto_inpaint_total as f32).clamp(0.0, 1.0)
+                }
+            } else if ocr_frac < 1.0 {
+                0.0
+            } else {
+                1.0
+            };
+            weighted += INPAINT_W * frac;
+            divisor += INPAINT_W;
+        }
+    }
+
+    if divisor <= 0.0 {
+        return None;
+    }
+    Some((weighted / divisor).clamp(0.0, 1.0))
+}
+
 pub(crate) struct ActiveTab<'a> {
     pub app: &'a App,
     pub tab: &'a Tab,
@@ -206,6 +386,10 @@ impl UiState for ActiveTab<'_> {
         { false }
     }
 
+    fn pipeline_progress(&self) -> Option<f32> {
+        pipeline_progress_for_tab(self.tab)
+    }
+
     fn is_bulk_busy(&self) -> bool {
         self.tab.running
             || self.tab.translating
@@ -331,8 +515,13 @@ impl UiState for ActiveTab<'_> {
     fn update_current_version(&self) -> String {
         crate::updater::get_current_version()
     }
+    #[cfg(feature = "updates")]
     fn update_available_version(&self) -> Option<String> {
         self.app.update_info.as_ref().map(|i| i.TargetFullRelease.Version.to_string())
+    }
+    #[cfg(not(feature = "updates"))]
+    fn update_available_version(&self) -> Option<String> {
+        None
     }
     fn update_downloading(&self) -> bool {
         self.app.update_downloading
@@ -343,11 +532,16 @@ impl UiState for ActiveTab<'_> {
     fn update_ready(&self) -> bool {
         self.app.update_ready
     }
+    #[cfg(feature = "updates")]
     fn update_notes(&self) -> Option<String> {
         self.app.update_info.as_ref().and_then(|i| {
             let n = i.TargetFullRelease.NotesMarkdown.clone();
             if n.trim().is_empty() { None } else { Some(n) }
         })
+    }
+    #[cfg(not(feature = "updates"))]
+    fn update_notes(&self) -> Option<String> {
+        None
     }
 
     fn onboarding_open(&self) -> bool { self.app.onboarding.is_some() }
@@ -462,6 +656,9 @@ impl UiState for App {
         #[cfg(not(feature = "styling"))]
         { false }
     }
+    fn pipeline_progress(&self) -> Option<f32> {
+        self.tabs.get(self.active).and_then(pipeline_progress_for_tab)
+    }
     fn is_bulk_busy(&self) -> bool {
         self.tabs[self.active].running
             || self.tabs[self.active].translating
@@ -531,17 +728,29 @@ impl UiState for App {
     fn loading_phase(&self) -> f32 { self.tabs[self.active].loading_phase }
     fn loading_title(&self) -> String { self.tabs[self.active].title.clone() }
     fn update_current_version(&self) -> String { crate::updater::get_current_version() }
+    #[cfg(feature = "updates")]
     fn update_available_version(&self) -> Option<String> {
         self.update_info.as_ref().map(|i| i.TargetFullRelease.Version.to_string())
+    }
+    #[cfg(not(feature = "updates"))]
+    fn update_available_version(&self) -> Option<String> {
+        let _ = &self.update_info;
+        None
     }
     fn update_downloading(&self) -> bool { self.update_downloading }
     fn update_progress(&self) -> i16 { self.update_progress }
     fn update_ready(&self) -> bool { self.update_ready }
+    #[cfg(feature = "updates")]
     fn update_notes(&self) -> Option<String> {
         self.update_info.as_ref().and_then(|i| {
             let n = i.TargetFullRelease.NotesMarkdown.clone();
             if n.trim().is_empty() { None } else { Some(n) }
         })
+    }
+    #[cfg(not(feature = "updates"))]
+    fn update_notes(&self) -> Option<String> {
+        let _ = &self.update_info;
+        None
     }
     fn onboarding_open(&self) -> bool { self.onboarding.is_some() }
     fn onboarding_step(&self) -> u8 { self.onboarding.as_ref().map(|o| o.step).unwrap_or(0) }

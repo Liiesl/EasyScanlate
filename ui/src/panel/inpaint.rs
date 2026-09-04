@@ -52,9 +52,9 @@ fn header_row<'a, S: UiState + ?Sized>(state: &'a S, total: usize) -> Element<'a
         {
             let btn = button(
                 crate::icon::lucide(if state.show_inpaint() {
-                    Icon::Eye
+                    Icon::Image
                 } else {
-                    Icon::EyeOff
+                    Icon::ImageOff
                 })
                 .size(scale::s(14.0))
                 .center(),
@@ -139,9 +139,9 @@ fn layer_row<'a>(
     };
 
     let eye: Element<'_, UiEvent> = crate::icon::lucide(if global_visible {
-        Icon::Eye
+        Icon::Image
     } else {
-        Icon::EyeOff
+        Icon::ImageOff
     })
     .size(scale::s(12.0))
     .color(if global_visible { MUTED_FG } else { Color::from_rgba8(120, 120, 120, 0.9) })

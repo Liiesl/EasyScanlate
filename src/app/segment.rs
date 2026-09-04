@@ -221,6 +221,7 @@ pub fn handle_filtered(
 ) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none()};
     app.tabs[idx].segment_filtering = false;
+    app.tabs[idx].pipeline_seg_done = true;
     // free queue weight for segment (success or failure)
     app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Segment);
     crate::app::queue::refresh_queued_statuses(app);

@@ -23,7 +23,6 @@ image = { workspace = true }
 neverliie-iced-widgets = { workspace = true }
 easyscanlate-model = { workspace = true }
 easyscanlate-settings = { workspace = true }
-easyscanlate-models = { workspace = true }
 easyscanlate-translation = { workspace = true, optional = true }
 easyscanlate-segment = { workspace = true, optional = true }
 tokio = { workspace = true }

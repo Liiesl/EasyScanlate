@@ -49,7 +49,7 @@ pub fn handle_check_again(app: &mut App) -> Task<Message> {
     handle_check(app)
 }
 
-pub fn handle_check_result(app: &mut App, info: Option<velopack::UpdateInfo>) -> Task<Message> {
+pub fn handle_check_result(app: &mut App, info: Option<crate::updater::UpdateInfo>) -> Task<Message> {
     app.update_info = info;
     if app.update_info.is_none() {
         app.update_error = None;

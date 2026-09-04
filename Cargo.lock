@@ -1378,7 +1378,6 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "easyscanlate-model",
- "easyscanlate-models",
  "easyscanlate-segment",
  "easyscanlate-settings",
  "easyscanlate-translation",

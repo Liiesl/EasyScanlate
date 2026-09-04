@@ -10,8 +10,8 @@ use crate::event::UiEvent;
 use crate::scale;
 use crate::state::UiState;
 
-/// Fixed width of the toolbar, in pixels.
-pub const TOOLBAR_WIDTH: f32 = 52.0;
+/// Width of the toolbar, in pixels — always equal to the button size.
+pub const TOOLBAR_WIDTH: f32 = 36.0;
 
 fn tip<'a>(label: &'a str) -> container::Container<'a, UiEvent> {
     container(text(label).size(scale::s(11.0)))
@@ -21,13 +21,13 @@ fn tip<'a>(label: &'a str) -> container::Container<'a, UiEvent> {
 
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let can_toggle = !state.images().is_empty();
-    let btn_size = scale::s(36.0);
+    let btn_size = scale::s(TOOLBAR_WIDTH);
 
     let toggle_text_btn = button(
         crate::icon::lucide(if state.show_overlay_text() {
-            Icon::EyeOff
+            Icon::MessageCircle
         } else {
-            Icon::Eye
+            Icon::MessageCircleOff
         })
         .size(scale::s(16.0))
         .center(),
@@ -44,9 +44,9 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
 
     let toggle_inpaint_btn = button(
         crate::icon::lucide(if state.show_inpaint() {
-            Icon::EyeOff
+            Icon::Image
         } else {
-            Icon::Eye
+            Icon::ImageOff
         })
         .size(scale::s(16.0))
         .center(),
@@ -128,9 +128,8 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
 
     container(column![toggle_text, toggle_inpaint, inpaint, manual_ocr, settings]
         .spacing(scale::s(6.0))
-        .padding(scale::s(4.0))
         .align_x(iced::Alignment::Center))
-        .width(Length::Fixed(scale::s(TOOLBAR_WIDTH)))
+        .width(Length::Fixed(btn_size))
         .height(Length::Fill)
         .style(|_theme| container::Style {
             background: None,

@@ -112,6 +112,10 @@ pub trait UiState {
     fn is_segment_filtering(&self) -> bool { false }
     /// True while styling classification jobs are pending/running.
     fn is_styling_busy(&self) -> bool { false }
+    /// Weighted overall pipeline progress (`0.0..=1.0`) for the Start OCR
+    /// button: OCR x5 + SFX segment x2 + style x1 + auto-inpaint x3,
+    /// normalized over the enabled stages. `None` when idle (hide bar).
+    fn pipeline_progress(&self) -> Option<f32> { None }
     /// Bulk busy: any job that mutates OCR entries / inpaint patches / translations and conflicts with bulk actions.
     /// Used to disable Start OCR (re-enable), Translate, Retranslate, AutoDetect, InpaintBackground, manual mode etc.
     /// Note: main-area text editing and fine-grained style controls are intentionally *not* gated by this.

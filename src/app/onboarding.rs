@@ -2,7 +2,17 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use iced::Task;
 
+#[cfg(feature = "models")]
 use easyscanlate_models::registry::ModelSpec;
+/// Stub spec for builds without the `models` feature (test-ui): the
+/// mandatory list is always empty so onboarding has nothing to download.
+/// Only `id` is read by the shared `handle_model_done` path.
+#[cfg(not(feature = "models"))]
+#[derive(Debug, Clone, Copy)]
+pub struct ModelSpec {
+    pub id: &'static str,
+    pub description: &'static str,
+}
 use easyscanlate_ui::state::ModelDownloadStatus;
 
 use super::{App, Message};
@@ -17,6 +27,8 @@ pub struct OnboardingState {
 }
 
 impl OnboardingState {
+    // Dead in builds without `models` (test-ui bypasses onboarding in `App::new`).
+    #[cfg_attr(not(feature = "models"), allow(dead_code))]
     pub fn new() -> Self {
         let mut s = Self {
             step: 0,
@@ -45,6 +57,17 @@ impl OnboardingState {
         ensure_korean_dict();
     }
 
+    #[cfg(not(feature = "models"))]
+    pub fn overall_progress(&self) -> f32 {
+        if self.models.is_empty() {
+            return 1.0;
+        }
+        // No byte weights without models-store: count-based only.
+        let done = self.models.iter().filter(|(_, _, s)| matches!(s, ModelDownloadStatus::Done)).count() as f32;
+        done / self.models.len() as f32
+    }
+
+    #[cfg(feature = "models")]
     pub fn overall_progress(&self) -> f32 {
         if self.models.is_empty() {
             return 1.0;
@@ -112,18 +135,27 @@ impl OnboardingState {
     }
 
     pub fn next_missing(&self) -> Option<ModelSpec> {
-        for (id, _, status) in &self.models {
-            if matches!(status, ModelDownloadStatus::Done) {
-                continue;
-            }
-            if let Some(spec) = easyscanlate_models::get_model(id) {
-                return Some(*spec);
-            }
+        #[cfg(not(feature = "models"))]
+        {
+            let _ = &self.models;
+            return None;
         }
-        None
+        #[cfg(feature = "models")]
+        {
+            for (id, _, status) in &self.models {
+                if matches!(status, ModelDownloadStatus::Done) {
+                    continue;
+                }
+                if let Some(spec) = easyscanlate_models::get_model(id) {
+                    return Some(*spec);
+                }
+            }
+            None
+        }
     }
 }
 
+#[cfg(feature = "models")]
 fn mandatory_specs() -> Vec<&'static ModelSpec> {
     easyscanlate_models::MODELS
         .iter()
@@ -131,6 +163,14 @@ fn mandatory_specs() -> Vec<&'static ModelSpec> {
         .collect()
 }
 
+/// No models feature: nothing is mandatory, so the list is always empty
+/// and the wizard (if ever shown) is immediately complete.
+#[cfg(not(feature = "models"))]
+fn mandatory_specs() -> Vec<&'static ModelSpec> {
+    Vec::new()
+}
+
+#[cfg(feature = "models")]
 fn is_present(spec: &ModelSpec) -> bool {
     // Only check canonical `models_dir` (where downloads land). Do NOT use
     // `resolve_model_path` fallbacks (workspace `../models`, exe-relative)
@@ -139,6 +179,11 @@ fn is_present(spec: &ModelSpec) -> bool {
     // still falls back via `resolve_model_path` — this gate is onboarding-only.
     easyscanlate_models::registry::is_downloaded(spec)
         || easyscanlate_models::registry::is_downloaded_with_legacy(spec)
+}
+
+#[cfg(not(feature = "models"))]
+fn is_present(_spec: &ModelSpec) -> bool {
+    true
 }
 
 fn ensure_korean_dict() {
@@ -266,6 +311,13 @@ fn start_download(app: &mut App, id: String) -> Task<Message> {
     download_task(id, tx)
 }
 
+#[cfg(not(feature = "models"))]
+fn download_task(_id: String, _sender: mpsc::Sender<(f32, u64, u64)>) -> Task<Message> {
+    // No downloader in this build: callers treat the queue as empty.
+    Task::none()
+}
+
+#[cfg(feature = "models")]
 fn download_task(id: String, sender: mpsc::Sender<(f32, u64, u64)>) -> Task<Message> {
     let spec = match easyscanlate_models::get_model(&id) {
         Some(s) => *s,
@@ -419,9 +471,18 @@ pub fn handle_finish(app: &mut App) -> Task<Message> {
 }
 
 pub fn handle_replay(app: &mut App) -> Task<Message> {
-    easyscanlate_settings::reset_onboarding();
-    app.onboarding = Some(OnboardingState::new());
-    app.settings_open = false;
-    app.manage_models_open = false;
-    Task::none()
+    #[cfg(not(feature = "models"))]
+    {
+        app.active_tab_mut().status =
+            "Onboarding unavailable in this build (no models feature).".to_string();
+        return Task::none();
+    }
+    #[cfg(feature = "models")]
+    {
+        easyscanlate_settings::reset_onboarding();
+        app.onboarding = Some(OnboardingState::new());
+        app.settings_open = false;
+        app.manage_models_open = false;
+        Task::none()
+    }
 }

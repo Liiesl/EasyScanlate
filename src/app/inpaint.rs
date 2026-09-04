@@ -1926,6 +1926,7 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
     };
     if let Some(engine) = cached {
         app.tabs[idx].auto_inpaint_pending += jobs.len();
+        app.tabs[idx].auto_inpaint_total += jobs.len();
         match backend {
             InpaintBackend::Telea => {
                 app.tabs[idx].status = format!("Auto-inpaint (Telea) {} regions in parallel...", jobs.len());

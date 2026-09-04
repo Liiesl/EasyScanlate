@@ -3,7 +3,7 @@
 //! Renders `easyscanlate` (pinned, no ×, with icon) + project tabs (`title • ×`) + `+`
 //! immediately after last tab. Scroll area grows with tabs until 80% of titlebar
 //! then becomes fixed and scrollable. Inactive bg = transparent, active bg =
-//! `PANEL_BG` (`34,36,44,0.78`) with top-only radius 6, no border/underline.
+//! `PANEL_BG` (`34,36,44,0.70`) with top-only radius 6, no border/underline.
 //! Trailing `Fill` gap falls through to `draggable` in
 //! `NeverLiieIcedWidgets/src/title_bar/mod.rs:628,653`.
 //!
@@ -17,9 +17,9 @@ use crate::event::UiEvent;
 use crate::state::UiState;
 
 const ACCENT: Color = Color::from_rgb8(92, 190, 255);
-const PANEL_BG: Color = Color::from_rgba8(34, 36, 44, 0.78);
-const PANEL_HOVER: Color = Color::from_rgba8(46, 48, 62, 0.90);
-const PANEL_PRESSED: Color = Color::from_rgba8(55, 57, 72, 0.95);
+const PANEL_BG: Color = Color::from_rgba8(34, 36, 44, 0.70);
+const PANEL_HOVER: Color = Color::from_rgba8(46, 48, 62, 0.82);
+const PANEL_PRESSED: Color = Color::from_rgba8(55, 57, 72, 0.87);
 
 fn chip_button_style(active: bool, is_dark: bool) -> impl Fn(&Theme, button::Status) -> button::Style + Clone {
     move |_theme: &Theme, status: button::Status| {

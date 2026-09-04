@@ -353,7 +353,7 @@ fn translation_mode_switcher<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEv
         ),
     ]);
     container(pill)
-        .width(Length::Fixed(scale::s(150.0)))
+        .width(Length::Fixed(scale::s(88.0)))
         .into()
 }
 

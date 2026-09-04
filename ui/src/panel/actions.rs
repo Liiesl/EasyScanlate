@@ -2,8 +2,8 @@
 //! stopping OCR, the running status and the settings button all live in one
 //! compact row across the panel's full width.
 
-use iced::widget::{button, container, row, text, tooltip};
-use iced::{Element, Length};
+use iced::widget::{button, container, progress_bar, row, text, tooltip};
+use iced::{Color, Element, Length};
 use lucide_icons::Icon;
 
 use crate::event::UiEvent;
@@ -24,7 +24,31 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let is_stop = is_running;
     let can_start = !state.images().is_empty() && !is_bulk_busy && !is_running;
     let ocr_label = if is_stop { "Stop OCR" } else { "Start OCR" };
-    let ocr_btn = button(
+    let progress = state.pipeline_progress();
+    let ocr_content: Element<'_, UiEvent> = if let Some(frac) = progress {
+        let frac = frac.clamp(0.0, 1.0);
+        let pct = format!("{:.0}%", frac * 100.0);
+        row![
+            crate::icon::lucide(if is_stop { Icon::Square } else { Icon::Play })
+                .size(scale::s(14.0))
+                .center(),
+            text(ocr_label).size(scale::s(12.0)),
+            progress_bar(0.0..=1.0, frac)
+                .girth(Length::Fixed(scale::s(6.0)))
+                .length(Length::Fixed(scale::s(60.0)))
+                .style(|_theme: &iced::Theme| iced::widget::progress_bar::Style {
+                    background: Color::from_rgba8(255, 255, 255, 0.12).into(),
+                    bar: crate::segmented::ACCENT.into(),
+                    border: iced::Border::default().rounded(scale::s(3.0)),
+                }),
+            text(pct)
+                .size(scale::s(11.0))
+                .width(Length::Fixed(scale::s(38.0))),
+        ]
+        .spacing(scale::s(6.0))
+        .align_y(iced::Alignment::Center)
+        .into()
+    } else {
         row![
             crate::icon::lucide(if is_stop { Icon::Square } else { Icon::Play })
                 .size(scale::s(14.0))
@@ -32,8 +56,10 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             text(ocr_label).size(scale::s(12.0))
         ]
         .spacing(scale::s(4.0))
-        .align_y(iced::Alignment::Center),
-    )
+        .align_y(iced::Alignment::Center)
+        .into()
+    };
+    let ocr_btn = button(ocr_content)
     .style(crate::panel::button_style)
     .on_press_maybe(
         if is_stop {
@@ -63,7 +89,6 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         .spacing(scale::s(6.0))
         .width(Length::Fill),
     )
-    .padding(scale::s(8.0))
     .width(Length::Fill)
     .style(|_theme| container::Style {
         background: None,

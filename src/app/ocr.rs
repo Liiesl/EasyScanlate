@@ -2,6 +2,9 @@ use iced::Task;
 #[cfg(feature = "ocr")]
 use iced::futures::{SinkExt, StreamExt};
 use easyscanlate_model::{NewEntry, Quad};
+// Needed only by the `not(ocr)` fake-OCR fallback (`is_bulk_busy` via `UiState`).
+#[cfg(not(feature = "ocr"))]
+use easyscanlate_ui::UiState;
 #[cfg(feature = "ocr")]
 use easyscanlate_ocr::{self as ocr, ParallelEngine};
 
@@ -184,6 +187,15 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
             tab.ocr_failed = 0;
             tab.ocr_cancelled = false;
             tab.held_boundary = None;
+            #[cfg(feature = "segment")]
+            {
+                tab.pipeline_seg_done = false;
+            }
+            #[cfg(feature = "inpaint")]
+            {
+                tab.auto_inpaint_pending = 0;
+                tab.auto_inpaint_total = 0;
+            }
         }
         // queue gate — weight 4, backfill + priority (cap 5)
         use crate::app::queue::{AcquireResult, EngineKind};
