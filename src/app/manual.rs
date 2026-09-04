@@ -207,7 +207,7 @@ pub fn handle_start(app: &mut App) -> Task<Message> {
             #[cfg(feature = "inpaint")]
             {
                 eprintln!("[manual] -> handle_inpaint_selection with {} sels", sels.len());
-                return super::inpaint::handle_inpaint_selection(app, sels);
+                super::inpaint::handle_inpaint_selection(app, sels)
             }
             #[cfg(not(feature = "inpaint"))]
             {
@@ -222,7 +222,7 @@ pub fn handle_start(app: &mut App) -> Task<Message> {
             {
                 eprintln!("[manual] -> handle_manual_ocr_selection with {} sels", sels.len());
                 let tid = app.active_tab().id;
-                return super::ocr::handle_manual_ocr_selection(app, tid, sels);
+                super::ocr::handle_manual_ocr_selection(app, tid, sels)
             }
             #[cfg(not(feature = "ocr"))]
             {

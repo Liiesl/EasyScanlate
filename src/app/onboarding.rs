@@ -206,8 +206,8 @@ fn ensure_korean_dict() {
         return;
     }
     // Try exe-relative
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent() {
             let exe_legacy = dir.join("models").join("korean_dict.txt");
             if exe_legacy.exists() {
                 let _ = easyscanlate_settings::ensure_models_dir();
@@ -215,7 +215,6 @@ fn ensure_korean_dict() {
                 return;
             }
         }
-    }
     // Fallback: if bundled models/korean_dict.txt was embedded at build, write it
     // We attempt to include via relative path at runtime: check if `models/korean_dict.txt` exists relative to current dir
     let cwd_legacy = std::path::PathBuf::from("models/korean_dict.txt");
@@ -253,11 +252,10 @@ pub fn handle_next(app: &mut App) -> Task<Message> {
 }
 
 pub fn handle_back(app: &mut App) -> Task<Message> {
-    if let Some(state) = app.onboarding.as_mut() {
-        if state.step > 0 && state.step < 4 {
+    if let Some(state) = app.onboarding.as_mut()
+        && state.step > 0 && state.step < 4 {
             state.step -= 1;
         }
-    }
     Task::none()
 }
 

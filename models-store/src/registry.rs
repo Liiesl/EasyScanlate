@@ -135,11 +135,10 @@ pub fn is_downloaded_with_legacy(spec: &ModelSpec) -> bool {
     if is_downloaded(spec) {
         return true;
     }
-    if let Some(legacy) = spec.replaces {
-        if models_dir().join(legacy).exists() {
+    if let Some(legacy) = spec.replaces
+        && models_dir().join(legacy).exists() {
             return true;
         }
-    }
     false
 }
 

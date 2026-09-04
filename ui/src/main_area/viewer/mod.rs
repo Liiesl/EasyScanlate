@@ -406,24 +406,20 @@ where
         }
         if self.reveal != state.last_revealed {
             state.last_revealed = self.reveal;
-            if let Some((index, id)) = self.reveal {
-                if let Some(new_offset) = hit_test::reveal_offset(&self.tiles, state, index, id) {
+            if let Some((index, id)) = self.reveal
+                && let Some(new_offset) = hit_test::reveal_offset(&self.tiles, state, index, id) {
                     state.offset = new_offset;
                 }
-            }
         }
         // Inpaint selection reveal (panel -> main area): bring its bbox into view.
         if self.inpaint_reveal != state.last_inpaint_revealed {
             state.last_inpaint_revealed = self.inpaint_reveal;
-            if let Some((index, patch_idx)) = self.inpaint_reveal {
-                if let Some(tile) = self.tiles.get(index) {
-                    if let Some(layer) = tile.inpaint.get(patch_idx) {
-                        if let Some(new_offset) = inpaint_reveal_offset(&self.tiles, state, index, layer.bounds) {
+            if let Some((index, patch_idx)) = self.inpaint_reveal
+                && let Some(tile) = self.tiles.get(index)
+                    && let Some(layer) = tile.inpaint.get(patch_idx)
+                        && let Some(new_offset) = inpaint_reveal_offset(&self.tiles, state, index, layer.bounds) {
                             state.offset = new_offset;
                         }
-                    }
-                }
-            }
         }
         if new_viewport > 0.0 {
             state.offset = state
@@ -525,8 +521,8 @@ where
                 .filter_map(|(index, tile)| {
                     let (y, height) = layout[index];
                     let tile_visible = y + height > visible_top && y < visible_bottom;
-                    let is_selecting = inpaint_span.map_or(false, |(gy0, gy1)| is_inpaint_span(index, gy0, gy1))
-                        || ocr_span.map_or(false, |(gy0, gy1)| is_inpaint_span(index, gy0, gy1));
+                    let is_selecting = inpaint_span.is_some_and(|(gy0, gy1)| is_inpaint_span(index, gy0, gy1))
+                        || ocr_span.is_some_and(|(gy0, gy1)| is_inpaint_span(index, gy0, gy1));
                     // Keep the selecting tile visible even when it has no overlays so the
                     // inpaint marquee (rubber band) always has a frame to draw into.
                     if is_selecting && tile_visible {
@@ -550,53 +546,44 @@ where
                 })
                 .collect();
             // Inpaint selection must also drive a frame even while OCR overlays are hidden.
-            if let Some((img_idx, _)) = self.selected_inpaint {
-                if !visible_tiles.contains(&img_idx) {
-                    if let Some((y, height)) = layout.get(img_idx).copied() {
-                        if y + height > visible_top && y < visible_bottom {
+            if let Some((img_idx, _)) = self.selected_inpaint
+                && !visible_tiles.contains(&img_idx)
+                    && let Some((y, height)) = layout.get(img_idx).copied()
+                        && y + height > visible_top && y < visible_bottom {
                             visible_tiles.push(img_idx);
                         }
-                    }
-                }
-            }
             // Ensure selecting marquee tiles are visible even if overlays hidden (span-aware)
             if visible_tiles.is_empty() {
                 if let Some((gy0, gy1)) = inpaint_span {
                     for (idx, (y, height)) in layout.iter().enumerate() {
-                        if gy1 > *y && gy0 < *y + *height && *y + *height > visible_top && *y < visible_bottom {
-                            if !visible_tiles.contains(&idx) { visible_tiles.push(idx); }
-                        }
+                        if gy1 > *y && gy0 < *y + *height && *y + *height > visible_top && *y < visible_bottom
+                            && !visible_tiles.contains(&idx) { visible_tiles.push(idx); }
                     }
                 }
                 if let Some((gy0, gy1)) = ocr_span {
                     for (idx, (y, height)) in layout.iter().enumerate() {
-                        if gy1 > *y && gy0 < *y + *height && *y + *height > visible_top && *y < visible_bottom {
-                            if !visible_tiles.contains(&idx) { visible_tiles.push(idx); }
-                        }
+                        if gy1 > *y && gy0 < *y + *height && *y + *height > visible_top && *y < visible_bottom
+                            && !visible_tiles.contains(&idx) { visible_tiles.push(idx); }
                     }
                 }
                 // also for persistent manual selections when otherwise empty
                 if !self.manual_selections.is_empty() {
                     for (sel_idx, _) in &self.manual_selections {
-                        if !visible_tiles.contains(sel_idx) {
-                            if let Some((y, height)) = layout.get(*sel_idx).copied() {
-                                if y + height > visible_top && y < visible_bottom {
+                        if !visible_tiles.contains(sel_idx)
+                            && let Some((y, height)) = layout.get(*sel_idx).copied()
+                                && y + height > visible_top && y < visible_bottom {
                                     visible_tiles.push(*sel_idx);
                                 }
-                            }
-                        }
                     }
                 }
             } else {
                 // Even when we have visible_tiles, ensure manual tiles are included
                 for (sel_idx, _) in &self.manual_selections {
-                    if !visible_tiles.contains(sel_idx) {
-                        if let Some((y, height)) = layout.get(*sel_idx).copied() {
-                            if y + height > visible_top && y < visible_bottom {
+                    if !visible_tiles.contains(sel_idx)
+                        && let Some((y, height)) = layout.get(*sel_idx).copied()
+                            && y + height > visible_top && y < visible_bottom {
                                 visible_tiles.push(*sel_idx);
                             }
-                        }
-                    }
                 }
             }
             if !visible_tiles.is_empty() {
@@ -648,8 +635,8 @@ where
                                     flip_at,
                                 );
                             }
-                            if state.inpaint_mode() {
-                                if let Interaction::InpaintSelecting { index: sel_idx, start, current } = state.interaction {
+                            if state.inpaint_mode()
+                                && let Interaction::InpaintSelecting { index: sel_idx, start, current } = state.interaction {
                                     let (sel_y, _) = layout[sel_idx];
                                     let global_y0 = sel_y + start.y.min(current.y);
                                     let global_y1 = sel_y + start.y.max(current.y);
@@ -664,9 +651,8 @@ where
                                         draw_inpaint_marquee(&mut overlay_frame, a, b, tile_bounds.size());
                                     }
                                 }
-                            }
-                            if state.ocr_mode() {
-                                if let Interaction::OcrSelecting { index: sel_idx, start, current } = state.interaction {
+                            if state.ocr_mode()
+                                && let Interaction::OcrSelecting { index: sel_idx, start, current } = state.interaction {
                                     let (sel_y, _) = layout[sel_idx];
                                     let global_y0 = sel_y + start.y.min(current.y);
                                     let global_y1 = sel_y + start.y.max(current.y);
@@ -681,7 +667,6 @@ where
                                         draw_ocr_marquee(&mut overlay_frame, a, b, tile_bounds.size());
                                     }
                                 }
-                            }
                             // Persistent manual multi-select rubber bands (kept after drag release)
                             if !self.manual_selections.is_empty() {
                                 let scale = self.tiles[index].source_width.max(1) as f32;
@@ -802,13 +787,12 @@ where
                 if let Some(position) = cursor.position_over(bounds) {
                     let local = local_point(position, bounds);
                     if self.show_overlay_buttons {
-                        if state.save_menu_open {
-                            if let Some(menu_button) = hit_save_menu_button(bounds, local) {
+                        if state.save_menu_open
+                            && let Some(menu_button) = hit_save_menu_button(bounds, local) {
                                 state.interaction = Interaction::SaveMenuPressed { button: menu_button };
                                 shell.capture_event();
                                 return;
                             }
-                        }
                         if let Some(button) = hit_overlay_button(bounds, local) {
                             state.interaction = Interaction::OverlayButtonPressed { button };
                             shell.capture_event();
@@ -822,8 +806,8 @@ where
                     }
                     // Persistent manual mode has priority over inpaint patch toolbar
                     if self.manual_mode != ManualMode::None {
-                        if let Some(hover_index) = hit_tile(&self.tiles, state, local) {
-                            if !track_rect(bounds).contains(local) {
+                        if let Some(hover_index) = hit_tile(&self.tiles, state, local)
+                            && !track_rect(bounds).contains(local) {
                                 let (layout, _) = tile_layout(&self.tiles, state.width);
                                 let content = tile_local_point(&layout, hover_index, local, state.offset);
                                 match self.manual_mode {
@@ -838,7 +822,6 @@ where
                                 shell.capture_event();
                                 return;
                             }
-                        }
                         if self.show_scrollbar && track_rect(bounds).contains(local) {
                             state.interaction = Interaction::ScrollerGrabbed { grab_offset: local.y - thumb_rect(bounds, state).y };
                             shell.capture_event();
@@ -850,8 +833,8 @@ where
                     // Inpaint selection has its own floating toolbar (no handles). It is drawn
                     // like the result border but must not be movable/resizable.
                     if self.selected_inpaint.is_some() {
-                        if self.show_inpaint {
-                            if let Some((idx, patch, action)) = hit_inpaint_toolbar(
+                        if self.show_inpaint
+                            && let Some((idx, patch, action)) = hit_inpaint_toolbar(
                                 &self.tiles,
                                 state,
                                 self.selected_inpaint,
@@ -865,7 +848,6 @@ where
                                 shell.capture_event();
                                 return;
                             }
-                        }
                         // While an inpaint is selected OCR overlays are hidden and must not
                         // be interactive (no drag/resize/rotate/toolbar). Fall through to
                         // scrollbar / empty click handling only.
@@ -875,9 +857,9 @@ where
                             shell.capture_event();
                             return;
                         }
-                        if self.inpaint_mode {
-                            if let Some(hover_index) = hit_tile(&self.tiles, state, local) {
-                                if !track_rect(bounds).contains(local) {
+                        if self.inpaint_mode
+                            && let Some(hover_index) = hit_tile(&self.tiles, state, local)
+                                && !track_rect(bounds).contains(local) {
                                     let (layout, _) = tile_layout(&self.tiles, state.width);
                                     let content = tile_local_point(&layout, hover_index, local, state.offset);
                                     state.interaction = Interaction::InpaintSelecting {
@@ -888,11 +870,9 @@ where
                                     shell.capture_event();
                                     return;
                                 }
-                            }
-                        }
-                        if self.ocr_mode {
-                            if let Some(hover_index) = hit_tile(&self.tiles, state, local) {
-                                if !track_rect(bounds).contains(local) {
+                        if self.ocr_mode
+                            && let Some(hover_index) = hit_tile(&self.tiles, state, local)
+                                && !track_rect(bounds).contains(local) {
                                     let (layout, _) = tile_layout(&self.tiles, state.width);
                                     let content = tile_local_point(&layout, hover_index, local, state.offset);
                                     state.interaction = Interaction::OcrSelecting {
@@ -903,8 +883,6 @@ where
                                     shell.capture_event();
                                     return;
                                 }
-                            }
-                        }
                         if let Some((index, id, hit)) = hit_top_decor(&self.tiles, state, local) {
                             match hit {
                                 TopDecorHit::Revert => {
@@ -939,10 +917,10 @@ where
                                 }
                             }
                         }
-                        if let Some((index, id, handle)) = hit_handle(&self.tiles, state, local) {
-                            if let Some(quad) = hit_test::entry_quad(&self.tiles, index, id) {
-                                if let Some(corner) = handle.corner() {
-                                    if state.keyboard_modifiers.command() {
+                        if let Some((index, id, handle)) = hit_handle(&self.tiles, state, local)
+                            && let Some(quad) = hit_test::entry_quad(&self.tiles, index, id) {
+                                if let Some(corner) = handle.corner()
+                                    && state.keyboard_modifiers.command() {
                                         state.interaction = Interaction::DistortPending {
                                             index,
                                             id,
@@ -955,7 +933,6 @@ where
                                         shell.capture_event();
                                         return;
                                     }
-                                }
                                 state.interaction = Interaction::ResizePending {
                                     index,
                                     id,
@@ -966,7 +943,6 @@ where
                                 shell.capture_event();
                                 return;
                             }
-                        }
                     }
                     if self.show_scrollbar && track_rect(bounds).contains(local) {
                         state.interaction = Interaction::ScrollerGrabbed {
@@ -982,18 +958,17 @@ where
                             if let (Some(hit), Some(callback)) = (hit, self.on_entry_double_clicked.as_ref()) {
                                 shell.publish(callback(hit));
                             }
-                            if let (Some(hit), Some(rect_callback)) = (hit, self.on_edit_rect.as_ref()) {
-                                if let Some(rect) = editing_rect(&self.tiles, state, hit) {
+                            if let (Some(hit), Some(rect_callback)) = (hit, self.on_edit_rect.as_ref())
+                                && let Some(rect) = editing_rect(&self.tiles, state, hit) {
                                     state.last_edit_rect = Some(rect);
                                     shell.publish(rect_callback(rect));
                                 }
-                            }
                         } else if let Some(callback) = self.on_entry_clicked.as_ref() {
                             shell.publish(callback(hit));
                         }
-                        if let Some((index, id)) = hit {
-                            if let Some(offset) = drag_grab(&self.tiles, state, index, id, local) {
-                                if let Some(quad) = hit_test::entry_quad(&self.tiles, index, id) {
+                        if let Some((index, id)) = hit
+                            && let Some(offset) = drag_grab(&self.tiles, state, index, id, local)
+                                && let Some(quad) = hit_test::entry_quad(&self.tiles, index, id) {
                                     state.interaction = Interaction::DragPending {
                                         index,
                                         id,
@@ -1002,15 +977,13 @@ where
                                         press: local,
                                     };
                                 }
-                            }
-                        }
                         shell.capture_event();
                     }
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                if let Interaction::InpaintToolbarPressed { index, patch, action } = state.interaction {
-                    if let Some(position) = cursor.position_over(bounds) {
+                if let Interaction::InpaintToolbarPressed { index, patch, action } = state.interaction
+                    && let Some(position) = cursor.position_over(bounds) {
                         let local = local_point(position, bounds);
                         let still_hovered = hit_inpaint_toolbar(
                             &self.tiles,
@@ -1018,16 +991,14 @@ where
                             self.selected_inpaint,
                             local,
                         ) == Some((index, patch, action));
-                        if still_hovered {
-                            if let Some(callback) = self.on_inpaint_toolbar.as_ref() {
+                        if still_hovered
+                            && let Some(callback) = self.on_inpaint_toolbar.as_ref() {
                                 shell.publish(callback((index, patch, action)));
                                 shell.request_redraw();
                             }
-                        }
                     }
-                }
-                if let Interaction::ToolbarPressed { index, id, action } = state.interaction {
-                    if let Some(position) = cursor.position_over(bounds) {
+                if let Interaction::ToolbarPressed { index, id, action } = state.interaction
+                    && let Some(position) = cursor.position_over(bounds) {
                         let local = local_point(position, bounds);
                         let still_hovered = match action {
                             ToolbarAction::RevertTransform => {
@@ -1035,14 +1006,12 @@ where
                             }
                             _ => hit_toolbar(&self.tiles, state, local) == Some((index, id, action)),
                         };
-                        if still_hovered {
-                            if let Some(callback) = self.on_toolbar_action.as_ref() {
+                        if still_hovered
+                            && let Some(callback) = self.on_toolbar_action.as_ref() {
                                 shell.publish(callback((index, id, action)));
                                 shell.request_redraw();
                             }
-                        }
                     }
-                }
                 let manual_active = self.manual_mode != ManualMode::None;
                 if manual_active {
                     // In manual mode every drag is accumulated as persistent selections
@@ -1246,8 +1215,8 @@ where
                         }
                     }
                 }
-                if let Interaction::OverlayButtonPressed { button } = state.interaction {
-                    if let Some(position) = cursor.position_over(bounds) {
+                if let Interaction::OverlayButtonPressed { button } = state.interaction
+                    && let Some(position) = cursor.position_over(bounds) {
                         let local = local_point(position, bounds);
                         if hit_overlay_button(bounds, local) == Some(button) {
                             match button {
@@ -1278,7 +1247,6 @@ where
                             }
                         }
                     }
-                }
                 if let Interaction::SaveMenuPressed { button } = state.interaction {
                     if let Some(position) = cursor.position_over(bounds) {
                         let local = local_point(position, bounds);
@@ -1323,11 +1291,10 @@ where
                     shell.capture_event();
                     shell.request_redraw();
                 }
-                if ended_scroll {
-                    if let Some(callback) = self.on_scroll_ended.as_ref() {
+                if ended_scroll
+                    && let Some(callback) = self.on_scroll_ended.as_ref() {
                         shell.publish(callback());
                     }
-                }
             }
             Event::Mouse(mouse::Event::CursorMoved { position }) => {
                 if state.save_menu_open && cursor.position_over(bounds).is_some() {
@@ -1533,11 +1500,10 @@ where
                     }
                     // Inpaint toolbar takes precedence and OCR handles are hidden while inpaint selected.
                     if self.selected_inpaint.is_some() {
-                        if self.show_inpaint {
-                            if hit_inpaint_toolbar(&self.tiles, state, self.selected_inpaint, local).is_some() {
+                        if self.show_inpaint
+                            && hit_inpaint_toolbar(&self.tiles, state, self.selected_inpaint, local).is_some() {
                                 return mouse::Interaction::Pointer;
                             }
-                        }
                         if self.show_scrollbar && (track_rect(bounds).contains(local) || thumb_rect(bounds, state).contains(local)) {
                             return mouse::Interaction::Pointer;
                         }

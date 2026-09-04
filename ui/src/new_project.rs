@@ -28,7 +28,6 @@ pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -
     let Some(np) = state.new_project_overlay() else {
         return base;
     };
-    let np = np;
     let source_value = if np.source_paths.is_empty() {
         String::new()
     } else if np.source_paths.len() == 1 {

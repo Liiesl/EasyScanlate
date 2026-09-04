@@ -587,7 +587,7 @@ pub fn stitch(prev: Option<&RgbImage>, cur: &RgbImage, next: Option<&RgbImage>, 
     let width = cur.width();
     let top = prev.and_then(|p| bottom_margin_strip(p, (0.0, 1.0), width, margin));
     let bottom = next.and_then(|n| top_margin_strip(n, (0.0, 1.0), width, margin));
-    stack_run(top, &[cur.clone()], bottom, width, (0.0, 1.0))
+    stack_run(top, std::slice::from_ref(cur), bottom, width, (0.0, 1.0))
 }
 
 /// A bubble captured in a run's bottom margin strip: the merged line's bounds
@@ -668,6 +668,7 @@ impl BoundaryState {
 /// `prev` is the dedup target: the committed quads of the page above, its
 /// width and the offset of this run's canvas top edge in that page's pixel
 /// space (`(quads, prev_width, prev_offset)`).
+#[allow(clippy::too_many_arguments)]
 pub fn assemble(
     index: usize,
     width: u32,
@@ -685,6 +686,7 @@ pub fn assemble(
 
 /// Like [`assemble`] but with an explicit [`MergeConfig`] (threshold) so the
 /// caller can honor the user's `ocr_merge_threshold` setting.
+#[allow(clippy::too_many_arguments)]
 pub fn assemble_with_merge(
     index: usize,
     width: u32,
@@ -703,6 +705,7 @@ pub fn assemble_with_merge(
 
 /// Like [`assemble_with_merge`] but also filters by bbox height. `min_bbox_height`
 /// and `max_bbox_height` are the Minimum/Maximum Text (bbox) Height filters.
+#[allow(clippy::too_many_arguments)]
 pub fn assemble_with_config(
     index: usize,
     width: u32,
@@ -761,7 +764,7 @@ pub fn assemble_with_config(
             .map(|(p, e)| format!("p{p}:{}", e.len()))
             .collect::<Vec<_>>()
     );
-    let held = (!out.held.is_empty()).then(|| BoundaryState {
+    let held = (!out.held.is_empty()).then_some(BoundaryState {
         candidates: out.held,
         width,
         boundary: out.boundary,

@@ -310,7 +310,7 @@ pub fn resize_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, 
     }
     let old_local = [min_lx, min_ly, max_lx, max_ly];
     // Degenerate quad (should not happen) - fall back to old world refit
-    if (max_lx - min_lx) < f32::EPSILON || (max_ly - min_ly) < f32::EPSILON {
+    if (max_lx - min_lx).abs() < f32::EPSILON || (max_ly - min_ly).abs() < f32::EPSILON {
         let start = quad.bounds();
         let [mut min_x, mut min_y, mut max_x, mut max_y] = start;
         if handle.left { min_x = img_x.min(max_x - min_edge); }

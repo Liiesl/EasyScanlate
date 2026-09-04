@@ -72,7 +72,6 @@ pub fn view<'a, S: UiState + ?Sized>(
 ) -> Element<'a, UiEvent> {
     let groups = state.all_model_groups();
     let query = state.manage_models_search().to_string();
-    let is_filtering = !query.trim().is_empty();
 
     let header = row![
         text("Manage Models").size(scale::s(16.0)),
@@ -151,11 +150,7 @@ pub fn view<'a, S: UiState + ?Sized>(
             {
                 let total = filtered.len();
                 // When filtering show filtered counts; otherwise total counts are the same.
-                let count_label = if is_filtering {
-                    format!("{visible_cnt}/{total}")
-                } else {
-                    format!("{visible_cnt}/{total}")
-                };
+                let count_label = format!("{visible_cnt}/{total}");
                 let pid = provider_id.clone();
                 let filtered_ids: Vec<String> = filtered.iter().map(|(id, _)| id.clone()).collect();
                 let filtered_for_toggle = filtered_ids.clone();

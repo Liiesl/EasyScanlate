@@ -1,5 +1,8 @@
 use iced::Task;
-use easyscanlate_model::{EntryId, EntryStyle, Quad};
+#[cfg(all(feature = "styling", feature = "inpaint"))]
+use easyscanlate_model::EntryStyle;
+#[cfg(all(feature = "styling", feature = "inpaint"))]
+use super::tab::PipelineStyleItem;
 #[cfg(feature = "inpaint")]
 use easyscanlate_settings::InpaintBackend;
 
@@ -9,7 +12,7 @@ use super::{App, AutoInpaintJob, Message};
 pub fn dispatch_inpaint(
     app: &mut App,
     tab_id: crate::app::tab::TabId,
-    buffered: Vec<(usize, EntryId, Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>, Quad, String)>,
+    buffered: Vec<PipelineStyleItem>,
 ) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     let results = if buffered.is_empty() && app.tabs[idx].pipeline_style_results.is_empty() {

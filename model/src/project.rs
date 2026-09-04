@@ -188,20 +188,6 @@ impl Project {
         Self { images, next_image_id, ocr, profiles, styles, view_quads, extras, next_inpaint_id }
     }
 
-    /// Reconstruct from raw parts with explicit next_inpaint_id (for persistence with id-aware files).
-    pub fn from_raw_with_inpaint(
-        images: Vec<ImageMeta>,
-        next_image_id: u64,
-        ocr: OcrResult,
-        profiles: Profiles,
-        styles: HashMap<EntryId, EntryStyle>,
-        view_quads: HashMap<EntryId, Quad>,
-        extras: Extras,
-        next_inpaint_id: u64,
-    ) -> Self {
-        Self { images, next_image_id, ocr, profiles, styles, view_quads, extras, next_inpaint_id }
-    }
-
     /// Append entries for `image_id`. `EntryId` remains globally unique.
     pub fn append_ocr_for_image(&mut self, image_id: ImageId, entries: Vec<NewEntry>) -> usize {
         self.ocr.append_many_for_image(image_id, entries)

@@ -32,6 +32,11 @@ pub struct TabMeta {
     pub is_home: bool,
 }
 
+/// One selectable model: `(model id, display name)`.
+pub type ModelOptionPair = (String, String);
+/// One provider group: `(provider id, display name, models)`.
+pub type ModelGroup = (String, String, Vec<ModelOptionPair>);
+
 /// Read-only view of the app state that the widgets render from. Implemented
 /// by the app for its own state type; the ui crate never depends on the app.
 pub trait UiState {
@@ -47,7 +52,7 @@ pub trait UiState {
     /// the display name while the request still uses the `id`. Borrows from
     /// `&self` (the session's cache), so the result is valid for as long as
     /// the state borrow — enough for a frame.
-    fn translate_model_groups(&self) -> &[(String, String, Vec<(String, String)>)];
+    fn translate_model_groups(&self) -> &[ModelGroup];
     /// The currently selected `(provider id, model id)` of the merged model
     /// dropdown; both are always one of `translate_model_groups` (matched by
     /// `id`; display is the `name`).
@@ -156,7 +161,7 @@ pub trait UiState {
     /// removed) grouped by provider – shown in the Manage Models overlay.
     /// Each inner pair is `(model id, display name)`; the hidden set is
     /// still keyed by `id`.
-    fn all_model_groups(&self) -> Vec<(String, String, Vec<(String, String)>)>;
+    fn all_model_groups(&self) -> Vec<ModelGroup>;
     /// The mode of the translation/results panel (Edit vs Translate).
     fn translation_panel_mode(&self) -> TranslationPanelMode;
     /// The base profile for translate-mode left column (None when no images).

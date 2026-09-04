@@ -239,7 +239,7 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
         let new_path = id_to_path.get(&meta.id).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| meta.path.clone());
         // optionally re-read dimensions from extracted file
         let (w, h) = if let Some(p) = id_to_path.get(&meta.id) {
-            if let Ok(img) = image::ImageReader::open(p).and_then(|r| r.with_guessed_format().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))) {
+            if let Ok(img) = image::ImageReader::open(p).and_then(|r| r.with_guessed_format().map_err(std::io::Error::other)) {
                 if let Ok(decoded) = img.decode() {
                     (decoded.width() as f32, decoded.height() as f32)
                 } else { (meta.width, meta.height) }
@@ -250,12 +250,12 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
     if !new_images.is_empty() {
         // reconstruct project with new images paths
         let ocr = std::mem::replace(&mut project.ocr, OcrResult::from_raw(Vec::new(), 0));
-        let profiles = std::mem::replace(&mut project.profiles, easyscanlate_model::Profiles::default());
-        let styles = std::mem::replace(&mut project.styles().clone(), HashMap::new());
+        let profiles = std::mem::take(&mut project.profiles);
+        let styles = project.styles().clone();
         // need mutable access to private fields via from_raw
         // Instead use Project::from_raw
         // we need to extract all fields
-        let extras = std::mem::replace(&mut project.extras, easyscanlate_model::Extras::default());
+        let extras = std::mem::take(&mut project.extras);
         let view_quads = project.view_quads().clone();
         let styles_map = styles;
         // Note: project was moved partially, but we have its components saved
@@ -282,13 +282,12 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
         let path = temp.path().join(name);
         let stem = Path::new(name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
         let mut parts = stem.split('_');
-        if let (Some(id_str), Some(idx_str)) = (parts.next(), parts.next()) {
-            if let Ok(id) = id_str.parse::<u64>() {
+        if let (Some(id_str), Some(idx_str)) = (parts.next(), parts.next())
+            && let Ok(id) = id_str.parse::<u64>() {
                 let raw_idx = idx_str.parse::<usize>().ok();
                 parsed.push(Parsed { image_id: ImageId(id), raw_idx, path: path.clone(), name: name.clone() });
                 continue;
             }
-        }
         // unparsable -> push with dummy id 0 (will be skipped)
         parsed.push(Parsed { image_id: ImageId(0), raw_idx: None, path: path.clone(), name: name.clone() });
     }
@@ -325,8 +324,8 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
         let mut entry_dims: Vec<Option<(u32,u32)>> = Vec::new();
         for e in &entries {
             let dim = image::ImageReader::open(&e.path)
-                .and_then(|r| r.with_guessed_format().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
-                .and_then(|r| r.into_dimensions().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
+                .and_then(|r| r.with_guessed_format().map_err(|e| std::io::Error::other(e.to_string())))
+                .and_then(|r| r.into_dimensions().map_err(|e| std::io::Error::other(e.to_string())))
                 .ok();
             // into_dimensions returns (w,h); but we called via ImageReader? Actually with_guessed_format returns Reader; use .into_dimensions
             // If we used ImageReader::open + with_guessed_format, we get an ImageReader; into_dimensions works without decoding full.
@@ -371,12 +370,11 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
                     // More files than patches (or patches missing) -> fallback zero
                     // Still expose file with dummy bounds so UI shows something instead of silently dropping.
                     // Try raw_idx direct if possible
-                    if let Some(raw) = entry.raw_idx {
-                        if let Some(patch) = patches_for_image.get(raw) {
+                    if let Some(raw) = entry.raw_idx
+                        && let Some(patch) = patches_for_image.get(raw) {
                             inpaint_files.push((patch.image_id, patch.bounds, entry.path.clone()));
                             continue;
                         }
-                    }
                     inpaint_files.push((entry.image_id, [0.0;4], entry.path.clone()));
                 }
             }
@@ -433,13 +431,11 @@ fn load_legacy_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
     for name in &image_names {
         let path = temp.path().join(name);
         let filename = Path::new(name).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-        if let Ok(reader) = image::ImageReader::open(&path) {
-            if let Ok(reader) = reader.with_guessed_format() {
-                if let Ok(img) = reader.decode() {
+        if let Ok(reader) = image::ImageReader::open(&path)
+            && let Ok(reader) = reader.with_guessed_format()
+                && let Ok(img) = reader.decode() {
                     dims.insert(filename, (img.width() as f32, img.height() as f32));
                 }
-            }
-        }
     }
     let mut project = legacy::project_from_legacy(&legacy_master, &legacy_meta, &dims)?;
     // Update paths to extracted absolute paths
@@ -459,10 +455,10 @@ fn load_legacy_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
     }
     // reconstruct with new paths
     let ocr = std::mem::replace(&mut project.ocr, OcrResult::from_raw(Vec::new(), 0));
-    let profiles = std::mem::replace(&mut project.profiles, easyscanlate_model::Profiles::default());
+    let profiles = std::mem::take(&mut project.profiles);
     let styles = project.styles().clone();
     let view_quads = project.view_quads().clone();
-    let extras = std::mem::replace(&mut project.extras, easyscanlate_model::Extras::default());
+    let extras = std::mem::take(&mut project.extras);
     let next_image_id = new_images.iter().map(|m| m.id.0+1).max().unwrap_or(0);
     let rebuilt = Project::from_raw(new_images.clone(), next_image_id, ocr, profiles, styles, view_quads, extras);
     let mut image_paths = HashMap::new();
@@ -477,7 +473,7 @@ use easyscanlate_model::{OcrResult, ImageMeta};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use easyscanlate_model::{EntrySource, NewEntry, Quad, Project, ImageId};
+    use easyscanlate_model::{EntrySource, NewEntry, Quad, Project};
 
     #[test]
     fn save_and_load_roundtrip() {
@@ -492,10 +488,10 @@ mod tests {
         let mut images = project.images().to_vec();
         images[0].path = img_path.to_string_lossy().to_string();
         let ocr = std::mem::replace(&mut project.ocr, OcrResult::from_raw(Vec::new(),0));
-        let profiles = std::mem::replace(&mut project.profiles, easyscanlate_model::Profiles::default());
+        let profiles = std::mem::take(&mut project.profiles);
         let styles = project.styles().clone();
         let view_quads = project.view_quads().clone();
-        let extras = std::mem::replace(&mut project.extras, easyscanlate_model::Extras::default());
+        let extras = std::mem::take(&mut project.extras);
         let project2 = Project::from_raw(images, 1, ocr, profiles, styles, view_quads, extras);
         let mut project = project2;
         project.ocr.append_for_image(id, NewEntry{ source: EntrySource::AutoOcr, text:"hi".into(), score:0.9, quad: Quad{points:[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]]}});

@@ -58,7 +58,7 @@ pub fn publish_visible<'a, Message, F>(
     }
 }
 
-pub fn publish_offset<'a, Message, R>(
+pub fn publish_offset<Message, R>(
     shell: &mut Shell<'_, Message>,
     state: &mut TileViewState,
     on_scroll: &Option<R>,
@@ -99,7 +99,7 @@ pub fn offset_from_anchor(anchor: f32, content_height: f32, viewport_height: f32
 /// absolute offset into `last_published_offset` for legacy reads. The app
 /// stores this anchor as `viewer_scroll` so a geometry change can restore the
 /// same *centered* row instead of the same absolute offset.
-pub fn publish_anchor<'a, Message, R>(
+pub fn publish_anchor<Message, R>(
     shell: &mut Shell<'_, Message>,
     state: &mut TileViewState,
     on_scroll: &Option<R>,

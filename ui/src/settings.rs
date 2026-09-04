@@ -361,6 +361,8 @@ fn stepper_button<'a>(enabled: bool, label: &'a str, msg: Option<UiEvent>) -> El
         .into()
 }
 
+// Used by the ocr/inpaint cards; dead in translation-only builds.
+#[allow(dead_code)]
 fn field_row<'a>(label: &'a str, control: Element<'a, UiEvent>) -> Element<'a, UiEvent> {
     row![
         container(text(label).size(scale::s(12.0)).color(Color::WHITE))
@@ -376,6 +378,8 @@ fn helper_text<'a>(s: &'a str) -> Element<'a, UiEvent> {
     text(s).size(scale::s(11.0)).color(MUTED_FG).into()
 }
 
+// Used by the bg-aware inpaint cards; dead in translation-only builds.
+#[allow(dead_code)]
 fn warning_text<'a>(s: String) -> Element<'a, UiEvent> {
     text(s).size(scale::s(11.0)).color(Color::from_rgb8(240, 200, 80)).into()
 }
@@ -414,8 +418,6 @@ fn appearance_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                 .on_input(move |input| {
                     if let Ok(v) = input.trim().parse::<u32>() {
                         set(move |s| s.ui_font_size = v)
-                    } else if input.trim().is_empty() {
-                        UiEvent::SettingsChanged
                     } else {
                         UiEvent::SettingsChanged
                     }
@@ -457,7 +459,7 @@ fn appearance_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                 segment(!is_dark, "Light", Some(UiEvent::SettingEdit(SettingEdit::AuroraDarkMode(false))), iced::Font::DEFAULT),
                 segment(is_dark, "Dark", Some(UiEvent::SettingEdit(SettingEdit::AuroraDarkMode(true))), iced::Font::DEFAULT),
             ]);
-            inner.push(mode_row.into());
+            inner.push(mode_row);
             if show_palette || show_density {
                 inner.push(space::vertical().height(Length::Fixed(scale::s(8.0))).into());
             }
@@ -563,7 +565,7 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
         let show_any = show_automation_header || show_auto_detect || show_sfx || show_inpaint;
         if show_any {
             let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-            col.push(card_header(Icon::Sparkles, "Automation", Some("Style & SFX filtering")).into());
+            col.push(card_header(Icon::Sparkles, "Automation", Some("Style & SFX filtering")));
 
             #[cfg(feature = "styling")]
             if show_auto_detect || show_automation_header || query_ref.trim().is_empty() {
@@ -618,7 +620,7 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
         let show_onboarding = matches_any(query_ref, &["onboarding", "setup", "wizard", "replay", "general"]);
         if show_onboarding {
             let col: Vec<Element<'static, UiEvent>> = vec![
-                card_header(Icon::Sparkles, "Onboarding", Some("First-run setup wizard")).into(),
+                card_header(Icon::Sparkles, "Onboarding", Some("First-run setup wizard")),
                 column![
                     text("Replay the first-run setup (models + preferences). The wizard is blocking until all mandatory models are downloaded.").size(scale::s(11.0)).color(MUTED_FG),
                     button(text("Replay onboarding…").size(scale::s(11.0)))
@@ -665,7 +667,7 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         let show_any = show_automation_header || show_auto_detect || show_sfx || show_inpaint;
         if show_any {
             let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-            col.push(card_header(Icon::Sparkles, "Automation", Some("Style & SFX filtering")).into());
+            col.push(card_header(Icon::Sparkles, "Automation", Some("Style & SFX filtering")));
             #[cfg(feature = "styling")]
             if show_auto_detect || show_automation_header || query.trim().is_empty() {
                 let auto = easyscanlate_settings::get(|s| s.auto_style_detect);
@@ -716,7 +718,7 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         let show_onboarding = matches_any(query, &["onboarding", "setup", "wizard", "replay", "general"]);
         if show_onboarding {
             let col: Vec<Element<'static, UiEvent>> = vec![
-                card_header(Icon::Sparkles, "Onboarding", Some("First-run setup wizard")).into(),
+                card_header(Icon::Sparkles, "Onboarding", Some("First-run setup wizard")),
                 column![
                     text("Replay the first-run setup (models + preferences). The wizard is blocking until all mandatory models are downloaded.").size(scale::s(11.0)).color(MUTED_FG),
                     button(text("Replay onboarding…").size(scale::s(11.0)))
@@ -735,6 +737,8 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
 // OCR tab — dedicated OCR tuning
 // ---------------------------------------------------------------------------
 
+// `query` only feeds the `#[cfg(feature = "ocr")]` block below.
+#[allow(unused_variables)]
 fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
     let query_ref = query.as_str();
     let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
@@ -755,7 +759,7 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
                     )
                 });
             let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-            col.push(card_header(Icon::ScanSearch, "OCR Engine", Some("Detection & recognition tuning — next run")).into());
+            col.push(card_header(Icon::ScanSearch, "OCR Engine", Some("Detection & recognition tuning — next run")));
             if matches_any(query_ref, &["ocr", "workers", "parallel", "detection", "engine"]) || query_ref.trim().is_empty() {
                 col.push(field_row("Detection workers",
                     text_input("2", &workers)
@@ -764,8 +768,8 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
-                ).into());
-                col.push(helper_text("Parallel detection sessions; 2 fits a potato-laptop CPU.").into());
+                ));
+                col.push(helper_text("Parallel detection sessions; 2 fits a potato-laptop CPU."));
                 col.push(item_separator());
             }
             if matches_any(query_ref, &["ocr", "tuning", "confidence"]) || query_ref.trim().is_empty() {
@@ -776,8 +780,8 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
-                ).into());
-                col.push(helper_text("Minimum recognition confidence 0.0–1.0. Lower keeps more lines.").into());
+                ));
+                col.push(helper_text("Minimum recognition confidence 0.0–1.0. Lower keeps more lines."));
             }
             if matches_any(query_ref, &["ocr", "height", "bbox", "minimum", "min"]) || query_ref.trim().is_empty() {
                 col.push(field_row("Min text height",
@@ -787,8 +791,8 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
-                ).into());
-                col.push(helper_text("Minimum bbox height (px). Drops boxes shorter than this.").into());
+                ));
+                col.push(helper_text("Minimum bbox height (px). Drops boxes shorter than this."));
             }
             if matches_any(query_ref, &["ocr", "height", "bbox", "maximum", "max"]) || query_ref.trim().is_empty() {
                 col.push(field_row("Max text height",
@@ -798,8 +802,8 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
-                ).into());
-                col.push(helper_text("Maximum bbox height (px). Drops boxes taller than this.").into());
+                ));
+                col.push(helper_text("Maximum bbox height (px). Drops boxes taller than this."));
             }
             if matches_any(query_ref, &["ocr", "merge", "distance", "threshold", "gap"]) || query_ref.trim().is_empty() {
                 col.push(field_row("Merge threshold",
@@ -809,8 +813,8 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
-                ).into());
-                col.push(helper_text("Gap as ratio of height 0.0–2.0 (0.5 = 50% of height).").into());
+                ));
+                col.push(helper_text("Gap as ratio of height 0.0–2.0 (0.5 = 50% of height)."));
             }
             if matches_any(query_ref, &["ocr", "side", "len", "max", "resize"]) || query_ref.trim().is_empty() {
                 col.push(field_row("Max side len",
@@ -820,10 +824,10 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
-                ).into());
-                col.push(helper_text("Max longer side before resize (px). Larger keeps more detail but uses more RAM.").into());
+                ));
+                col.push(helper_text("Max longer side before resize (px). Larger keeps more detail but uses more RAM."));
             }
-            let has_field = col.iter().count() > 1;
+            let has_field = col.len() > 1;
             if has_field {
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
@@ -849,6 +853,8 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
     scrollable(column(cards).spacing(scale::s(10.0))).height(Length::Fill).into()
 }
 
+// `query` only feeds the `#[cfg(feature = "ocr")]` block below.
+#[allow(unused_variables)]
 fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
     #[cfg(feature = "ocr")]
@@ -867,7 +873,7 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                     )
                 });
             let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-            col.push(card_header(Icon::ScanSearch, "OCR Engine", Some("Detection & recognition tuning — next run")).into());
+            col.push(card_header(Icon::ScanSearch, "OCR Engine", Some("Detection & recognition tuning — next run")));
             if matches_any(query, &["ocr", "workers", "parallel", "detection", "engine"]) || query.trim().is_empty() {
                 col.push(field_row("Detection workers",
                     text_input("2", &workers)
@@ -876,8 +882,8 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
-                ).into());
-                col.push(helper_text("Parallel detection sessions; 2 fits a potato-laptop CPU.").into());
+                ));
+                col.push(helper_text("Parallel detection sessions; 2 fits a potato-laptop CPU."));
                 col.push(item_separator());
             }
             if matches_any(query, &["ocr", "tuning", "confidence"]) || query.trim().is_empty() {
@@ -888,8 +894,8 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
-                ).into());
-                col.push(helper_text("Minimum recognition confidence 0.0–1.0. Lower keeps more lines.").into());
+                ));
+                col.push(helper_text("Minimum recognition confidence 0.0–1.0. Lower keeps more lines."));
             }
             if matches_any(query, &["ocr", "height", "bbox", "minimum", "min"]) || query.trim().is_empty() {
                 col.push(field_row("Min text height",
@@ -899,8 +905,8 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
-                ).into());
-                col.push(helper_text("Minimum bbox height (px). Drops boxes shorter than this.").into());
+                ));
+                col.push(helper_text("Minimum bbox height (px). Drops boxes shorter than this."));
             }
             if matches_any(query, &["ocr", "height", "bbox", "maximum", "max"]) || query.trim().is_empty() {
                 col.push(field_row("Max text height",
@@ -910,8 +916,8 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
-                ).into());
-                col.push(helper_text("Maximum bbox height (px). Drops boxes taller than this.").into());
+                ));
+                col.push(helper_text("Maximum bbox height (px). Drops boxes taller than this."));
             }
             if matches_any(query, &["ocr", "merge", "distance", "threshold", "gap"]) || query.trim().is_empty() {
                 col.push(field_row("Merge threshold",
@@ -921,8 +927,8 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
-                ).into());
-                col.push(helper_text("Gap as ratio of height 0.0–2.0 (0.5 = 50% of height).").into());
+                ));
+                col.push(helper_text("Gap as ratio of height 0.0–2.0 (0.5 = 50% of height)."));
             }
             if matches_any(query, &["ocr", "side", "len", "max", "resize"]) || query.trim().is_empty() {
                 col.push(field_row("Max side len",
@@ -932,10 +938,10 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
-                ).into());
-                col.push(helper_text("Max longer side before resize (px). Larger keeps more detail but uses more RAM.").into());
+                ));
+                col.push(helper_text("Max longer side before resize (px). Larger keeps more detail but uses more RAM."));
             }
-            let has_field = col.iter().count() > 1;
+            let has_field = col.len() > 1;
             if has_field {
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
@@ -969,9 +975,9 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
             {
                 let (auto_inpaint, auto_model, auto_style) = easyscanlate_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model, s.auto_style_detect));
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-                col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("After OCR: style-detect → per bg type")).into());
+                col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("After OCR: style-detect → per bg type")));
                 col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
-                col.push(helper_text("Solid keeps bg color, Gradient → Telea, Artwork → LaMa. Mixed needs Auto-detect style.").into());
+                col.push(helper_text("Solid keeps bg color, Gradient → Telea, Artwork → LaMa. Mixed needs Auto-detect style."));
                 let all_models = [AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot, AutoInpaintModel::Mixed];
                 let available: Vec<AutoInpaintModel> = if auto_style { all_models.to_vec() } else { vec![AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot] };
                 let pick_value = if auto_style || auto_model != AutoInpaintModel::Mixed { Some(auto_model) } else { Some(AutoInpaintModel::Telea) };
@@ -983,7 +989,7 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
                 if !auto_style && auto_model == AutoInpaintModel::Mixed {
                     col.push(warning_text("Pick Telea, Lama or AOT while Auto-detect style is off; Mixed will auto-fallback to Telea.".to_string()));
                 }
-                col.push(helper_text("Full pipeline runs once when OCR finishes if all toggles are on. Telea in parallel, LaMa/AOT sequentially.").into());
+                col.push(helper_text("Full pipeline runs once when OCR finishes if all toggles are on. Telea in parallel, LaMa/AOT sequentially."));
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
             #[cfg(all(feature = "inpaint", not(all(feature = "styling", feature = "segment"))))]
@@ -1014,13 +1020,14 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
             {
                 let backend = easyscanlate_settings::get(|s| s.inpaint_backend);
                 let radius = easyscanlate_settings::get(|s| s.inpaint_radius.clone());
-                let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-                col.push(card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Telea vs ONNX")).into());
-                col.push(field_row("Backend", pick_list([InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()).into());
-                col.push(helper_text("Telea is instant (no model); LaMa is high-quality ONNX; AOT-GAN is 2-4× faster than LaMa (pad 8, max 1024).").into());
-                col.push(item_separator());
-                col.push(field_row("Telea radius", text_input("5", &radius).on_input(|input| set(move |s| s.inpaint_radius = input.clone())).padding(scale::s(4.0)).size(scale::s(12.0)).width(Length::Fixed(scale::s(80.0))).into()).into());
-                col.push(helper_text("Pixels around mask Telea samples; larger smooths more but blurs. Ignored by LaMa/AOT.").into());
+                let col: Vec<Element<'static, UiEvent>> = vec![
+                    card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Telea vs ONNX")),
+                    field_row("Backend", pick_list([InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()),
+                    helper_text("Telea is instant (no model); LaMa is high-quality ONNX; AOT-GAN is 2-4× faster than LaMa (pad 8, max 1024)."),
+                    item_separator(),
+                    field_row("Telea radius", text_input("5", &radius).on_input(|input| set(move |s| s.inpaint_radius = input.clone())).padding(scale::s(4.0)).size(scale::s(12.0)).width(Length::Fixed(scale::s(80.0))).into()),
+                    helper_text("Pixels around mask Telea samples; larger smooths more but blurs. Ignored by LaMa/AOT."),
+                ];
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
             #[cfg(not(feature = "inpaint"))]
@@ -1045,9 +1052,9 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             {
                 let (auto_inpaint, auto_model, auto_style) = easyscanlate_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model, s.auto_style_detect));
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-                col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("After OCR: style-detect → per bg type")).into());
+                col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("After OCR: style-detect → per bg type")));
                 col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
-                col.push(helper_text("Solid keeps bg color, Gradient → Telea, Artwork → LaMa. Mixed needs Auto-detect style.").into());
+                col.push(helper_text("Solid keeps bg color, Gradient → Telea, Artwork → LaMa. Mixed needs Auto-detect style."));
                 let all_models = [AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot, AutoInpaintModel::Mixed];
                 let available: Vec<AutoInpaintModel> = if auto_style { all_models.to_vec() } else { vec![AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot] };
                 let pick_value = if auto_style || auto_model != AutoInpaintModel::Mixed { Some(auto_model) } else { Some(AutoInpaintModel::Telea) };
@@ -1059,7 +1066,7 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                 if !auto_style && auto_model == AutoInpaintModel::Mixed {
                     col.push(warning_text("Pick Telea, Lama or AOT while Auto-detect style is off; Mixed will auto-fallback to Telea.".to_string()));
                 }
-                col.push(helper_text("Full pipeline runs once when OCR finishes if all toggles are on. Telea in parallel, LaMa/AOT sequentially.").into());
+                col.push(helper_text("Full pipeline runs once when OCR finishes if all toggles are on. Telea in parallel, LaMa/AOT sequentially."));
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
             #[cfg(all(feature = "inpaint", not(all(feature = "styling", feature = "segment"))))]
@@ -1088,13 +1095,14 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             {
                 let backend = easyscanlate_settings::get(|s| s.inpaint_backend);
                 let radius = easyscanlate_settings::get(|s| s.inpaint_radius.clone());
-                let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-                col.push(card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Telea vs ONNX")).into());
-                col.push(field_row("Backend", pick_list([InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()).into());
-                col.push(helper_text("Telea is instant (no model); LaMa is high-quality ONNX; AOT-GAN is 2-4× faster than LaMa (pad 8, max 1024).").into());
-                col.push(item_separator());
-                col.push(field_row("Telea radius", text_input("5", &radius).on_input(|input| set(move |s| s.inpaint_radius = input.clone())).padding(scale::s(4.0)).size(scale::s(12.0)).width(Length::Fixed(scale::s(80.0))).into()).into());
-                col.push(helper_text("Pixels around mask Telea samples; larger smooths more but blurs. Ignored by LaMa/AOT.").into());
+                let col: Vec<Element<'static, UiEvent>> = vec![
+                    card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Telea vs ONNX")),
+                    field_row("Backend", pick_list([InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()),
+                    helper_text("Telea is instant (no model); LaMa is high-quality ONNX; AOT-GAN is 2-4× faster than LaMa (pad 8, max 1024)."),
+                    item_separator(),
+                    field_row("Telea radius", text_input("5", &radius).on_input(|input| set(move |s| s.inpaint_radius = input.clone())).padding(scale::s(4.0)).size(scale::s(12.0)).width(Length::Fixed(scale::s(80.0))).into()),
+                    helper_text("Pixels around mask Telea samples; larger smooths more but blurs. Ignored by LaMa/AOT."),
+                ];
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
         }
@@ -1274,10 +1282,9 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
 
     // Options card — only when query matches its keywords or empty
     if matches_any(&q, &["free", "paid", "filter", "models", "manage", "dropdown", "only show free"]) || !query_active {
-        let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
-        content.push(card_header(Icon::SlidersHorizontal, "Options", None).into());
-        content.push(item_separator());
-        content.push(
+        let content: Vec<Element<'static, UiEvent>> = vec![
+            card_header(Icon::SlidersHorizontal, "Options", None),
+            item_separator(),
             row![
                 column![
                     text("Only show free models").size(scale::s(12.0)),
@@ -1296,9 +1303,7 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
             .align_y(iced::Alignment::Center)
             .padding([scale::s(4.0), 0.0])
             .into(),
-        );
-        content.push(item_separator());
-        content.push(
+            item_separator(),
             row![
                 column![
                     text("Filter unused models from the translation dropdown.")
@@ -1319,14 +1324,12 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
             .align_y(iced::Alignment::Center)
             .padding([scale::s(4.0), 0.0])
             .into(),
-        );
-        content.push(item_separator());
-        content.push(
+            item_separator(),
             text("Connections are saved to the app's settings file in the system configuration directory.")
                 .size(scale::s(11.0))
                 .color(MUTED_FG)
                 .into(),
-        );
+        ];
         cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
     }
 
@@ -1490,10 +1493,9 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
     }
     if matches_any(&q, &["free", "paid", "filter", "models", "manage", "dropdown", "only show free"]) || !query_active {
-        let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
-        content.push(card_header(Icon::SlidersHorizontal, "Options", None).into());
-        content.push(item_separator());
-        content.push(
+        let content: Vec<Element<'static, UiEvent>> = vec![
+            card_header(Icon::SlidersHorizontal, "Options", None),
+            item_separator(),
             row![
                 column![
                     text("Only show free models").size(scale::s(12.0)),
@@ -1512,9 +1514,7 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             .align_y(iced::Alignment::Center)
             .padding([scale::s(4.0), 0.0])
             .into(),
-        );
-        content.push(item_separator());
-        content.push(
+            item_separator(),
             row![
                 column![
                     text("Filter unused models from the translation dropdown.")
@@ -1535,14 +1535,12 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             .align_y(iced::Alignment::Center)
             .padding([scale::s(4.0), 0.0])
             .into(),
-        );
-        content.push(item_separator());
-        content.push(
+            item_separator(),
             text("Connections are saved to the app's settings file in the system configuration directory.")
                 .size(scale::s(11.0))
                 .color(MUTED_FG)
                 .into(),
-        );
+        ];
         cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
     }
     cards
@@ -1560,7 +1558,7 @@ fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
     let notes = state.update_notes();
 
     let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-    col.push(card_header(Icon::Download, "Updates", Some("Velopack — GitHub releases Liiesl/EasyScanlate")).into());
+    col.push(card_header(Icon::Download, "Updates", Some("Velopack — GitHub releases Liiesl/EasyScanlate")));
     col.push(text(format!("Current version: {}", if current.is_empty() { env!("CARGO_PKG_VERSION").to_string() } else { current.clone() })).size(scale::s(11.0)).color(MUTED_FG).into());
     col.push(item_separator());
 
@@ -1576,7 +1574,7 @@ fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
             button(text("Restart & Update").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateApply),
             button(text("Later").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateDismiss),
         ].spacing(scale::s(8.0)).into());
-        col.push(helper_text("The app will restart and install the update (Velopack — per-user, no admin).").into());
+        col.push(helper_text("The app will restart and install the update (Velopack — per-user, no admin)."));
     } else if downloading {
         let pct = progress.clamp(0, 100);
         col.push(text(format!("Downloading update {}% — please don't close", pct)).size(scale::s(12.0)).color(ACCENT).into());
@@ -1600,12 +1598,12 @@ fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
             button(text("Download").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateDownload),
             button(text("Dismiss").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateDismiss),
         ].spacing(scale::s(8.0)).into());
-        col.push(helper_text("Downloaded via Velopack (delta if available) from GitHub releases.").into());
+        col.push(helper_text("Downloaded via Velopack (delta if available) from GitHub releases."));
     } else {
         col.push(text("You're up to date.").size(scale::s(12.0)).color(Color::WHITE).into());
         col.push(text(format!("Current: v{}", current)).size(scale::s(11.0)).color(MUTED_FG).into());
         col.push(button(text("Check again").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateCheck).into());
-        col.push(helper_text("Checks GitHub Liiesl/EasyScanlate — same endpoint old app used (update.py).").into());
+        col.push(helper_text("Checks GitHub Liiesl/EasyScanlate — same endpoint old app used (update.py)."));
     }
 
     if available.is_none() && !ready && !downloading {

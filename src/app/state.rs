@@ -108,9 +108,7 @@ pub(crate) fn pipeline_progress_for_tab(tab: &Tab) -> Option<f32> {
     if do_sfx {
         #[cfg(feature = "segment")]
         {
-            let frac = if tab.segment_filtering {
-                0.0
-            } else if ocr_frac < 1.0 {
+            let frac = if tab.segment_filtering || ocr_frac < 1.0 {
                 0.0
             } else if tab.pipeline_seg_done {
                 1.0
@@ -146,9 +144,7 @@ pub(crate) fn pipeline_progress_for_tab(tab: &Tab) -> Option<f32> {
                 {
                     0.0
                 }
-            } else if tab.styling.is_building() {
-                0.0
-            } else if ocr_frac < 1.0 {
+            } else if tab.styling.is_building() || ocr_frac < 1.0 {
                 0.0
             } else {
                 1.0
@@ -446,11 +442,10 @@ impl UiState for ActiveTab<'_> {
     }
 
     fn base_profile(&self) -> Option<easyscanlate_model::ProfileId> {
-        if let Some(id) = self.tab.translate_base {
-            if self.tab.project.profiles.iter().any(|p| p.id == id) {
+        if let Some(id) = self.tab.translate_base
+            && self.tab.project.profiles.iter().any(|p| p.id == id) {
                 return Some(id);
             }
-        }
         if self.tab.images.is_empty() {
             return None;
         }
@@ -458,14 +453,13 @@ impl UiState for ActiveTab<'_> {
     }
 
     fn target_profile(&self) -> TargetProfileSelection {
-        if let TargetProfileSelection::AutoPlaceholder(name) = &self.tab.translate_target {
-            if let Some(id) = self.tab.project.profiles.find_by_name(name) {
+        if let TargetProfileSelection::AutoPlaceholder(name) = &self.tab.translate_target
+            && let Some(id) = self.tab.project.profiles.find_by_name(name) {
                 let base = self.base_profile();
                 if Some(id) != base {
                     return TargetProfileSelection::Existing(id);
                 }
             }
-        }
         self.tab.translate_target.clone()
     }
 
@@ -682,11 +676,10 @@ impl UiState for App {
     fn translation_panel_mode(&self) -> TranslationPanelMode { self.tabs[self.active].translation_panel_mode }
     fn base_profile(&self) -> Option<easyscanlate_model::ProfileId> {
         let tab = &self.tabs[self.active];
-        if let Some(id) = tab.translate_base {
-            if tab.project.profiles.iter().any(|p| p.id == id) {
+        if let Some(id) = tab.translate_base
+            && tab.project.profiles.iter().any(|p| p.id == id) {
                 return Some(id);
             }
-        }
         if tab.images.is_empty() {
             return None;
         }
@@ -694,14 +687,13 @@ impl UiState for App {
     }
     fn target_profile(&self) -> TargetProfileSelection {
         let tab = &self.tabs[self.active];
-        if let TargetProfileSelection::AutoPlaceholder(name) = &tab.translate_target {
-            if let Some(id) = tab.project.profiles.find_by_name(name) {
+        if let TargetProfileSelection::AutoPlaceholder(name) = &tab.translate_target
+            && let Some(id) = tab.project.profiles.find_by_name(name) {
                 let base = self.base_profile();
                 if Some(id) != base {
                     return TargetProfileSelection::Existing(id);
                 }
             }
-        }
         tab.translate_target.clone()
     }
     fn target_placeholder_name(&self) -> String { format!("{}(auto)", self.tabs[self.active].translate_lang) }

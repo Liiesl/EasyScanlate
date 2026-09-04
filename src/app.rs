@@ -8,7 +8,7 @@ use neverliie_iced_widgets::title_bar::{FrameAction, NativeFrame};
 
 #[cfg(feature = "inpaint")]
 use easyscanlate_inpaint::Engine as InpaintEngine;
-use easyscanlate_model::{EntryId, EntryStyle, ModelEvent, NewEntry, Project};
+use easyscanlate_model::{EntryId, EntryStyle, ModelEvent, NewEntry};
 use easyscanlate_settings::StylePresets;
 #[cfg(feature = "inpaint")]
 use easyscanlate_settings::InpaintBackend;
@@ -22,7 +22,7 @@ use easyscanlate_ui::translation as ui_translation;
 use easyscanlate_ui::main_area::decode::{DecodedPage, Tier};
 use easyscanlate_ui::{
     event::{SettingsTab, UiEvent},
-    ConnectModal, LoadedImage,
+    ConnectModal,
 };
 
 // ---------------------------------------------------------------------------
@@ -58,6 +58,48 @@ pub mod onboarding;
 
 use tab::{AutoInpaintJob, EnginePool, Tab, TabId};
 
+// ---------------------------------------------------------------------------
+// Shared complex payload aliases (silences `clippy::type_complexity`).
+// ---------------------------------------------------------------------------
+
+/// One inpaint patch: RGBA crop, bounds, source quad.
+#[cfg(feature = "inpaint")]
+type InpaintPatch = (
+    image::RgbaImage,
+    [f32; 4],
+    Option<easyscanlate_model::Quad>,
+);
+/// Grouped manual inpaint result: per-image patches.
+#[cfg(feature = "inpaint")]
+type GroupedInpaintPatches = Vec<(usize, Vec<InpaintPatch>)>;
+/// Manual multi-inpaint async result.
+#[cfg(feature = "inpaint")]
+type ManualInpaintResult = Result<GroupedInpaintPatches, String>;
+/// One auto-inpaint patch with its target image index.
+#[cfg(feature = "inpaint")]
+type AutoInpaintPatch = (
+    usize,
+    image::RgbaImage,
+    [f32; 4],
+    Option<easyscanlate_model::Quad>,
+);
+/// Auto single-job async result.
+#[cfg(feature = "inpaint")]
+type AutoInpaintResult = Result<Vec<AutoInpaintPatch>, String>;
+/// One auto batch item: job index, entry, result.
+#[cfg(feature = "inpaint")]
+type AutoInpaintBatchItem = (usize, EntryId, AutoInpaintResult);
+/// Auto batch (LaMa/AOT) async payload.
+#[cfg(feature = "inpaint")]
+type AutoInpaintBatch = Vec<AutoInpaintBatchItem>;
+
+/// Loaded `.mmtl` project payload (reuses `mmtl` alias to stay in sync).
+type MmtlLoadedPayload = mmtl::LoadedProjectResult;
+
+/// Onboarding download progress channel.
+type OnboardingProgress = (f32, u64, u64);
+pub(crate) type OnboardingRx = Option<Arc<Mutex<mpsc::Receiver<OnboardingProgress>>>>;
+
 #[derive(Debug, Clone)]
 pub enum TabMessage {
     /// Granular model change event for this tab.
@@ -82,15 +124,15 @@ pub enum TabMessage {
     #[cfg(feature = "inpaint")]
     InpaintEngineReady(Result<InpaintEngine, String>),
     #[cfg(feature = "inpaint")]
-    ManualMultiInpaintFinished(Result<Vec<(usize, Vec<(image::RgbaImage, [f32; 4], Option<easyscanlate_model::Quad>)>)>, String>),
+    ManualMultiInpaintFinished(ManualInpaintResult),
     #[cfg(feature = "inpaint")]
     AutoInpaintEngineReady(InpaintBackend, Result<InpaintEngine, String>),
     #[cfg(feature = "inpaint")]
-    AutoInpaintFinished(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<easyscanlate_model::Quad>)>, String>),
+    AutoInpaintFinished(usize, EntryId, AutoInpaintResult),
     #[cfg(feature = "inpaint")]
-    AutoInpaintLamaBatchFinished(Vec<(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<easyscanlate_model::Quad>)>, String>)>),
+    AutoInpaintLamaBatchFinished(AutoInpaintBatch),
     #[cfg(feature = "inpaint")]
-    AutoInpaintAotBatchFinished(Vec<(usize, EntryId, Result<Vec<(usize, image::RgbaImage, [f32; 4], Option<easyscanlate_model::Quad>)>, String>)>),
+    AutoInpaintAotBatchFinished(AutoInpaintBatch),
     #[cfg(all(feature = "styling", feature = "inpaint"))]
     PipelineStyleDetected(usize, EntryId, Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>),
     #[cfg(feature = "styling")]
@@ -109,12 +151,12 @@ pub enum TabMessage {
     MmtlSavePicked(Option<String>),
     MmtlOpenPicked(Option<String>),
     MmtlSaved(Result<String, String>),
-    MmtlLoaded(Result<(Project, Vec<LoadedImage>, String, Option<std::sync::Arc<tempfile::TempDir>>), String>),
+    MmtlLoaded(MmtlLoadedPayload),
     NewProjectSourcePicked(Result<Vec<(String, u32, u32)>, String>),
     NewProjectFolderPicked(Result<Vec<(String, u32, u32)>, String>),
     NewProjectLocationPicked(Option<String>),
     CreateProjectPicked(Result<String, String>),
-    RecentPickedToLoad(Result<(Project, Vec<LoadedImage>, String, Option<std::sync::Arc<tempfile::TempDir>>), String>),
+    RecentPickedToLoad(MmtlLoadedPayload),
     ExportFolderPicked(Option<String>),
     ExportFinished(Result<String, String>),
     TilesVisible(std::ops::Range<usize>),
@@ -122,6 +164,11 @@ pub enum TabMessage {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
+// `Tab(TabId, TabMessage)` is large (376 bytes) by design: boxing it would
+// add indirection to every UI message for negligible gain. Iced `Message`
+// enums commonly allow this lint.
+#[allow(clippy::large_enum_variant)]
 pub enum Message {
     /// Frame actions from the custom title bar.
     Frame(FrameAction),
@@ -197,7 +244,7 @@ pub struct App {
     pub update_error: Option<String>,
     // ——— Onboarding (first-run, blocking) ———
     pub onboarding: Option<onboarding::OnboardingState>,
-    pub(crate) onboarding_rx: Option<Arc<Mutex<mpsc::Receiver<(f32, u64, u64)>>>>,
+    pub(crate) onboarding_rx: OnboardingRx,
     pub(crate) onboarding_active_id: Option<String>,
 }
 
@@ -560,7 +607,8 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             return Task::none();
         }
     }
-    let task = match message {
+    
+    match message {
         Message::IpcPoll => {
             let pending = app.ipc_listener.as_mut().map(|l| l.poll()).unwrap_or_default();
             let paths: Vec<String> = pending.into_iter().filter(|s| !s.is_empty()).collect();
@@ -573,7 +621,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             // Legacy flat ModelEvent — forward to TabId-tagged path so
             // rapid tab switches cannot misattribute dirty flag (Q2).
             let tid = app.active_tab().id;
-            return handle_tab_message(app, tid, TabMessage::Model(ev));
+            handle_tab_message(app, tid, TabMessage::Model(ev))
         }
         Message::FetchModels => translation::handle_fetch_models(app),
         Message::ModelsFetched(providers) => translation::handle_models_fetched(app, providers),
@@ -625,11 +673,11 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::TargetProfileSelect(sel)) => translation::handle_target_select(app, sel),
         Message::Ui(UiEvent::TilesVisible(range)) => {
             let tid = app.active_tab().id;
-            return handle_tab_message(app, tid, TabMessage::TilesVisible(range));
+            handle_tab_message(app, tid, TabMessage::TilesVisible(range))
         },
         Message::Ui(UiEvent::TileScrollEnded) => {
             let tid = app.active_tab().id;
-            return handle_tab_message(app, tid, TabMessage::TileScrollEnded);
+            handle_tab_message(app, tid, TabMessage::TileScrollEnded)
         }
 
         Message::Ui(UiEvent::Translate) => translation::handle_translate(app),
@@ -719,20 +767,19 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::OnboardingFinish) => onboarding::handle_finish(app),
         Message::Ui(UiEvent::OnboardingReplay) => onboarding::handle_replay(app),
         // ——— Updates (Velopack) ———
-        Message::Ui(UiEvent::UpdateCheck) => return update::handle_check(app),
-        Message::Ui(UiEvent::UpdateDownload) => return update::handle_download(app),
-        Message::Ui(UiEvent::UpdateApply) => return update::handle_apply(app),
+        Message::Ui(UiEvent::UpdateCheck) => update::handle_check(app),
+        Message::Ui(UiEvent::UpdateDownload) => update::handle_download(app),
+        Message::Ui(UiEvent::UpdateApply) => update::handle_apply(app),
         Message::Ui(UiEvent::UpdateDismiss) => update::handle_dismiss(app),
         Message::UpdateCheckResult(info) => update::handle_check_result(app, *info),
-        Message::UpdateCheckAgain => return update::handle_check_again(app),
-        Message::UpdateDownloadStart => return update::handle_download(app),
-        Message::UpdateApply => return update::handle_apply(app),
+        Message::UpdateCheckAgain => update::handle_check_again(app),
+        Message::UpdateDownloadStart => update::handle_download(app),
+        Message::UpdateApply => update::handle_apply(app),
         Message::UpdateDismiss => update::handle_dismiss(app),
         Message::UpdatePoll => update::handle_poll(app),
         Message::OnboardingModelDone { id, result } => onboarding::handle_model_done(app, id, result),
         Message::OnboardingModelPoll => onboarding::handle_poll(app),
-    };
-    task
+    }
 }
 
 pub fn subscription(app: &App) -> Subscription<Message> {

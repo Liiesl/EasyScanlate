@@ -13,6 +13,9 @@
 //! still points at our ProgID.
 
 pub const PROG_ID: &str = "EasyScanlate.MMTLFile";
+// Used in tests + future multi-drop; `dead_code` fires for `cargo clippy`
+// without `--all-targets` since `#[cfg(test)]` is excluded.
+#[allow(dead_code)]
 pub const EXT: &str = ".mmtl";
 pub const PROG_DESC: &str = "Manga OCR Tool Project";
 

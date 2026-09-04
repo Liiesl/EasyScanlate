@@ -70,15 +70,15 @@ pub fn start_segment_filter(app: &mut App, tab_id: crate::app::tab::TabId) -> Ta
                     app.engines.queue.used_weight(),
                     crate::app::queue::POOL_CAPACITY
                 );
-                return Task::perform(
+                Task::perform(
                     async move {
-                        let res = tokio::task::spawn_blocking(move || run_segment_filter_blocking(&engine, &dims, &paths, &ocr_boxes))
+                        
+                        tokio::task::spawn_blocking(move || run_segment_filter_blocking(&engine, &dims, &paths, &ocr_boxes))
                             .await
-                            .unwrap_or_else(|e| Err(format!("segment task cancelled: {e}")));
-                        res
+                            .unwrap_or_else(|e| Err(format!("segment task cancelled: {e}")))
                     },
                     move |res| Message::Tab(tab_id, crate::app::TabMessage::SegmentFiltered(res)),
-                );
+                )
             }
             None => {
                 app.tabs[idx].segment_filtering = true;
@@ -87,7 +87,7 @@ pub fn start_segment_filter(app: &mut App, tab_id: crate::app::tab::TabId) -> Ta
                     app.engines.queue.used_weight(),
                     crate::app::queue::POOL_CAPACITY
                 );
-                return Task::perform(async move { SegmentEngine::build() }, move |res| Message::Tab(tab_id, crate::app::TabMessage::SegmentEngineReady(res)));
+                Task::perform(async move { SegmentEngine::build() }, move |res| Message::Tab(tab_id, crate::app::TabMessage::SegmentEngineReady(res)))
             }
         }
     }
@@ -190,15 +190,15 @@ pub fn handle_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, result
             }).collect();
             app.tabs[idx].segment_filtering = true;
             app.tabs[idx].status = format!("Filtering SFX via segmentation... pool {}/{}", app.engines.queue.used_weight(), crate::app::queue::POOL_CAPACITY);
-            return Task::perform(
+            Task::perform(
                 async move {
-                    let res = tokio::task::spawn_blocking(move || run_segment_filter_blocking(&engine_clone, &dims, &paths, &ocr_boxes))
+                    
+                    tokio::task::spawn_blocking(move || run_segment_filter_blocking(&engine_clone, &dims, &paths, &ocr_boxes))
                         .await
-                        .unwrap_or_else(|e| Err(format!("segment task cancelled: {e}")));
-                    res
+                        .unwrap_or_else(|e| Err(format!("segment task cancelled: {e}")))
                 },
                 move |res| Message::Tab(tab_id, crate::app::TabMessage::SegmentFiltered(res)),
-            );
+            )
         }
         Err(e) => {
             let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none()};
@@ -208,7 +208,7 @@ pub fn handle_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, result
             app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Segment);
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
-            return promote;
+            promote
         }
     }
 }

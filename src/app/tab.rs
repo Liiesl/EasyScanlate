@@ -19,7 +19,7 @@ use easyscanlate_ocr::{self as ocr_engine, OcrCancellationToken, ParallelEngine}
 #[cfg(feature = "segment")]
 use easyscanlate_segment::Engine as SegmentEngine;
 #[cfg(feature = "styling")]
-use easyscanlate_styling::{Engine as StylingEngine, JobTracker, StylePrediction};
+use easyscanlate_styling::{JobTracker, StylePrediction};
 use easyscanlate_ui::event::{EditOrigin, MainAreaMode, ManualMode, StyleField, TargetProfileSelection, TranslationPanelMode};
 use easyscanlate_ui::main_area::decode::Scheduler;
 use easyscanlate_ui::LoadedImage;
@@ -84,12 +84,28 @@ pub struct EnginePool {
     pub auto_lama: Option<InpaintEngine>,
     #[cfg(feature = "inpaint")]
     pub auto_aot: Option<InpaintEngine>,
-    #[cfg(feature = "styling")]
-    pub styling: Option<StylingEngine>,
     #[cfg(feature = "segment")]
     pub segment: Option<SegmentEngine>,
     pub queue: crate::app::queue::EngineQueue,
 }
+
+// ---------------------------------------------------------------------------
+// Shared complex payload aliases (silences `clippy::type_complexity`).
+// ---------------------------------------------------------------------------
+
+/// One manual inpaint selection: image index, path, rect, quads.
+#[cfg(feature = "inpaint")]
+pub type ManualInpaintSelection = (usize, String, [f32; 4], Vec<Quad>);
+
+/// One deferred pipeline style result with its inpaint job payload.
+#[cfg(all(feature = "styling", feature = "inpaint"))]
+pub type PipelineStyleItem = (
+    usize,
+    EntryId,
+    Result<(EntryStyle, StylePrediction), String>,
+    Quad,
+    String,
+);
 
 // ---------------------------------------------------------------------------
 // Tab — full per-tab state (Phase 0: scaffold, not yet wired)
@@ -131,7 +147,7 @@ pub struct Tab {
 
     // inpaint (per-tab pending queues)
     #[cfg(feature = "inpaint")]
-    pub pending_manual_multi: Option<Vec<(usize, String, [f32; 4], Vec<Quad>)>>,
+    pub pending_manual_multi: Option<Vec<ManualInpaintSelection>>,
     #[cfg(feature = "inpaint")]
     pub pending_background_stitch: Option<(AutoInpaintJob, f32, Option<String>, Option<String>)>,
     pub inpainting: bool,
@@ -157,7 +173,7 @@ pub struct Tab {
     #[cfg(all(feature = "styling", feature = "inpaint"))]
     pub pipeline_style_pending: usize,
     #[cfg(all(feature = "styling", feature = "inpaint"))]
-    pub pipeline_style_results: Vec<(usize, EntryId, Result<(EntryStyle, StylePrediction), String>, Quad, String)>,
+    pub pipeline_style_results: Vec<PipelineStyleItem>,
     #[cfg(feature = "inpaint")]
     pub auto_inpaint_pending: usize,
     #[cfg(feature = "inpaint")]
@@ -358,10 +374,6 @@ impl Tab {
     }
     pub fn is_project(&self) -> bool {
         self.kind.is_project()
-    }
-
-    pub fn is_loading(&self) -> bool {
-        self.loading
     }
 
     /// Instant placeholder shown while the `.mmtl` is being extracted off the UI thread.

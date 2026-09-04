@@ -311,17 +311,18 @@ pub fn generate_aurora_palette(
 use std::sync::{Mutex, OnceLock};
 use iced::advanced::image::{Handle as ImageHandle, Image as CoreImage};
 
-static AURORA_CACHE: OnceLock<Mutex<Option<(AuroraConfig, (u32, u32), ImageHandle)>>> =
-    OnceLock::new();
+/// Cached aurora backdrop: config + pixel size + rendered handle.
+type AuroraCacheEntry = (AuroraConfig, (u32, u32), ImageHandle);
+
+static AURORA_CACHE: OnceLock<Mutex<Option<AuroraCacheEntry>>> = OnceLock::new();
 
 fn cached_aurora_handle(config: &AuroraConfig, width: u32, height: u32) -> ImageHandle {
     let slot = AURORA_CACHE.get_or_init(|| Mutex::new(None));
     let mut guard = slot.lock().unwrap();
-    if let Some((cached_cfg, cached_size, handle)) = guard.as_ref() {
-        if cached_cfg == config && *cached_size == (width, height) {
+    if let Some((cached_cfg, cached_size, handle)) = guard.as_ref()
+        && cached_cfg == config && *cached_size == (width, height) {
             return handle.clone();
         }
-    }
     let handle = generate_aurora_handle(width, height, config);
     *guard = Some((config.clone(), (width, height), handle.clone()));
     handle
@@ -342,9 +343,9 @@ fn generate_aurora_rgba(width: u32, height: u32, config: &AuroraConfig) -> Vec<u
     let sat = s_raw as i32;
     let val = v_raw as i32;
     let base = if config.is_dark {
-        hsv_to_color(hue, sat as u8, ((val as f32 * 0.2).round() as u8).min(255))
+        hsv_to_color(hue, sat as u8, (val as f32 * 0.2).round() as u8)
     } else {
-        let ns = ((sat as f32 * 0.1).round() as u8).min(255);
+        let ns = (sat as f32 * 0.1).round() as u8;
         hsv_to_color(hue, ns, 250)
     };
     let [br, bg, bb, _] = base.into_rgba8();
@@ -642,7 +643,7 @@ fn color_at_position(pos: Point, bounds: Rectangle, config: &AuroraConfig) -> Ui
     let dist = (dx * dx + dy * dy).sqrt();
     let angle = dy.atan2(dx) + std::f32::consts::FRAC_PI_2;
     let mut hue = angle / (2.0 * std::f32::consts::PI);
-    hue = hue % 1.0;
+    hue %= 1.0;
     if hue < 0.0 {
         hue += 1.0;
     }
@@ -667,6 +668,8 @@ fn color_at_position(pos: Point, bounds: Rectangle, config: &AuroraConfig) -> Ui
     UiEvent::SettingsChanged
 }
 
+// 10 args map 1:1 to the wheel-handle draw call; grouping would obscure call sites.
+#[allow(clippy::too_many_arguments)]
 fn draw_handle(
     frame: &mut Frame,
     center: Point,

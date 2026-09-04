@@ -259,7 +259,7 @@ pub fn handle_auto_detect(app: &mut App) -> Task<Message> {
         app.active_tab_mut().styling.mark_building();
         app.active_tab_mut().status = "Loading the styling model...".to_string();
         let tid = app.active_tab().id;
-        return Task::perform(async move { StylingEngine::build() }, move |res| Message::Tab(tid, crate::app::TabMessage::StylingEngineReady(res)));
+        Task::perform(async move { StylingEngine::build() }, move |res| Message::Tab(tid, crate::app::TabMessage::StylingEngineReady(res)))
     }
     #[cfg(not(feature = "styling"))]
     {
@@ -407,11 +407,11 @@ pub fn handle_styling_ready(app: &mut App, tab_id: crate::app::tab::TabId, resul
             }
             if is_pipeline {
                 #[cfg(all(feature = "styling", feature = "inpaint"))]
-                { return start_jobs(app, tab_id, engine, true); }
+                { start_jobs(app, tab_id, engine, true)}
                 #[cfg(not(all(feature = "styling", feature = "inpaint")))]
                 { let _ = engine; return Task::none(); }
             } else {
-                return start_jobs(app, tab_id, engine, false);
+                start_jobs(app, tab_id, engine, false)
             }
         }
         Err(e) => {
@@ -423,7 +423,7 @@ pub fn handle_styling_ready(app: &mut App, tab_id: crate::app::tab::TabId, resul
             app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Style);
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
-            return promote;
+            promote
         }
     }
 }

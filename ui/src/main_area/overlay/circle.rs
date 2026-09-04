@@ -232,11 +232,10 @@ pub(crate) fn fit_circle_metrics(text: &str, font: Font, bounds: Size) -> (f32, 
     };
     with_circle_cache(|cache| {
         if !cache.entries.contains_key(&key) {
-            if cache.entries.len() >= FIT_CACHE_CAP {
-                if let Some(evicted) = cache.order.pop_front() {
+            if cache.entries.len() >= FIT_CACHE_CAP
+                && let Some(evicted) = cache.order.pop_front() {
                     cache.entries.remove(&evicted);
                 }
-            }
             cache.order.push_back(key);
         }
         cache.entries.insert(

@@ -75,11 +75,10 @@ pub(crate) fn shape_warp_layout(text: &str, font: Font, size: f32, wrap_width: f
         }
         let layout = build_warp_layout(text, font, size, wrap_width);
         if !cache.entries.contains_key(&key) {
-            if cache.entries.len() >= FIT_CACHE_CAP {
-                if let Some(evicted) = cache.order.pop_front() {
+            if cache.entries.len() >= FIT_CACHE_CAP
+                && let Some(evicted) = cache.order.pop_front() {
                     cache.entries.remove(&evicted);
                 }
-            }
             cache.order.push_back(key);
         }
         cache.entries.insert(

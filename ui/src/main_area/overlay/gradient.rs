@@ -46,6 +46,9 @@ pub fn gradient_t(dir: TextGradientDir, box_rect: Rectangle, p: Point) -> f32 {
     t.clamp(0.0, 1.0)
 }
 
+// Gradient text needs every band param at the draw call; a params struct would
+// add indirection for a single call site.
+#[allow(clippy::too_many_arguments)]
 pub fn fill_gradient_text<F>(
     frame: &mut F,
     text: &Text,

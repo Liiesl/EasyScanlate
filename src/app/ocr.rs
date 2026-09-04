@@ -222,7 +222,7 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
                         move |res| Message::Tab(tid, crate::app::TabMessage::ParallelEngineReady(res)),
                     );
                 }
-                return maybe_start_ocr(app, tab_id);
+                maybe_start_ocr(app, tab_id)
             }
             AcquireResult::Queued(_, pos) => {
                 let idx = app.tabs.iter().position(|t| t.id == tab_id).unwrap();
@@ -233,7 +233,7 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
                     crate::app::queue::POOL_CAPACITY,
                     run_count
                 );
-                return Task::none();
+                Task::none()
             }
         }
     }
@@ -283,7 +283,7 @@ pub fn handle_parallel_ready(app: &mut App, tab_id: super::tab::TabId, result: R
             app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Ocr);
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
-            return promote;
+            promote
         }
     }
 }
@@ -307,7 +307,7 @@ pub fn handle_stop_ocr(app: &mut App) -> Task<Message> {
         }
         app.active_tab_mut().running = false;
         app.active_tab_mut().status = "Cancelling OCR...".to_string();
-        return Task::none();
+        Task::none()
     }
     #[cfg(not(feature = "ocr"))]
     {
@@ -638,11 +638,10 @@ pub fn handle_manual_ocr_engine_ready(app: &mut App, tab_id: super::tab::TabId, 
     match result {
         Ok(engine) => {
             app.engines.manual_ocr = Some(engine.clone());
-            if let Some(tab) = app.tab_by_id_mut(tab_id) {
-                if let Some(multi) = tab.pending_manual_multi_ocr.take() {
+            if let Some(tab) = app.tab_by_id_mut(tab_id)
+                && let Some(multi) = tab.pending_manual_multi_ocr.take() {
                     return start_manual_ocr_selection(app, tab_id, multi, engine.clone());
                 }
-            }
             Task::none()
         }
         Err(e) => {
@@ -736,7 +735,7 @@ pub fn handle_manual_ocr_selection(app: &mut App, tab_id: super::tab::TabId, sel
             tab.pending_manual_multi_ocr = Some(valid);
             tab.status = "Loading OCR engine for manual OCR…".to_string();
         }
-        return Task::perform(async move { ocr::Engine::build_with_config(cfg) }, move |res| Message::Tab(tab_id, crate::app::TabMessage::ManualOcrEngineReady(res)));
+        Task::perform(async move { ocr::Engine::build_with_config(cfg) }, move |res| Message::Tab(tab_id, crate::app::TabMessage::ManualOcrEngineReady(res)))
     }
     #[cfg(not(feature = "ocr"))]
     {
@@ -928,7 +927,7 @@ pub fn handle_manual_ocr_finished(app: &mut App, tab_id: super::tab::TabId, resu
             Err(e) => { if let Some(tab) = app.tab_by_id_mut(tab_id) { tab.status = format!("Manual OCR multi failed: {e}"); } }
         }
         if refresh_needed { crate::app::queue::refresh_queued_statuses(app); }
-        return promote_task;
+        promote_task
     }
     #[cfg(not(feature = "ocr"))]
     {

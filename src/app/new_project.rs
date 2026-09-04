@@ -220,6 +220,6 @@ pub fn handle_folder_picked(app: &mut App, tab_id: TabId, result: Result<Vec<(St
 }
 
 pub fn handle_location_picked(app: &mut App, _tab_id: TabId, picked: Option<String>) -> Task<Message> {
-    if let Some(p) = picked { if let Some(np) = app.new_project.as_mut() { np.project_location = Some(p); } }
+    if let Some(p) = picked && let Some(np) = app.new_project.as_mut() { np.project_location = Some(p); }
     Task::none()
 }

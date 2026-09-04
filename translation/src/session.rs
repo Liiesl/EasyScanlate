@@ -10,6 +10,11 @@ use super::{
     CUSTOM_ANTHROPIC, CUSTOM_OPENAI, SUPPORTED_PROVIDERS,
 };
 
+/// One model entry in the picker: `(model id, display name)`.
+pub type ModelPair = (String, String);
+/// One provider group in the picker: `(provider id, display name, models)`.
+pub type ModelGroup = (String, String, Vec<ModelPair>);
+
 /// The connected-provider session state of the translation bar.
 #[derive(Debug, Clone, Default)]
 pub struct Session {
@@ -37,7 +42,7 @@ pub struct Session {
     /// Cached output of [`Self::model_groups`]; rebuilt at the top of every
     /// [`Self::sync_models`] call so callers can borrow it for the frame.
     /// Each inner pair is `(model id, display name)`.
-    groups: Vec<(String, String, Vec<(String, String)>)>,
+    groups: Vec<ModelGroup>,
 }
 
 impl Session {
@@ -52,11 +57,11 @@ impl Session {
             ..Session::default()
         };
         session.sync();
-        if let Some(id) = last_provider {
-            if session.connections.contains_key(&id) {
-                session.selected_id = id;
-                session.sync_models();
-            }
+        if let Some(id) = last_provider
+            && session.connections.contains_key(&id)
+        {
+            session.selected_id = id;
+            session.sync_models();
         }
         session
     }
@@ -105,7 +110,7 @@ impl Session {
         ids
     }
 
-    fn visible_model_pairs(&self, provider: &Provider) -> Vec<(String, String)> {
+    fn visible_model_pairs(&self, provider: &Provider) -> Vec<ModelPair> {
         let ids = self.visible_models(provider);
         ids.into_iter()
             .map(|id| {
@@ -153,12 +158,12 @@ impl Session {
             self.selected_model = self.models[0].clone();
         }
         // Prune stale hidden entries that no longer exist in provider.
-        if let Some(provider) = provider {
-            if let Some(hidden) = self.hidden_models.get_mut(&provider.id) {
-                let valid: BTreeSet<String> =
-                    provider.models.iter().map(|m| m.id.clone()).collect();
-                hidden.retain(|id| valid.contains(id));
-            }
+        if let Some(provider) = provider
+            && let Some(hidden) = self.hidden_models.get_mut(&provider.id)
+        {
+            let valid: BTreeSet<String> =
+                provider.models.iter().map(|m| m.id.clone()).collect();
+            hidden.retain(|id| valid.contains(id));
         }
     }
 
@@ -198,12 +203,12 @@ impl Session {
     /// Returns a borrow of the internal cache (refreshed by
     /// [`Self::sync_models`]) so view code can hold the `&str`s for a frame
     /// without cloning.
-    pub fn model_groups(&self) -> &[(String, String, Vec<(String, String)>)] {
+    pub fn model_groups(&self) -> &[ModelGroup] {
         &self.groups
     }
 
     /// Recomputes [`Self::model_groups`] from scratch.
-    fn compute_model_groups(&self) -> Vec<(String, String, Vec<(String, String)>)> {
+    fn compute_model_groups(&self) -> Vec<ModelGroup> {
         self.connected_ids
             .iter()
             .filter_map(|id| {
@@ -223,7 +228,7 @@ impl Session {
     /// hidden filtering – deprecated already removed. Used by the Manage
     /// Models overlay to list every toggleable model. Each inner pair is
     /// `(model id, display name)`.
-    pub fn all_model_groups(&self) -> Vec<(String, String, Vec<(String, String)>)> {
+    pub fn all_model_groups(&self) -> Vec<ModelGroup> {
         self.connected_ids
             .iter()
             .filter_map(|id| {
@@ -232,7 +237,7 @@ impl Session {
                         .get(id)
                         .map(|connection| provider_for_connection(id, connection))
                 })?;
-                let mut pairs: Vec<(String, String)> = provider
+                let mut pairs: Vec<ModelPair> = provider
                     .models
                     .iter()
                     .map(|m| (m.id.clone(), m.display_name().to_string()))
@@ -392,13 +397,12 @@ impl Session {
         let mut endpoints = HashMap::new();
         for id in &self.connected_ids {
             if is_local(id) {
-                if let Some(conn) = self.connections.get(id) {
-                    if let Some(url) = &conn.base_url {
-                        if !url.trim().is_empty() {
-                            endpoints.insert(id.clone(), url.clone());
-                            continue;
-                        }
-                    }
+                if let Some(conn) = self.connections.get(id)
+                    && let Some(url) = &conn.base_url
+                    && !url.trim().is_empty()
+                {
+                    endpoints.insert(id.clone(), url.clone());
+                    continue;
                 }
                 if let Some(catalog) = super::catalog_provider(id) {
                     endpoints.insert(id.clone(), catalog.api.clone());

@@ -112,6 +112,9 @@ impl Default for EngineQueue {
 }
 
 impl EngineQueue {
+    // Used in tests (`#[cfg(test)]` code is excluded from non-test builds,
+    // so `dead_code` fires for `cargo clippy` without `--all-targets`).
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -328,6 +331,7 @@ impl EngineQueue {
 
 }
 
+#[allow(dead_code)]
 pub enum AcquireResult {
     Acquired(QueuedJob),
     Queued(QueuedJob, usize),
@@ -409,8 +413,8 @@ pub fn dispatch_pending(app: &mut crate::app::App) -> Task<crate::app::Message> 
 fn dispatch_ocr(app: &mut crate::app::App, tab_id: super::tab::TabId) -> Task<crate::app::Message> {
     // Manual OCR has priority if pending_manual_multi_ocr exists (FIFO insertion + priority scan dispatched this job)
     let idx_opt = app.tabs.iter().position(|t| t.id == tab_id);
-    if let Some(idx) = idx_opt {
-        if app.tabs[idx].pending_manual_multi_ocr.is_some() {
+    if let Some(idx) = idx_opt
+        && app.tabs[idx].pending_manual_multi_ocr.is_some() {
             let data = app.tabs[idx].pending_manual_multi_ocr.take().unwrap();
             let cached = app.engines.manual_ocr.clone();
             if let Some(engine) = cached {
@@ -426,7 +430,6 @@ fn dispatch_ocr(app: &mut crate::app::App, tab_id: super::tab::TabId) -> Task<cr
                 );
             }
         }
-    }
     // otherwise pipeline OCR
     if app.engines.pipeline.is_some() {
         return crate::app::ocr::maybe_start_ocr(app, tab_id);
@@ -456,7 +459,7 @@ fn dispatch_segment(app: &mut crate::app::App, tab_id: super::tab::TabId) -> Tas
 fn dispatch_style(app: &mut crate::app::App, tab_id: super::tab::TabId) -> Task<crate::app::Message> {
     #[cfg(feature = "styling")]
     {
-        return crate::app::styling::classify(app, tab_id);
+        crate::app::styling::classify(app, tab_id)
     }
     #[cfg(not(feature = "styling"))]
     {
@@ -539,7 +542,7 @@ fn dispatch_inpaint(
                 );
             }
         }
-        return Task::none();
+        Task::none()
     }
     #[cfg(not(feature = "inpaint"))]
     {

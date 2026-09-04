@@ -175,7 +175,7 @@ pub fn draw_entries<'a, I, F>(
         let stroke = (entry.style.stroke_width > 0.0).then(|| {
             (rgba_to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
         });
-        let gradient = entry.style.text_gradient.then(|| {
+        let gradient = entry.style.text_gradient.then_some({
             (entry.style.gradient_dir, entry.style.gradient_a, entry.style.gradient_b)
         });
 

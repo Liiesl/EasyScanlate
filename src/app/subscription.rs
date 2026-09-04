@@ -33,11 +33,10 @@ fn keys_subscription(app: &App) -> Subscription<Message> {
                         return None;
                     }
                     iced::keyboard::Key::Character(c) => {
-                        if let Ok(n) = c.parse::<usize>() {
-                            if (1..=9).contains(&n) && n <= state.len {
+                        if let Ok(n) = c.parse::<usize>()
+                            && (1..=9).contains(&n) && n <= state.len {
                                 return Some(Message::Ui(UiEvent::TabSelected(state.ids[n - 1])));
                             }
-                        }
                         return None;
                     }
                     _ => return None,

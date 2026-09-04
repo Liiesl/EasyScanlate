@@ -11,6 +11,7 @@ use iced::widget::{
 use iced::{keyboard, Background, Border, Color, Element, Fill as FillLength, Font, Length, Padding,
     Rectangle, Vector};
 use neverliie_iced_widgets::advanced_dropdown::{advanced_dropdown, Footer, Item, MenuItem};
+use std::fmt::{Display, Formatter};
 
 use crate::event::{EditOrigin, SettingsTab, TargetProfileSelection, ToolbarAction, TranslationPanelMode, UiEvent};
 use crate::loaded::LoadedImage;
@@ -24,11 +25,11 @@ use easyscanlate_model::{EntryId, OcrEntry, ProfileId};
 
 /// Widget id of the multi-line editor shown in a row while the entry is
 /// edited from the panel; must match the app's focus id.
-const PANEL_EDIT_INPUT_ID: &'static str = "panel-editor";
+const PANEL_EDIT_INPUT_ID: &str = "panel-editor";
 
 /// Widget id of the scrollable results list; used by the app to scroll a
 /// selected entry's row into view.
-pub const PANEL_LIST_ID: &'static str = "panel-results-list";
+pub const PANEL_LIST_ID: &str = "panel-results-list";
 
 /// The widget id of the results row for `(index, id)`; must match the
 /// container id set in `entry_row`.
@@ -304,9 +305,9 @@ struct ModelOption {
     model_name: String,
 }
 
-impl ToString for ModelOption {
-    fn to_string(&self) -> String {
-        format!("{}:{}", self.provider_name, self.model_name)
+impl Display for ModelOption {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.provider_name, self.model_name)
     }
 }
 
@@ -319,9 +320,9 @@ struct ProfileOption {
     name: String,
 }
 
-impl ToString for ProfileOption {
-    fn to_string(&self) -> String {
-        self.name.clone()
+impl Display for ProfileOption {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
     }
 }
 
@@ -331,9 +332,9 @@ struct TargetPickOption {
     label: String,
 }
 
-impl ToString for TargetPickOption {
-    fn to_string(&self) -> String {
-        self.label.clone()
+impl Display for TargetPickOption {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.label)
     }
 }
 

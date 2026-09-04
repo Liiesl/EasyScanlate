@@ -289,7 +289,7 @@ impl geometry::frame::Backend for ExportFrame {
         let self_ptr = self as *mut Self;
         // need to clone stroke per glyph
         text.draw_with(|path, _| unsafe {
-            (*self_ptr).stroke(&path, stroke.clone());
+            (*self_ptr).stroke(&path, stroke);
         });
     }
 
@@ -500,12 +500,11 @@ pub fn handle_export_picked(app: &mut App, tab_id: crate::app::tab::TabId, folde
         return Task::none();
     };
     let folder_path = PathBuf::from(&folder_str);
-    if !folder_path.exists() {
-        if let Err(e) = std::fs::create_dir_all(&folder_path) {
+    if !folder_path.exists()
+        && let Err(e) = std::fs::create_dir_all(&folder_path) {
             app.tabs[idx].status = format!("Export failed: cannot create folder: {e}");
             return Task::none();
         }
-    }
 
     // Snapshot project + inpaint raw for blocking thread
     let project = app.tabs[idx].project.clone();

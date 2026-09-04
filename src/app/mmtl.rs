@@ -1,10 +1,20 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use iced::Task;
 
 use super::tab::Tab;
 use super::{App, Message};
+
+/// Loaded `.mmtl` project with its images, display path, and temp dir guard.
+pub type LoadedProject = (
+    easyscanlate_model::Project,
+    Vec<easyscanlate_ui::LoadedImage>,
+    String,
+    Option<Arc<tempfile::TempDir>>,
+);
+/// Result of loading a `.mmtl` project.
+pub type LoadedProjectResult = Result<LoadedProject, String>;
 
 fn extract_inpaint_data(tab: &Tab) -> Vec<easyscanlate_mmtl::InpaintImageData> {
     let mut out = Vec::new();
@@ -91,7 +101,7 @@ pub fn handle_save_picked(app: &mut App, tab_id: crate::app::tab::TabId, picked:
     do_save(tab_id, tab.project.clone(), extract_inpaint_data(tab), path)
 }
 
-fn build_loaded_images(res: easyscanlate_mmtl::LoadResult, display: String) -> Result<(easyscanlate_model::Project, Vec<easyscanlate_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String> {
+fn build_loaded_images(res: easyscanlate_mmtl::LoadResult, display: String) -> LoadedProjectResult {
     let project = res.project;
     let mut inpaint_map: std::collections::HashMap<easyscanlate_model::ImageId, Vec<easyscanlate_ui::loaded::InpaintLayer>> = std::collections::HashMap::new();
     for (img_id, bounds, png_path) in &res.inpaint_files {
@@ -126,14 +136,14 @@ fn do_save(tab_id: crate::app::tab::TabId, project: easyscanlate_model::Project,
     )
 }
 
-fn find_tab_by_path(app: &App, path: &PathBuf) -> Option<usize> {
+fn find_tab_by_path(app: &App, path: &Path) -> Option<usize> {
     app.tabs.iter().position(|t| {
-        t.mmtl_path.as_deref() == Some(path.as_path())
-            || t.loading_path.as_deref() == Some(path.as_path())
+        t.mmtl_path.as_deref() == Some(path)
+            || t.loading_path.as_deref() == Some(path)
     })
 }
 
-fn dedup_activate(app: &mut App, path: &PathBuf) -> bool {
+fn dedup_activate(app: &mut App, path: &Path) -> bool {
     if let Some(idx) = find_tab_by_path(app, path) {
         app.active = idx;
         // If it's a loading placeholder, keep its "Loading..." status; otherwise show Already open.
@@ -175,8 +185,8 @@ pub(crate) fn push_project_tab(
     let path = PathBuf::from(&display_path);
 
     // Hydration path: `id` is a loading placeholder that was created optimistically.
-    if let Some(idx) = app.tabs.iter().position(|t| t.id == id) {
-        if app.tabs[idx].loading {
+    if let Some(idx) = app.tabs.iter().position(|t| t.id == id)
+        && app.tabs[idx].loading {
             // Another non-placeholder tab already has this path (race: opened elsewhere while loading).
             // Remove the placeholder and activate the existing one.
             if let Some(other_idx) = app
@@ -231,7 +241,6 @@ pub(crate) fn push_project_tab(
             }
             return Task::none();
         }
-    }
 
     // Non-hydration (legacy or placeholder was closed before load finished).
     // Dedup: if already open, just activate it and discard this load.
@@ -342,13 +351,12 @@ pub fn handle_saved(app: &mut App, tab_id: crate::app::tab::TabId, result: Resul
             app.recent_projects = easyscanlate_settings::get(|s| s.recent_projects.clone());
             // If there was a pending close for this tab, now close it
             if app.pending_close == Some(tab_id) {
-                if let Some(pos) = app.tabs.iter().position(|t| t.id == tab_id) {
-                    if app.tabs[pos].is_project() {
+                if let Some(pos) = app.tabs.iter().position(|t| t.id == tab_id)
+                    && app.tabs[pos].is_project() {
                         app.tabs.remove(pos);
                         if app.active >= app.tabs.len() { app.active = app.tabs.len().saturating_sub(1); }
                         else if pos < app.active { app.active -= 1; }
                     }
-                }
                 app.pending_close = None;
             }
         }
@@ -359,7 +367,7 @@ pub fn handle_saved(app: &mut App, tab_id: crate::app::tab::TabId, result: Resul
     Task::none()
 }
 
-pub fn load_created_project(path_str: String) -> Result<(easyscanlate_model::Project, Vec<easyscanlate_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String> {
+pub fn load_created_project(path_str: String) -> LoadedProjectResult {
     let path = PathBuf::from(&path_str);
     let res = easyscanlate_mmtl::load_mmtl(&path)?;
     let display = path.to_string_lossy().to_string();
@@ -400,7 +408,7 @@ pub fn handle_external_opens(app: &mut App, paths: Vec<String>) -> Task<Message>
 pub fn handle_loaded(
     app: &mut App,
     tab_id: crate::app::tab::TabId,
-    result: Result<(easyscanlate_model::Project, Vec<easyscanlate_ui::LoadedImage>, String, Option<Arc<tempfile::TempDir>>), String>,
+    result: LoadedProjectResult,
 ) -> Task<Message> {
     match result {
         Ok((project, images, display_path, temp_dir)) => {

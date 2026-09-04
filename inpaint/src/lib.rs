@@ -53,6 +53,12 @@ pub const AOT_MAX_SIZE: u32 = 1024;
 const MODEL_FILE: &str = "lama-manga_int8.onnx";
 const MODEL_FILE_AOT: &str = "inpainting_aot.onnx";
 
+/// One inpainted patch: RGBA crop, `[x, y, w, h]` bounds in image pixels,
+/// and the source quad (`None` for whole-rect case).
+pub type InpaintPatch = (RgbaImage, [f32; 4], Option<Quad>);
+/// Result of inpainting one rect: one [`InpaintPatch`] per mask box.
+pub type InpaintResult = Result<Vec<InpaintPatch>, String>;
+
 /// Cloneable handle to the shared inpainting engine: either the stateless
 /// Telea backend or an ONNX session (one inference at a time, serialized
 /// through the inner mutex).
@@ -203,7 +209,7 @@ impl Engine {
         path: &str,
         rect: [f32; 4],
         quads: &[Quad],
-    ) -> Result<Vec<(RgbaImage, [f32; 4], Option<Quad>)>, String> {
+    ) -> InpaintResult {
         let image = image::ImageReader::open(path)
             .map_err(|e| format!("Failed to open {path}: {e}"))?
             .with_guessed_format()
@@ -245,7 +251,7 @@ impl Engine {
         image: &RgbaImage,
         rect: [f32; 4],
         quads: &[Quad],
-    ) -> Result<Vec<(RgbaImage, [f32; 4], Option<Quad>)>, String> {
+    ) -> InpaintResult {
         match self.backend {
             InpaintBackend::Telea => telea_inpaint_crop(image, rect, quads, self.radius),
             InpaintBackend::Lama => {
@@ -536,6 +542,7 @@ fn compose_inputs(canvas: &RgbImage, mask: &GrayImage) -> Array4<f32> {
 /// crop: the canvas region that received the crop pixels (`dst_x..dst_x+w`,
 /// `dst_y..dst_y+h`) maps 1:1 back to `src_x..src_x+w, src_y..src_y+h`;
 /// everything else (the white padding the model never saw) is white.
+#[allow(clippy::too_many_arguments)]
 fn extract_window(
     output: &ArrayD<f32>,
     crop_w: u32,
@@ -617,7 +624,7 @@ fn apply_quad_alpha_mask(crop: &mut RgbaImage, quad: &Quad, crop_origin: [f32; 2
 /// pixels outside the actual quad polygon are made transparent (`alpha=0`),
 /// so overlaying the patch only affects the true quad shape. Also returns
 /// the quad for storage.
-fn bbox_crops(patch: RgbaImage, origin: [f32; 2], quads: &[Quad]) -> Vec<(RgbaImage, [f32; 4], Option<Quad>)> {
+fn bbox_crops(patch: RgbaImage, origin: [f32; 2], quads: &[Quad]) -> Vec<InpaintPatch> {
     if quads.is_empty() {
         let (width, height) = patch.dimensions();
         return vec![(patch, [origin[0], origin[1], width as f32, height as f32], None)];
@@ -676,7 +683,7 @@ pub fn telea_inpaint_crop(
     rect: [f32; 4],
     quads: &[Quad],
     radius: i32,
-) -> Result<Vec<(RgbaImage, [f32; 4], Option<Quad>)>, String> {
+) -> InpaintResult {
     let radius = radius.max(1);
     let pad = radius as f32;
     let [rx, ry, rw, rh] = rect;
@@ -714,8 +721,8 @@ pub fn telea_inpaint_crop(
         );
         let sub = image::imageops::crop_imm(
             &crop,
-            (ox - ex) as u32,
-            (oy - ey) as u32,
+            ox - ex,
+            oy - ey,
             ow,
             oh,
         )
@@ -741,7 +748,7 @@ pub fn inpaint_crop(
     image: &RgbaImage,
     rect: [f32; 4],
     quads: &[Quad],
-) -> Result<Vec<(RgbaImage, [f32; 4], Option<Quad>)>, String> {
+) -> InpaintResult {
     let [rx, ry, rw, rh] = rect;
     let pad = LAMA_CONTEXT_PAD;
     let [ex, ey, exp_w, exp_h] = crop_spec(
@@ -905,8 +912,8 @@ pub fn inpaint_crop(
         let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
         let sub = image::imageops::crop_imm(
             &patch,
-            (ox - ex) as u32,
-            (oy - ey) as u32,
+            ox - ex,
+            oy - ey,
             ow,
             oh,
         )
@@ -927,17 +934,17 @@ pub fn inpaint_crop(
 // ---------------------------------------------------------------------------
 
 fn next_multiple(v: u32, pad: u32) -> u32 {
-    if v % pad == 0 {
+    if v.is_multiple_of(pad) {
         v
     } else {
-        ((v + pad - 1) / pad) * pad
+        v.div_ceil(pad) * pad
     }
 }
 
 /// Inference dimensions for AOT: mirrors `aot_inference.py: potentially` `_next_multiple` + `max_size` logic.
 fn aot_infer_dims(w: u32, h: u32, pad: u32, max_size: Option<u32>) -> (u32, u32) {
-    if let Some(max) = max_size {
-        if w.max(h) > max {
+    if let Some(max) = max_size
+        && w.max(h) > max {
             let scale = max as f32 / w.max(h) as f32;
             let mut nw = (w as f32 * scale).round() as u32;
             let mut nh = (h as f32 * scale).round() as u32;
@@ -945,7 +952,6 @@ fn aot_infer_dims(w: u32, h: u32, pad: u32, max_size: Option<u32>) -> (u32, u32)
             nh = next_multiple(nh.max(1), pad);
             return (nw, nh);
         }
-    }
     (next_multiple(w, pad), next_multiple(h, pad))
 }
 
@@ -994,7 +1000,7 @@ pub fn aot_inpaint_crop(
     image: &RgbaImage,
     rect: [f32; 4],
     quads: &[Quad],
-) -> Result<Vec<(RgbaImage, [f32; 4], Option<Quad>)>, String> {
+) -> InpaintResult {
     let [rx, ry, rw, rh] = rect;
     let pad = AOT_CONTEXT_PAD;
     let [ex, ey, exp_w, exp_h] = crop_spec(
@@ -1026,7 +1032,7 @@ pub fn aot_inpaint_crop(
         eprintln!("[inpaint::aot] empty mask -> returning original crop");
         if quads.is_empty() {
             let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
-            let sub = image::imageops::crop_imm(&crop, (ox - ex) as u32, (oy - ey) as u32, ow, oh).to_image();
+            let sub = image::imageops::crop_imm(&crop, ox - ex, oy - ey, ow, oh).to_image();
             return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32], None)]);
         }
         return Ok(bbox_crops(crop, exp_origin, quads));
@@ -1114,7 +1120,7 @@ pub fn aot_inpaint_crop(
     }
     if quads.is_empty() {
         let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
-        let sub = image::imageops::crop_imm(&patch, (ox - ex) as u32, (oy - ey) as u32, ow, oh).to_image();
+        let sub = image::imageops::crop_imm(&patch, ox - ex, oy - ey, ow, oh).to_image();
         eprintln!(
             "[inpaint::aot] empty quads -> returning sub [{},{},{},{}] from patch {}x{}",
             ox, oy, ow, oh, patch.width(), patch.height()

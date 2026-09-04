@@ -35,11 +35,10 @@ fn unesc(s: &str) -> String {
 
 fn attr(e: &BytesStart, key: &[u8]) -> Option<String> {
     for a in e.attributes().flatten() {
-        if a.key.as_ref() == key {
-            if let Ok(v) = a.unescape_value() {
+        if a.key.as_ref() == key
+            && let Ok(v) = a.unescape_value() {
                 return Some(v.into_owned());
             }
-        }
     }
     None
 }
@@ -804,7 +803,7 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                         if let Some(parent) = stack.last().map(|s| s.as_str()) {
                             if parent=="quad" {
                                 // check if this quad belongs to a patch
-                                let is_patch_quad = cur_inpaint_patch.is_some() && stack.len() >= 1 && stack.iter().any(|s| s=="patch");
+                                let is_patch_quad = cur_inpaint_patch.is_some() && !stack.is_empty() && stack.iter().any(|s| s=="patch");
                                 // More precise: if stack contains patch and quad parent is patch quad
                                 if is_patch_quad && cur_inpaint_patch.is_some() {
                                     // Heuristic: if we are inside inpaint_patches/patch/quad, push to patch quad points
@@ -863,31 +862,28 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                 }
             }
             Ok(Event::Text(e)) => {
-                if collecting.is_some() {
-                    if let Ok(txt) = e.unescape() {
+                if collecting.is_some()
+                    && let Ok(txt) = e.unescape() {
                         text_buf.push_str(&txt);
                     }
-                }
             }
             Ok(Event::CData(e)) => {
-                if collecting.is_some() {
-                    if let Ok(txt) = std::str::from_utf8(&e.into_inner()) {
+                if collecting.is_some()
+                    && let Ok(txt) = std::str::from_utf8(&e.into_inner()) {
                         text_buf.push_str(txt);
                     }
-                }
             }
             Ok(Event::End(e)) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 // handle closing for collecting tags
                 match name.as_str() {
                     "text" => {
-                        if let Some(entry) = cur_entry.as_mut() {
-                            if collecting.as_deref()==Some("text") {
+                        if let Some(entry) = cur_entry.as_mut()
+                            && collecting.as_deref()==Some("text") {
                                 entry.text = unesc(&text_buf);
                                 collecting = None;
                                 text_buf.clear();
                             }
-                        }
                     }
                     "translation" => {
                         if collecting.as_deref()==Some("translation") {
@@ -908,11 +904,10 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                         // If this quad belongs to an inpaint patch, assign to pending patch
                         let is_patch_quad = cur_inpaint_patch.is_some() && stack.len() >= 2 && stack[stack.len() - 2] == "patch";
                         if is_patch_quad {
-                            if cur_inpaint_quad_points.len() == 4 {
-                                if let Some(p) = cur_inpaint_patch.as_mut() {
+                            if cur_inpaint_quad_points.len() == 4
+                                && let Some(p) = cur_inpaint_patch.as_mut() {
                                     p.quad = Some(Quad{ points: [cur_inpaint_quad_points[0], cur_inpaint_quad_points[1], cur_inpaint_quad_points[2], cur_inpaint_quad_points[3]] });
                                 }
-                            }
                             cur_inpaint_quad_points.clear();
                         } else if let Some(entry) = cur_entry.as_mut() {
                             if cur_quad_points.len() == 4 {
@@ -996,11 +991,10 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                     _ => {}
                 }
                 // pop stack
-                if let Some(top) = stack.last() {
-                    if top == &name {
+                if let Some(top) = stack.last()
+                    && top == &name {
                         stack.pop();
                     }
-                }
                 if collecting.as_deref() == Some(name.as_str()) {
                     collecting = None;
                     text_buf.clear();
@@ -1041,7 +1035,7 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use easyscanlate_model::{EntrySource, ImageId, NewEntry, Quad};
+    use easyscanlate_model::{EntrySource, NewEntry, Quad};
 
     #[test]
     fn roundtrip_basic() {
@@ -1059,8 +1053,8 @@ mod tests {
         assert_eq!(back.ocr.entries().len(), 1);
         assert_eq!(back.ocr.get(entry).unwrap().text, "hello");
         assert_eq!(back.profiles.selected().translation_of(entry), Some("hi"));
-        assert_eq!(back.entry_style(entry).bold, true);
-        assert_eq!(back.view_quads().get(&entry).is_some(), true);
+        assert!(back.entry_style(entry).bold);
+        assert!(back.view_quads().get(&entry).is_some());
         assert_eq!(back.extras.note(entry), Some("note"));
     }
 

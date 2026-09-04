@@ -804,10 +804,10 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
         // surface it as a single model so translation still works before
         // discovery finishes. Otherwise keep whatever models the catalog/
         // fetched provider already had (empty until fetch completes).
-        if let Some(model) = connection.model.clone().filter(|m| !m.trim().is_empty()) {
-            if provider.models.is_empty() {
-                provider.models = vec![Model { id: model.clone(), name: model.clone(), free: false, family: None, release_date: None, last_updated: None }];
-            }
+        if let Some(model) = connection.model.clone().filter(|m| !m.trim().is_empty())
+            && provider.models.is_empty()
+        {
+            provider.models = vec![Model { id: model.clone(), name: model.clone(), free: false, family: None, release_date: None, last_updated: None }];
         }
         return provider;
     }
@@ -883,10 +883,7 @@ pub fn default_hidden_ids(listing: &ProviderListing) -> std::collections::BTreeS
             continue;
         }
         let family = info.family.clone().unwrap_or_else(|| id.clone());
-        let keep = match latest.get(&family) {
-            Some((_, current)) if !is_newer(info, current) => false,
-            _ => true,
-        };
+        let keep = !matches!(latest.get(&family), Some((_, current)) if !is_newer(info, current));
         if keep {
             latest.insert(family, (id, info));
         }
@@ -923,10 +920,7 @@ pub fn default_hidden_ids_for_models(models: &[Model]) -> std::collections::BTre
             continue;
         }
         let family = m.family.clone().unwrap_or_else(|| m.id.clone());
-        let keep = match latest.get(&family) {
-            Some(current) if !is_newer_model(m, current) => false,
-            _ => true,
-        };
+        let keep = !matches!(latest.get(&family), Some(current) if !is_newer_model(m, current));
         if keep {
             latest.insert(family, m);
         }
@@ -1060,11 +1054,11 @@ do not add, merge, drop or reorder any line. Respond only with the file.\n\n{}",
                     let retry_parsed = parse_translation_file(&retry_output);
                     let mut recovered = 0usize;
                     for miss in &missing {
-                        if let Some(t) = retry_parsed.get(&(miss.filename.clone(), miss.id)) {
-                            if !t.is_empty() {
-                                parsed.insert((miss.filename.clone(), miss.id), t.clone());
-                                recovered += 1;
-                            }
+                        if let Some(t) = retry_parsed.get(&(miss.filename.clone(), miss.id))
+                            && !t.is_empty()
+                        {
+                            parsed.insert((miss.filename.clone(), miss.id), t.clone());
+                            recovered += 1;
                         }
                     }
                     eprintln!(
@@ -1143,6 +1137,10 @@ translation, no explanation.\n\nText: {}",
 /// `RETRANSLATE_CONTEXT` neighbors as `<context>` inside a
 /// `<re-translation>` block. When `context_items` is empty it falls back
 /// to the simple isolated prompt.
+// Eight args mirror the retranslate call-site (text + target + provider +
+// model + key + context window + selection); grouping them would churn the
+// public API for no runtime gain.
+#[allow(clippy::too_many_arguments)]
 pub async fn translate_one_with_context(
     text: &str,
     target: &str,
@@ -1570,8 +1568,7 @@ pub fn build_retranslate_content(
             let min_idx = group[0].saturating_sub(context_size);
             let max_idx = (group[group.len() - 1] + context_size).min(file_results.len() - 1);
             let selected_set: HashSet<usize> = group.into_iter().collect();
-            for idx in min_idx..=max_idx {
-                let it = file_results[idx];
+            for (idx, it) in file_results.iter().enumerate().take(max_idx + 1).skip(min_idx) {
                 let text = it.text.replace(['\r', '\n'], " ");
                 if selected_set.contains(&idx) {
                     content.push_str(&format!(

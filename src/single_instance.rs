@@ -10,7 +10,7 @@
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::Path;
 use std::time::Duration;
 
 /// Stable localhost port for single-instance handshake.
@@ -191,6 +191,7 @@ pub fn parse_initial_mmtl(args: &[String]) -> Option<String> {
 
 /// Also collect *all* .mmtl args (for future multi-drop), but current callers
 /// only need the first.
+#[allow(dead_code)]
 pub fn parse_all_mmtl(args: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     for raw in args.iter().skip(1) {
@@ -203,11 +204,13 @@ pub fn parse_all_mmtl(args: &[String]) -> Vec<String> {
     out
 }
 
+#[allow(dead_code)]
 pub fn is_mmtl_path(p: &str) -> bool {
     p.trim().trim_matches('"').to_ascii_lowercase().ends_with(".mmtl")
 }
 
-pub fn is_mmtl_pathbuf(p: &PathBuf) -> bool {
+#[allow(dead_code)]
+pub fn is_mmtl_pathbuf(p: &Path) -> bool {
     p.extension()
         .and_then(|e| e.to_str())
         .map(|e| e.eq_ignore_ascii_case("mmtl"))

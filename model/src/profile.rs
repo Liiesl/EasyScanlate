@@ -206,6 +206,10 @@ impl Profiles {
         self.profiles.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.profiles.is_empty()
+    }
+
     /// Monotonic next id.
     pub fn next_id(&self) -> u64 {
         self.next_id

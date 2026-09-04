@@ -104,17 +104,17 @@ pub fn handle_close_confirmed(app: &mut App, raw: u64, save: bool) -> Task<Messa
                 }
                 out
             };
-            return Task::perform(
+            Task::perform(
                 async move {
                     tokio::task::spawn_blocking(move || {
                         easyscanlate_mmtl::save_mmtl(&project, &inpaint, &path).map(|_| path.to_string_lossy().to_string()).map_err(|e| e.to_string())
                     }).await.unwrap_or_else(|e| Err(format!("save task failed: {e}")))
                 },
                 move |res| Message::Tab(tid, TabMessage::MmtlSaved(res)),
-            );
+            )
         } else {
             let tid = id;
-            return Task::perform(
+            Task::perform(
                 async move {
                     let file = rfd::AsyncFileDialog::new()
                         .add_filter("Manga Translation (.mmtl)", &["mmtl"])
@@ -124,10 +124,10 @@ pub fn handle_close_confirmed(app: &mut App, raw: u64, save: bool) -> Task<Messa
                     file.map(|f| f.path().to_string_lossy().to_string())
                 },
                 move |picked| Message::Tab(tid, TabMessage::MmtlSavePicked(picked)),
-            );
+            )
         }
     } else {
-        return close_tab_immediate(app, id);
+        close_tab_immediate(app, id)
     }
 }
 

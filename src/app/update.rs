@@ -72,19 +72,14 @@ pub fn handle_poll(app: &mut App) -> Task<Message> {
                 }
             }
         }
-        if app.update_downloading {
-            if let Ok(rx) = rx_arc.lock() {
-                match rx.try_recv() {
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        app.update_downloading = false;
-                        app.update_ready = true;
-                        app.update_progress = 100;
-                        app.update_rx = None;
-                    }
-                    _ => {}
+        if app.update_downloading
+            && let Ok(rx) = rx_arc.lock()
+                && let Err(mpsc::TryRecvError::Disconnected) = rx.try_recv() {
+                    app.update_downloading = false;
+                    app.update_ready = true;
+                    app.update_progress = 100;
+                    app.update_rx = None;
                 }
-            }
-        }
     }
     Task::none()
 }

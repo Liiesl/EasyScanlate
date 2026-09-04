@@ -97,11 +97,10 @@ pub fn project_from_legacy(
         }
     }
     // also ensure active_profile exists
-    if let Some(active) = &meta.active_profile_name {
-        if project.profiles.find_by_name(active).is_none() {
+    if let Some(active) = &meta.active_profile_name
+        && project.profiles.find_by_name(active).is_none() {
             let _ = project.profiles.add(active.clone());
         }
-    }
 
     // Now append entries
     // We'll need to map each legacy entry to an OcrEntry and insert translations after
@@ -126,11 +125,10 @@ pub fn project_from_legacy(
             project.ocr.soft_delete(eid);
         }
         // custom_style -> EntryStyle : apply to project styles
-        if let Some(style_val) = &le.custom_style {
-            if let Some(style) = legacy_style_to_entry_style(style_val) {
+        if let Some(style_val) = &le.custom_style
+            && let Some(style) = legacy_style_to_entry_style(style_val) {
                 project.set_entry_style(eid, style);
             }
-        }
         // translations per entry
         if let Some(trans) = &le.translations {
             for (pname, ttext) in trans {
@@ -152,11 +150,10 @@ pub fn project_from_legacy(
     }
 
     // set active profile selection
-    if let Some(active) = &meta.active_profile_name {
-        if let Some(pid) = project.profiles.find_by_name(active) {
+    if let Some(active) = &meta.active_profile_name
+        && let Some(pid) = project.profiles.find_by_name(active) {
             project.profiles.select(pid);
         }
-    }
 
     // fix next_id to be max row_number +1 if larger than current
     let max_row = master.iter().filter_map(|e| row_to_u64(&e.row_number)).max().unwrap_or(0);
@@ -169,11 +166,11 @@ pub fn project_from_legacy(
         // reconstruct project with new ocr
         let images = project.images().to_vec();
         let next_image_id = project.next_image_id();
-        let profiles = std::mem::replace(&mut project.profiles, easyscanlate_model::Profiles::default());
+        let profiles = std::mem::take(&mut project.profiles);
         // but we have moved; instead build new project via from_raw
         let styles = project.styles().clone();
         let view_quads = project.view_quads().clone();
-        let extras = std::mem::replace(&mut project.extras, easyscanlate_model::Extras::default());
+        let extras = std::mem::take(&mut project.extras);
         let new_proj = Project::from_raw(images, next_image_id, ocr, profiles, styles, view_quads, extras);
         return Ok(new_proj);
     }
@@ -208,24 +205,21 @@ fn legacy_style_to_entry_style(val: &serde_json::Value) -> Option<easyscanlate_m
         style.font_size = fs as f32;
         changed = true;
     }
-    if let Some(bg) = obj.get("bg_color").and_then(|v| v.as_str()) {
-        if let Some(rgba) = parse_hex_argb(bg) {
+    if let Some(bg) = obj.get("bg_color").and_then(|v| v.as_str())
+        && let Some(rgba) = parse_hex_argb(bg) {
             style.bg_color = rgba;
             changed = true;
         }
-    }
-    if let Some(tc) = obj.get("text_color").and_then(|v| v.as_str()) {
-        if let Some(rgba) = parse_hex_argb(tc) {
+    if let Some(tc) = obj.get("text_color").and_then(|v| v.as_str())
+        && let Some(rgba) = parse_hex_argb(tc) {
             style.text_color = rgba;
             changed = true;
         }
-    }
-    if let Some(bc) = obj.get("border_color").and_then(|v| v.as_str()) {
-        if let Some(rgba) = parse_hex_argb(bc) {
+    if let Some(bc) = obj.get("border_color").and_then(|v| v.as_str())
+        && let Some(rgba) = parse_hex_argb(bc) {
             style.stroke_color = rgba;
             changed = true;
         }
-    }
     if let Some(bw) = obj.get("border_width").and_then(|v| v.as_f64()) {
         style.stroke_width = bw as f32;
         changed = true;
@@ -301,11 +295,10 @@ fn entry_style_to_legacy_custom(val: &easyscanlate_model::EntryStyle) -> Option<
     if val.bg_radius != def.bg_radius {
         map.insert("corner_radius".into(), serde_json::Value::Number(serde_json::Number::from_f64(val.bg_radius as f64).unwrap()));
     }
-    if val.font_family != def.font_family {
-        if let Some(fam) = &val.font_family {
+    if val.font_family != def.font_family
+        && let Some(fam) = &val.font_family {
             map.insert("font_family".into(), serde_json::Value::String(fam.clone()));
         }
-    }
     if val.bold != def.bold {
         map.insert("font_bold".into(), serde_json::Value::Bool(val.bold));
     }

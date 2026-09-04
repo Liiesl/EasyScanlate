@@ -80,6 +80,8 @@ fn header_row<'a, S: UiState + ?Sized>(state: &'a S, total: usize) -> Element<'a
 /// One layer row: eye, 28px thumbnail, title/subtitle and, when selected,
 /// Delete / Repaint actions. The whole row is a click target that toggles
 /// inpaint selection (like the results list highlights its overlay).
+// 8 row fields; a struct would mirror the args 1:1 with no benefit.
+#[allow(clippy::too_many_arguments)]
 fn layer_row<'a>(
     image_name: &'a str,
     image_index: usize,

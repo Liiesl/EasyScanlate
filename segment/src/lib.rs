@@ -188,7 +188,7 @@ impl Engine {
             .map_err(|e| format!("Segment engine lock poisoned: {e}"))?;
         let (lb, r, dx, dy) = letterbox(canvas, IMG_SIZE);
         let input = compose_input(&lb);
-        let outputs = run_session(&mut *session, input)?;
+        let outputs = run_session(&mut session, input)?;
         let dets = decode_koharu(&outputs, r, dx, dy, canvas.width(), canvas.height());
         Ok(dets)
     }

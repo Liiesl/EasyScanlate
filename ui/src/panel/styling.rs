@@ -378,7 +378,7 @@ fn fill_section<'a, S: UiState + ?Sized>(
                 ]
                 .spacing(scale::s(8.0)),
                 pick_list(TextGradientDir::LABELS, Some(style.gradient_dir.label()), |l| {
-                    UiEvent::StyleGradientDir(TextGradientDir::from_label(&l))
+                    UiEvent::StyleGradientDir(TextGradientDir::from_label(l))
                 })
                 .text_size(scale::s(12.0))
                 .width(FillLength),
@@ -478,7 +478,7 @@ fn checker_handle() -> &'static Handle {
         let mut pixels = Vec::with_capacity((side * side * 4) as usize);
         for y in 0..side {
             for x in 0..side {
-                let color = if (x / tile + y / tile) % 2 == 0 {
+                let color = if (x / tile + y / tile).is_multiple_of(2) {
                     CHECKER_LIGHT
                 } else {
                     CHECKER_DARK
@@ -629,7 +629,7 @@ fn presets_grid<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
         })
         .collect();
     tiles.push(add_square(Some(UiEvent::StylePresetAdd)));
-    let mut columns: Vec<Element<'a, UiEvent>> = Vec::with_capacity((tiles.len() + 1) / 2);
+    let mut columns: Vec<Element<'a, UiEvent>> = Vec::with_capacity(tiles.len().div_ceil(2));
     while !tiles.is_empty() {
         let top = tiles.remove(0);
         let bottom = if tiles.is_empty() {

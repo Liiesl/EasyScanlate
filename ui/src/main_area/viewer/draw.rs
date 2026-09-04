@@ -305,6 +305,8 @@ where
     }
 }
 
+// 8 args mirror the overlay draw state; all call sites pass them through together.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_selection_decorations<'a, F>(
     frame: &mut F,
     state: &TileViewState,
