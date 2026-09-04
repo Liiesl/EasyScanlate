@@ -2,11 +2,12 @@
 //!
 //! Real blur of the iced widgets behind the panel, without forking `iced`:
 //! capture a window screenshot *before* the modal opens (clean base frame),
-//! downscale to 0.25x on the CPU (the output is blurred anyway, so high
-//! frequencies are invisible — the downscale itself is the first blur stage
-//! and makes the gaussian ~16x cheaper), gaussian-blur at low res, then crop
-//! to the modal window rect. Only the cropped blur is shown, directly behind
-//! the translucent panel; everything outside stays live base + plain dim.
+//! nearest-decimate to 0.125x on the CPU (the output is blurred anyway, so
+//! high frequencies are invisible — the downscale itself is the first blur
+//! stage and makes the blur ~64x cheaper), fast multi-pass box-blur at low
+//! res (≈ gaussian), then row-slice crop to the modal window rect. Only the
+//! cropped blur is shown, directly behind the translucent panel; everything
+//! outside stays live base + plain dim.
 //!
 //! Timing matters: the screenshot re-renders the *current* view, so it must
 //! be dispatched while the modal is still closed (pending flag) and the
@@ -19,10 +20,13 @@ use iced::window::Screenshot;
 
 use super::{App, Message};
 
-/// Downscale factor for the snapshot: 0.25x in each axis (16x fewer pixels).
-pub const DOWNSCALE: f32 = 0.25;
-/// Gaussian sigma applied *at low res*; ~7px here ≈ ~28px at native scale.
-pub const BLUR_SIGMA: f32 = 7.0;
+/// Downscale factor for the snapshot: 0.125x in each axis (64x fewer pixels).
+pub const DOWNSCALE: f32 = 0.125;
+/// Blur sigma applied *at low res*; ~3.5px here ≈ ~28px at native scale
+/// (same look as the old 7.0 @ 0.25x, at a quarter of the pixels).
+pub const BLUR_SIGMA: f32 = 3.5;
+/// Separable box-blur passes; 3 passes closely approximate a gaussian.
+const BLUR_PASSES: u32 = 3;
 /// Manage Models modal design size (mirrors `ui/src/manage_models.rs`, which
 /// renders `scale::s(MODAL_WIDTH) × scale::s(MODAL_HEIGHT)`).
 const MANAGE_W: f32 = 540.0;
@@ -67,11 +71,14 @@ impl PendingLoad {
 /// Fullscreen low-res blurred frame plus the geometry needed to crop the
 /// panel rect out of it later (re-crop is microseconds, so Manage Models can
 /// reuse Settings' capture with its own rect).
+///
+/// `rgba` is refcounted so `backdrop_frame.clone()` in `begin_load`/`recrop`
+/// is a pointer bump, not a multi-MB copy.
 #[derive(Debug, Clone)]
 pub struct CapturedBackdrop {
     width: u32,
     height: u32,
-    rgba: Vec<u8>,
+    rgba: bytes::Bytes,
     scale_factor: f32,
     win_w: f32,
     win_h: f32,
@@ -203,8 +210,14 @@ pub fn recrop(app: &mut App, kind: BackdropKind) {
     }
 }
 
-/// Downscale + gaussian-blur the whole screenshot at low res.
+/// Downscale + fast box-blur the whole screenshot at low res.
 /// Returns `None` on empty/degenerate input so callers open flat.
+///
+/// Pipeline (all single-pass, no full-size copies):
+/// 1. nearest-decimate straight from the screenshot bytes (no `RgbaImage`
+///    copy of the full frame, no interpolation — invisible under blur),
+/// 2. `BLUR_PASSES` separable box-blur passes (≈ gaussian, O(1) per px wrt
+///    radius via sliding window).
 fn blur_fullscreen(shot: &Screenshot, titlebar_h: f32) -> Option<CapturedBackdrop> {
     let w = shot.size.width;
     let h = shot.size.height;
@@ -212,21 +225,132 @@ fn blur_fullscreen(shot: &Screenshot, titlebar_h: f32) -> Option<CapturedBackdro
     if w == 0 || h == 0 || sf <= 0.0 || shot.rgba.is_empty() {
         return None;
     }
-    let img = image::RgbaImage::from_raw(w, h, shot.rgba.to_vec())?;
+    let src: &[u8] = &shot.rgba;
+    if src.len() < (w as usize) * (h as usize) * 4 {
+        return None;
+    }
     let dw = ((w as f32 * DOWNSCALE).round() as u32).max(1);
     let dh = ((h as f32 * DOWNSCALE).round() as u32).max(1);
-    let small = image::imageops::resize(&img, dw, dh, image::imageops::FilterType::Triangle);
-    let blurred = image::imageops::blur(&small, BLUR_SIGMA);
-    let (bw, bh) = blurred.dimensions();
+    let mut small = downscale_nearest_rgba(src, w, h, dw, dh);
+    let radius = box_radius_for_sigma(BLUR_SIGMA, BLUR_PASSES);
+    if radius > 0 {
+        box_blur_rgba_inplace(&mut small, dw, dh, radius, BLUR_PASSES);
+    }
     Some(CapturedBackdrop {
-        width: bw,
-        height: bh,
-        rgba: blurred.into_raw(),
+        width: dw,
+        height: dh,
+        rgba: bytes::Bytes::from(small),
         scale_factor: sf,
         win_w: w as f32 / sf,
         win_h: h as f32 / sf,
         titlebar_h,
     })
+}
+
+/// Nearest-decimate `src` (`sw`×`sh` RGBA) to `dw`×`dh` by top-left sampling.
+/// One pass over the destination; no interpolation.
+fn downscale_nearest_rgba(src: &[u8], sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u8> {
+    let (sw64, sh64, dw64, dh64) = (sw as u64, sh as u64, dw as u64, dh as u64);
+    let mut out = vec![0u8; (dw as usize) * (dh as usize) * 4];
+    let src_stride = sw as usize * 4;
+    for dy in 0..dh as usize {
+        let sy = (((dy as u64) * sh64) / dh64) as usize;
+        let src_row = sy * src_stride;
+        let dst_row = dy * dw as usize * 4;
+        for dx in 0..dw as usize {
+            let sx = (((dx as u64) * sw64) / dw64) as usize;
+            let s = src_row + sx * 4;
+            let d = dst_row + dx * 4;
+            out[d] = src[s];
+            out[d + 1] = src[s + 1];
+            out[d + 2] = src[s + 2];
+            out[d + 3] = src[s + 3];
+        }
+    }
+    out
+}
+
+/// Box-blur radius per pass approximating `sigma` with `passes` passes.
+/// Variance of `passes` box passes of width `w` ≈ `passes*(w²-1)/12`.
+fn box_radius_for_sigma(sigma: f32, passes: u32) -> u32 {
+    if sigma <= 0.0 || passes == 0 {
+        return 0;
+    }
+    let n = passes as f32;
+    let width = ((12.0 * sigma * sigma) / n + 1.0).sqrt().round().max(3.0) as u32;
+    // Width is odd by construction below; radius = (width-1)/2, clamped.
+    let radius = width.saturating_sub(1) / 2;
+    radius.clamp(1, 32)
+}
+
+/// In-place multi-pass separable box blur on an RGBA buffer.
+/// Each pass = horizontal slide into scratch + vertical slide back.
+fn box_blur_rgba_inplace(buf: &mut Vec<u8>, w: u32, h: u32, radius: u32, passes: u32) {
+    let (w, h) = (w as usize, h as usize);
+    if buf.len() < w * h * 4 || w == 0 || h == 0 || radius == 0 || passes == 0 {
+        return;
+    }
+    let r = radius as usize;
+    let win = 2 * r + 1;
+    let inv = 1.0 / win as f32;
+    let mut scratch = vec![0u8; w * h * 4];
+    for _ in 0..passes {
+        // Horizontal: buf -> scratch.
+        for y in 0..h {
+            let row = y * w * 4;
+            let mut acc = [0u32; 4];
+            for k in 0..win {
+                let xi = k.saturating_sub(r).min(w - 1);
+                let o = row + xi * 4;
+                acc[0] += buf[o] as u32;
+                acc[1] += buf[o + 1] as u32;
+                acc[2] += buf[o + 2] as u32;
+                acc[3] += buf[o + 3] as u32;
+            }
+            for x in 0..w {
+                let d = row + x * 4;
+                scratch[d] = (acc[0] as f32 * inv).round() as u8;
+                scratch[d + 1] = (acc[1] as f32 * inv).round() as u8;
+                scratch[d + 2] = (acc[2] as f32 * inv).round() as u8;
+                scratch[d + 3] = (acc[3] as f32 * inv).round() as u8;
+                let x_out = x.saturating_sub(r).min(w - 1);
+                let x_in = (x + r + 1).min(w - 1);
+                let o = row + x_out * 4;
+                let i = row + x_in * 4;
+                acc[0] += buf[i] as u32 - buf[o] as u32;
+                acc[1] += buf[i + 1] as u32 - buf[o + 1] as u32;
+                acc[2] += buf[i + 2] as u32 - buf[o + 2] as u32;
+                acc[3] += buf[i + 3] as u32 - buf[o + 3] as u32;
+            }
+        }
+        // Vertical: scratch -> buf.
+        for x in 0..w {
+            let mut acc = [0u32; 4];
+            for k in 0..win {
+                let yi = k.saturating_sub(r).min(h - 1);
+                let o = (yi * w + x) * 4;
+                acc[0] += scratch[o] as u32;
+                acc[1] += scratch[o + 1] as u32;
+                acc[2] += scratch[o + 2] as u32;
+                acc[3] += scratch[o + 3] as u32;
+            }
+            for y in 0..h {
+                let d = (y * w + x) * 4;
+                buf[d] = (acc[0] as f32 * inv).round() as u8;
+                buf[d + 1] = (acc[1] as f32 * inv).round() as u8;
+                buf[d + 2] = (acc[2] as f32 * inv).round() as u8;
+                buf[d + 3] = (acc[3] as f32 * inv).round() as u8;
+                let y_out = y.saturating_sub(r).min(h - 1);
+                let y_in = (y + r + 1).min(h - 1);
+                let o = (y_out * w + x) * 4;
+                let i = (y_in * w + x) * 4;
+                acc[0] += scratch[i] as u32 - scratch[o] as u32;
+                acc[1] += scratch[i + 1] as u32 - scratch[o + 1] as u32;
+                acc[2] += scratch[i + 2] as u32 - scratch[o + 2] as u32;
+                acc[3] += scratch[i + 3] as u32 - scratch[o + 3] as u32;
+            }
+        }
+    }
 }
 
 /// Panel rect in low-res pixels: the modal window occupies the content area
@@ -287,14 +411,29 @@ fn centered_fixed(cx: f32, cy: f32, cw: f32, ch: f32, w: f32, h: f32) -> (f32, f
 }
 
 /// Crop the panel rect out of the blurred fullscreen frame for display.
+///
+/// Row-slice copy only (no full-frame clone, no intermediate image).
 pub fn crop_for(frame: &CapturedBackdrop, kind: BackdropKind) -> Option<ImageHandle> {
     let (x, y, w, h) = panel_rect_lowres(frame, kind)?;
-    let img = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba.clone())?;
-    let cropped = image::imageops::crop_imm(&img, x, y, w, h).to_image();
-    let (bw, bh) = cropped.dimensions();
+    let (x, y, w, h) = (x as usize, y as usize, w as usize, h as usize);
+    let fw = frame.width as usize;
+    let fh = frame.height as usize;
+    if x + w > fw || y + h > fh || w == 0 || h == 0 {
+        return None;
+    }
+    let src: &[u8] = &frame.rgba;
+    if src.len() < fw * fh * 4 {
+        return None;
+    }
+    let w_bytes = w * 4;
+    let mut dst = Vec::with_capacity(w * h * 4);
+    for row in 0..h {
+        let start = ((y + row) * fw + x) * 4;
+        dst.extend_from_slice(&src[start..start + w_bytes]);
+    }
     Some(ImageHandle::from_rgba(
-        bw,
-        bh,
-        bytes::Bytes::from(cropped.into_raw()),
+        w as u32,
+        h as u32,
+        bytes::Bytes::from(dst),
     ))
 }

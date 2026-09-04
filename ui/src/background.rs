@@ -311,20 +311,51 @@ pub fn generate_aurora_palette(
 use std::sync::{Mutex, OnceLock};
 use iced::advanced::image::{Handle as ImageHandle, Image as CoreImage};
 
-/// Cached aurora backdrop: config + pixel size + rendered handle.
+/// Longest side of the tiny aurora buffer, in pixels.
+///
+/// The aurora is smooth low-frequency gradients, so rendering tiny once per
+/// config and letting the GPU stretch it on resize is visually identical
+/// while turning resize into a cache hit (or a <2ms tiny recompute on aspect
+/// change) instead of a full-res per-pixel recompute.
+const AURORA_TINY_LONG: u32 = 320;
+
+/// Maps a window size to its tiny render size, preserving aspect ratio.
+/// Windows at or below the tiny size render natively (nothing to gain).
+fn aurora_tiny_size(width: u32, height: u32) -> (u32, u32) {
+    let w = width.max(1);
+    let h = height.max(1);
+    let m = w.max(h);
+    if m <= AURORA_TINY_LONG {
+        return (w, h);
+    }
+    if w >= h {
+        let th = ((h as f32 * AURORA_TINY_LONG as f32) / m as f32).round().max(1.0) as u32;
+        (AURORA_TINY_LONG, th)
+    } else {
+        let tw = ((w as f32 * AURORA_TINY_LONG as f32) / m as f32).round().max(1.0) as u32;
+        (tw, AURORA_TINY_LONG)
+    }
+}
+
+/// Cached aurora backdrop: config + tiny size + rendered handle.
+/// The key is the *tiny* size, not the window size, so window resizes that
+/// map to the same tiny buffer (same aspect at/above 320px, or any size
+/// below it) are O(1) cache hits; aspect changes recompute only the tiny
+/// buffer (~58k px max) in ~1-2ms.
 type AuroraCacheEntry = (AuroraConfig, (u32, u32), ImageHandle);
 
 static AURORA_CACHE: OnceLock<Mutex<Option<AuroraCacheEntry>>> = OnceLock::new();
 
 fn cached_aurora_handle(config: &AuroraConfig, width: u32, height: u32) -> ImageHandle {
+    let (tw, th) = aurora_tiny_size(width, height);
     let slot = AURORA_CACHE.get_or_init(|| Mutex::new(None));
     let mut guard = slot.lock().unwrap();
     if let Some((cached_cfg, cached_size, handle)) = guard.as_ref()
-        && cached_cfg == config && *cached_size == (width, height) {
+        && cached_cfg == config && *cached_size == (tw, th) {
             return handle.clone();
         }
-    let handle = generate_aurora_handle(width, height, config);
-    *guard = Some((config.clone(), (width, height), handle.clone()));
+    let handle = generate_aurora_handle(tw, th, config);
+    *guard = Some((config.clone(), (tw, th), handle.clone()));
     handle
 }
 
@@ -348,18 +379,25 @@ fn generate_aurora_rgba(width: u32, height: u32, config: &AuroraConfig) -> Vec<u
         let ns = (sat as f32 * 0.1).round() as u8;
         hsv_to_color(hue, ns, 250)
     };
-    let [br, bg, bb, _] = base.into_rgba8();
-    let mut out = Vec::with_capacity((width * height * 4) as usize);
+    let [br8, bg8, bb8, _] = base.into_rgba8();
+    let br = br8 as f32;
+    let bg = bg8 as f32;
+    let bb = bb8 as f32;
+    let total = (width as usize) * (height as usize);
+    if total == 0 {
+        return Vec::new();
+    }
 
     if config.blob_count <= 1 {
         let alpha = if config.is_dark { 100.0 / 255.0 } else { 50.0 / 255.0 };
         let [sr, sg, sb, _] = config.color.into_rgba8();
         // Blend flat overlay over base per pixel (same for all pixels)
-        let r = (sr as f32 * alpha + br as f32 * (1.0 - alpha)).round().clamp(0.0, 255.0) as u8;
-        let g = (sg as f32 * alpha + bg as f32 * (1.0 - alpha)).round().clamp(0.0, 255.0) as u8;
-        let b = (sb as f32 * alpha + bb as f32 * (1.0 - alpha)).round().clamp(0.0, 255.0) as u8;
-        for _ in 0..(width * height) {
-            out.extend_from_slice(&[r, g, b, 255]);
+        let r = (sr as f32 * alpha + br * (1.0 - alpha)).round().clamp(0.0, 255.0) as u8;
+        let g = (sg as f32 * alpha + bg * (1.0 - alpha)).round().clamp(0.0, 255.0) as u8;
+        let b = (sb as f32 * alpha + bb * (1.0 - alpha)).round().clamp(0.0, 255.0) as u8;
+        let mut out = vec![0u8; total * 4];
+        for px in out.chunks_exact_mut(4) {
+            px.copy_from_slice(&[r, g, b, 255]);
         }
         return out;
     }
@@ -370,49 +408,62 @@ fn generate_aurora_rgba(width: u32, height: u32, config: &AuroraConfig) -> Vec<u
         config.is_dark,
         config.schema,
     );
-    let radius = (width.max(height) as f32) * 0.85;
-    let radius = radius.max(1.0);
-    let start_alpha_dark = 180.0;
-    let start_alpha_light = 120.0;
-    let start_a = if config.is_dark { start_alpha_dark } else { start_alpha_light };
+    let radius = ((width.max(height) as f32) * 0.85).max(1.0);
+    let r2 = radius * radius;
+    let inv_r2 = 1.0 / r2;
+    let start_a = if config.is_dark { 180.0 } else { 120.0 };
+    let start_a_norm = start_a / 255.0;
 
-    // Precompute blob centers and colors as u8
-    let blob_data: Vec<(f32, f32, u8, u8, u8)> = blobs
+    // Precompute blob centers and colors as f32 (avoids per-pixel casts).
+    let blob_data: Vec<(f32, f32, f32, f32, f32)> = blobs
         .iter()
         .map(|b| {
             let [r, g, b_, _] = b.color.into_rgba8();
-            (b.x_pct * width as f32, b.y_pct * height as f32, r, g, b_)
+            (
+                b.x_pct * width as f32,
+                b.y_pct * height as f32,
+                r as f32,
+                g as f32,
+                b_ as f32,
+            )
         })
         .collect();
 
+    // Squared-distance falloff: alpha = start*(1-d2/r2)^2. Same value at the
+    // center and edge as the old linear-in-dist falloff, ~12% brighter
+    // mid-radius, smoother (zero derivative) at the edge — and no sqrt.
+    let mut out = vec![0u8; total * 4];
     for y in 0..height {
+        let yf = y as f32 + 0.5;
+        let row_base = (y as usize) * (width as usize) * 4;
         for x in 0..width {
-            let mut r = br as f32;
-            let mut g = bg as f32;
-            let mut b = bb as f32;
+            let mut r = br;
+            let mut g = bg;
+            let mut b = bb;
             let xf = x as f32 + 0.5;
-            let yf = y as f32 + 0.5;
             for (cx, cy, pr, pg, pb) in &blob_data {
                 let dx = xf - *cx;
                 let dy = yf - *cy;
-                let dist = (dx * dx + dy * dy).sqrt();
-                let t = dist / radius;
-                if t >= 1.0 {
+                let d2 = dx * dx + dy * dy;
+                if d2 >= r2 {
                     continue;
                 }
-                let alpha = start_a * (1.0 - t) / 255.0;
+                let f = 1.0 - d2 * inv_r2;
+                let alpha = start_a_norm * f * f;
                 if alpha <= 0.003 {
                     continue;
                 }
                 // source-over blend
-                r = *pr as f32 * alpha + r * (1.0 - alpha);
-                g = *pg as f32 * alpha + g * (1.0 - alpha);
-                b = *pb as f32 * alpha + b * (1.0 - alpha);
+                let inv = 1.0 - alpha;
+                r = *pr * alpha + r * inv;
+                g = *pg * alpha + g * inv;
+                b = *pb * alpha + b * inv;
             }
-            out.push(r.round().clamp(0.0, 255.0) as u8);
-            out.push(g.round().clamp(0.0, 255.0) as u8);
-            out.push(b.round().clamp(0.0, 255.0) as u8);
-            out.push(255);
+            let o = row_base + (x as usize) * 4;
+            out[o] = r.round().clamp(0.0, 255.0) as u8;
+            out[o + 1] = g.round().clamp(0.0, 255.0) as u8;
+            out[o + 2] = b.round().clamp(0.0, 255.0) as u8;
+            out[o + 3] = 255;
         }
     }
     out
