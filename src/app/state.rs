@@ -433,6 +433,10 @@ impl UiState for ActiveTab<'_> {
         &self.app.manage_models_search
     }
 
+    fn backdrop_blur(&self) -> Option<iced::widget::image::Handle> {
+        self.app.backdrop_blur.clone()
+    }
+
     fn all_model_groups(&self) -> Vec<(String, String, Vec<(String, String)>)> {
         self.app.tx.all_model_groups()
     }
@@ -672,6 +676,7 @@ impl UiState for App {
     fn settings_search(&self) -> &str { &self.settings_search }
     fn manage_models_open(&self) -> bool { self.manage_models_open }
     fn manage_models_search(&self) -> &str { &self.manage_models_search }
+    fn backdrop_blur(&self) -> Option<iced::widget::image::Handle> { self.backdrop_blur.clone() }
     fn all_model_groups(&self) -> Vec<(String, String, Vec<(String, String)>)> { self.tx.all_model_groups() }
     fn translation_panel_mode(&self) -> TranslationPanelMode { self.tabs[self.active].translation_panel_mode }
     fn base_profile(&self) -> Option<easyscanlate_model::ProfileId> {

@@ -1,16 +1,31 @@
 use iced::Task;
 use super::{App, Message};
+use super::backdrop::{self, BackdropKind};
 use super::translation;
 
 pub fn handle_settings_open(app: &mut App) -> Task<Message> {
-    app.settings_open = true;
-    Task::none()
+    // Capture-then-open: screenshot the clean base first so the blurred
+    // backdrop never contains the modal itself. Reuse a cached handle for
+    // instant reopen; without a window (tests) open flat immediately.
+    if app.backdrop_frame.is_some() {
+        backdrop::recrop(app, BackdropKind::Settings);
+        app.settings_open = true;
+        return Task::none();
+    }
+    if app.frame.primary_window().is_none() {
+        app.settings_open = true;
+        return Task::none();
+    }
+    if app.backdrop_pending.is_some() {
+        return Task::none();
+    }
+    app.backdrop_pending = Some(BackdropKind::Settings);
+    backdrop::capture_task(app, BackdropKind::Settings)
 }
 
 pub fn handle_settings_open_tab(app: &mut App, tab: easyscanlate_ui::event::SettingsTab) -> Task<Message> {
-    app.settings_open = true;
     app.settings_tab = tab;
-    Task::none()
+    handle_settings_open(app)
 }
 
 pub fn handle_settings_close(app: &mut App) -> Task<Message> {
@@ -18,6 +33,10 @@ pub fn handle_settings_close(app: &mut App) -> Task<Message> {
     app.manage_models_open = false;
     app.connect_modal = None;
     app.settings_search.clear();
+    // Drop the frozen frame so the next open re-captures fresh content.
+    app.backdrop_blur = None;
+    app.backdrop_frame = None;
+    app.backdrop_pending = None;
     Task::none()
 }
 
@@ -94,14 +113,31 @@ pub fn handle_open_url(app: &mut App, url: String) -> Task<Message> {
 }
 
 pub fn handle_manage_models_open(app: &mut App) -> Task<Message> {
-    app.manage_models_open = true;
-    app.manage_models_search.clear();
-    Task::none()
+    // Re-crop the existing capture when present (clean base without modals).
+    // Otherwise capture first, then open on BackdropReady.
+    if app.backdrop_frame.is_some() {
+        backdrop::recrop(app, BackdropKind::ManageModels);
+        app.manage_models_open = true;
+        app.manage_models_search.clear();
+        return Task::none();
+    }
+    if app.frame.primary_window().is_none() {
+        app.manage_models_open = true;
+        app.manage_models_search.clear();
+        return Task::none();
+    }
+    if app.backdrop_pending.is_some() {
+        return Task::none();
+    }
+    app.backdrop_pending = Some(BackdropKind::ManageModels);
+    backdrop::capture_task(app, BackdropKind::ManageModels)
 }
 
 pub fn handle_manage_models_close(app: &mut App) -> Task<Message> {
     app.manage_models_open = false;
     app.manage_models_search.clear();
+    // Keep the backdrop: Settings is still open underneath.
+    app.backdrop_pending = None;
     Task::none()
 }
 

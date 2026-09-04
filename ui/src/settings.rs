@@ -7,8 +7,8 @@
 
 #[allow(unused_imports)]
 use iced::widget::{
-    button, center, checkbox, column, container, mouse_area, opaque, progress_bar, row, rule,
-    scrollable, space, stack, text, toggler,
+    button, center, checkbox, column, container, image, mouse_area, opaque, progress_bar, row,
+    rule, scrollable, space, stack, text, toggler,
 };
 #[cfg(feature = "inpaint")]
 use iced::widget::pick_list;
@@ -1772,13 +1772,33 @@ pub fn view<'a, S: UiState + ?Sized>(
             ..container::Style::default()
         });
 
-    // 80% centered modal: 1-8-1 split both axes => 8/10 = 80%
+    // 80% centered modal: 1-8-1 split both axes => 8/10 = 80%.
+    // The blurred snapshot is cropped to this window rect at capture time and
+    // rendered only behind the panel (same cell, stacked under it); the dim
+    // outside the panel stays plain dim over the live base.
+    let blur_cover: Element<'a, UiEvent> = match state.backdrop_blur() {
+        Some(handle) => container(
+            image(handle)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .content_fit(iced::ContentFit::Fill)
+                .border_radius(scale::s(8.0)),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into(),
+        // No capture yet: the panel cell is just the window on its own.
+        None => space::horizontal()
+            .width(Length::Fixed(0.0))
+            .height(Length::Fixed(0.0))
+            .into(),
+    };
     let dimmed = container(
         row![
             space::horizontal().width(Length::FillPortion(1)),
             column![
                 space::vertical().height(Length::FillPortion(1)),
-                container(opaque(window))
+                container(opaque(stack![blur_cover, window]))
                     .width(Length::Fill)
                     .height(Length::FillPortion(8)),
                 space::vertical().height(Length::FillPortion(1)),

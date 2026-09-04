@@ -31,6 +31,7 @@ use easyscanlate_ui::{
 pub mod layout;
 pub mod chrome;
 pub mod boot;
+pub mod backdrop;
 pub mod state;
 pub mod edit;
 pub mod ocr;
@@ -202,6 +203,9 @@ pub enum Message {
     // ——— Onboarding (first-run, blocking) ———
     OnboardingModelDone { id: String, result: Result<(), String> },
     OnboardingModelPoll,
+    // ——— Blurred backdrop (Settings / Manage Models) ———
+    BackdropCaptured(Box<iced::window::Screenshot>, backdrop::BackdropKind),
+    BackdropReady(Option<backdrop::CapturedBackdrop>, backdrop::BackdropKind),
 }
 
 impl From<UiEvent> for Message {
@@ -230,6 +234,11 @@ pub struct App {
     pub(crate) settings_search: String,
     pub(crate) manage_models_open: bool,
     pub(crate) manage_models_search: String,
+    pub(crate) backdrop_blur: Option<iced::widget::image::Handle>,
+    pub(crate) backdrop_frame: Option<backdrop::CapturedBackdrop>,
+    pub(crate) backdrop_pending: Option<backdrop::BackdropKind>,
+    pub(crate) loading_blur: Option<iced::widget::image::Handle>,
+    pub(crate) pending_load: Option<backdrop::PendingLoad>,
     pub(crate) recent_projects: Vec<easyscanlate_settings::RecentProject>,
     pub(crate) new_project: Option<new_project::NewProjectState>,
     pub frame: NativeFrame,
@@ -299,6 +308,11 @@ impl App {
             settings_search: String::new(),
             manage_models_open: false,
             manage_models_search: String::new(),
+            backdrop_blur: None,
+            backdrop_frame: None,
+            backdrop_pending: None,
+            loading_blur: None,
+            pending_load: None,
             recent_projects: easyscanlate_settings::get(|s| s.recent_projects.clone()),
             new_project: None,
             frame,
@@ -373,6 +387,8 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
                             return mmtl::push_project_tab(app, tab_id, project, images, display, temp_dir);
                         }
                         Err(e) => {
+                            // Load resolved (failed): the reusable capture is stale.
+                            app.backdrop_frame = None;
                             if let Some(idx) = app.tabs.iter().position(|t| t.id == tab_id) {
                                 let tab = &mut app.tabs[idx];
                                 if tab.loading {
@@ -396,6 +412,7 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
                                 return mmtl::push_project_tab(app, tab_id, project, images, display, temp_dir);
                             }
                             Err(e) => {
+                                app.backdrop_frame = None;
                                 if let Some(idx) = app.tabs.iter().position(|t| t.id == tab_id) {
                                     let tab = &mut app.tabs[idx];
                                     if tab.loading {
@@ -413,6 +430,7 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
                             }
                         },
                         Err(e) => {
+                            app.backdrop_frame = None;
                             if let Some(idx) = app.tabs.iter().position(|t| t.id == tab_id) {
                                 let tab = &mut app.tabs[idx];
                                 if tab.loading {
@@ -544,7 +562,11 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
         TabMessage::TranslateFinished(jobs, result) => translation::handle_translate_finished(app, tab_id, jobs, result),
         TabMessage::RetranslateFinished((index, entry_id), result) => translation::handle_retranslate_finished(app, tab_id, index, entry_id, result),
         TabMessage::MmtlSavePicked(picked) => mmtl::handle_save_picked(app, tab_id, picked),
-        TabMessage::MmtlOpenPicked(picked) => mmtl::handle_open_picked(app, tab_id, picked),
+        TabMessage::MmtlOpenPicked(picked) => match picked {
+            // Cancelled picker: status only, never a load — no capture.
+            None => mmtl::handle_open_picked(app, tab_id, None),
+            Some(path) => backdrop::begin_load(app, backdrop::PendingLoad::OpenPicked { tab_id, path }),
+        },
         TabMessage::MmtlSaved(result) => mmtl::handle_saved(app, tab_id, result),
         TabMessage::NewProjectSourcePicked(result) => new_project::handle_source_picked(app, tab_id, result),
         TabMessage::NewProjectFolderPicked(result) => new_project::handle_folder_picked(app, tab_id, result),
@@ -600,7 +622,9 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             | Message::FetchModels
             | Message::ModelsFetched(_)
             | Message::Tab(_, _)
-            | Message::ExternalOpen(_) => true,
+            | Message::ExternalOpen(_)
+            | Message::BackdropCaptured(_, _)
+            | Message::BackdropReady(_, _) => true,
             _ => false,
         };
         if !allowed {
@@ -612,9 +636,9 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::IpcPoll => {
             let pending = app.ipc_listener.as_mut().map(|l| l.poll()).unwrap_or_default();
             let paths: Vec<String> = pending.into_iter().filter(|s| !s.is_empty()).collect();
-            if paths.is_empty() { Task::none() } else { mmtl::handle_external_opens(app, paths) }
+            if paths.is_empty() { Task::none() } else { backdrop::begin_load(app, backdrop::PendingLoad::External(paths)) }
         }
-        Message::ExternalOpen(paths) => mmtl::handle_external_opens(app, paths),
+        Message::ExternalOpen(paths) => backdrop::begin_load(app, backdrop::PendingLoad::External(paths)),
         Message::Frame(action) => app.frame.update(action, Message::Frame),
         Message::Tab(tab_id, tab_msg) => handle_tab_message(app, tab_id, tab_msg),
         Message::Model(ev) => {
@@ -625,33 +649,17 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         }
         Message::FetchModels => translation::handle_fetch_models(app),
         Message::ModelsFetched(providers) => translation::handle_models_fetched(app, providers),
-        Message::Ui(UiEvent::TabSelected(raw)) => tabs::handle_selected(app, raw),
-        Message::Ui(UiEvent::TabClose(raw)) => tabs::handle_close(app, raw),
-        Message::Ui(UiEvent::TabCloseConfirmed(raw, save)) => tabs::handle_close_confirmed(app, raw, save),
+        Message::Ui(UiEvent::TabSelected(raw)) => { app.backdrop_frame = None; tabs::handle_selected(app, raw) }
+        Message::Ui(UiEvent::TabClose(raw)) => { app.backdrop_frame = None; tabs::handle_close(app, raw) }
+        Message::Ui(UiEvent::TabCloseConfirmed(raw, save)) => { app.backdrop_frame = None; tabs::handle_close_confirmed(app, raw, save) }
         Message::Ui(UiEvent::TabCloseCancel) => tabs::handle_close_cancel(app),
-        Message::Ui(UiEvent::TabCloseOthers(raw)) => tabs::handle_close_others(app, raw),
-        Message::Ui(UiEvent::TabCloseAll) => tabs::handle_close_all(app),
+        Message::Ui(UiEvent::TabCloseOthers(raw)) => { app.backdrop_frame = None; tabs::handle_close_others(app, raw) }
+        Message::Ui(UiEvent::TabCloseAll) => { app.backdrop_frame = None; tabs::handle_close_all(app) }
         Message::Ui(UiEvent::TabNew) => new_project::handle_new(app),
         Message::Ui(UiEvent::HomeNewProject) => new_project::handle_new(app),
         Message::Ui(UiEvent::HomeOpenProject) => mmtl::handle_open(app),
         Message::Ui(UiEvent::HomeRecentClicked(path)) => {
-            let p = std::path::PathBuf::from(path.clone());
-            if !p.exists() {
-                app.active_tab_mut().status = format!("Missing: {path}");
-                return Task::none();
-            }
-            let Some(new_id) = mmtl::create_loading_tab(app, p.clone()) else {
-                return Task::none();
-            };
-            let path_clone = p.clone();
-            Task::perform(
-                async move {
-                    tokio::task::spawn_blocking(move || mmtl::load_created_project(path_clone.to_string_lossy().to_string()))
-                        .await
-                        .unwrap_or_else(|e| Err(format!("load task failed: {e}")))
-                },
-                move |res| Message::Tab(new_id, TabMessage::RecentPickedToLoad(res)),
-            )
+            backdrop::begin_load(app, backdrop::PendingLoad::Recent(path))
         }
         Message::Ui(UiEvent::HomeSettings) => settings::handle_settings_open(app),
         Message::Ui(UiEvent::NewProjectClose) => new_project::handle_close(app),
@@ -659,7 +667,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::NewProjectSourceFolder) => new_project::handle_source_folder(app),
         Message::Ui(UiEvent::NewProjectLocationBrowse) => new_project::handle_location_browse(app),
         Message::Ui(UiEvent::NewProjectOriginalLang(lang)) => new_project::handle_original_lang(app, lang),
-        Message::Ui(UiEvent::NewProjectCreate) => new_project::handle_create(app),
+        Message::Ui(UiEvent::NewProjectCreate) => backdrop::begin_load(app, backdrop::PendingLoad::Create),
         Message::Ui(UiEvent::StartOcr) => ocr::handle_start_ocr(app),
         Message::Ui(UiEvent::StopOcr) => ocr::handle_stop_ocr(app),
         Message::FontLoaded => boot::handle_font_loaded(app),
@@ -779,6 +787,8 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::UpdatePoll => update::handle_poll(app),
         Message::OnboardingModelDone { id, result } => onboarding::handle_model_done(app, id, result),
         Message::OnboardingModelPoll => onboarding::handle_poll(app),
+        Message::BackdropCaptured(shot, kind) => backdrop::handle_captured(app, *shot, kind),
+        Message::BackdropReady(handle, kind) => backdrop::handle_ready(app, handle, kind),
     }
 }
 

@@ -157,6 +157,10 @@ pub trait UiState {
     fn manage_models_open(&self) -> bool;
     /// Current filter text of the Manage Models search field.
     fn manage_models_search(&self) -> &str;
+    /// Blurred snapshot of the window behind the Settings / Manage Models
+    /// overlays (`None` = not captured yet: render flat). Captured clean
+    /// before the modal opens, downscaled + blurred off-thread.
+    fn backdrop_blur(&self) -> Option<iced::widget::image::Handle> { None }
     /// Every connected provider's *all* toggleable models (deprecated already
     /// removed) grouped by provider – shown in the Manage Models overlay.
     /// Each inner pair is `(model id, display name)`; the hidden set is
@@ -200,8 +204,7 @@ pub trait UiState {
     fn update_ready(&self) -> bool { false }
     fn update_notes(&self) -> Option<String> { None }
     // ——— Onboarding (first-run, blocking) ———
-    fn onboarding_open(&self) -> bool { false }
-    fn onboarding_step(&self) -> u8 { 0 }
+    fn onboarding_open(&self) -> bool { false }    fn onboarding_step(&self) -> u8 { 0 }
     fn onboarding_models(&self) -> Vec<(String, String, ModelDownloadStatus)> { Vec::new() }
     fn onboarding_overall_progress(&self) -> f32 { 0.0 }
     fn onboarding_downloading(&self) -> bool { false }

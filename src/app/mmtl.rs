@@ -182,6 +182,8 @@ pub(crate) fn push_project_tab(
     display_path: String,
     temp_dir: Option<Arc<tempfile::TempDir>>,
 ) -> Task<Message> {
+    // A load resolved: the reusable backdrop capture predates the new base.
+    app.backdrop_frame = None;
     let path = PathBuf::from(&display_path);
 
     // Hydration path: `id` is a loading placeholder that was created optimistically.
@@ -336,6 +338,29 @@ pub fn handle_open_picked(app: &mut App, tab_id: crate::app::tab::TabId, picked:
     )
 }
 
+/// Recent-project click: validates the path, creates the loading placeholder
+/// tab and spawns the load. Extracted so the loading backdrop can stash and
+/// replay it after capturing the clean base frame.
+pub fn handle_recent_open(app: &mut App, path: String) -> Task<Message> {
+    let p = PathBuf::from(path.clone());
+    if !p.exists() {
+        app.active_tab_mut().status = format!("Missing: {path}");
+        return Task::none();
+    }
+    let Some(new_id) = create_loading_tab(app, p.clone()) else {
+        return Task::none();
+    };
+    let path_clone = p.clone();
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || load_created_project(path_clone.to_string_lossy().to_string()))
+                .await
+                .unwrap_or_else(|e| Err(format!("load task failed: {e}")))
+        },
+        move |res| Message::Tab(new_id, crate::app::TabMessage::RecentPickedToLoad(res)),
+    )
+}
+
 pub fn handle_saved(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<String, String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     match result {
@@ -416,6 +441,8 @@ pub fn handle_loaded(
             return push_project_tab(app, tab_id, project, images, display_path, temp_dir);
         }
         Err(e) => {
+            // Load resolved (failed): the reusable capture is stale.
+            app.backdrop_frame = None;
             // If this was a loading placeholder, keep the tab but mark it failed so the
             // user sees the error in the tab's status/overlay and can close it.
             if let Some(idx) = app.tabs.iter().position(|t| t.id == tab_id) {

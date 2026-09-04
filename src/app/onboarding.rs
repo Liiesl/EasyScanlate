@@ -481,6 +481,11 @@ pub fn handle_replay(app: &mut App) -> Task<Message> {
         app.onboarding = Some(OnboardingState::new());
         app.settings_open = false;
         app.manage_models_open = false;
+        app.backdrop_blur = None;
+        app.backdrop_frame = None;
+        app.backdrop_pending = None;
+        app.loading_blur = None;
+        app.pending_load = None;
         Task::none()
     }
 }

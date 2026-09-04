@@ -10,8 +10,8 @@
 //! the default hidden set, not an empty one.
 
 use iced::widget::{
-    button, center, column, container, mouse_area, opaque, row, rule, scrollable, space, stack,
-    text, text_input, toggler, tooltip,
+    button, center, column, container, image, mouse_area, opaque, row, rule, scrollable, space,
+    stack, text, text_input, toggler, tooltip,
 };
 use iced::{Color, Element, Fill as FillLength, Length};
 use lucide_icons::Icon;
@@ -310,11 +310,32 @@ pub fn view<'a, S: UiState + ?Sized>(
         ..container::Style::default()
     });
 
+    // Blurred snapshot cropped to this window rect at capture time, stacked
+    // directly behind the panel (same fixed size, so always aligned). The dim
+    // outside the panel stays plain dim over the live base.
+    let blur_cover: Element<'_, UiEvent> = match state.backdrop_blur() {
+        Some(handle) => container(
+            image(handle)
+                .width(Length::Fixed(scale::s(MODAL_WIDTH)))
+                .height(Length::Fixed(scale::s(MODAL_HEIGHT)))
+                .content_fit(iced::ContentFit::Fill)
+                .border_radius(scale::s(8.0)),
+        )
+        .width(Length::Fixed(scale::s(MODAL_WIDTH)))
+        .height(Length::Fixed(scale::s(MODAL_HEIGHT)))
+        .into(),
+        // No capture yet: just the window on its own.
+        None => space::horizontal()
+            .width(Length::Fixed(0.0))
+            .height(Length::Fixed(0.0))
+            .into(),
+    };
+
     stack![
         base,
         opaque(
             mouse_area(
-                center(opaque(window)).style(|_theme| container::Style {
+                center(opaque(stack![blur_cover, window])).style(|_theme| container::Style {
                     background: Some(
                         Color {
                             a: 0.55,

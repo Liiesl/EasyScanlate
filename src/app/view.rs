@@ -1,5 +1,5 @@
 use iced::{Color, Element, Length};
-use iced::widget::{center, column, container, opaque, space, stack, text};
+use iced::widget::{center, column, container, image, opaque, space, stack, text};
 use easyscanlate_ui::panel;
 use easyscanlate_ui::scale;
 
@@ -188,6 +188,27 @@ fn loading_overlay<'a>(app: &'a App, base: Element<'a, Message>) -> Element<'a, 
             ..container::Style::default()
         });
 
+    // Blurred snapshot cropped to this card rect at capture time, stacked
+    // directly behind it (same fixed size, so always aligned). The dim around
+    // the card stays plain dim over the live base.
+    let blur_cover: Element<'_, Message> = match &app.loading_blur {
+        Some(handle) => container(
+            image(handle)
+                .width(Length::Fixed(scale::s(520.0)))
+                .height(Length::Fixed(scale::s(280.0)))
+                .content_fit(iced::ContentFit::Fill)
+                .border_radius(scale::s(16.0)),
+        )
+        .width(Length::Fixed(scale::s(520.0)))
+        .height(Length::Fixed(scale::s(280.0)))
+        .into(),
+        // No capture (tests / capture in flight / failed): just the card.
+        None => space::horizontal()
+            .width(Length::Fixed(0.0))
+            .height(Length::Fixed(0.0))
+            .into(),
+    };
+
     // Split dim: titlebar strip is visual-only (no opaque/mouse_area) so drag
     // and tab clicks still reach the NativeFrame titlebar underneath. Content
     // area below remains opaque-blocking.
@@ -210,7 +231,7 @@ fn loading_overlay<'a>(app: &'a App, base: Element<'a, Message>) -> Element<'a, 
         ..container::Style::default()
     });
 
-    let content_dim = container(center(card))
+    let content_dim = container(center(stack![blur_cover, card]))
         .width(Length::Fill)
         .height(Length::Fill)
         .style(|_| container::Style {
