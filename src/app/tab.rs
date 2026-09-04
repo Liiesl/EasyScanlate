@@ -178,6 +178,22 @@ pub struct Tab {
     pub auto_inpaint_pending: usize,
     #[cfg(feature = "inpaint")]
     pub auto_inpaint_total: usize,
+    #[cfg(feature = "inpaint")]
+    pub auto_inpaint_failed: usize,
+    #[cfg(feature = "inpaint")]
+    pub manual_inpaint_pending: usize,
+    #[cfg(feature = "inpaint")]
+    pub manual_inpaint_total: usize,
+    #[cfg(feature = "inpaint")]
+    pub manual_inpaint_failed: usize,
+    #[cfg(feature = "segment")]
+    pub segment_pending: usize,
+    #[cfg(feature = "segment")]
+    pub segment_total: usize,
+    #[cfg(feature = "segment")]
+    pub segment_failed: usize,
+    #[cfg(feature = "segment")]
+    pub segment_removed: usize,
     #[cfg(feature = "segment")]
     pub pipeline_seg_done: bool,
     #[cfg(feature = "inpaint")]
@@ -308,6 +324,22 @@ impl Tab {
             auto_inpaint_pending: 0,
             #[cfg(feature = "inpaint")]
             auto_inpaint_total: 0,
+            #[cfg(feature = "inpaint")]
+            auto_inpaint_failed: 0,
+            #[cfg(feature = "inpaint")]
+            manual_inpaint_pending: 0,
+            #[cfg(feature = "inpaint")]
+            manual_inpaint_total: 0,
+            #[cfg(feature = "inpaint")]
+            manual_inpaint_failed: 0,
+            #[cfg(feature = "segment")]
+            segment_pending: 0,
+            #[cfg(feature = "segment")]
+            segment_total: 0,
+            #[cfg(feature = "segment")]
+            segment_failed: 0,
+            #[cfg(feature = "segment")]
+            segment_removed: 0,
             #[cfg(feature = "segment")]
             pipeline_seg_done: false,
             #[cfg(feature = "inpaint")]

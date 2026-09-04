@@ -190,11 +190,19 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
             #[cfg(feature = "segment")]
             {
                 tab.pipeline_seg_done = false;
+                tab.segment_pending = 0;
+                tab.segment_total = 0;
+                tab.segment_failed = 0;
+                tab.segment_removed = 0;
             }
             #[cfg(feature = "inpaint")]
             {
                 tab.auto_inpaint_pending = 0;
                 tab.auto_inpaint_total = 0;
+                tab.auto_inpaint_failed = 0;
+                tab.manual_inpaint_pending = 0;
+                tab.manual_inpaint_total = 0;
+                tab.manual_inpaint_failed = 0;
             }
         }
         // queue gate — weight 4, backfill + priority (cap 5)

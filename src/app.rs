@@ -87,12 +87,19 @@ type AutoInpaintPatch = (
 /// Auto single-job async result.
 #[cfg(feature = "inpaint")]
 type AutoInpaintResult = Result<Vec<AutoInpaintPatch>, String>;
-/// One auto batch item: job index, entry, result.
+/// One granular auto-inpaint stream item: job index, entry, per-job result.
+/// Emitted per finished job (OCR-style), so one failure never drops the rest.
 #[cfg(feature = "inpaint")]
-type AutoInpaintBatchItem = (usize, EntryId, AutoInpaintResult);
-/// Auto batch (LaMa/AOT) async payload.
+type AutoInpaintStreamItem = (usize, EntryId, AutoInpaintResult);
+/// One granular manual-inpaint stream item: per-unit partial patches + failed
+/// group count in that unit. A unit is one 512-group when truly streaming, or
+/// the whole multi-selection batch on the tolerant single-shot path. Either
+/// way one group's failure never drops the other groups' patches.
 #[cfg(feature = "inpaint")]
-type AutoInpaintBatch = Vec<AutoInpaintBatchItem>;
+type ManualInpaintStreamItem = (GroupedInpaintPatches, usize);
+/// One granular segment stream item: grid index + this grid's deletions.
+#[cfg(feature = "segment")]
+type SegmentStreamItem = (usize, Vec<(usize, EntryId)>);
 
 /// Loaded `.mmtl` project payload (reuses `mmtl` alias to stay in sync).
 type MmtlLoadedPayload = mmtl::LoadedProjectResult;
@@ -131,9 +138,11 @@ pub enum TabMessage {
     #[cfg(feature = "inpaint")]
     AutoInpaintFinished(usize, EntryId, AutoInpaintResult),
     #[cfg(feature = "inpaint")]
-    AutoInpaintLamaBatchFinished(AutoInpaintBatch),
+    AutoInpaintStreamRun(Result<AutoInpaintStreamItem, String>),
     #[cfg(feature = "inpaint")]
-    AutoInpaintAotBatchFinished(AutoInpaintBatch),
+    AutoInpaintStreamFailed(String),
+    #[cfg(feature = "inpaint")]
+    ManualInpaintStreamRun(Result<ManualInpaintStreamItem, String>),
     #[cfg(all(feature = "styling", feature = "inpaint"))]
     PipelineStyleDetected(usize, EntryId, Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>),
     #[cfg(feature = "styling")]
@@ -143,7 +152,9 @@ pub enum TabMessage {
     #[cfg(feature = "segment")]
     SegmentEngineReady(Result<SegmentEngine, String>),
     #[cfg(feature = "segment")]
-    SegmentFiltered(Result<Vec<(usize, EntryId)>, String>),
+    SegmentStreamRun(Result<SegmentStreamItem, String>),
+    #[cfg(feature = "segment")]
+    SegmentStreamFailed(String),
     TranslateFinished(
         Vec<(usize, EntryId, String, String)>,
         Result<Vec<String>, String>,
@@ -550,13 +561,17 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
         #[cfg(feature = "inpaint")]
         TabMessage::AutoInpaintFinished(index, id, result) => inpaint::handle_auto_finished(app, tab_id, index, id, result),
         #[cfg(feature = "inpaint")]
-        TabMessage::AutoInpaintLamaBatchFinished(batch) => inpaint::handle_auto_batch(app, tab_id, batch),
+        TabMessage::AutoInpaintStreamRun(result) => inpaint::handle_auto_stream_run(app, tab_id, result),
         #[cfg(feature = "inpaint")]
-        TabMessage::AutoInpaintAotBatchFinished(batch) => inpaint::handle_auto_batch(app, tab_id, batch),
+        TabMessage::AutoInpaintStreamFailed(e) => inpaint::handle_auto_stream_failed(app, tab_id, e),
+        #[cfg(feature = "inpaint")]
+        TabMessage::ManualInpaintStreamRun(result) => inpaint::handle_manual_stream_run(app, tab_id, result),
         #[cfg(feature = "segment")]
         TabMessage::SegmentEngineReady(result) => segment::handle_engine_ready(app, tab_id, result),
         #[cfg(feature = "segment")]
-        TabMessage::SegmentFiltered(result) => segment::handle_filtered(app, tab_id, result),
+        TabMessage::SegmentStreamRun(result) => segment::handle_stream_run(app, tab_id, result),
+        #[cfg(feature = "segment")]
+        TabMessage::SegmentStreamFailed(e) => segment::handle_stream_failed(app, tab_id, e),
         #[cfg(feature = "inpaint")]
         TabMessage::ManualMultiInpaintFinished(result) => inpaint::handle_inpaint_finished(app, tab_id, result),
         TabMessage::TranslateFinished(jobs, result) => translation::handle_translate_finished(app, tab_id, jobs, result),

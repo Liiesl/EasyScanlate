@@ -104,11 +104,14 @@ pub(crate) fn pipeline_progress_for_tab(tab: &Tab) -> Option<f32> {
         divisor += OCR_W;
     }
 
-    // SFX segment is a single blocking job: 0 while filtering/not started, 1 when done.
+    // SFX segment: granular while streaming (done/total grids), else 0/1 step.
     if do_sfx {
         #[cfg(feature = "segment")]
         {
-            let frac = if tab.segment_filtering || ocr_frac < 1.0 {
+            let frac = if tab.segment_total > 0 {
+                let done = tab.segment_total.saturating_sub(tab.segment_pending) as f32;
+                (done / tab.segment_total as f32).clamp(0.0, 1.0)
+            } else if tab.segment_filtering || ocr_frac < 1.0 {
                 0.0
             } else if tab.pipeline_seg_done {
                 1.0

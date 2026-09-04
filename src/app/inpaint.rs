@@ -1,4 +1,6 @@
 use iced::Task;
+#[cfg(feature = "inpaint")]
+use iced::futures::{SinkExt, StreamExt};
 use easyscanlate_model::Quad;
 #[cfg(feature = "inpaint")]
 use easyscanlate_inpaint::Engine as InpaintEngine;
@@ -38,12 +40,15 @@ type AutoPatch = (usize, RgbaImage, [f32; 4], Option<Quad>);
 /// Auto single-job async result.
 #[cfg(feature = "inpaint")]
 type AutoResult = Result<Vec<AutoPatch>, String>;
-/// One auto batch item: job index, entry, result.
+/// One granular auto stream item: job index, entry, per-job result.
+/// Outer `Result` in the message is the per-job dispatch outcome (OCR-style);
+/// inner `AutoResult::Err` is the per-job inpaint failure. Both count as failed.
 #[cfg(feature = "inpaint")]
-type AutoBatchItem = (usize, easyscanlate_model::EntryId, AutoResult);
-/// Auto batch (LaMa/AOT) async payload.
+pub type AutoStreamItem = (usize, easyscanlate_model::EntryId, AutoResult);
+/// Per-unit manual stream payload: partial patches + failed group count in
+/// that unit (OCR-style: failures counted, successes kept).
 #[cfg(feature = "inpaint")]
-type AutoBatch = Vec<AutoBatchItem>;
+pub type ManualStreamPatches = (GroupedInpaint, usize);
 
 #[cfg(feature = "inpaint")]
 fn neighbor_paths(app: &App, index: usize) -> (Option<String>, Option<String>) {
@@ -112,6 +117,149 @@ fn auto_pad_for(backend: InpaintBackend, radius: i32) -> f32 {
         InpaintBackend::Telea => radius as f32,
         _ => 32.0,
     }
+}
+
+/// Commits one auto job's patches to `tabs[idx]`. Returns number of patches applied.
+#[cfg(feature = "inpaint")]
+fn commit_auto_patches(app: &mut App, idx: usize, patches: Vec<AutoPatch>) -> usize {
+    let mut pending_evs: Vec<(easyscanlate_model::ImageId, [f32; 4], Option<Quad>)> =
+        Vec::new();
+    let mut affected = std::collections::HashSet::new();
+    let mut applied = 0usize;
+    for (target_idx, patch, bounds, quad) in patches {
+        let image_id_opt = app.tabs[idx].images.get(target_idx).map(|i| i.image_id);
+        if let Some(image_id) = image_id_opt
+            && let Some(image) = app.tabs[idx].images.get_mut(target_idx)
+        {
+            let (w, h) = (patch.width(), patch.height());
+            let layer = InpaintLayer {
+                bounds,
+                quad,
+                handle: iced::widget::image::Handle::from_rgba(
+                    w,
+                    h,
+                    bytes::Bytes::from(patch.into_raw()),
+                ),
+                width: w,
+                height: h,
+            };
+            image.inpaint.push(layer);
+            pending_evs.push((image_id, bounds, quad));
+            affected.insert(target_idx);
+            applied += 1;
+        }
+    }
+    for (image_id, bounds, quad) in pending_evs {
+        let ev = app.tabs[idx]
+            .project
+            .add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad);
+        crate::app::handle_model_event(&mut app.tabs[idx], ev);
+    }
+    if !affected.is_empty() {
+        app.tabs[idx].show_inpaint = true;
+    }
+    applied
+}
+
+/// Frees whichever auto-inpaint backend weight is held. Returns true if anything freed.
+#[cfg(feature = "inpaint")]
+fn free_auto_queue(app: &mut App, tab_id: super::tab::TabId) -> bool {
+    let mut freed = false;
+    if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintTelea).is_some() {
+        freed = true;
+    }
+    if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintLama).is_some() {
+        freed = true;
+    }
+    if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintAot).is_some() {
+        freed = true;
+    }
+    freed
+}
+
+/// Finalizes auto-inpaint when `pending==0`: summary status + queue promote.
+/// Call only when `auto_inpaint_pending == 0`.
+#[cfg(feature = "inpaint")]
+fn finish_auto_stream(
+    app: &mut App,
+    tab_id: super::tab::TabId,
+    idx: usize,
+    label: &str,
+) -> Task<Message> {
+    #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+    {
+        app.tabs[idx].pipeline_active = false;
+    }
+    let (total, failed) = (app.tabs[idx].auto_inpaint_total, app.tabs[idx].auto_inpaint_failed);
+    let done = total.saturating_sub(failed);
+    app.tabs[idx].status = if failed > 0 {
+        format!("Auto-inpaint ({label}) done: {done} of {total} region(s), {failed} failed.")
+    } else {
+        format!("Auto-inpaint ({label}) done: {total} region(s).")
+    };
+    free_auto_queue(app, tab_id);
+    let promote = crate::app::queue::dispatch_pending(app);
+    crate::app::queue::refresh_queued_statuses(app);
+    promote
+}
+
+/// Commits one manual group's patches. Returns number of patches applied.
+#[cfg(feature = "inpaint")]
+fn commit_manual_patches(app: &mut App, idx: usize, per_image_patches: GroupedInpaint) -> usize {
+    let mut total = 0usize;
+    let mut pending_evs = Vec::new();
+    for (idx2, patches) in per_image_patches {
+        let image_id_opt = app.tabs[idx].images.get(idx2).map(|i| i.image_id);
+        if image_id_opt.is_none() {
+            continue;
+        }
+        let image_id = image_id_opt.unwrap();
+        if let Some(image) = app.tabs[idx].images.get_mut(idx2) {
+            for (patch, bounds, quad) in patches {
+                total += 1;
+                let (w, h) = (patch.width(), patch.height());
+                let layer = InpaintLayer {
+                    bounds,
+                    quad,
+                    handle: iced::widget::image::Handle::from_rgba(
+                        w,
+                        h,
+                        bytes::Bytes::from(patch.into_raw()),
+                    ),
+                    width: w,
+                    height: h,
+                };
+                image.inpaint.push(layer);
+                pending_evs.push((image_id, bounds, quad));
+            }
+        }
+    }
+    for (image_id, bounds, quad) in pending_evs {
+        let ev = app.tabs[idx]
+            .project
+            .add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad);
+        crate::app::handle_model_event(&mut app.tabs[idx], ev);
+    }
+    if total > 0 {
+        app.tabs[idx].show_inpaint = true;
+    }
+    total
+}
+
+/// Frees whichever manual-inpaint backend weight is held.
+#[cfg(feature = "inpaint")]
+fn free_manual_queue(app: &mut App, tab_id: super::tab::TabId) -> bool {
+    let mut freed = false;
+    if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintTelea).is_some() {
+        freed = true;
+    }
+    if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintLama).is_some() {
+        freed = true;
+    }
+    if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintAot).is_some() {
+        freed = true;
+    }
+    freed
 }
 
 #[cfg(feature = "inpaint")]
@@ -1121,7 +1269,7 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
 
 
 #[cfg(feature = "inpaint")]
-fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelection>) -> GroupedInpaintResult {
+fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelection>) -> Result<ManualStreamPatches, String> {
     eprintln!("[manual::multi] run_inpaint_selection enter data={} backend={:?} radius={}", data.len(), engine.backend(), engine.radius());
     for (i, (idx, path, rect, quads)) in data.iter().enumerate() {
         eprintln!("[manual::multi]   data {}: idx={} path={} rect={:?} quads={} bounds={:?}", i, idx, path, rect, quads.len(), quads.iter().map(|q| q.bounds()).collect::<Vec<_>>());
@@ -1249,6 +1397,10 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
         eprintln!("[manual::multi]   group {}: sels={} max_w={} total_h={} member={:?}", gi, g.len(), max_w, total_h, g.iter().map(|s| (s.idx, s.x0, s.y0, s.w, s.h)).collect::<Vec<_>>());
     }
     let mut per_image: PatchMap = HashMap::new();
+    // Granular (OCR-style): one group's inference failure counts as one failed
+    // group and the stream continues with the remaining groups instead of
+    // dropping every patch.
+    let mut failed_groups: usize = 0;
     // helpers
     let reflect_index = |x: i64, len: i64| -> i64 {
         let period = len*2;
@@ -1286,7 +1438,7 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
             let rect = [0.0, 0.0, CANVAS as f32, CANVAS as f32];
             let patches = match engine.run_on_image(&canvas_rgba, rect, &[quad]) {
                 Ok(v) => { eprintln!("[manual::multi]   oversized patches={}", v.len()); v },
-                Err(e) => { eprintln!("[manual::multi]   oversized run_on_image failed: {}", e); return Err(e); }
+                Err(e) => { eprintln!("[manual::multi]   oversized run_on_image failed: {}", e); failed_groups += 1; continue; }
             };
             for (pi, (patch_img, bounds_canvas, quad_opt)) in patches.into_iter().enumerate() {
                 let [bx, by, bw, bh] = bounds_canvas;
@@ -1411,7 +1563,7 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
             let rect = [0.0,0.0,CANVAS as f32, CANVAS as f32];
             let patches = match engine.run_on_image(&canvas, rect, &quads_canvas) {
                 Ok(v) => { eprintln!("[manual::multi]   single window patches={}", v.len()); v },
-                Err(e) => { eprintln!("[manual::multi]   single window run_on_image failed: {}", e); return Err(e); }
+                Err(e) => { eprintln!("[manual::multi]   single window run_on_image failed: {}", e); failed_groups += 1; continue; }
             };
             for (pi, (patch_img, bounds_canvas, quad_opt)) in patches.into_iter().enumerate() {
                 let [bx,by,bw,bh] = bounds_canvas;
@@ -1607,7 +1759,7 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
             let rect = [0.0,0.0,CANVAS as f32, CANVAS as f32];
             let patches = match engine.run_on_image(&stitched, rect, &quads_canvas) {
                 Ok(v) => { eprintln!("[manual::multi]   stitch patches={}", v.len()); v },
-                Err(e) => { eprintln!("[manual::multi]   stitch run_on_image failed: {}", e); return Err(e); }
+                Err(e) => { eprintln!("[manual::multi]   stitch run_on_image failed: {}", e); failed_groups += 1; continue; }
             };
             for (pi, (patch_img, bounds_canvas, quad_opt)) in patches.into_iter().enumerate() {
                 let [bx,by,bw,bh] = bounds_canvas;
@@ -1679,7 +1831,10 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
     let mut out: GroupedInpaint = Vec::new();
     for (idx, v) in per_image { out.push((idx, v)); }
     out.sort_by_key(|(idx,_)| *idx);
-    Ok(out)
+    if out.is_empty() && failed_groups > 0 {
+        return Err(format!("all {failed_groups} inpaint group(s) failed"));
+    }
+    Ok((out, failed_groups))
 }
 
 #[cfg(feature = "inpaint")]
@@ -1763,106 +1918,188 @@ pub fn handle_auto_finished(app: &mut App, tab_id: crate::app::tab::TabId, index
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     app.tabs[idx].auto_inpaint_pending = app.tabs[idx].auto_inpaint_pending.saturating_sub(1);
     let pending = app.tabs[idx].auto_inpaint_pending;
+    let total = app.tabs[idx].auto_inpaint_total;
     match result {
         Ok(patches) => {
-            // apply patches to this tab
-            let mut pending_evs: Vec<(easyscanlate_model::ImageId, [f32;4], Option<easyscanlate_model::Quad>)> = Vec::new();
-            let mut affected = std::collections::HashSet::new();
-            for (target_idx, patch, bounds, quad) in patches {
-                let image_id_opt = app.tabs[idx].images.get(target_idx).map(|i| i.image_id);
-                if let Some(image_id) = image_id_opt
-                    && let Some(image) = app.tabs[idx].images.get_mut(target_idx) {
-                        let (w,h) = (patch.width(), patch.height());
-                        let layer = InpaintLayer { bounds, quad, handle: iced::widget::image::Handle::from_rgba(w,h, bytes::Bytes::from(patch.into_raw())), width: w, height: h };
-                        image.inpaint.push(layer);
-                        pending_evs.push((image_id, bounds, quad));
-                        affected.insert(target_idx);
-                    }
-            }
-            for (image_id, bounds, quad) in pending_evs {
-                let ev = app.tabs[idx].project.add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad);
-                crate::app::handle_model_event(&mut app.tabs[idx], ev);
-            }
-            if !affected.is_empty() { app.tabs[idx].show_inpaint = true; }
+            commit_auto_patches(app, idx, patches);
             if pending == 0 {
-                #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-                { app.tabs[idx].pipeline_active = false; }
-                let s = app.tabs[idx].status.clone();
-                app.tabs[idx].status = format!("Auto-inpaint done. {}", s);
-                // free queue weight for InpaintTelea (per-region batch uses telea weight)
-                app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintTelea);
-                // also try other backends if mistakenly reserved (e.g., mixed)
-                app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintLama);
-                app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintAot);
-                let promote = crate::app::queue::dispatch_pending(app);
-                crate::app::queue::refresh_queued_statuses(app);
-                return promote;
+                return finish_auto_stream(app, tab_id, idx, "Telea");
             } else {
-                let s = app.tabs[idx].status.clone();
-                app.tabs[idx].status = format!("Auto-inpaint: {} remaining. {}", pending, s);
+                let done = total.saturating_sub(pending);
+                let failed = app.tabs[idx].auto_inpaint_failed;
+                app.tabs[idx].status = if failed > 0 {
+                    format!("Auto-inpaint (Telea): {done} of {total} done, {failed} failed ({pending} remaining).")
+                } else {
+                    format!("Auto-inpaint (Telea): {done} of {total} done ({pending} remaining).")
+                };
             }
         }
         Err(e) => {
-            app.tabs[idx].status = format!("Auto-inpaint failed for {index}:{id:?}: {e}");
+            app.tabs[idx].auto_inpaint_failed += 1;
+            let failed = app.tabs[idx].auto_inpaint_failed;
             if pending == 0 {
-                #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-                { app.tabs[idx].pipeline_active = false; }
-                app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintTelea);
-                app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintLama);
-                app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintAot);
-                let promote = crate::app::queue::dispatch_pending(app);
-                crate::app::queue::refresh_queued_statuses(app);
-                return promote;
+                return finish_auto_stream(app, tab_id, idx, "Telea");
+            } else {
+                let done = total.saturating_sub(pending);
+                app.tabs[idx].status = format!("Auto-inpaint (Telea): {done} of {total} done, {failed} failed ({pending} remaining; last: {index}:{id:?}: {e}).");
             }
         }
     }
     Task::none()
 }
+
+/// Granular auto-inpaint stream event (OCR-style): one finished job.
+/// `Ok((index, id, result))` is a completed job whose inner `result` may still
+/// be per-job `Err`; outer `Err` is a per-job dispatch failure. Both count as
+/// one failed job without dropping the rest of the stream.
 #[cfg(feature = "inpaint")]
-pub fn handle_auto_batch(app: &mut App, tab_id: crate::app::tab::TabId, batch: AutoBatch) -> Task<Message> {
+pub fn handle_auto_stream_run(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    result: Result<AutoStreamItem, String>,
+) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
-    for (_index, id, result) in batch {
-        app.tabs[idx].auto_inpaint_pending = app.tabs[idx].auto_inpaint_pending.saturating_sub(1);
-        match result {
+    app.tabs[idx].auto_inpaint_pending = app.tabs[idx].auto_inpaint_pending.saturating_sub(1);
+    let pending = app.tabs[idx].auto_inpaint_pending;
+    let total = app.tabs[idx].auto_inpaint_total;
+    // Backend label for status: infer from which queue weight is held.
+    let label = if app.engines.queue.running_for(tab_id, crate::app::queue::EngineKind::InpaintLama).is_some() {
+        "LaMa"
+    } else if app.engines.queue.running_for(tab_id, crate::app::queue::EngineKind::InpaintAot).is_some() {
+        "AOT-GAN"
+    } else {
+        "Telea"
+    };
+    match result {
+        Ok((_index, _id, inner)) => match inner {
             Ok(patches) => {
-                let mut pending_evs: Vec<(easyscanlate_model::ImageId, [f32;4], Option<easyscanlate_model::Quad>)> = Vec::new();
-                let mut affected = std::collections::HashSet::new();
-                for (target_idx, patch, bounds, quad) in patches {
-                    if let Some(image_id) = app.tabs[idx].images.get(target_idx).map(|i| i.image_id)
-                        && let Some(image) = app.tabs[idx].images.get_mut(target_idx) {
-                            let (w,h) = (patch.width(), patch.height());
-                            let layer = InpaintLayer { bounds, quad, handle: iced::widget::image::Handle::from_rgba(w,h, bytes::Bytes::from(patch.into_raw())), width: w, height: h };
-                            image.inpaint.push(layer);
-                            pending_evs.push((image_id, bounds, quad));
-                            affected.insert(target_idx);
-                        }
+                commit_auto_patches(app, idx, patches);
+                if pending == 0 {
+                    return finish_auto_stream(app, tab_id, idx, label);
                 }
-                for (image_id, bounds, quad) in pending_evs {
-                    let ev = app.tabs[idx].project.add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad);
-                    crate::app::handle_model_event(&mut app.tabs[idx], ev);
-                }
-                if !affected.is_empty() { app.tabs[idx].show_inpaint = true; }
+                let done = total.saturating_sub(pending);
+                let failed = app.tabs[idx].auto_inpaint_failed;
+                app.tabs[idx].status = if failed > 0 {
+                    format!("Auto-inpaint ({label}): {done} of {total} done, {failed} failed ({pending} remaining).")
+                } else {
+                    format!("Auto-inpaint ({label}): {done} of {total} done ({pending} remaining).")
+                };
             }
-            Err(e) => { app.tabs[idx].status = format!("Auto-inpaint batch failed for {_index}:{id:?}: {e}"); }
-        }
-    }
-    if app.tabs[idx].auto_inpaint_pending == 0 {
-        #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-        { app.tabs[idx].pipeline_active = false; }
-        let s = app.tabs[idx].status.clone();
-        app.tabs[idx].status = format!("Auto-inpaint batch done. {}", s);
-        // free whichever inpaint backend was running (lama/aot)
-        let mut freed = false;
-        if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintLama).is_some() { freed = true; }
-        if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintAot).is_some() { freed = true; }
-        if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintTelea).is_some() { freed = true; }
-        if freed {
-            let promote = crate::app::queue::dispatch_pending(app);
-            crate::app::queue::refresh_queued_statuses(app);
-            return promote;
+            Err(e) => {
+                app.tabs[idx].auto_inpaint_failed += 1;
+                let failed = app.tabs[idx].auto_inpaint_failed;
+                if pending == 0 {
+                    return finish_auto_stream(app, tab_id, idx, label);
+                }
+                let done = total.saturating_sub(pending);
+                app.tabs[idx].status = format!("Auto-inpaint ({label}): {done} of {total} done, {failed} failed ({pending} remaining; last: {e}).");
+            }
+        },
+        Err(e) => {
+            app.tabs[idx].auto_inpaint_failed += 1;
+            let failed = app.tabs[idx].auto_inpaint_failed;
+            if pending == 0 {
+                return finish_auto_stream(app, tab_id, idx, label);
+            }
+            let done = total.saturating_sub(pending);
+            app.tabs[idx].status = format!("Auto-inpaint ({label}): {done} of {total} done, {failed} failed ({pending} remaining; dispatch: {e}).");
         }
     }
     Task::none()
+}
+
+/// Fatal auto-inpaint stream failure (channel/task aborted). Marks all
+/// remaining jobs failed, frees queue weight and promotes pending work.
+#[cfg(feature = "inpaint")]
+pub fn handle_auto_stream_failed(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    e: String,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    if app.tabs[idx].auto_inpaint_pending > 0 {
+        let remaining = app.tabs[idx].auto_inpaint_pending;
+        app.tabs[idx].auto_inpaint_failed += remaining;
+        app.tabs[idx].auto_inpaint_pending = 0;
+        let (total, failed) = (app.tabs[idx].auto_inpaint_total, app.tabs[idx].auto_inpaint_failed);
+        #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
+        {
+            app.tabs[idx].pipeline_active = false;
+        }
+        app.tabs[idx].status =
+            format!("Auto-inpaint stream failed ({e}): {total} region(s), {failed} failed.");
+        free_auto_queue(app, tab_id);
+        let promote = crate::app::queue::dispatch_pending(app);
+        crate::app::queue::refresh_queued_statuses(app);
+        return promote;
+    }
+    Task::none()
+}
+/// Starts a granular auto-inpaint stream for LaMa/AOT (OCR-style).
+/// Jobs run sequentially (ONNX session is single-threaded) but each finished
+/// job emits `AutoInpaintStreamRun` immediately: progress + partial commits
+/// are visible and one failure never drops the rest. Queue weight stays
+/// reserved until the last event finalizes.
+#[cfg(feature = "inpaint")]
+fn start_auto_stream(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    engine: InpaintEngine,
+    jobs: Vec<AutoInpaintJob>,
+    pad: f32,
+    label: &str,
+    _backend: InpaintBackend,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    let total = jobs.len();
+    app.tabs[idx].status = format!("Auto-inpaint ({label}) 0 of {total} done...");
+    let tab = &app.tabs[idx];
+    let enriched: Vec<(AutoInpaintJob, Option<String>, Option<String>)> = jobs
+        .into_iter()
+        .map(|job| {
+            let prev = if job.index > 0 {
+                tab.images.get(job.index - 1).and_then(|img| tab.project.image(img.image_id).map(|m| m.path.clone()))
+            } else {
+                None
+            };
+            let next = if job.index + 1 < tab.images.len() {
+                tab.images.get(job.index + 1).and_then(|img| tab.project.image(img.image_id).map(|m| m.path.clone()))
+            } else {
+                None
+            };
+            (job, prev, next)
+        })
+        .collect();
+    let tid = tab_id;
+    Task::stream(
+        iced::stream::try_channel(1, move |mut sender: iced::futures::channel::mpsc::Sender<Message>| async move {
+            for (job, prev_path, next_path) in enriched {
+                let engine_clone = engine.clone();
+                let jidx = job.index;
+                let jid = job.id;
+                let res = tokio::task::spawn_blocking(move || {
+                    run_auto_job_with_stitch(&engine_clone, &job, pad, prev_path.as_deref(), next_path.as_deref())
+                })
+                .await
+                .unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")));
+                if sender
+                    .send(Message::Tab(
+                        tid,
+                        crate::app::TabMessage::AutoInpaintStreamRun(Ok((jidx, jid, res))),
+                    ))
+                    .await
+                    .is_err()
+                {
+                    return Ok::<(), String>(());
+                }
+            }
+            Ok::<(), String>(())
+        })
+        .map(move |item: Result<Message, String>| match item {
+            Ok(message) => message,
+            Err(e) => Message::Tab(tid, crate::app::TabMessage::AutoInpaintStreamFailed(e.to_string())),
+        }),
+    )
 }
 #[cfg(feature = "inpaint")]
 pub fn handle_inpaint_finished(app: &mut App, tab_id: crate::app::tab::TabId, result: GroupedInpaintResult) -> Task<Message> {
@@ -1870,43 +2107,81 @@ pub fn handle_inpaint_finished(app: &mut App, tab_id: crate::app::tab::TabId, re
     app.tabs[idx].inpainting = false;
     match result {
         Ok(per_image_patches) => {
-            let mut total=0usize;
-            let mut pending_evs = Vec::new();
-            for (idx2, patches) in per_image_patches {
-                let image_id_opt = app.tabs[idx].images.get(idx2).map(|i| i.image_id);
-                if image_id_opt.is_none() { continue; }
-                let image_id = image_id_opt.unwrap();
-                if let Some(image) = app.tabs[idx].images.get_mut(idx2) {
-                    for (patch, bounds, quad) in patches {
-                        total+=1;
-                        let (w,h)=(patch.width(), patch.height());
-                        let layer = InpaintLayer { bounds, quad, handle: iced::widget::image::Handle::from_rgba(w,h, bytes::Bytes::from(patch.into_raw())), width: w, height: h };
-                        image.inpaint.push(layer);
-                        pending_evs.push((image_id, bounds, quad));
-                    }
-                }
-            }
-            for (image_id, bounds, quad) in pending_evs {
-                let ev = app.tabs[idx].project.add_inpaint_patch_with_bounds_and_quad(image_id, bounds, quad);
-                crate::app::handle_model_event(&mut app.tabs[idx], ev);
-            }
-            app.tabs[idx].show_inpaint = true;
+            let total = commit_manual_patches(app, idx, per_image_patches);
             app.tabs[idx].status = format!("Inpainted {total} region(s) (multi).");
         }
         Err(e) => { app.tabs[idx].status = format!("Multi inpaint failed: {e}"); }
     }
     // Free queue weight for manual inpaint (any backend) and promote via backfill
-    let mut freed = false;
-    if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintTelea).is_some() { freed = true; }
-    if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintLama).is_some() { freed = true; }
-    if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::InpaintAot).is_some() { freed = true; }
-    if freed {
+    if free_manual_queue(app, tab_id) {
         let promote = crate::app::queue::dispatch_pending(app);
         crate::app::queue::refresh_queued_statuses(app);
         return promote;
     }
     Task::none()
 }
+
+/// Granular manual-inpaint stream event (OCR-style): one finished batch unit.
+/// `Ok((patches, failed))` commits `patches` and adds `failed` to the failed
+/// counter; outer `Err` counts one failed unit with no patches. Queue weight
+/// stays reserved until the last unit finalizes.
+#[cfg(feature = "inpaint")]
+pub fn handle_manual_stream_run(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    result: Result<ManualStreamPatches, String>,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    app.tabs[idx].manual_inpaint_pending = app.tabs[idx].manual_inpaint_pending.saturating_sub(1);
+    let pending = app.tabs[idx].manual_inpaint_pending;
+    let total = app.tabs[idx].manual_inpaint_total;
+    match result {
+        Ok((patches, failed_in_unit)) => {
+            let applied = commit_manual_patches(app, idx, patches);
+            app.tabs[idx].manual_inpaint_failed += failed_in_unit;
+            let failed = app.tabs[idx].manual_inpaint_failed;
+            if pending == 0 {
+                app.tabs[idx].inpainting = false;
+                app.tabs[idx].status = if failed > 0 {
+                    format!("Inpainted {applied} region(s), {failed} group(s) failed.")
+                } else {
+                    format!("Inpainted {applied} region(s) (multi).")
+                };
+                if free_manual_queue(app, tab_id) {
+                    let promote = crate::app::queue::dispatch_pending(app);
+                    crate::app::queue::refresh_queued_statuses(app);
+                    return promote;
+                }
+                return Task::none();
+            }
+            let done = total.saturating_sub(pending);
+            app.tabs[idx].status = if failed > 0 {
+                format!("Inpainting: {done} of {total} done, {failed} failed ({pending} remaining).")
+            } else {
+                format!("Inpainting: {done} of {total} done ({pending} remaining).")
+            };
+        }
+        Err(e) => {
+            app.tabs[idx].manual_inpaint_failed += 1;
+            let failed = app.tabs[idx].manual_inpaint_failed;
+            if pending == 0 {
+                app.tabs[idx].inpainting = false;
+                app.tabs[idx].status = format!("Inpaint failed ({e}); {failed} of {total} unit(s) failed.");
+                if free_manual_queue(app, tab_id) {
+                    let promote = crate::app::queue::dispatch_pending(app);
+                    crate::app::queue::refresh_queued_statuses(app);
+                    return promote;
+                }
+                return Task::none();
+            }
+            let done = total.saturating_sub(pending);
+            app.tabs[idx].status =
+                format!("Inpainting: {done} of {total} done, {failed} failed ({pending} remaining; last: {e}).");
+        }
+    }
+    Task::none()
+}
+
 #[cfg(feature = "inpaint")]
 pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<AutoInpaintJob>, backend: InpaintBackend) -> Task<Message> {
     if jobs.is_empty() { return Task::none(); }
@@ -1945,6 +2220,11 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
         InpaintBackend::Aot => app.engines.auto_aot.clone().filter(|e| e.radius() == radius),
     };
     if let Some(engine) = cached {
+        // Fresh run resets totals; queue guarantees no concurrent same-tab run.
+        if app.tabs[idx].auto_inpaint_pending == 0 {
+            app.tabs[idx].auto_inpaint_total = 0;
+            app.tabs[idx].auto_inpaint_failed = 0;
+        }
         app.tabs[idx].auto_inpaint_pending += jobs.len();
         app.tabs[idx].auto_inpaint_total += jobs.len();
         match backend {
@@ -1978,28 +2258,7 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
             }
             _ => {
                 let label = match backend { InpaintBackend::Lama => "LaMa", InpaintBackend::Aot => "AOT-GAN", _=> unreachable!()};
-                app.tabs[idx].status = format!("Auto-inpaint ({label}) {} regions sequentially...", jobs.len());
-                let tab = &app.tabs[idx];
-                let enriched: Vec<(AutoInpaintJob, Option<String>, Option<String>)> = jobs.into_iter().map(|job| {
-                    let prev = if job.index>0 { tab.images.get(job.index-1).and_then(|img| tab.project.image(img.image_id).map(|m| m.path.clone())) } else { None };
-                    let next = if job.index+1 < tab.images.len() { tab.images.get(job.index+1).and_then(|img| tab.project.image(img.image_id).map(|m| m.path.clone())) } else { None };
-                    (job, prev, next)
-                }).collect();
-                let is_lama = backend == InpaintBackend::Lama;
-                let tid = tab_id;
-                Task::perform(
-                    async move {
-                        tokio::task::spawn_blocking(move || {
-                            let mut out: AutoBatch = Vec::new();
-                            for (job, prev_path, next_path) in enriched {
-                                let r = run_auto_job_with_stitch(&engine, &job, pad, prev_path.as_deref(), next_path.as_deref());
-                                out.push((job.index, job.id, r));
-                            }
-                            out
-                        }).await.unwrap_or_else(|e| { let msg = if is_lama { format!("lama batch cancelled: {e}") } else { format!("aot batch cancelled: {e}") }; vec![(0, easyscanlate_model::EntryId(0), Err(msg))] })
-                    },
-                    move |batch| if is_lama { Message::Tab(tid, crate::app::TabMessage::AutoInpaintLamaBatchFinished(batch)) } else { Message::Tab(tid, crate::app::TabMessage::AutoInpaintAotBatchFinished(batch)) },
-                )
+                return start_auto_stream(app, tab_id, engine, jobs, pad, label, backend);
             }
         }
     } else {
@@ -2041,6 +2300,14 @@ pub fn dispatch_auto_solo(app: &mut App, tab_id: crate::app::tab::TabId, effecti
 pub(crate) fn start_inpaint_selection(app: &mut App, tab_id: crate::app::tab::TabId, engine: InpaintEngine, data: Vec<ManualInpaintSelection>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     app.tabs[idx].inpainting = true;
+    // Granular counters (OCR-style): one batch unit; per-group failures are
+    // counted inside the worker and reported with the patches.
+    if app.tabs[idx].manual_inpaint_pending == 0 {
+        app.tabs[idx].manual_inpaint_total = 0;
+        app.tabs[idx].manual_inpaint_failed = 0;
+    }
+    app.tabs[idx].manual_inpaint_total += 1;
+    app.tabs[idx].manual_inpaint_pending += 1;
     app.tabs[idx].status = "inpainting...".to_string();
     let tid = tab_id;
     Task::perform(
@@ -2049,7 +2316,7 @@ pub(crate) fn start_inpaint_selection(app: &mut App, tab_id: crate::app::tab::Ta
                 .await
                 .unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")))
         },
-        move |res| Message::Tab(tid, crate::app::TabMessage::ManualMultiInpaintFinished(res)),
+        move |res| Message::Tab(tid, crate::app::TabMessage::ManualInpaintStreamRun(res)),
     )
 }
 #[cfg(feature = "inpaint")]
