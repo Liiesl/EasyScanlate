@@ -701,6 +701,13 @@ pub fn handle_manual_ocr_selection(app: &mut App, tab_id: super::tab::TabId, sel
             if r.width < 4.0 || r.height < 4.0 { continue; }
             valid.push((idx, r));
         }
+        // Keep one entry point capable of both single and stitched multi-image:
+        // order so pieces of one seam-crossing drag become adjacent (idx, y, x).
+        valid.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then(a.1.y.total_cmp(&b.1.y))
+                .then(a.1.x.total_cmp(&b.1.x))
+        });
         if valid.is_empty() {
             if let Some(tab) = app.tab_by_id_mut(tab_id) { tab.status = "Manual OCR: no valid selections.".to_string(); }
             return Task::none();
@@ -755,6 +762,14 @@ pub fn handle_manual_ocr_selection(app: &mut App, tab_id: super::tab::TabId, sel
 
 #[cfg(feature = "ocr")]
 pub(crate) fn start_manual_ocr_selection(app: &mut App, tab_id: super::tab::TabId, selections: Vec<(usize, iced::Rectangle)>, engine: ocr::Engine) -> Task<Message> {
+    // Same single entry point handles single + stitched: order selections so
+    // seam-crossing pieces stay adjacent for the stitch pass in the worker.
+    let mut selections = selections;
+    selections.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then(a.1.y.total_cmp(&b.1.y))
+            .then(a.1.x.total_cmp(&b.1.x))
+    });
     if let Some(tab) = app.tab_by_id_mut(tab_id) {
         tab.manual_ocring = true;
         tab.status = format!("Manual OCR on {} selection(s)...", selections.len());
@@ -841,15 +856,11 @@ fn run_manual_ocr_selection(engine: ocr::Engine, items: Vec<(usize, String, iced
         }
     }
     if jobs.is_empty() { return Err("no OCR jobs".to_string()); }
-    // For each job, decode, crop, run OCR (parallel via spawn_blocking per job? But we are already in blocking thread, so sequential or use rayon)
-    // Since we are in a single blocking task, we can run sequentially but spec says parallel if more than one.
-    // We can use std::thread scope to run parallel within this blocking task.
-    // Simpler: run sequentially and collect; parallelism will be limited but okay. For true parallel, spawn tokio tasks inside?
-    // We'll implement parallel using crossbeam or std::thread::scope with each job cloning engine.
-    // Engine is Arc<Mutex<RapidOcr>> so cloning is cheap but still serializes on lock. We'll just run sequentially for now; the engine lock will serialize anyway.
-    // For demonstration, we run sequentially but spawn blocking per job could be parallel via tokio::join_all from the outer async, but we are already blocking.
-    // Instead, we run jobs sequentially but collect results.
-    let mut per_image: HashMap<usize, Vec<NewEntry>> = HashMap::new();
+    // Decode every clustered crop once so seam-crossing pieces can be stitched
+    // vertically (auto-OCR style) instead of OCR'd as isolated single images.
+    // Tuple layout for decoded pieces:
+    // (idx, path, x0, y0, cw, ch, img_w, img_h, crop_rgba)
+    let mut decoded: Vec<(usize, String, u32, u32, u32, u32, u32, u32, image::RgbaImage)> = Vec::new();
     for (idx, path, cluster) in jobs {
         let dyn_img = image::ImageReader::open(&path)
             .map_err(|e| format!("Failed to open {path}: {e}"))?
@@ -865,19 +876,143 @@ fn run_manual_ocr_selection(engine: ocr::Engine, items: Vec<(usize, String, iced
         let y1 = y1.min(img_h);
         let cw = x1.saturating_sub(x0).max(1);
         let ch = y1.saturating_sub(y0).max(1);
-        let cropped_rgba = image::imageops::crop_imm(&rgba, x0, y0, cw, ch).to_image();
-        let cropped_rgb = image::DynamicImage::ImageRgba8(cropped_rgba).to_rgb8();
-        let token = ocr::OcrCancellationToken::new();
-        let lines = engine.run_image_cancellable(&cropped_rgb, &token)
-            .map_err(|e| format!("Manual OCR failed: {e}"))?;
-        let mut entries = ocr::to_entries_with(lines, merge_cfg);
-        for entry in &mut entries {
-            for p in &mut entry.quad.points {
-                p[0] += x0 as f32;
-                p[1] += y0 as f32;
+        // Clamp origin inside the image so crop_imm cannot panic on edge-touching spans.
+        let x0 = x0.min(img_w.saturating_sub(1));
+        let y0 = y0.min(img_h.saturating_sub(1));
+        let cw = cw.min(img_w.saturating_sub(x0).max(1));
+        let ch = ch.min(img_h.saturating_sub(y0).max(1));
+        let crop = image::imageops::crop_imm(&rgba, x0, y0, cw, ch).to_image();
+        decoded.push((idx, path, x0, y0, cw, ch, img_w, img_h, crop));
+    }
+    if decoded.is_empty() { return Err("no OCR jobs".to_string()); }
+    decoded.sort_by(|a, b| a.0.cmp(&b.0).then(a.3.cmp(&b.3)).then(a.2.cmp(&b.2)));
+    // Partition sorted pieces into stitch groups: consecutive images with
+    // overlapping x-range where the upper piece touches the bottom seam and
+    // the lower piece touches the top seam belong to one logical drag.
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for i in 0..decoded.len() {
+        if i == 0 {
+            groups.push(vec![0]);
+            continue;
+        }
+        let prev_i = *groups.last().and_then(|g| g.last()).unwrap_or(&0);
+        let (p_idx, _, p_x0, p_y0, p_cw, p_ch, p_img_w, p_img_h, _) = &decoded[prev_i];
+        let (c_idx, _, c_x0, c_y0, c_cw, _c_ch, c_img_w, _, _) = &decoded[i];
+        let consecutive = *c_idx == *p_idx + 1;
+        let mut stitch = false;
+        if consecutive && *p_img_w > 0 && *c_img_w > 0 {
+            let p_x0n = *p_x0 as f32 / *p_img_w as f32;
+            let p_x1n = (*p_x0 + *p_cw) as f32 / *p_img_w as f32;
+            let c_x0n = *c_x0 as f32 / *c_img_w as f32;
+            let c_x1n = (*c_x0 + *c_cw) as f32 / *c_img_w as f32;
+            let overlap = (p_x1n.min(c_x1n) - p_x0n.max(c_x0n)).max(0.0);
+            let min_w = (p_x1n - p_x0n).min(c_x1n - c_x0n).max(1e-6);
+            let x_overlap = overlap / min_w > 0.5;
+            let prev_touches_bottom = (*p_y0 + *p_ch) as i32 >= *p_img_h as i32 - 2;
+            let cur_touches_top = *c_y0 as i32 <= 2;
+            stitch = x_overlap && prev_touches_bottom && cur_touches_top;
+        }
+        if stitch {
+            if let Some(g) = groups.last_mut() { g.push(i); }
+        } else {
+            groups.push(vec![i]);
+        }
+    }
+    let mut per_image: HashMap<usize, Vec<NewEntry>> = HashMap::new();
+    for g in groups {
+        if g.len() == 1 {
+            let (idx, _, x0, y0, _, _, _, _, crop_rgba) = &decoded[g[0]];
+            let cropped_rgb = image::DynamicImage::ImageRgba8(crop_rgba.clone()).to_rgb8();
+            let token = ocr::OcrCancellationToken::new();
+            let lines = engine.run_image_cancellable(&cropped_rgb, &token)
+                .map_err(|e| format!("Manual OCR failed: {e}"))?;
+            let mut entries = ocr::to_entries_with(lines, merge_cfg);
+            for entry in &mut entries {
+                for p in &mut entry.quad.points {
+                    p[0] += *x0 as f32;
+                    p[1] += *y0 as f32;
+                }
+            }
+            per_image.entry(*idx).or_default().extend(entries);
+        } else {
+            // Stitched path: common width of first piece, scale the rest,
+            // single OCR over the vertical canvas, map quads back per image.
+            let common_w = decoded[g[0]].4;
+            if common_w == 0 { continue; }
+            // (idx, x0, y0, cw, ch, scaled_h, off_y, scaled_img)
+            let mut scaled: Vec<(usize, u32, u32, u32, u32, u32, u32, image::RgbaImage)> = Vec::new();
+            let mut total_h: u32 = 0;
+            for pi in &g {
+                let (idx, _, x0, y0, cw, ch, _, _, crop) = &decoded[*pi];
+                let scaled_h = if *cw == common_w {
+                    *ch
+                } else {
+                    ((*ch as f32 * common_w as f32 / *cw as f32).round().max(1.0)) as u32
+                };
+                let scaled_img = if *cw == common_w {
+                    crop.clone()
+                } else {
+                    image::imageops::resize(crop, common_w, scaled_h, image::imageops::FilterType::Triangle)
+                };
+                let off_y = total_h;
+                total_h += scaled_h;
+                scaled.push((*idx, *x0, *y0, *cw, *ch, scaled_h, off_y, scaled_img));
+            }
+            if total_h == 0 { continue; }
+            let mut stitched_rgba = image::RgbaImage::new(common_w, total_h);
+            for (_, _, _, _, _, _, off_y, img) in &scaled {
+                image::imageops::replace(&mut stitched_rgba, img, 0, *off_y as i64);
+            }
+            let stitched_rgb = image::DynamicImage::ImageRgba8(stitched_rgba).to_rgb8();
+            let token = ocr::OcrCancellationToken::new();
+            let lines = engine.run_image_cancellable(&stitched_rgb, &token)
+                .map_err(|e| format!("Manual OCR span failed: {e}"))?;
+            let mut entries = ocr::to_entries_with(lines, merge_cfg);
+            for mut entry in entries.drain(..) {
+                let ys: Vec<f32> = entry.quad.points.iter().map(|p| p[1]).collect();
+                if ys.is_empty() { continue; }
+                let y0e = ys.iter().cloned().fold(f32::INFINITY, f32::min);
+                let y1e = ys.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                // Assign to the piece with the largest vertical overlap.
+                let mut best: usize = 0;
+                let mut best_overlap: f32 = -1.0;
+                for (pi, (_, _, _, _, _, sh, off, _)) in scaled.iter().enumerate() {
+                    let lo = *off as f32;
+                    let hi = (*off + *sh) as f32;
+                    let overlap = (y1e.min(hi) - y0e.max(lo)).max(0.0);
+                    if overlap > best_overlap {
+                        best_overlap = overlap;
+                        best = pi;
+                    }
+                }
+                if best_overlap <= 0.0 {
+                    let yc = ys.iter().sum::<f32>() / ys.len() as f32;
+                    for (pi, (_, _, _, _, _, sh, off, _)) in scaled.iter().enumerate() {
+                        let lo = *off as f32;
+                        let hi = (*off + *sh) as f32;
+                        if yc >= lo && yc < hi {
+                            best = pi;
+                            break;
+                        }
+                    }
+                    if yc >= total_h as f32 {
+                        best = scaled.len() - 1;
+                    }
+                }
+                let (t_idx, t_x0, t_y0, t_cw, _, _, t_off, _) = &scaled[best];
+                let t_idx = *t_idx;
+                let factor = *t_cw as f32 / common_w as f32;
+                let lo = *t_off as f32;
+                let hi = (*t_off + scaled[best].5) as f32;
+                for p in &mut entry.quad.points {
+                    let y_clamped = p[1].clamp(lo, hi);
+                    let x_mapped = *t_x0 as f32 + p[0] * factor;
+                    let y_mapped = *t_y0 as f32 + (y_clamped - *t_off as f32) * factor;
+                    *p = [x_mapped, y_mapped];
+                }
+                per_image.entry(t_idx).or_default().push(entry);
             }
         }
-        per_image.entry(idx).or_default().extend(entries);
     }
     let mut out: Vec<(usize, Vec<NewEntry>)> = per_image.into_iter().collect();
     out.sort_by_key(|(idx,_)| *idx);
