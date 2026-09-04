@@ -98,7 +98,7 @@ impl Engine {
                 .commit_from_file(path)
                 .map_err(|e| {
                     if label == "aot" {
-                        format!("failed to load AOT inpainting model {}: {e}. Place inpainting_aot.onnx (opset 18, inputs img [B,3,H,W] + mask [B,1,H,W]) from https://github.com/zyddnys/manga-image-translator or converted ONNX.", path.display())
+                        format!("failed to load AOT inpainting model {}: {e}. Place inpainting_aot.onnx (opset 18, inputs img [B,3,H,W] + mask [B,1,H,W]) from https://huggingface.co/Liiesl/aot-inpainting-onnx/serve/main/inpainting_aot.onnx?download=true.", path.display())
                     } else {
                         format!("failed to load inpainting model {}: {e}", path.display())
                     }
@@ -119,7 +119,7 @@ impl Engine {
                 .commit_from_file(path)
                 .map_err(|e| {
                     if label == "aot" {
-                        format!("failed to load AOT inpainting model {}: {e}. Place inpainting_aot.onnx (opset 18, inputs img [B,3,H,W] + mask [B,1,H,W]) from https://github.com/zyddnys/manga-image-translator or converted ONNX.", path.display())
+                        format!("failed to load AOT inpainting model {}: {e}. Place inpainting_aot.onnx (opset 18, inputs img [B,3,H,W] + mask [B,1,H,W]) from https://huggingface.co/Liiesl/aot-inpainting-onnx/serve/main/inpainting_aot.onnx?download=true.", path.display())
                     } else {
                         format!("failed to load inpainting model {}: {e}", path.display())
                     }

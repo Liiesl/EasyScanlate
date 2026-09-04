@@ -15,7 +15,7 @@ pub struct ModelSpec {
     pub url: &'static str,
     /// Human-readable description.
     pub description: &'static str,
-    /// Whether this model is currently downloadable. `false` for deferred assets (e.g. AOT).
+    /// Whether this model is currently downloadable.
     pub available: bool,
     /// Legacy filename that this asset replaces (if any). Used for migration checks.
     pub replaces: Option<&'static str>,
@@ -70,14 +70,22 @@ pub const PPOCR_DET_TINY: ModelSpec = ModelSpec {
     replaces: None,
 };
 
-/// AOT inpainting model — not yet available, deferred.
-/// Included in the registry so callers can query `is_available()` and show a placeholder.
+pub const KOREAN_DICT: ModelSpec = ModelSpec {
+    id: "korean-dict",
+    filename: "ppocrv5_korean_dict.txt",
+    url: "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/refs/heads/main/ppocr/utils/dict/ppocrv5_korean_dict.txt",
+    description: "Korean PP-OCRv5 dict (upstream PaddleOCR)",
+    available: true,
+    replaces: None,
+};
+
+/// AOT inpainting model (optional lazy download, not part of mandatory onboarding).
 pub const AOT_INPAINT: ModelSpec = ModelSpec {
     id: "aot-inpaint",
     filename: "inpainting_aot.onnx",
-    url: "",
-    description: "AOT-GAN inpainting (deferred, not yet available)",
-    available: false,
+    url: "https://huggingface.co/Liiesl/aot-inpainting-onnx/serve/main/inpainting_aot.onnx?download=true",
+    description: "AOT-GAN inpainting (variable resolution, up to 1024)",
+    available: true,
     replaces: None,
 };
 
@@ -87,6 +95,7 @@ pub const MODELS: &[ModelSpec] = &[
     TEXT_STYLING,
     KOHARU_SEG,
     KOREAN_REC,
+    KOREAN_DICT,
     PPOCR_DET_TINY,
     AOT_INPAINT,
 ];
@@ -169,13 +178,14 @@ mod tests {
         assert!(ids.contains(&"text-styling"));
         assert!(ids.contains(&"koharu-seg"));
         assert!(ids.contains(&"korean-rec"));
+        assert!(ids.contains(&"korean-dict"));
         assert!(ids.contains(&"ppocr-det-tiny"));
         assert!(ids.contains(&"aot-inpaint"));
     }
 
     #[test]
-    fn aot_is_not_available() {
-        assert!(!is_available("aot-inpaint"));
+    fn aot_is_available() {
+        assert!(is_available("aot-inpaint"));
         assert!(is_available("lama-manga"));
     }
 
@@ -190,6 +200,7 @@ mod tests {
         assert!(LAMA_MANGA.url.contains("?download=true"));
         assert!(TEXT_STYLING.url.contains("?download=true"));
         assert!(KOHARU_SEG.url.contains("?download=true"));
+        assert!(AOT_INPAINT.url.contains("?download=true"));
     }
 
     #[test]

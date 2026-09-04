@@ -192,7 +192,7 @@ pub fn config_with(text_score: f32, max_side_len: u32) -> RapidOcrConfig {
     // Prefer onboarding-downloaded models in settings models_dir(), fallback to legacy crate-relative ../models.
     let det_path = easyscanlate_settings::resolve_model_path("PP-OCRv6_det_tiny.onnx");
     let rec_path = easyscanlate_settings::resolve_model_path("korean_PP-OCRv5_rec_mobile.onnx");
-    let dict_path = easyscanlate_settings::resolve_model_path("korean_dict.txt");
+    let dict_path = easyscanlate_settings::resolve_model_path("ppocrv5_korean_dict.txt");
     // Keep model_dir for error messages fallback, but use resolved paths.
     let _model_dir = PathBuf::from(MODEL_DIR);
     // Clamp to valid ranges; rapidocr_core::config::RapidOcrConfig::validate

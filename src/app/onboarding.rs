@@ -53,8 +53,6 @@ impl OnboardingState {
                 (spec.id.to_string(), spec.description.to_string(), status)
             })
             .collect();
-        // Also ensure korean_dict.txt is present (copied from legacy or embedded)
-        ensure_korean_dict();
     }
 
     #[cfg(not(feature = "models"))]
@@ -157,9 +155,11 @@ impl OnboardingState {
 
 #[cfg(feature = "models")]
 fn mandatory_specs() -> Vec<&'static ModelSpec> {
+    // AOT is optional (lazy download on first AOT use), everything else
+    // registered as available is mandatory for first-run.
     easyscanlate_models::MODELS
         .iter()
-        .filter(|m| m.available)
+        .filter(|m| m.available && m.id != "aot-inpaint")
         .collect()
 }
 
@@ -184,44 +184,6 @@ fn is_present(spec: &ModelSpec) -> bool {
 #[cfg(not(feature = "models"))]
 fn is_present(_spec: &ModelSpec) -> bool {
     true
-}
-
-fn ensure_korean_dict() {
-    let path = easyscanlate_settings::model_path("korean_dict.txt");
-    if path.exists() {
-        return;
-    }
-    // Try legacy copy (app crate manifest is workspace root)
-    let legacy = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models/korean_dict.txt");
-    if legacy.exists() {
-        let _ = easyscanlate_settings::ensure_models_dir();
-        let _ = std::fs::copy(&legacy, &path);
-        return;
-    }
-    // Also try settings crate relative legacy
-    let legacy2 = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../models/korean_dict.txt");
-    if legacy2.exists() {
-        let _ = easyscanlate_settings::ensure_models_dir();
-        let _ = std::fs::copy(&legacy2, &path);
-        return;
-    }
-    // Try exe-relative
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(dir) = exe.parent() {
-            let exe_legacy = dir.join("models").join("korean_dict.txt");
-            if exe_legacy.exists() {
-                let _ = easyscanlate_settings::ensure_models_dir();
-                let _ = std::fs::copy(&exe_legacy, &path);
-                return;
-            }
-        }
-    // Fallback: if bundled models/korean_dict.txt was embedded at build, write it
-    // We attempt to include via relative path at runtime: check if `models/korean_dict.txt` exists relative to current dir
-    let cwd_legacy = std::path::PathBuf::from("models/korean_dict.txt");
-    if cwd_legacy.exists() {
-        let _ = easyscanlate_settings::ensure_models_dir();
-        let _ = std::fs::copy(&cwd_legacy, &path);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -361,7 +323,6 @@ pub fn handle_model_done(app: &mut App, id: String, result: Result<(), String>) 
                     break;
                 }
             }
-            ensure_korean_dict();
         }
         Err(e) => {
             for (mid, _, st) in &mut state.models {
@@ -392,7 +353,6 @@ pub fn handle_model_done(app: &mut App, id: String, result: Result<(), String>) 
         state.error = None;
         app.onboarding_rx = None;
         app.onboarding_active_id = None;
-        ensure_korean_dict();
         // All done — refresh once more
         state.refresh_from_disk();
         Task::none()
