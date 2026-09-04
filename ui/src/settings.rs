@@ -34,6 +34,10 @@ const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);
 const CARD_BG: Color = Color::from_rgba8(255, 255, 255, 0.06);
 const CARD_BORDER: Color = Color::from_rgba8(255, 255, 255, 0.08);
 
+const DOCS_URL: &str = "https://docs.easyscanlate.site/workflow/your-first-project/";
+const BUG_URL: &str = "https://github.com/Liiesl/EasyScanlate/issues/new?template=bug_report.yml";
+const FEATURE_URL: &str = "https://github.com/Liiesl/EasyScanlate/issues/new?template=feature_request.yml";
+
 /// Writes one change into the shared settings store (write-through) and
 /// returns the single announcement event for the app.
 fn set(f: impl FnOnce(&mut easyscanlate_settings::Settings)) -> UiEvent {
@@ -551,6 +555,98 @@ fn appearance_tab_filtered(query: String) -> Element<'static, UiEvent> {
 // General tab — now grouped into cards + filtered
 // ---------------------------------------------------------------------------
 
+fn help_support_card() -> Element<'static, UiEvent> {
+    let col: Vec<Element<'static, UiEvent>> = vec![
+        card_header(
+            Icon::Info,
+            "Help & Support",
+            Some("Docs, ideas & bug reports"),
+        ),
+        row![
+            column![
+                text("First-project guide").size(scale::s(12.0)),
+                text("New here? Read the first-project guide.")
+                    .size(scale::s(11.0))
+                    .color(MUTED_FG),
+            ]
+            .spacing(scale::s(1.0))
+            .width(FillLength),
+            button(text("Documentation").size(scale::s(11.0)))
+                .padding([scale::s(6.0), scale::s(10.0)])
+                .style(crate::panel::button_style)
+                .on_press(UiEvent::OpenUrl(DOCS_URL.to_string())),
+        ]
+        .spacing(scale::s(8.0))
+        .align_y(iced::Alignment::Center)
+        .into(),
+        item_separator(),
+        row![
+            column![
+                text("Request a feature").size(scale::s(12.0)),
+                text("Have an idea? Request a feature.")
+                    .size(scale::s(11.0))
+                    .color(MUTED_FG),
+            ]
+            .spacing(scale::s(1.0))
+            .width(FillLength),
+            button(text("Request feature").size(scale::s(11.0)))
+                .padding([scale::s(6.0), scale::s(10.0)])
+                .style(crate::panel::button_style)
+                .on_press(UiEvent::OpenUrl(FEATURE_URL.to_string())),
+        ]
+        .spacing(scale::s(8.0))
+        .align_y(iced::Alignment::Center)
+        .into(),
+        item_separator(),
+        row![
+            column![
+                text("Report an issue").size(scale::s(12.0)),
+                text("Found a bug? Report the problem.")
+                    .size(scale::s(11.0))
+                    .color(MUTED_FG),
+            ]
+            .spacing(scale::s(1.0))
+            .width(FillLength),
+            button(text("Report issue").size(scale::s(11.0)))
+                .padding([scale::s(6.0), scale::s(10.0)])
+                .style(crate::panel::button_style)
+                .on_press(UiEvent::OpenUrl(BUG_URL.to_string())),
+        ]
+        .spacing(scale::s(8.0))
+        .align_y(iced::Alignment::Center)
+        .into(),
+    ];
+    container(column(col).spacing(scale::s(8.0)))
+        .padding(scale::s(10.0))
+        .style(|_| card_style())
+        .into()
+}
+
+fn help_support_visible(query: &str) -> bool {
+    matches_any(
+        query,
+        &[
+            "help",
+            "support",
+            "docs",
+            "documentation",
+            "manual",
+            "guide",
+            "workflow",
+            "first",
+            "project",
+            "feature",
+            "request",
+            "idea",
+            "bug",
+            "issue",
+            "report",
+            "github",
+            "general",
+        ],
+    )
+}
+
 fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
     let query_ref = query.as_str();
     let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
@@ -631,6 +727,11 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
             ];
             cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
         }
+    }
+
+    // ── Help & Support card
+    if help_support_visible(query_ref) {
+        cards.push(help_support_card());
     }
 
     // ── Empty state ───────────────────────────────────────────────
@@ -729,6 +830,9 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             ];
             cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
         }
+    }
+    if help_support_visible(query) {
+        cards.push(help_support_card());
     }
     cards
 }
