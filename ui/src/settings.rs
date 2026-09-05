@@ -1665,7 +1665,7 @@ fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
     let notes = state.update_notes();
 
     let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-    col.push(card_header(Icon::Download, "Updates", Some("Velopack — GitHub releases dotliie/EasyScanlate-test")));
+    col.push(card_header(Icon::Download, "Updates", Some("Velopack — GitHub releases Liiesl/EasyScanlate")));
     let auto_check = easyscanlate_settings::get(|s| s.auto_check_updates);
     col.push(
         column![
@@ -1721,7 +1721,7 @@ fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
         col.push(text("You're up to date.").size(scale::s(12.0)).color(Color::WHITE).into());
         col.push(text(format!("Current: v{}", current)).size(scale::s(11.0)).color(MUTED_FG).into());
         col.push(button(text("Check again").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateCheck).into());
-        col.push(helper_text("Checks GitHub dotliie/EasyScanlate-test — same endpoint old app used (update.py)."));
+        col.push(helper_text("Checks GitHub Liiesl/EasyScanlate — same endpoint old app used (update.py)."));
     }
 
     if available.is_none() && !ready && !downloading {

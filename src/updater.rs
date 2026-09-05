@@ -22,7 +22,7 @@ pub use velopack::UpdateInfo;
 pub struct UpdateInfo;
 
 #[cfg(feature = "updates")]
-const GITHUB_REPO: &str = "https://github.com/dotliie/EasyScanlate-test";
+const GITHUB_REPO: &str = "https://github.com/Liiesl/EasyScanlate";
 
 #[cfg(feature = "updates")]
 fn create_manager() -> Option<UpdateManager> {
