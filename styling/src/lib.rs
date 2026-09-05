@@ -7,14 +7,17 @@
 //!
 //! [`Engine`] holds one shared inference session (CPU-only),
 //! mirroring the inpainting crate's pattern. Callers pass an image
-//! path plus an entry's [`Quad`]; the quad's bounding box is squished to the
-//! model's fixed `160x64` input (the model was trained on stretched crops, so
-//! no aspect-ratio letterboxing), normalized, and classified.
+//! path plus an entry's [`Quad`]; the quad is perspective-warped flat and
+//! then squished to the model's fixed `160x64` input (the model was trained
+//! on flat stretched crops, so no aspect-ratio letterboxing), normalized,
+//! and classified. Near-upright quads (within [`Quad::SNAP_ANGLE_RAD`]) take
+//! the fast AABB path, which is identical to warping them.
 
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-use image::RgbImage;
+use image::{Rgb, RgbImage};
+use imageproc::geometric_transformations::{warp_into, Interpolation, Projection};
 use ndarray::{Array4, ArrayD};
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
@@ -105,9 +108,10 @@ impl Engine {
         Ok(Self(Arc::new(Mutex::new(session))))
     }
 
-    /// Decodes `path`, squishes `quad`'s bounding box to the model's `160x64`
-    /// input, and classifies the crop. The model was trained on stretched
-    /// crops, so no aspect-ratio padding is applied.
+    /// Decodes `path`, warps `quad` flat, squishes it to the model's `160x64`
+    /// input, and classifies the crop. The model was trained on flat
+    /// stretched crops, so rotated quads are de-skewed first and no
+    /// aspect-ratio padding is applied.
     pub fn predict_entry(
         &self,
         path: &str,
@@ -151,16 +155,59 @@ impl Engine {
     }
 }
 
+/// Warps `quad` flat so the styling model (trained on flat crops) sees
+/// de-skewed text. Near-upright quads take the fast AABB path; rotated ones
+/// are perspective-warped to their measured edge sizes. Degenerate (empty)
+/// quads fall back to the whole image.
+fn crop_quad(image: &RgbImage, quad: &Quad) -> RgbImage {
+    if quad.is_near_upright() {
+        return crop_aabb(image, quad);
+    }
+    warp_quad(image, quad).unwrap_or_else(|| crop_aabb(image, quad))
+}
+
 /// Crops the axis-aligned bounding box of `quad` from `image`, clamped to the
 /// image. Degenerate (empty) quads fall back to the whole image.
-fn crop_quad(image: &RgbImage, quad: &Quad) -> RgbImage {
+fn crop_aabb(image: &RgbImage, quad: &Quad) -> RgbImage {
     let [min_x, min_y, max_x, max_y] = quad.bounds();
     let (width, height) = image.dimensions();
+    if width == 0 || height == 0 {
+        return image.clone();
+    }
     let x0 = min_x.floor().clamp(0.0, width as f32 - 1.0) as u32;
     let y0 = min_y.floor().clamp(0.0, height as f32 - 1.0) as u32;
     let x1 = max_x.ceil().clamp((x0 + 1) as f32, width as f32) as u32;
     let y1 = max_y.ceil().clamp((y0 + 1) as f32, height as f32) as u32;
     image::imageops::crop_imm(image, x0, y0, x1 - x0, y1 - y0).to_image()
+}
+
+/// Perspective-warps `quad` (TL/TR/BR/BL) onto a flat `w x h` crop sized by
+/// its measured edge lengths. Returns `None` when the quad is degenerate or
+/// the homography cannot be solved, so the caller can fall back to the AABB.
+fn warp_quad(image: &RgbImage, quad: &Quad) -> Option<RgbImage> {
+    let [p0, p1, p2, p3] = quad.points;
+    if !quad.points.iter().all(|p| p[0].is_finite() && p[1].is_finite()) {
+        return None;
+    }
+    let dist = |a: [f32; 2], b: [f32; 2]| ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt();
+    let w = dist(p0, p1).max(dist(p3, p2)).round() as u32;
+    let h = dist(p0, p3).max(dist(p1, p2)).round() as u32;
+    // Clamp warp size: text boxes are small; huge quads (e.g. whole-image
+    // fallbacks) should not allocate a full-res warp before the 160x64
+    // squish.
+    let (w, h) = (w.clamp(1, 1024), h.clamp(1, 1024));
+    let from = [(p0[0], p0[1]), (p1[0], p1[1]), (p2[0], p2[1]), (p3[0], p3[1])];
+    let to = [(0.0, 0.0), (w as f32, 0.0), (w as f32, h as f32), (0.0, h as f32)];
+    let projection = Projection::from_control_points(from, to)?;
+    let mut out = RgbImage::new(w, h);
+    warp_into(
+        image,
+        &projection,
+        Interpolation::Bilinear,
+        Rgb([0, 0, 0]),
+        &mut out,
+    );
+    Some(out)
 }
 
 /// Squishes the crop to `160x64` (bicubic), exactly like the training
@@ -356,6 +403,30 @@ mod tests {
         assert_eq!(crop.dimensions(), (30, 20));
         assert_eq!(crop[(20, 10)], Rgb([9, 9, 9]));
         assert_eq!(crop[(0, 0)], Rgb([0, 0, 0]));
+    }
+
+    #[test]
+    fn crop_quad_warps_a_rotated_quad_flat() {
+        let mut image = RgbImage::from_pixel(100, 50, Rgb([0, 0, 0]));
+        image[(10, 15)] = Rgb([255, 255, 255]);
+        let quad = Quad {
+            points: [[10.0, 15.0], [40.0, 10.0], [40.0, 30.0], [10.0, 35.0]],
+        };
+        assert!(!quad.is_near_upright(), "test quad must take the warp path");
+        let crop = crop_quad(&image, &quad);
+        assert_eq!(crop.dimensions(), (30, 20), "flat quad edge sizes");
+        assert_eq!(crop[(0, 0)], Rgb([255, 255, 255]), "p0 maps to the origin");
+    }
+
+    #[test]
+    fn crop_quad_keeps_the_aabb_path_for_near_upright_jitter() {
+        let image = RgbImage::from_pixel(100, 50, Rgb([1, 2, 3]));
+        let quad = Quad {
+            points: [[10.0, 20.7], [40.0, 19.3], [40.0, 39.3], [10.0, 40.7]],
+        };
+        assert!(quad.is_near_upright());
+        let crop = crop_quad(&image, &quad);
+        assert_eq!(crop.dimensions(), (30, 22), "same as the AABB crop");
     }
 
     #[test]

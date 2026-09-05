@@ -341,6 +341,10 @@ pub fn to_entries(lines: Vec<OcrLine>) -> Vec<NewEntry> {
 }
 
 /// Like [`to_entries`], but with explicit merge tuning.
+///
+/// Stored quads keep the detector's rotation; near-upright jitter (within
+/// [`Quad::SNAP_ANGLE_RAD`]) collapses to the AABB so rendering, styling,
+/// and inpaint agree on what counts as upright.
 pub fn to_entries_with(lines: Vec<OcrLine>, cfg: MergeConfig) -> Vec<NewEntry> {
     merge_lines(lines, cfg)
         .into_iter()
@@ -348,7 +352,10 @@ pub fn to_entries_with(lines: Vec<OcrLine>, cfg: MergeConfig) -> Vec<NewEntry> {
             source: EntrySource::AutoOcr,
             text: line.text,
             score: line.score,
-            quad: Quad { points: line.bbox.points },
+            quad: Quad {
+                points: line.bbox.points,
+            }
+            .snap_if_near_upright(),
         })
         .collect()
 }
@@ -597,8 +604,10 @@ pub fn stitch(prev: Option<&RgbImage>, cur: &RgbImage, next: Option<&RgbImage>, 
 /// margin; [`resolve_boundary`] keeps the fuller capture.
 #[derive(Debug, Clone)]
 pub struct BoundaryCandidate {
-    /// AABB of the merged line in the producing run's canvas space.
-    pub canvas_quad: [f32; 4],
+    /// Full rotated quad of the merged line in the producing run's canvas
+    /// space (detector points, not the AABB). AABB matching still uses its
+    /// bounds, but the stored entry keeps the rotation.
+    pub canvas_quad: [[f32; 2]; 4],
     /// Ready-to-append entry in the last page's pixel space, quad possibly
     /// past its bottom edge.
     pub entry: NewEntry,
@@ -841,14 +850,15 @@ pub fn distribute(
             let scale = scaled[t].0;
             let dy = (band_bottom - offset(t) - margin_top as f32 - total) * scale;
             held.push(BoundaryCandidate {
-                canvas_quad: bounds,
+                canvas_quad: line.bbox.points,
                 entry: NewEntry {
                     source: EntrySource::AutoOcr,
                     text: line.text,
                     score: line.score,
                     quad: Quad {
                         points: line.bbox.points.map(|[x, y]| [x * scale, y * scale + dy]),
-                    },
+                    }
+                    .snap_if_near_upright(),
                 },
                 page: pages[t].0,
             });
@@ -868,7 +878,8 @@ pub fn distribute(
             score: line.score,
             quad: Quad {
                 points: line.bbox.points.map(|[x, y]| [x * scale, y * scale + dy]),
-            },
+            }
+            .snap_if_near_upright(),
         });
     }
 
@@ -895,18 +906,17 @@ pub fn transform_candidates(
     prev_boundary: u32,
     new_width: u32,
     new_margin_top: u32,
-) -> Vec<[f32; 4]> {
+) -> Vec<[[f32; 2]; 4]> {
     let scale = new_width as f32 / prev_width.max(1) as f32;
     candidates
         .iter()
         .map(|candidate| {
-            let [x0, y0, x1, y1] = candidate.canvas_quad;
-            [
-                x0 * scale,
-                (y0 - prev_boundary as f32) * scale + new_margin_top as f32,
-                x1 * scale,
-                (y1 - prev_boundary as f32) * scale + new_margin_top as f32,
-            ]
+            candidate.canvas_quad.map(|[x, y]| {
+                [
+                    x * scale,
+                    (y - prev_boundary as f32) * scale + new_margin_top as f32,
+                ]
+            })
         })
         .collect()
 }
@@ -937,9 +947,12 @@ pub struct Resolution {
 /// returned for append; a winning re-detection survives and flows through
 /// [`distribute`], which already stores top-margin entries past the seam on
 /// the run's first page. Unmatched candidates and lines are kept.
+///
+/// Matching and area comparison use AABB bounds, but the winner keeps its
+/// own rotated quad (no AABB union) so detector rotation survives the seam.
 pub fn resolve_boundary(
     candidates: &[BoundaryCandidate],
-    transformed: &[[f32; 4]],
+    transformed: &[[[f32; 2]; 4]],
     lines: Vec<OcrLine>,
 ) -> Resolution {
     let mut kept = lines;
@@ -950,13 +963,14 @@ pub fn resolve_boundary(
     let mut append: Vec<BoundaryCandidate> = Vec::new();
 
     for (candidate, quad) in candidates.iter().zip(transformed) {
+        let quad_bounds = points_bounds(quad);
         let mut best = None;
         let mut best_overlap = 0.0f32;
         for (i, line) in kept.iter().enumerate() {
             if matched[i] {
                 continue;
             }
-            let overlap = overlap_area(*quad, box_bounds(&line.bbox));
+            let overlap = overlap_area(quad_bounds, box_bounds(&line.bbox));
             if overlap > best_overlap {
                 best_overlap = overlap;
                 best = Some(i);
@@ -967,7 +981,7 @@ pub fn resolve_boundary(
             continue;
         };
         matched[i] = true;
-        let cand_area = quad_area(*quad);
+        let cand_area = quad_area(quad_bounds);
         let line_area = quad_area(box_bounds(&kept[i].bbox));
         let bigger = cand_area.max(line_area);
         // Within 10% the captures are effectively equal (OCR jitter): the
@@ -975,8 +989,8 @@ pub fn resolve_boundary(
         // capture wins outright.
         let tie = (cand_area - line_area).abs() <= 0.1 * bigger;
         let below_wins = if tie {
-            let above = -quad[1].min(0.0);
-            let below = quad[3].max(0.0);
+            let above = -quad_bounds[1].min(0.0);
+            let below = quad_bounds[3].max(0.0);
             below >= above
         } else {
             line_area > cand_area
@@ -984,16 +998,9 @@ pub fn resolve_boundary(
         let merged_text = merge_texts(&kept[i].text, &candidate.entry.text);
         if below_wins {
             // The re-detection won: it survives with the candidate's extra
-            // text and bbox merged in, then flows through dedup and
-            // distribute.
+            // text merged in, keeping its own rotated quad, then flows
+            // through dedup and distribute.
             kept[i].text = merged_text;
-            let [x0, y0, x1, y1] = box_bounds(&kept[i].bbox);
-            kept[i].bbox = rapidocr_core::types::Quad::from_xyxy(
-                x0.min(quad[0]),
-                y0.min(quad[1]),
-                x1.max(quad[2]),
-                y1.max(quad[3]),
-            );
         } else {
             // The candidate's capture won: drop the re-detection and append
             // the ready-to-append entry, carrying the re-detection's fuller
@@ -1093,12 +1100,20 @@ pub fn dedup_with_previous(
 }
 
 /// AABBs of a detected text box as `[min_x, min_y, max_x, max_y]`.
+/// Grouping, boundary matching, and height filtering stay on AABBs; the
+/// stored quad keeps the detector's rotation (snapped at the `NewEntry`
+/// boundary).
 fn box_bounds(quad: &rapidocr_core::types::Quad) -> [f32; 4] {
+    points_bounds(&quad.points)
+}
+
+/// AABB of raw quad points as `[min_x, min_y, max_x, max_y]`.
+fn points_bounds(points: &[[f32; 2]; 4]) -> [f32; 4] {
     let mut min_x = f32::INFINITY;
     let mut min_y = f32::INFINITY;
     let mut max_x = f32::NEG_INFINITY;
     let mut max_y = f32::NEG_INFINITY;
-    for point in &quad.points {
+    for point in points {
         min_x = min_x.min(point[0]);
         min_y = min_y.min(point[1]);
         max_x = max_x.max(point[0]);
@@ -1198,7 +1213,14 @@ fn merge_lines(lines: Vec<OcrLine>, cfg: MergeConfig) -> Vec<OcrLine> {
 
     groups
         .into_iter()
-        .map(|group| {
+        .map(|mut group| {
+            // Single-line groups keep the detector's rotated quad verbatim;
+            // only true multi-line merges collapse to the union AABB (which
+            // is upright by construction, so no snap needed here — snapping
+            // happens at the `NewEntry` boundary).
+            if group.lines.len() == 1 {
+                return group.lines.pop().expect("single-line group has one line");
+            }
             let text = group
                 .lines
                 .iter()
@@ -1258,6 +1280,45 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].text, "first");
         assert_eq!(entries[1].text, "second");
+    }
+
+    #[test]
+    fn single_lines_keep_their_rotated_quad() {
+        // A lone tilted detection must not collapse to its AABB: the stored
+        // entry keeps the detector points for rotated rendering / inpaint.
+        let tilted = OcrLine {
+            bbox: rapidocr_core::types::Quad {
+                points: [[10.0, 12.0], [90.0, 0.0], [90.0, 30.0], [10.0, 42.0]],
+            },
+            text: "tilted".to_string(),
+            score: 0.9,
+        };
+        let entries = to_entries(vec![tilted]);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].quad.points,
+            [[10.0, 12.0], [90.0, 0.0], [90.0, 30.0], [10.0, 42.0]]
+        );
+    }
+
+    #[test]
+    fn near_upright_jitter_snaps_to_the_aabb() {
+        // ~1deg tilt is inside the 5deg snap tolerance: stored as upright.
+        let jittered = OcrLine {
+            bbox: rapidocr_core::types::Quad {
+                points: [[10.0, 20.7], [90.0, 19.3], [90.0, 79.3], [10.0, 80.7]],
+            },
+            text: "flat".to_string(),
+            score: 0.9,
+        };
+        let entries = to_entries(vec![jittered]);
+        assert_eq!(entries.len(), 1);
+        let [x0, y0, x1, y1] = entries[0].quad.bounds();
+        assert_eq!(
+            entries[0].quad.points,
+            [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+            "near-upright quad must collapse to its AABB"
+        );
     }
 
     #[test]
@@ -1380,7 +1441,10 @@ mod tests {
         assert_eq!(bounds[0], [10.0, -50.0, 90.0, -20.0], "top margin, out of page");
         assert_eq!(bounds[1], [10.0, 50.0, 90.0, 80.0], "page body");
         assert_eq!(out.held.len(), 1, "bottom margin must be held, not stored");
-        assert_eq!(out.held[0].canvas_quad, [10.0, 650.0, 90.0, 680.0]);
+        assert_eq!(
+            out.held[0].canvas_quad,
+            [[10.0, 650.0], [90.0, 650.0], [90.0, 680.0], [10.0, 680.0]]
+        );
         assert_eq!(out.held[0].page, 0);
         assert_eq!(out.held[0].entry.quad.bounds(), [10.0, 450.0, 90.0, 480.0]);
         assert_eq!(out.boundary, 600, "seam at the page's bottom edge");
@@ -1419,7 +1483,10 @@ mod tests {
         assert_eq!(out.held[0].page, 1);
         assert_eq!(out.held[0].entry.text, "below");
         assert_eq!(out.held[0].entry.quad.bounds(), [10.0, 310.0, 90.0, 330.0]);
-        assert_eq!(out.held[0].canvas_quad, [10.0, 710.0, 90.0, 730.0]);
+        assert_eq!(
+            out.held[0].canvas_quad,
+            [[10.0, 710.0], [90.0, 710.0], [90.0, 730.0], [10.0, 730.0]]
+        );
         assert_eq!(out.boundary, 700);
     }
 
@@ -1666,13 +1733,17 @@ mod tests {
         );
     }
 
+    fn quad_points(x0: f32, y0: f32, x1: f32, y1: f32) -> [[f32; 2]; 4] {
+        [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+    }
+
     fn candidate(canvas: [f32; 4], page: usize) -> BoundaryCandidate {
         candidate_text(canvas, page, "held")
     }
 
     fn candidate_text(canvas: [f32; 4], page: usize, text: &str) -> BoundaryCandidate {
         BoundaryCandidate {
-            canvas_quad: canvas,
+            canvas_quad: quad_points(canvas[0], canvas[1], canvas[2], canvas[3]),
             entry: NewEntry {
                 source: EntrySource::AutoOcr,
                 text: text.to_string(),
@@ -1689,7 +1760,7 @@ mod tests {
     /// `(appended pages' entries texts, kept lines' texts)`.
     fn resolve(
         candidates: &[BoundaryCandidate],
-        transformed: &[[f32; 4]],
+        transformed: &[[[f32; 2]; 4]],
         lines: Vec<OcrLine>,
     ) -> (Vec<String>, Vec<String>) {
         let out = resolve_boundary(candidates, transformed, lines);
@@ -1703,7 +1774,11 @@ mod tests {
     fn transform_candidates_maps_candidates_into_the_next_canvas() {
         let candidates = vec![candidate([10.0, 590.0, 90.0, 650.0], 0)];
         let transformed = transform_candidates(&candidates, 100, 600, 200, 0);
-        assert_eq!(transformed, vec![[20.0, -20.0, 180.0, 100.0]], "scale + seam shift");
+        assert_eq!(
+            transformed,
+            vec![quad_points(20.0, -20.0, 180.0, 100.0)],
+            "scale + seam shift"
+        );
     }
 
     #[test]
@@ -1712,7 +1787,7 @@ mod tests {
         // positive; the seam itself maps to 0.
         let candidates = vec![candidate([0.0, 100.0, 50.0, 700.0], 0)];
         let transformed = transform_candidates(&candidates, 200, 600, 100, 0);
-        assert_eq!(transformed, vec![[0.0, -250.0, 25.0, 50.0]]);
+        assert_eq!(transformed, vec![quad_points(0.0, -250.0, 25.0, 50.0)]);
     }
 
     #[test]
@@ -1721,7 +1796,29 @@ mod tests {
         // seam lands at the strip's height, not at 0.
         let candidates = vec![candidate([10.0, 590.0, 90.0, 650.0], 0)];
         let transformed = transform_candidates(&candidates, 100, 600, 200, 320);
-        assert_eq!(transformed, vec![[20.0, 300.0, 180.0, 420.0]]);
+        assert_eq!(transformed, vec![quad_points(20.0, 300.0, 180.0, 420.0)]);
+    }
+
+    #[test]
+    fn transform_candidates_preserves_rotation_per_point() {
+        // A tilted quad maps each corner independently (no AABB collapse).
+        let tilted = BoundaryCandidate {
+            canvas_quad: [[10.0, 590.0], [90.0, 600.0], [90.0, 650.0], [10.0, 640.0]],
+            entry: NewEntry {
+                source: EntrySource::AutoOcr,
+                text: "tilted".to_string(),
+                score: 0.9,
+                quad: Quad {
+                    points: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                },
+            },
+            page: 0,
+        };
+        let transformed = transform_candidates(&tilted, 100, 600, 200, 0);
+        assert_eq!(
+            transformed,
+            vec![[[20.0, -20.0], [180.0, 0.0], [180.0, 100.0], [20.0, 80.0]]]
+        );
     }
 
     #[test]
@@ -1730,7 +1827,7 @@ mod tests {
         // candidate's canvas (ends at +90): the re-detection shows it fully
         // (to +90) but crops the top at -100. The candidate is fuller.
         let candidates = vec![candidate([0.0, -150.0, 100.0, 90.0], 0)];
-        let (append, kept) = resolve(&candidates, &[[0.0, -150.0, 100.0, 90.0]], vec![
+        let (append, kept) = resolve(&candidates, &[quad_points(0.0, -150.0, 100.0, 90.0)], vec![
             line("redo", 0.0, -100.0, 100.0, 90.0, 0.9),
         ]);
         assert_eq!(append, vec!["held".to_string()], "candidate capture wins");
@@ -1743,7 +1840,7 @@ mod tests {
         // re-detection's canvas (starts at -50); the candidate's capture was
         // cropped at the margin (+100). The re-detection is fuller.
         let candidates = vec![candidate([0.0, -50.0, 100.0, 100.0], 0)];
-        let (append, kept) = resolve(&candidates, &[[0.0, -50.0, 100.0, 100.0]], vec![
+        let (append, kept) = resolve(&candidates, &[quad_points(0.0, -50.0, 100.0, 100.0)], vec![
             line("redo", 0.0, -50.0, 100.0, 150.0, 0.9),
         ]);
         assert!(append.is_empty(), "candidate must lose");
@@ -1755,14 +1852,14 @@ mod tests {
         // Small bubble fully inside the overlap band: both captures are full
         // (equal areas), so the page with more of the bubble decides.
         let mostly_above = vec![candidate([0.0, -100.0, 100.0, 90.0], 0)];
-        let (append, kept) = resolve(&mostly_above, &[[0.0, -100.0, 100.0, 90.0]], vec![
+        let (append, kept) = resolve(&mostly_above, &[quad_points(0.0, -100.0, 100.0, 90.0)], vec![
             line("redo", 0.0, -100.0, 100.0, 90.0, 0.9),
         ]);
         assert_eq!(append, vec!["held".to_string()], "more area above the seam");
         assert!(kept.is_empty());
 
         let mostly_below = vec![candidate([0.0, -90.0, 100.0, 100.0], 0)];
-        let (append, kept) = resolve(&mostly_below, &[[0.0, -90.0, 100.0, 100.0]], vec![
+        let (append, kept) = resolve(&mostly_below, &[quad_points(0.0, -90.0, 100.0, 100.0)], vec![
             line("redo", 0.0, -90.0, 100.0, 100.0, 0.9),
         ]);
         assert!(append.is_empty(), "more area below the seam");
@@ -1772,7 +1869,7 @@ mod tests {
     #[test]
     fn resolve_flushes_unmatched_candidates_and_keeps_unmatched_lines() {
         let candidates = vec![candidate([0.0, -100.0, 100.0, 90.0], 0)];
-        let (append, kept) = resolve(&candidates, &[[0.0, -100.0, 100.0, 90.0]], vec![
+        let (append, kept) = resolve(&candidates, &[quad_points(0.0, -100.0, 100.0, 90.0)], vec![
             line("own", 0.0, 500.0, 100.0, 530.0, 0.9),
         ]);
         assert_eq!(append, vec!["held".to_string()], "no re-detection: flushed");
@@ -1787,7 +1884,10 @@ mod tests {
             candidate([0.0, -150.0, 100.0, 90.0], 0),
             candidate([200.0, -150.0, 300.0, 90.0], 0),
         ];
-        let transformed = vec![[0.0, -150.0, 100.0, 90.0], [200.0, -150.0, 300.0, 90.0]];
+        let transformed = vec![
+            quad_points(0.0, -150.0, 100.0, 90.0),
+            quad_points(200.0, -150.0, 300.0, 90.0),
+        ];
         let (append, kept) = resolve(&candidates, &transformed, vec![
             line("redo", 0.0, -100.0, 100.0, 90.0, 0.9),
         ]);
@@ -1801,7 +1901,7 @@ mod tests {
         // re-detection read the leading dots the candidate missed. The
         // candidate wins the area but its text must carry the dots.
         let candidates = vec![candidate_text([0.0, -150.0, 100.0, 90.0], 0, "떠나시는 겁니까")];
-        let (append, kept) = resolve(&candidates, &[[0.0, -150.0, 100.0, 90.0]], vec![
+        let (append, kept) = resolve(&candidates, &[quad_points(0.0, -150.0, 100.0, 90.0)], vec![
             line("..떠나시는 겁니까", 0.0, -100.0, 100.0, 90.0, 0.9),
         ]);
         assert_eq!(append, vec!["..떠나시는 겁니까".to_string()]);
@@ -1813,7 +1913,7 @@ mod tests {
         // The re-detection is fuller; the candidate's text adds a part the
         // re-detection's canvas cut. The kept line must carry both.
         let candidates = vec![candidate_text([0.0, -150.0, 100.0, 90.0], 0, "떠나시는")];
-        let (append, kept) = resolve(&candidates, &[[0.0, -150.0, 100.0, 90.0]], vec![
+        let (append, kept) = resolve(&candidates, &[quad_points(0.0, -150.0, 100.0, 90.0)], vec![
             line("..떠나시는 겁니까", 0.0, -150.0, 100.0, 200.0, 0.9),
         ]);
         assert!(append.is_empty());
@@ -1821,9 +1921,11 @@ mod tests {
     }
 
     #[test]
-    fn resolve_unions_the_winning_redetection_bbox_with_the_candidate() {
+    fn resolve_keeps_the_winning_redetection_quad_without_union() {
+        // The winner keeps its own rotated quad (no AABB union) so detector
+        // rotation survives the seam; text still merges.
         let candidates = vec![candidate([0.0, -150.0, 100.0, 90.0], 0)];
-        let out = resolve_boundary(&candidates, &[[0.0, -150.0, 100.0, 90.0]], vec![
+        let out = resolve_boundary(&candidates, &[quad_points(0.0, -150.0, 100.0, 90.0)], vec![
             line("redo", 0.0, -150.0, 100.0, 200.0, 0.9),
         ]);
         assert!(out.append.is_empty());
@@ -1831,7 +1933,28 @@ mod tests {
         assert_eq!(
             box_bounds(&out.kept[0].bbox),
             [0.0, -150.0, 100.0, 200.0],
-            "union of the candidate and re-detection boxes"
+            "winning re-detection keeps its own quad"
+        );
+    }
+
+    #[test]
+    fn resolve_keeps_a_tilted_winning_quad_verbatim() {
+        // Tilted re-detection wins on area: its points must flow through
+        // untouched (no axis-aligned union with the candidate).
+        let tilted = OcrLine {
+            bbox: rapidocr_core::types::Quad {
+                points: [[0.0, -140.0], [100.0, -150.0], [100.0, 190.0], [0.0, 200.0]],
+            },
+            text: "redo".to_string(),
+            score: 0.9,
+        };
+        let candidates = vec![candidate([0.0, -150.0, 100.0, 90.0], 0)];
+        let out = resolve_boundary(&candidates, &[quad_points(0.0, -150.0, 100.0, 90.0)], vec![tilted]);
+        assert!(out.append.is_empty());
+        assert_eq!(out.kept.len(), 1);
+        assert_eq!(
+            out.kept[0].bbox.points,
+            [[0.0, -140.0], [100.0, -150.0], [100.0, 190.0], [0.0, 200.0]],
         );
     }
 
@@ -1840,7 +1963,7 @@ mod tests {
         // The re-detection wins; the candidate's text is a cut misread of the
         // same sliver, not extra text — it must not be concatenated in.
         let candidates = vec![candidate_text([0.0, -150.0, 100.0, 90.0], 0, "전하를 지켜즈게")];
-        let (append, kept) = resolve(&candidates, &[[0.0, -150.0, 100.0, 90.0]], vec![
+        let (append, kept) = resolve(&candidates, &[quad_points(0.0, -150.0, 100.0, 90.0)], vec![
             line("..전하를 지켜주게 숙빈", 0.0, -150.0, 100.0, 200.0, 0.9),
         ]);
         assert!(append.is_empty());
@@ -2013,9 +2136,9 @@ mod tests {
         let id0 = project.add_image("p0.png", 100.0, 100.0);
         let state = BoundaryState {
             candidates: vec![
-                BoundaryCandidate { canvas_quad: [0.0, 0.0, 1.0, 1.0], entry: entry("a"), page: 0 },
-                BoundaryCandidate { canvas_quad: [0.0, 0.0, 1.0, 1.0], entry: entry("b"), page: 0 },
-                BoundaryCandidate { canvas_quad: [0.0, 0.0, 1.0, 1.0], entry: entry("c"), page: 5 },
+                BoundaryCandidate { canvas_quad: quad_points(0.0, 0.0, 1.0, 1.0), entry: entry("a"), page: 0 },
+                BoundaryCandidate { canvas_quad: quad_points(0.0, 0.0, 1.0, 1.0), entry: entry("b"), page: 0 },
+                BoundaryCandidate { canvas_quad: quad_points(0.0, 0.0, 1.0, 1.0), entry: entry("c"), page: 5 },
             ],
             width: 100,
             boundary: 600,

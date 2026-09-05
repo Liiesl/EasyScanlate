@@ -44,6 +44,76 @@ pub struct Quad {
 }
 
 impl Quad {
+    /// Upright-snap tolerance: quads tilted less than this collapse to their
+    /// AABB so near-flat detector jitter doesn't produce rotated rendering,
+    /// styling crops, or inpaint masks. 5 degrees (~0.087 rad).
+    pub const SNAP_ANGLE_RAD: f32 = 0.087_266_46;
+    /// Corner-deviation floor (px) for the upright snap.
+    pub const SNAP_CORNER_PX: f32 = 1.5;
+    /// Corner-deviation allowance as a fraction of the quad's short side.
+    pub const SNAP_CORNER_RATIO: f32 = 0.02;
+
+    /// Axis-aligned quad from `[min_x, min_y, max_x, max_y]` bounds.
+    pub fn from_xyxy(x0: f32, y0: f32, x1: f32, y1: f32) -> Self {
+        Self {
+            points: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+        }
+    }
+
+    /// Whether this quad is within snap tolerance of flat-upright: its
+    /// corners sit on its AABB corners (within `max(1.5px, 2% of short
+    /// side)`) and its top edge is within 5 degrees of horizontal.
+    pub fn is_near_upright(&self) -> bool {
+        let [min_x, min_y, max_x, max_y] = self.bounds();
+        if !(min_x.is_finite() && min_y.is_finite() && max_x.is_finite() && max_y.is_finite()) {
+            return true;
+        }
+        let w = max_x - min_x;
+        let h = max_y - min_y;
+        if w <= 0.0 || h <= 0.0 {
+            return true;
+        }
+        let ordered = self.ordered();
+        let corners = [
+            [min_x, min_y],
+            [max_x, min_y],
+            [max_x, max_y],
+            [min_x, max_y],
+        ];
+        let mut max_dev2 = 0.0f32;
+        for (point, corner) in ordered.iter().zip(corners) {
+            let dx = point[0] - corner[0];
+            let dy = point[1] - corner[1];
+            max_dev2 = max_dev2.max(dx * dx + dy * dy);
+        }
+        let tol = Self::SNAP_CORNER_PX.max(Self::SNAP_CORNER_RATIO * w.min(h));
+        if max_dev2 > tol * tol {
+            return false;
+        }
+        let dx = ordered[1][0] - ordered[0][0];
+        let dy = ordered[1][1] - ordered[0][1];
+        if dx <= 0.0 {
+            return false;
+        }
+        let mut angle = dy.atan2(dx).abs();
+        if angle > std::f32::consts::FRAC_PI_2 {
+            angle = std::f32::consts::PI - angle;
+        }
+        angle <= Self::SNAP_ANGLE_RAD
+    }
+
+    /// Collapse to the AABB when [`Quad::is_near_upright`], else `self`.
+    /// Single choke point so auto-OCR rendering, styling, and inpaint agree
+    /// on what counts as upright.
+    pub fn snap_if_near_upright(self) -> Self {
+        if self.is_near_upright() {
+            let [min_x, min_y, max_x, max_y] = self.bounds();
+            Self::from_xyxy(min_x, min_y, max_x, max_y)
+        } else {
+            self
+        }
+    }
+
     /// Axis-aligned bounding box as `[min_x, min_y, max_x, max_y]`.
     pub fn bounds(&self) -> [f32; 4] {
         let min_x = self.points.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min);
@@ -223,6 +293,44 @@ mod tests {
     fn intersects_rect_fully_contained() {
         let q = quad(10.0, 10.0, 90.0, 90.0);
         assert!(q.intersects_rect([0.0, 0.0, 100.0, 100.0]));
+    }
+
+    #[test]
+    fn upright_quad_snaps_to_aabb() {
+        let q = quad(10.0, 20.0, 90.0, 80.0);
+        assert!(q.is_near_upright());
+        assert_eq!(q.snap_if_near_upright(), q);
+    }
+
+    #[test]
+    fn small_jitter_snaps_to_upright() {
+        // ~2deg tilt on an 80x60 box: corner drift ~1.4px, inside tolerance.
+        let q = quad(10.0, 20.0, 90.0, 80.0).rotate([50.0, 50.0], 0.035);
+        assert!(q.is_near_upright(), "2deg jitter should snap: {q:?}");
+        let snapped = q.snap_if_near_upright();
+        let [x0, y0, x1, y1] = snapped.bounds();
+        assert_eq!(snapped.points, [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
+    }
+
+    #[test]
+    fn five_degree_tilt_is_the_boundary() {
+        let center = [50.0, 50.0];
+        let just_inside = quad(0.0, 20.0, 100.0, 80.0).rotate(center, 0.08);
+        let just_outside = quad(0.0, 20.0, 100.0, 80.0).rotate(center, 0.12);
+        assert!(just_inside.is_near_upright(), "4.6deg should snap");
+        assert!(!just_outside.is_near_upright(), "6.9deg should stay rotated");
+        assert_eq!(
+            just_outside.snap_if_near_upright().points,
+            just_outside.points,
+            "rotated quad must be preserved as-is"
+        );
+    }
+
+    #[test]
+    fn clearly_rotated_quad_is_preserved() {
+        let q = quad(0.0, 0.0, 100.0, 50.0).rotate([50.0, 25.0], 0.5);
+        assert!(!q.is_near_upright());
+        assert_eq!(q.snap_if_near_upright().points, q.points);
     }
 }
 
