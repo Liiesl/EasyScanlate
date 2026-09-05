@@ -17,6 +17,7 @@ pub(crate) fn close_tab_immediate(app: &mut App, id: TabId) -> Task<Message> {
         if app.tabs[idx].is_home() {
             return Task::none();
         }
+        crate::app::export::cancel_export_for_tab(app, id);
         app.engines.queue.cancel_pending_for_tab(id);
         let freed = !app.engines.queue.cancel_running_for_tab(id).is_empty();
         let promote = if freed {
@@ -143,6 +144,9 @@ pub fn handle_close_others(app: &mut App, raw: u64) -> Task<Message> {
         return Task::none();
     }
     let remove_ids: Vec<TabId> = app.tabs.iter().filter(|t| t.id != keep && t.is_project()).map(|t| t.id).collect();
+    for rid in &remove_ids {
+        crate::app::export::cancel_export_for_tab(app, *rid);
+    }
     cleanup_queue_for_tabs(app, &remove_ids);
     let keep_idx = app.tabs.iter().position(|t| t.id == keep);
     if let Some(kidx) = keep_idx {
@@ -170,6 +174,9 @@ pub fn handle_close_all(app: &mut App) -> Task<Message> {
         return Task::none();
     }
     let remove_ids: Vec<TabId> = app.tabs.iter().filter(|t| t.is_project()).map(|t| t.id).collect();
+    for rid in &remove_ids {
+        crate::app::export::cancel_export_for_tab(app, *rid);
+    }
     cleanup_queue_for_tabs(app, &remove_ids);
     app.tabs.retain(|t| t.is_home());
     app.active = 0;

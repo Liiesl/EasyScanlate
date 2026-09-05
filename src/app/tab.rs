@@ -234,6 +234,17 @@ pub struct Tab {
     pub loading: bool,
     pub loading_path: Option<std::path::PathBuf>,
     pub loading_phase: f32,
+
+    // image export progress (streaming, parallel workers)
+    pub exporting: bool,
+    pub export_total: usize,
+    pub export_done: usize,
+    pub export_failed: usize,
+    pub export_errors: Vec<String>,
+    pub export_folder: Option<std::path::PathBuf>,
+    /// Shared abort flag for the running export stream. Checked per chunk;
+    /// set by `ExportCancel` so late `ExportStreamRun` messages are ignored.
+    pub export_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl Tab {
@@ -376,6 +387,13 @@ impl Tab {
             loading: false,
             loading_path: None,
             loading_phase: 0.0,
+            exporting: false,
+            export_total: 0,
+            export_done: 0,
+            export_failed: 0,
+            export_errors: Vec::new(),
+            export_folder: None,
+            export_cancel: None,
         }
     }
 

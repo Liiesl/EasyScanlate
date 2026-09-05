@@ -1,11 +1,14 @@
 use std::cell::RefCell;
 use std::path::{Path as FsPath, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use iced::advanced::graphics::geometry::{self, Fill, Stroke, Text};
 use iced::advanced::graphics::geometry::Path as GeomPath;
+use iced::futures::{SinkExt, StreamExt};
 use iced::{Font, Point, Rectangle, Size, Vector, Radians};
 use image::RgbaImage;
+use rayon::prelude::*;
 use tiny_skia::{FillRule, Mask, Paint, Pixmap, PremultipliedColorU8, Rect, Shader, Transform};
 
 use easyscanlate_model::Project;
@@ -126,6 +129,11 @@ struct ExportFrame {
     stack: Vec<Transform>,
     clip: Option<Rectangle>,
     clip_stack: Vec<Option<Rectangle>>,
+    // Single-entry cache for the full-size clip mask. Gradient text draws
+    // every glyph once per band with the same clip, so rebuilding
+    // `Mask::new(w,h)` per glyph was the dominant raster cost. Same bits,
+    // just reused (bit-identical output).
+    mask_cache: RefCell<Option<(u32, u32, u32, u32, u32, u32, Mask)>>,
 }
 
 impl ExportFrame {
@@ -136,6 +144,7 @@ impl ExportFrame {
             stack: Vec::new(),
             clip: None,
             clip_stack: Vec::new(),
+            mask_cache: RefCell::new(None),
         }
     }
 
@@ -154,21 +163,31 @@ impl ExportFrame {
         let y = clip.y.max(0.0);
         let rw = (clip.width).min(w as f32 - x).max(0.0);
         let rh = (clip.height).min(h as f32 - y).max(0.0);
-        if rw <= 0.0 || rh <= 0.0 {
-            // empty clip -> fully masked (nothing draws)
-            let m = Mask::new(w, h)?;
-            // leave all zero
-            return Some(m);
+        let key = (w, h, x.to_bits(), y.to_bits(), rw.to_bits(), rh.to_bits());
+        if let Some((kw, kh, kx, ky, krw, krh, cached)) = self.mask_cache.borrow().as_ref()
+            && (*kw, *kh, *kx, *ky, *krw, *krh) == key
+        {
+            return Some(cached.clone());
         }
-        let mut mask = Mask::new(w, h)?;
-        let rect = Rect::from_xywh(x, y, rw, rh)?;
-        let path = {
-            let mut b = tiny_skia::PathBuilder::new();
-            b.push_rect(rect);
-            b.finish()?
-        };
-        mask.fill_path(&path, FillRule::Winding, false, Transform::identity());
-        Some(mask)
+        let built = (|| {
+            if rw <= 0.0 || rh <= 0.0 {
+                // empty clip -> fully masked (nothing draws)
+                let m = Mask::new(w, h)?;
+                // leave all zero
+                return Some(m);
+            }
+            let mut mask = Mask::new(w, h)?;
+            let rect = Rect::from_xywh(x, y, rw, rh)?;
+            let path = {
+                let mut b = tiny_skia::PathBuilder::new();
+                b.push_rect(rect);
+                b.finish()?
+            };
+            mask.fill_path(&path, FillRule::Winding, false, Transform::identity());
+            Some(mask)
+        })()?;
+        *self.mask_cache.borrow_mut() = Some((key.0, key.1, key.2, key.3, key.4, key.5, built.clone()));
+        Some(built)
     }
 }
 
@@ -226,6 +245,7 @@ impl geometry::frame::Backend for ExportFrame {
             stack: self.stack.clone(),
             clip: Some(new_clip),
             clip_stack: self.clip_stack.clone(),
+            mask_cache: RefCell::new(None),
         }
     }
     fn paste(&mut self, _frame: Self) {
@@ -302,33 +322,44 @@ impl geometry::frame::Backend for ExportFrame {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers: Pixmap <-> RgbaImage
+// Helpers: Pixmap <-> RgbaImage (bit-identical, parallel)
 // ---------------------------------------------------------------------------
 fn rgba_to_pixmap(img: &RgbaImage) -> Pixmap {
     let (w, h) = img.dimensions();
     let mut pix = Pixmap::new(w, h).unwrap_or_else(|| Pixmap::new(1, 1).unwrap());
-    // tiny-skia expects premultiplied; image crate stores straight
-    for (i, px) in img.pixels().enumerate() {
-        let [r, g, b, a] = px.0;
-        // premultiply
-        let pa = PremultipliedColorU8::from_rgba(r, g, b, a).unwrap_or(PremultipliedColorU8::from_rgba(0, 0, 0, 0).unwrap());
-        pix.pixels_mut()[i] = pa;
-    }
+    // tiny-skia expects premultiplied; image crate stores straight.
+    // Same per-pixel math as before (`from_rgba` + transparent fallback),
+    // just spread across cores. Output bytes are identical.
+    let raw = img.as_raw();
+    pix.pixels_mut()
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(i, dst)| {
+            let o = i * 4;
+            let (r, g, b, a) = (raw[o], raw[o + 1], raw[o + 2], raw[o + 3]);
+            // premultiply
+            *dst = PremultipliedColorU8::from_rgba(r, g, b, a)
+                .unwrap_or(PremultipliedColorU8::TRANSPARENT);
+        });
     pix
 }
 
 fn pixmap_to_rgba(pix: Pixmap) -> RgbaImage {
     let w = pix.width();
     let h = pix.height();
-    // unpremultiply to straight for image crate png/jpeg
-    let data: Vec<u8> = pix
-        .pixels()
-        .iter()
-        .flat_map(|p| {
-            let c = p.demultiply();
-            [c.red(), c.green(), c.blue(), c.alpha()]
-        })
-        .collect();
+    // unpremultiply to straight for image crate png/jpeg — same `demultiply`
+    // math as before, parallelized over rows. Identical bytes.
+    let src = pix.pixels();
+    let mut data = vec![0u8; src.len() * 4];
+    data.par_chunks_mut(4)
+        .enumerate()
+        .for_each(|(i, chunk)| {
+            let c = src[i].demultiply();
+            chunk[0] = c.red();
+            chunk[1] = c.green();
+            chunk[2] = c.blue();
+            chunk[3] = c.alpha();
+        });
     RgbaImage::from_raw(w, h, data).expect("pixmap size")
 }
 
@@ -354,10 +385,74 @@ fn handle_to_rgba(handle: &iced::widget::image::Handle) -> Option<RgbaImage> {
     }
 }
 
+#[allow(dead_code)]
 fn rasterize_page(
     base: RgbaImage,
     inpaint_raw: &[( [f32;4], RgbaImage )],
     project: &Project,
+    image_id: easyscanlate_model::ImageId,
+    font: Font,
+) -> RgbaImage {
+    let snapshot = ExportSnapshot::build(project);
+    rasterize_page_with_snapshot(base, inpaint_raw, &snapshot, image_id, font)
+}
+
+// Precomputed per-export snapshot so 90–200 pages don't rebuild
+// `global_offsets` + `owner_to_idx` + visible entry list per page.
+// Same predicates/order as before — identical output, O(P+E) build.
+#[derive(Clone)]
+struct SnapshotEntry {
+    id: easyscanlate_model::EntryId,
+    image_id: easyscanlate_model::ImageId,
+    quad: easyscanlate_model::Quad,
+    text: String,
+    style: easyscanlate_model::EntryStyle,
+}
+
+#[derive(Clone)]
+pub(crate) struct ExportSnapshot {
+    global_offsets: Vec<f32>,
+    owner_to_idx: std::collections::HashMap<easyscanlate_model::ImageId, usize>,
+    owner_widths: Vec<f32>,
+    page_ids: Vec<easyscanlate_model::ImageId>,
+    entries: Vec<SnapshotEntry>,
+}
+
+impl ExportSnapshot {
+    fn build(project: &Project) -> Self {
+        let images = project.images();
+        let mut global_offsets = Vec::with_capacity(images.len());
+        let mut cur = 0.0f32;
+        for m in images {
+            global_offsets.push(cur);
+            cur += m.height;
+        }
+        let mut owner_to_idx = std::collections::HashMap::with_capacity(images.len() * 2);
+        let mut owner_widths = Vec::with_capacity(images.len());
+        let mut page_ids = Vec::with_capacity(images.len());
+        for (i, m) in images.iter().enumerate() {
+            owner_to_idx.insert(m.id, i);
+            owner_widths.push(m.width);
+            page_ids.push(m.id);
+        }
+        let mut entries = Vec::new();
+        for e in project.visible_entries() {
+            entries.push(SnapshotEntry {
+                id: e.id,
+                image_id: e.image_id,
+                quad: project.view_quad(e),
+                text: project.display_text(e).to_string(),
+                style: project.entry_style(e.id),
+            });
+        }
+        Self { global_offsets, owner_to_idx, owner_widths, page_ids, entries }
+    }
+}
+
+fn rasterize_page_with_snapshot(
+    base: RgbaImage,
+    inpaint_raw: &[( [f32;4], RgbaImage )],
+    snapshot: &ExportSnapshot,
     image_id: easyscanlate_model::ImageId,
     font: Font,
 ) -> RgbaImage {
@@ -384,35 +479,22 @@ fn rasterize_page(
     // in the viewer will have a global y that intersects the neighboring page. We therefore render
     // *any* visible entry whose global bounds intersect this page's global interval, translating
     // its quad to this page's local pixel space. This fixes both "span 2 images" and "beyond" cases.
-    let images = project.images();
-    let mut global_offsets: Vec<f32> = Vec::with_capacity(images.len());
-    let mut cur = 0.0f32;
-    for m in images {
-        global_offsets.push(cur);
-        cur += m.height;
-    }
-    let page_idx = images.iter().position(|m| m.id == image_id).unwrap_or(0);
-    let page_g0 = global_offsets.get(page_idx).copied().unwrap_or(0.0);
+    let page_idx = snapshot.page_ids.iter().position(|id| *id == image_id).unwrap_or(0);
+    let page_g0 = snapshot.global_offsets.get(page_idx).copied().unwrap_or(0.0);
     let page_g1 = page_g0 + h as f32;
-    // owner -> idx map for O(1)
-    let mut owner_to_idx: std::collections::HashMap<easyscanlate_model::ImageId, usize> = std::collections::HashMap::new();
-    for (i, m) in images.iter().enumerate() {
-        owner_to_idx.insert(m.id, i);
-    }
 
     let mut texts: Vec<String> = Vec::new();
     let mut metas: Vec<(easyscanlate_model::EntryId, easyscanlate_model::Quad, easyscanlate_model::EntryStyle)> = Vec::new();
 
-    for e in project.visible_entries() {
-        let orig_quad = project.view_quad(e);
+    for e in &snapshot.entries {
+        let orig_quad = e.quad;
         let [vx0, vy0, vx1, vy1] = orig_quad.bounds();
-        let owner_idx = match owner_to_idx.get(&e.image_id) {
+        let owner_idx = match snapshot.owner_to_idx.get(&e.image_id) {
             Some(v) => *v,
             None => continue,
         };
-        let owner_g0 = global_offsets.get(owner_idx).copied().unwrap_or(0.0);
-        let owner_meta = project.image(e.image_id);
-        let owner_w = owner_meta.map(|m| m.width).unwrap_or(w as f32);
+        let owner_g0 = snapshot.global_offsets.get(owner_idx).copied().unwrap_or(0.0);
+        let owner_w = snapshot.owner_widths.get(owner_idx).copied().unwrap_or(w as f32);
         let scale_x = if owner_w > 1.0 && (owner_w - w as f32).abs() > 0.5 { w as f32 / owner_w } else { 1.0 };
         // global bounds (x stays local unless width differs)
         let gx0 = vx0 * scale_x;
@@ -430,8 +512,8 @@ fn rasterize_page(
             p[0] *= scale_x;
             p[1] += dy;
         }
-        texts.push(project.display_text(e).to_string());
-        metas.push((e.id, q, project.entry_style(e.id)));
+        texts.push(e.text.clone());
+        metas.push((e.id, q, e.style.clone()));
     }
     let mut entries: Vec<OverlayEntry<'_>> = Vec::with_capacity(metas.len());
     for (i, (id, quad, style)) in metas.iter().enumerate() {
@@ -493,6 +575,17 @@ pub fn handle_export_all(app: &mut App) -> Task<Message> {
     )
 }
 
+/// Stashed raster-export job while the clean-base screenshot is captured for
+/// the progress overlay. Started on `BackdropReady(Export)` via
+/// `start_pending_export` so the capture never contains the overlay.
+pub(crate) struct PendingExport {
+    tab_id: crate::app::tab::TabId,
+    units: Vec<ExportUnit>,
+    snapshot: Arc<ExportSnapshot>,
+    folder_path: PathBuf,
+    font: Font,
+}
+
 pub fn handle_export_picked(app: &mut App, tab_id: crate::app::tab::TabId, folder: Option<String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     let Some(folder_str) = folder else {
@@ -506,7 +599,12 @@ pub fn handle_export_picked(app: &mut App, tab_id: crate::app::tab::TabId, folde
             return Task::none();
         }
 
-    // Snapshot project + inpaint raw for blocking thread
+    if app.tabs[idx].exporting {
+        app.tabs[idx].status = "Export already running...".to_string();
+        return Task::none();
+    }
+
+    // Snapshot project + inpaint raw for background threads
     let project = app.tabs[idx].project.clone();
     let font = app.font.unwrap_or(Font::DEFAULT);
 
@@ -529,139 +627,399 @@ pub fn handle_export_picked(app: &mut App, tab_id: crate::app::tab::TabId, folde
         .map(|m| (m.id, m.path.clone()))
         .collect();
 
-    app.tabs[idx].status = format!("Exporting {} image(s)...", metas.len());
+    if metas.is_empty() {
+        app.tabs[idx].status = "Nothing to export.".to_string();
+        return Task::none();
+    }
 
-    let folder_clone = folder_path.clone();
-    Task::perform(
-        async move {
-            tokio::task::spawn_blocking(move || export_blocking(project, metas, inpaint_per_image, folder_clone, font))
-                .await
-                .unwrap_or_else(|e| Err(format!("export task failed: {e}")))
-        },
-        move |res| Message::Tab(tab_id, crate::app::TabMessage::ExportFinished(res)),
+    // Precompute deterministic output paths sequentially (same dedup as before),
+    // reserving this batch's paths so parallel workers can't collide.
+    let mut reserved: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    let mut units: Vec<ExportUnit> = Vec::with_capacity(metas.len());
+    for (job_idx, (image_id, src_path)) in metas.iter().enumerate() {
+        let (out_path, ext) = resolve_out_path(&folder_path, src_path, *image_id, &reserved);
+        reserved.insert(out_path.clone());
+        let inpaint = inpaint_per_image.get(job_idx).cloned().unwrap_or_default();
+        units.push(ExportUnit { idx: job_idx, image_id: *image_id, src_path: src_path.clone(), out_path, ext, inpaint });
+    }
+
+    let snapshot = Arc::new(ExportSnapshot::build(&project));
+    // Drop the cloned project early; workers only need the snapshot.
+    drop(project);
+
+    let pending = PendingExport { tab_id, units, snapshot, folder_path, font };
+    // Capture the clean base for the blurred overlay, then start on
+    // `BackdropReady`. Falls back to an immediate flat start when headless.
+    super::backdrop::begin_export(app, pending)
+}
+
+/// Starts a stashed export (immediate fallback or `BackdropReady` replay).
+/// Sets the `exporting` counters + cancel flag and spawns the parallel
+/// chunk stream. Late chunks after cancel are ignored by
+/// `handle_export_stream_run`'s `!exporting` guard plus the atomic check.
+pub(crate) fn start_pending_export(app: &mut App, op: PendingExport) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == op.tab_id) {
+        Some(i) => i,
+        None => {
+            // Tab closed while capturing: drop the job and its blur.
+            app.pending_export = None;
+            app.export_blur = None;
+            return Task::none();
+        }
+    };
+    if app.tabs[idx].exporting {
+        app.tabs[idx].status = "Export already running...".to_string();
+        app.export_blur = None;
+        return Task::none();
+    }
+    let total = op.units.len();
+    if total == 0 {
+        app.tabs[idx].status = "Nothing to export.".to_string();
+        app.export_blur = None;
+        return Task::none();
+    }
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    app.tabs[idx].exporting = true;
+    app.tabs[idx].export_total = total;
+    app.tabs[idx].export_done = 0;
+    app.tabs[idx].export_failed = 0;
+    app.tabs[idx].export_errors = Vec::new();
+    app.tabs[idx].export_folder = Some(op.folder_path.clone());
+    app.tabs[idx].export_cancel = Some(Arc::clone(&cancel));
+    app.tabs[idx].status = format!("Exporting 0 of {total} image(s)...");
+
+    let PendingExport { tab_id: tid, units, snapshot, font, .. } = op;
+    let chunk_size = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .clamp(2, 16);
+    Task::stream(
+        iced::stream::try_channel(1, move |mut sender: iced::futures::channel::mpsc::Sender<Message>| async move {
+            let mut units = units;
+            while !units.is_empty() {
+                if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    return Ok::<(), String>(());
+                }
+                let n = chunk_size.min(units.len());
+                let chunk: Vec<ExportUnit> = units.drain(..n).collect();
+                let snap = Arc::clone(&snapshot);
+                let res: super::ExportStreamItem =
+                    tokio::task::spawn_blocking(move || export_chunk_parallel(chunk, &snap, font))
+                        .await
+                        .unwrap_or_else(|e| vec![(usize::MAX, Err(format!("export task failed: {e}")))]);
+                if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    return Ok::<(), String>(());
+                }
+                if sender
+                    .send(Message::Tab(tid, crate::app::TabMessage::ExportStreamRun(Ok(res))))
+                    .await
+                    .is_err()
+                {
+                    return Ok::<(), String>(());
+                }
+            }
+            Ok::<(), String>(())
+        })
+        .map(move |item: Result<Message, String>| match item {
+            Ok(message) => message,
+            Err(e) => Message::Tab(tid, crate::app::TabMessage::ExportStreamFailed(e.to_string())),
+        }),
     )
 }
 
-fn export_blocking(
-    project: Project,
-    metas: Vec<(easyscanlate_model::ImageId, String)>,
-    inpaint_per_image: Vec<Vec<([f32; 4], RgbaImage)>>,
-    folder: PathBuf,
-    font: Font,
-) -> Result<String, String> {
-    let mut saved = 0usize;
-    let mut errors: Vec<String> = Vec::new();
+/// Cancels the running export for the active tab. Sets the atomic flag so
+/// the stream loop stops after the current chunk; late messages are ignored.
+pub fn handle_export_cancel(app: &mut App) -> Task<Message> {
+    let idx = match app.tabs.get(app.active) {
+        Some(_) => app.active,
+        None => return Task::none(),
+    };
+    if !app.tabs[idx].exporting {
+        return Task::none();
+    }
+    if let Some(flag) = app.tabs[idx].export_cancel.take() {
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    // Drop any capture staged for BackdropReady so it can't restart us.
+    app.pending_export = None;
+    if app.backdrop_pending == Some(super::backdrop::BackdropKind::Export) {
+        app.backdrop_pending = None;
+    }
+    app.tabs[idx].exporting = false;
+    let total = app.tabs[idx].export_total;
+    let done = app.tabs[idx].export_done;
+    let remaining = total.saturating_sub(done);
+    app.tabs[idx].export_failed += remaining;
+    app.tabs[idx].export_done = total;
+    app.tabs[idx].status = "Export cancelled.".to_string();
+    app.export_blur = None;
+    Task::none()
+}
 
-    for (idx, (image_id, src_path)) in metas.iter().enumerate() {
-        let inpaint_raw = inpaint_per_image.get(idx).map(|v| v.as_slice()).unwrap_or(&[]);
+/// Clears single-use export overlay state once the overlay dismisses.
+fn clear_export_overlay(app: &mut App, idx: usize) {
+    app.tabs[idx].export_cancel = None;
+    // Only the active tab owns the visible blur; a background tab finishing
+    // must not clear the overlay of the tab currently being viewed.
+    if idx == app.active {
+        app.export_blur = None;
+    }
+}
 
-        // Load base at native resolution
-        let base = match image::open(src_path) {
-            Ok(img) => img.to_rgba8(),
-            Err(e) => {
-                errors.push(format!("{}: open failed: {e}", src_path));
-                continue;
-            }
-        };
-
-        let out_rgba = rasterize_page(base, inpaint_raw, &project, *image_id, font);
-
-        // Determine output extension & path, keep original format
-        let src = FsPath::new(src_path);
-        let ext = src
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|s| s.to_ascii_lowercase())
-            .unwrap_or_else(|| "png".to_string());
-        let raw_stem = src
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("image");
-        // Strip leading "<id>_" that mmtl extraction adds (images/<id>_<basename>).
-        // Only for export: keep original basename for the output.
-        let id_prefix = format!("{}_", image_id.0);
-        let stem = if raw_stem.starts_with(&id_prefix) {
-            &raw_stem[id_prefix.len()..]
-        } else {
-            raw_stem
-        };
-        let stem = if stem.is_empty() { raw_stem } else { stem };
-        let mut out_name = format!("{stem}_export.{ext}");
-        let mut out_path = folder.join(&out_name);
-        // dedup like NewProjectCreate (n)
-        if out_path.exists() {
-            let mut n = 1;
-            loop {
-                out_name = format!("{stem}_export ({n}).{ext}");
-                out_path = folder.join(&out_name);
-                if !out_path.exists() {
-                    break;
-                }
-                n += 1;
-                if n > 999 {
-                    break;
-                }
+/// Aborts the export for `tab_id` (tab close): signals the stream loop to
+/// stop and drops a staged `pending_export` so `BackdropReady` can't restart it.
+pub(crate) fn cancel_export_for_tab(app: &mut App, tab_id: crate::app::tab::TabId) {
+    if let Some(pending) = app.pending_export.as_ref()
+        && pending.tab_id == tab_id {
+            app.pending_export = None;
+            app.export_blur = None;
+            if app.backdrop_pending == Some(super::backdrop::BackdropKind::Export) {
+                app.backdrop_pending = None;
             }
         }
-
-        let res: Result<(), String> = (|| {
-            // map original quality if possible: for jpeg use 95 (high quality, keep original format)
-            match ext.as_str() {
-                "jpg" | "jpeg" => {
-                    let file = std::fs::File::create(&out_path).map_err(|e| e.to_string())?;
-                    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(file, 95);
-                    // JPEG does not support alpha; composite onto white via conversion to RGB
-                    let rgb = image::DynamicImage::ImageRgba8(out_rgba.clone()).to_rgb8();
-                    encoder.encode(rgb.as_raw(), rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8).map_err(|e| e.to_string())?;
-                    Ok(())
-                }
-                "png" => {
-                    out_rgba.save_with_format(&out_path, image::ImageFormat::Png).map_err(|e| e.to_string())?;
-                    Ok(())
-                }
-                "bmp" => {
-                    out_rgba.save_with_format(&out_path, image::ImageFormat::Bmp).map_err(|e| e.to_string())?;
-                    Ok(())
-                }
-                "tiff" | "tif" => {
-                    out_rgba.save_with_format(&out_path, image::ImageFormat::Tiff).map_err(|e| e.to_string())?;
-                    Ok(())
-                }
-                "webp" => {
-                    out_rgba.save_with_format(&out_path, image::ImageFormat::WebP).map_err(|e| e.to_string())?;
-                    Ok(())
-                }
-                _ => {
-                    // fallback png but keep requested ext? Save as png with that ext will be confusing, so just png
-                    out_rgba.save_with_format(&out_path, image::ImageFormat::Png).map_err(|e| e.to_string())?;
-                    Ok(())
-                }
-            }
-        })();
-
-        match res {
-            Ok(_) => saved += 1,
-            Err(e) => errors.push(format!("{}: {e}", out_path.display())),
+    if let Some(idx) = app.tabs.iter().position(|t| t.id == tab_id) {
+        if let Some(flag) = app.tabs[idx].export_cancel.take() {
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        app.tabs[idx].exporting = false;
+        if idx == app.active {
+            app.export_blur = None;
         }
     }
+}
 
-    if saved == 0 && !errors.is_empty() {
-        return Err(errors.join("; "));
-    }
+#[derive(Clone)]
+struct ExportUnit {
+    idx: usize,
+    image_id: easyscanlate_model::ImageId,
+    src_path: String,
+    out_path: PathBuf,
+    ext: String,
+    inpaint: Vec<([f32; 4], RgbaImage)>,
+}
 
-    let msg = format!("Saved {saved} image(s) to {}", folder.display());
-    if saved == 0 {
-        Err("No images saved.".to_string())
+fn resolve_out_path(
+    folder: &FsPath,
+    src_path: &str,
+    image_id: easyscanlate_model::ImageId,
+    reserved: &std::collections::HashSet<PathBuf>,
+) -> (PathBuf, String) {
+    let src = FsPath::new(src_path);
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_else(|| "png".to_string());
+    let raw_stem = src
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("image");
+    // Strip leading "<id>_" that mmtl extraction adds (images/<id>_<basename>).
+    // Only for export: keep original basename for the output.
+    let id_prefix = format!("{}_", image_id.0);
+    let stem = if raw_stem.starts_with(&id_prefix) {
+        &raw_stem[id_prefix.len()..]
     } else {
-        Ok(msg)
+        raw_stem
+    };
+    let stem = if stem.is_empty() { raw_stem } else { stem };
+    let mut out_name = format!("{stem}_export.{ext}");
+    let mut out_path = folder.join(&out_name);
+    // dedup like NewProjectCreate (n), also against this batch's reservations
+    if out_path.exists() || reserved.contains(&out_path) {
+        let mut n = 1;
+        loop {
+            out_name = format!("{stem}_export ({n}).{ext}");
+            out_path = folder.join(&out_name);
+            if !out_path.exists() && !reserved.contains(&out_path) {
+                break;
+            }
+            n += 1;
+            if n > 999 {
+                break;
+            }
+        }
     }
+    (out_path, ext)
+}
+
+fn export_single(unit: &ExportUnit, snapshot: &ExportSnapshot, font: Font) -> Result<String, String> {
+    // Load base at native resolution
+    let base = match image::open(&unit.src_path) {
+        Ok(img) => img.to_rgba8(),
+        Err(e) => return Err(format!("{}: open failed: {e}", unit.src_path)),
+    };
+    let out_rgba = rasterize_page_with_snapshot(base, &unit.inpaint, snapshot, unit.image_id, font);
+    // Same encoder settings as before (bit-identical); JPEG avoids a full-image clone.
+    match unit.ext.as_str() {
+        "jpg" | "jpeg" => {
+            let file = std::fs::File::create(&unit.out_path).map_err(|e| e.to_string())?;
+            let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(file, 95);
+            // JPEG does not support alpha; conversion to RGB consumes the buffer (no clone).
+            let rgb = image::DynamicImage::ImageRgba8(out_rgba).to_rgb8();
+            encoder
+                .encode(rgb.as_raw(), rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8)
+                .map_err(|e| e.to_string())?;
+            Ok(unit.out_path.display().to_string())
+        }
+        "png" => out_rgba
+            .save_with_format(&unit.out_path, image::ImageFormat::Png)
+            .map(|_| unit.out_path.display().to_string())
+            .map_err(|e| e.to_string()),
+        "bmp" => out_rgba
+            .save_with_format(&unit.out_path, image::ImageFormat::Bmp)
+            .map(|_| unit.out_path.display().to_string())
+            .map_err(|e| e.to_string()),
+        "tiff" | "tif" => out_rgba
+            .save_with_format(&unit.out_path, image::ImageFormat::Tiff)
+            .map(|_| unit.out_path.display().to_string())
+            .map_err(|e| e.to_string()),
+        "webp" => out_rgba
+            .save_with_format(&unit.out_path, image::ImageFormat::WebP)
+            .map(|_| unit.out_path.display().to_string())
+            .map_err(|e| e.to_string()),
+        _ => out_rgba
+            .save_with_format(&unit.out_path, image::ImageFormat::Png)
+            .map(|_| unit.out_path.display().to_string())
+            .map_err(|e| e.to_string()),
+    }
+    .map_err(|e| format!("{}: {e}", unit.out_path.display()))
+}
+
+fn export_chunk_parallel(
+    chunk: Vec<ExportUnit>,
+    snapshot: &ExportSnapshot,
+    font: Font,
+) -> super::ExportStreamItem {
+    let mut out: super::ExportStreamItem = chunk
+        .par_iter()
+        .map(|unit| {
+            let r = export_single(unit, snapshot, font);
+            (unit.idx, r)
+        })
+        .collect();
+    // Deterministic order for error messages / tests.
+    out.sort_by_key(|(idx, _)| *idx);
+    out
 }
 
 pub fn handle_export_finished(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<String, String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    app.tabs[idx].exporting = false;
+    clear_export_overlay(app, idx);
     match result {
         Ok(msg) => app.tabs[idx].status = msg,
         Err(e) => app.tabs[idx].status = format!("Export failed: {e}"),
+    }
+    Task::none()
+}
+
+fn finish_export_if_done(app: &mut App, idx: usize) {
+    if !app.tabs[idx].exporting || app.tabs[idx].export_done < app.tabs[idx].export_total {
+        return;
+    }
+    app.tabs[idx].exporting = false;
+    clear_export_overlay(app, idx);
+    let total = app.tabs[idx].export_total;
+    let done = app.tabs[idx].export_done;
+    let failed = app.tabs[idx].export_failed;
+    let saved = done.saturating_sub(failed);
+    let folder = app.tabs[idx].export_folder.clone().unwrap_or_default();
+    if saved == 0 {
+        let detail = if app.tabs[idx].export_errors.is_empty() {
+            "No images saved.".to_string()
+        } else {
+            app.tabs[idx].export_errors.join("; ")
+        };
+        app.tabs[idx].status = format!("Export failed: {detail}");
+    } else {
+        // Same final wording as before (bit-identical UX); partial errors stay
+        // in `export_errors` and are not appended to keep the message stable.
+        let _ = total;
+        app.tabs[idx].status = format!("Saved {saved} image(s) to {}", folder.display());
+    }
+}
+
+pub fn handle_export_stream_run(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    result: Result<super::ExportStreamItem, String>,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    if !app.tabs[idx].exporting {
+        return Task::none();
+    }
+    match result {
+        Ok(items) => {
+            for (_job_idx, r) in items {
+                app.tabs[idx].export_done += 1;
+                match r {
+                    Ok(_) => {}
+                    Err(e) => {
+                        app.tabs[idx].export_failed += 1;
+                        app.tabs[idx].export_errors.push(e);
+                    }
+                }
+            }
+            let done = app.tabs[idx].export_done;
+            let total = app.tabs[idx].export_total;
+            let failed = app.tabs[idx].export_failed;
+            if done < total {
+                app.tabs[idx].status = if failed > 0 {
+                    format!("Exporting {done} of {total} image(s)... ({failed} failed)")
+                } else {
+                    format!("Exporting {done} of {total} image(s)...")
+                };
+            } else {
+                finish_export_if_done(app, idx);
+            }
+        }
+        Err(e) => {
+            // Whole chunk failed (spawn_blocking cancelled): count the chunk as failed.
+            // Remaining chunks won't arrive; finalize with what we have.
+            app.tabs[idx].export_errors.push(e);
+            app.tabs[idx].exporting = false;
+            clear_export_overlay(app, idx);
+            let saved = app.tabs[idx].export_done.saturating_sub(app.tabs[idx].export_failed);
+            if saved == 0 {
+                let detail = if app.tabs[idx].export_errors.is_empty() {
+                    "export task failed".to_string()
+                } else {
+                    app.tabs[idx].export_errors.join("; ")
+                };
+                app.tabs[idx].status = format!("Export failed: {detail}");
+            } else if let Some(folder) = app.tabs[idx].export_folder.clone() {
+                app.tabs[idx].status = format!("Saved {saved} image(s) to {}", folder.display());
+            }
+        }
+    }
+    Task::none()
+}
+
+pub fn handle_export_stream_failed(app: &mut App, tab_id: crate::app::tab::TabId, e: String) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    if !app.tabs[idx].exporting {
+        return Task::none();
+    }
+    app.tabs[idx].exporting = false;
+    clear_export_overlay(app, idx);
+    // Mark everything not yet done as failed so a dropped stream never hangs at "Exporting...".
+    let remaining = app.tabs[idx].export_total.saturating_sub(app.tabs[idx].export_done);
+    app.tabs[idx].export_failed += remaining;
+    app.tabs[idx].export_done = app.tabs[idx].export_total;
+    if !e.is_empty() {
+        app.tabs[idx].export_errors.push(e);
+    }
+    let saved = app.tabs[idx].export_done.saturating_sub(app.tabs[idx].export_failed);
+    if saved == 0 {
+        let detail = if app.tabs[idx].export_errors.is_empty() {
+            "export cancelled".to_string()
+        } else {
+            app.tabs[idx].export_errors.join("; ")
+        };
+        app.tabs[idx].status = format!("Export failed: {detail}");
+    } else if let Some(folder) = app.tabs[idx].export_folder.clone() {
+        app.tabs[idx].status = format!("Saved {saved} image(s) to {}", folder.display());
     }
     Task::none()
 }

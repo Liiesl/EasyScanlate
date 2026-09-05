@@ -29,6 +29,7 @@ path_helper = { version = "=0.1.9", features = ["auto_ext", "sanitize", "tokio"]
 tokio-util = "0.7"
 fontdb = "0.24"
 tiny-skia = "0.11"
+rayon = "1"
 open = "5"
 serde = { version = "1", features = ["derive"] }
 lucide-icons = { version = "1", features = ["iced"] }
@@ -111,6 +112,7 @@ tempfile = { workspace = true }
 tokio = { workspace = true }
 fontdb = { workspace = true }
 tiny-skia = { workspace = true }
+rayon = { workspace = true }
 open = { workspace = true }
 serde = { workspace = true }
 lucide-icons = { workspace = true }

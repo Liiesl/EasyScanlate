@@ -35,6 +35,10 @@ const MANAGE_H: f32 = 500.0;
 /// `scale::s(520.0) × scale::s(280.0)` with `rounded(scale::s(16.0))`).
 const LOADING_W: f32 = 520.0;
 const LOADING_H: f32 = 280.0;
+/// Export progress card size (mirrors `src/app/view.rs::export_overlay`,
+/// same card geometry as the loading splash so the crop aligns).
+const EXPORT_W: f32 = 520.0;
+const EXPORT_H: f32 = 280.0;
 
 /// Which modal the pending/ready backdrop belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +46,7 @@ pub enum BackdropKind {
     Settings,
     ManageModels,
     Loading,
+    Export,
 }
 
 /// A deferred project-load trigger, stashed while the clean-base screenshot
@@ -137,6 +142,24 @@ pub fn handle_ready(
         }
         return task;
     }
+    if kind == BackdropKind::Export {
+        if let Some(f) = frame {
+            app.export_blur = crop_for(&f, kind);
+            app.backdrop_frame = Some(f);
+        } else {
+            app.export_blur = None;
+        }
+        let task = app
+            .pending_export
+            .take()
+            .map(|op| super::export::start_pending_export(app, op))
+            .unwrap_or(Task::none());
+        if !is_exporting_now(app) {
+            app.export_blur = None;
+            // Keep `backdrop_frame` for settings reuse; export blur is single-use.
+        }
+        return task;
+    }
     if let Some(f) = frame {
         app.backdrop_blur = crop_for(&f, kind);
         app.backdrop_frame = Some(f);
@@ -149,7 +172,7 @@ pub fn handle_ready(
             app.manage_models_open = true;
             app.manage_models_search.clear();
         }
-        BackdropKind::Loading => unreachable!("handled above"),
+        BackdropKind::Loading | BackdropKind::Export => unreachable!("handled above"),
     }
     Task::none()
 }
@@ -197,6 +220,30 @@ fn run_pending(app: &mut App, op: PendingLoad) -> Task<Message> {
 /// still in its loading placeholder.
 fn is_loading_now(app: &App) -> bool {
     !app.active_is_home() && app.tabs.get(app.active).is_some_and(|t| t.loading)
+}
+
+/// Mirrors the export overlay condition in `src/app/view.rs`: active tab
+/// currently exporting raster images.
+fn is_exporting_now(app: &App) -> bool {
+    !app.active_is_home() && app.tabs.get(app.active).is_some_and(|t| t.exporting)
+}
+
+/// Entry point for raster-export triggers that show the progress overlay:
+/// captures the clean base first (stashing `op`), then starts the export on
+/// `BackdropReady` so the screenshot never contains the overlay. Falls back
+/// to an immediate start (flat, no blur) when headless/in tests or while
+/// another capture is in flight.
+pub fn begin_export(app: &mut App, op: super::export::PendingExport) -> Task<Message> {
+    if app.frame.primary_window().is_none() || app.backdrop_pending.is_some() {
+        app.export_blur = None;
+        return super::export::start_pending_export(app, op);
+    }
+    // Reuse a fresh-enough capture? Export happens long after project load,
+    // so the stored frame is stale — always recapture for a matching backdrop.
+    app.pending_export = Some(op);
+    app.export_blur = None;
+    app.backdrop_pending = Some(BackdropKind::Export);
+    capture_task(app, BackdropKind::Export)
 }
 
 /// Re-crop the stored fullscreen frame for `kind` (microseconds; no
@@ -383,6 +430,14 @@ fn panel_rect_lowres(frame: &CapturedBackdrop, kind: BackdropKind) -> Option<(u3
             ch,
             easyscanlate_ui::scale::s(LOADING_W),
             easyscanlate_ui::scale::s(LOADING_H),
+        ),
+        BackdropKind::Export => centered_fixed(
+            cx,
+            cy,
+            cw,
+            ch,
+            easyscanlate_ui::scale::s(EXPORT_W),
+            easyscanlate_ui::scale::s(EXPORT_H),
         ),
     };
     // Logical → physical → low-res, clamped into the frame.

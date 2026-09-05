@@ -182,6 +182,12 @@ pub trait UiState {
     fn is_loading(&self) -> bool { false }
     fn loading_phase(&self) -> f32 { 0.0 }
     fn loading_title(&self) -> String { String::new() }
+    /// True while the active tab is exporting raster images.
+    fn is_exporting(&self) -> bool { false }
+    /// Export progress as `(done, total, failed)`. `None` when idle.
+    fn export_progress(&self) -> Option<(usize, usize, usize)> { None }
+    /// Destination folder of the running export, if any.
+    fn export_folder(&self) -> Option<String> { None }
     // ——— Tabs (titlebar) ———
     fn tab_metas(&self) -> Vec<TabMeta> { Vec::new() }
     fn active_tab_id(&self) -> u64 { 0 }

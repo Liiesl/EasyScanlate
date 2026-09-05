@@ -324,6 +324,9 @@ pub enum UiEvent {
     /// Export every page as a baked raster image (original + inpaint + overlay)
     /// to a chosen folder. One click exports the whole chapter.
     ExportAll,
+    /// Cancel the running raster export. Remaining chunks are skipped; the
+    /// overlay dismisses with an "Export cancelled" status.
+    ExportCancel,
     // -- Tab management (multi-project, Phase 2+) --
     /// Select the tab with `id` (titlebar chip or Ctrl+1..9 / Ctrl+Tab).
     TabSelected(u64),

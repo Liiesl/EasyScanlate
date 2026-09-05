@@ -233,3 +233,13 @@ pub fn loading_overlay_data<S: UiState + ?Sized>(state: &S) -> Option<(f32, Stri
     let is_creating = !is_failed && lower.contains("creating");
     Some((phase, status, is_failed, is_creating))
 }
+
+/// Export progress overlay data: `(done, total, failed, folder)`.
+/// Mirrors `loading_overlay_data`; `None` when no export is running.
+pub fn export_overlay_data<S: UiState + ?Sized>(state: &S) -> Option<(usize, usize, usize, Option<String>)> {
+    if !state.is_exporting() {
+        return None;
+    }
+    let (done, total, failed) = state.export_progress()?;
+    Some((done, total, failed, state.export_folder()))
+}

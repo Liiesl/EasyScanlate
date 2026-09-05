@@ -446,6 +446,8 @@ pub fn handle_replay(app: &mut App) -> Task<Message> {
         app.backdrop_pending = None;
         app.loading_blur = None;
         app.pending_load = None;
+        app.export_blur = None;
+        app.pending_export = None;
         Task::none()
     }
 }

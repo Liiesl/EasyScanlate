@@ -100,6 +100,10 @@ type ManualInpaintStreamItem = (GroupedInpaintPatches, usize);
 /// One granular segment stream item: grid index + this grid's deletions.
 #[cfg(feature = "segment")]
 type SegmentStreamItem = (usize, Vec<(usize, EntryId)>);
+/// One granular export stream chunk: per finished file `(global_idx, result)`.
+/// `Ok(path_display)` counts one saved file, `Err(msg)` counts one failure
+/// without dropping the rest (mirrors OCR/segment streaming).
+pub type ExportStreamItem = Vec<(usize, Result<String, String>)>;
 
 /// Loaded `.mmtl` project payload (reuses `mmtl` alias to stay in sync).
 type MmtlLoadedPayload = mmtl::LoadedProjectResult;
@@ -171,6 +175,8 @@ pub enum TabMessage {
     RecentPickedToLoad(MmtlLoadedPayload),
     ExportFolderPicked(Option<String>),
     ExportFinished(Result<String, String>),
+    ExportStreamRun(Result<ExportStreamItem, String>),
+    ExportStreamFailed(String),
     TilesVisible(std::ops::Range<usize>),
     TileScrollEnded,
 }
@@ -250,6 +256,11 @@ pub struct App {
     pub(crate) backdrop_pending: Option<backdrop::BackdropKind>,
     pub(crate) loading_blur: Option<iced::widget::image::Handle>,
     pub(crate) pending_load: Option<backdrop::PendingLoad>,
+    /// Blurred card cover for the raster-export progress overlay (like
+    /// `loading_blur`, cropped to the export card rect).
+    pub(crate) export_blur: Option<iced::widget::image::Handle>,
+    /// Stashed export job while the clean-base screenshot is captured.
+    pub(crate) pending_export: Option<export::PendingExport>,
     pub(crate) recent_projects: Vec<easyscanlate_settings::RecentProject>,
     pub(crate) new_project: Option<new_project::NewProjectState>,
     pub frame: NativeFrame,
@@ -324,6 +335,8 @@ impl App {
             backdrop_pending: None,
             loading_blur: None,
             pending_load: None,
+            export_blur: None,
+            pending_export: None,
             recent_projects: easyscanlate_settings::get(|s| s.recent_projects.clone()),
             new_project: None,
             frame,
@@ -588,6 +601,8 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
         TabMessage::NewProjectLocationPicked(picked) => new_project::handle_location_picked(app, tab_id, picked),
         TabMessage::ExportFolderPicked(picked) => export::handle_export_picked(app, tab_id, picked),
         TabMessage::ExportFinished(result) => export::handle_export_finished(app, tab_id, result),
+        TabMessage::ExportStreamRun(result) => export::handle_export_stream_run(app, tab_id, result),
+        TabMessage::ExportStreamFailed(e) => export::handle_export_stream_failed(app, tab_id, e),
         TabMessage::MmtlLoaded(_) | TabMessage::CreateProjectPicked(_) | TabMessage::RecentPickedToLoad(_) => {
             unreachable!("MmtlLoaded/Create/Recent are handled before the idx guard")
         }
@@ -772,6 +787,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::OpenUrl(url)) => settings::handle_open_url(app, url),
         Message::Ui(UiEvent::SaveProject) => mmtl::handle_save(app),
         Message::Ui(UiEvent::ExportAll) => export::handle_export_all(app),
+        Message::Ui(UiEvent::ExportCancel) => export::handle_export_cancel(app),
         // ——— Onboarding (first-run, blocking) ———
         Message::Ui(UiEvent::OnboardingNext) => onboarding::handle_next(app),
         Message::Ui(UiEvent::OnboardingBack) => onboarding::handle_back(app),

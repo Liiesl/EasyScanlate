@@ -509,6 +509,21 @@ impl UiState for ActiveTab<'_> {
         self.tab.loading_phase
     }
 
+    fn is_exporting(&self) -> bool {
+        self.tab.exporting
+    }
+
+    fn export_progress(&self) -> Option<(usize, usize, usize)> {
+        if !self.tab.exporting {
+            return None;
+        }
+        Some((self.tab.export_done, self.tab.export_total, self.tab.export_failed))
+    }
+
+    fn export_folder(&self) -> Option<String> {
+        self.tab.export_folder.as_ref().map(|p| p.display().to_string())
+    }
+
     fn loading_title(&self) -> String {
         self.tab.title.clone()
     }
@@ -726,6 +741,15 @@ impl UiState for App {
     fn translation_anim_phase(&self) -> f32 { self.tabs[self.active].translate_anim_phase }
     fn is_loading(&self) -> bool { self.tabs[self.active].loading }
     fn loading_phase(&self) -> f32 { self.tabs[self.active].loading_phase }
+    fn is_exporting(&self) -> bool { self.tabs.get(self.active).is_some_and(|t| t.exporting) }
+    fn export_progress(&self) -> Option<(usize, usize, usize)> {
+        let t = self.tabs.get(self.active)?;
+        if !t.exporting { return None; }
+        Some((t.export_done, t.export_total, t.export_failed))
+    }
+    fn export_folder(&self) -> Option<String> {
+        self.tabs.get(self.active)?.export_folder.as_ref().map(|p| p.display().to_string())
+    }
     fn loading_title(&self) -> String { self.tabs[self.active].title.clone() }
     fn update_current_version(&self) -> String { crate::updater::get_current_version() }
     #[cfg(feature = "updates")]

@@ -1263,6 +1263,7 @@ dependencies = [
  "lucide-icons",
  "neverliie-iced-widgets",
  "open",
+ "rayon",
  "rfd",
  "serde",
  "tempfile",
