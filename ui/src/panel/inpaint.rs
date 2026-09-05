@@ -159,10 +159,13 @@ fn layer_row<'a>(
     let actions: Element<'a, UiEvent> = if is_selected {
         row![
             tooltip(
-                button(crate::icon::lucide(Icon::Trash2).size(scale::s(12.0)).center())
-                    .padding(scale::s(4.0))
-                    .style(crate::panel::button_style)
-                    .on_press_maybe((!bulk_busy).then_some(UiEvent::InpaintDelete((image_index, index_in_image)))),
+                crate::button::with_disabled_cursor(
+                    button(crate::icon::lucide(Icon::Trash2).size(scale::s(12.0)).center())
+                        .padding(scale::s(4.0))
+                        .style(crate::panel::button_style)
+                        .on_press_maybe((!bulk_busy).then_some(UiEvent::InpaintDelete((image_index, index_in_image))))
+                        .into(),
+                ),
                 container(text(if bulk_busy { "Busy" } else { "Delete patch" }).size(scale::s(11.0)))
                     .padding(scale::s(6.0))
                     .style(container::rounded_box),
@@ -170,10 +173,13 @@ fn layer_row<'a>(
             )
             .gap(scale::s(4.0)),
             tooltip(
-                button(crate::icon::lucide(Icon::RefreshCw).size(scale::s(12.0)).center())
-                    .padding(scale::s(4.0))
-                    .style(crate::panel::button_style)
-                    .on_press_maybe((!bulk_busy).then_some(UiEvent::InpaintRepaint((image_index, index_in_image)))),
+                crate::button::with_disabled_cursor(
+                    button(crate::icon::lucide(Icon::RefreshCw).size(scale::s(12.0)).center())
+                        .padding(scale::s(4.0))
+                        .style(crate::panel::button_style)
+                        .on_press_maybe((!bulk_busy).then_some(UiEvent::InpaintRepaint((image_index, index_in_image))))
+                        .into(),
+                ),
                 container(text(if bulk_busy { "Busy" } else { "Repaint" }).size(scale::s(11.0)))
                     .padding(scale::s(6.0))
                     .style(container::rounded_box),

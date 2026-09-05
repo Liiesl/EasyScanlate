@@ -6,6 +6,7 @@
 
 pub mod background;
 pub mod accent;
+pub mod button;
 pub mod chrome;
 pub mod color;
 pub mod connect;

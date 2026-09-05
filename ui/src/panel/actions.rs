@@ -67,7 +67,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         },
     )
     .padding(scale::s(6.0));
-    let ocr: Element<'_, UiEvent> = tooltip(ocr_btn, tip_label(ocr_label), tooltip::Position::Bottom)
+    let ocr: Element<'_, UiEvent> = tooltip(crate::button::with_disabled_cursor(ocr_btn.into()), tip_label(ocr_label), tooltip::Position::Bottom)
         .gap(scale::s(4.0))
         .into();
 

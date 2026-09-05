@@ -103,10 +103,13 @@ pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -
         // Buttons
         row![
             iced::widget::space::horizontal().width(FillLength),
-            button(text("Create").size(scale::s(12.0)).width(FillLength).center())
-                .padding([scale::s(6.0), scale::s(16.0)])
-                .style(crate::panel::button_style)
-                .on_press_maybe(can_create.then_some(UiEvent::NewProjectCreate)),
+            crate::button::with_disabled_cursor(
+                button(text("Create").size(scale::s(12.0)).width(FillLength).center())
+                    .padding([scale::s(6.0), scale::s(16.0)])
+                    .style(crate::panel::button_style)
+                    .on_press_maybe(can_create.then_some(UiEvent::NewProjectCreate))
+                    .into(),
+            ),
             button(text("Cancel").size(scale::s(12.0)).width(FillLength).center())
                 .padding([scale::s(6.0), scale::s(16.0)])
                 .style(crate::panel::button_style)

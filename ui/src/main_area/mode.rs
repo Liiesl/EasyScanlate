@@ -70,14 +70,20 @@ fn manual_banner<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> 
     let busy = state.is_bulk_busy();
     let can_start = count > 0 && !busy;
     let start_label = if is_inpaint { format!("Start Inpaint ({count})") } else { format!("Start OCR ({count})") };
-    let start_btn = button(text(start_label).size(scale::s(11.0)))
-        .padding([scale::s(6.0), scale::s(12.0)])
-        .style(crate::panel::button_style)
-        .on_press_maybe(can_start.then_some(UiEvent::ManualModeStart));
-    let reset_btn = button(text("Reset").size(scale::s(11.0)))
-        .padding([scale::s(6.0), scale::s(12.0)])
-        .style(crate::panel::button_style)
-        .on_press_maybe((count > 0).then_some(UiEvent::ManualModeReset));
+    let start_btn: Element<'_, UiEvent> = crate::button::with_disabled_cursor(
+        button(text(start_label).size(scale::s(11.0)))
+            .padding([scale::s(6.0), scale::s(12.0)])
+            .style(crate::panel::button_style)
+            .on_press_maybe(can_start.then_some(UiEvent::ManualModeStart))
+            .into(),
+    );
+    let reset_btn: Element<'_, UiEvent> = crate::button::with_disabled_cursor(
+        button(text("Reset").size(scale::s(11.0)))
+            .padding([scale::s(6.0), scale::s(12.0)])
+            .style(crate::panel::button_style)
+            .on_press_maybe((count > 0).then_some(UiEvent::ManualModeReset))
+            .into(),
+    );
     let cancel_btn = button(text("Cancel").size(scale::s(11.0)))
         .padding([scale::s(6.0), scale::s(12.0)])
         .style(crate::panel::button_style)

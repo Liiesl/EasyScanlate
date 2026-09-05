@@ -650,11 +650,15 @@ pub fn handle_manual_ocr_engine_ready(app: &mut App, tab_id: super::tab::TabId, 
                 && let Some(multi) = tab.pending_manual_multi_ocr.take() {
                     return start_manual_ocr_selection(app, tab_id, multi, engine.clone());
                 }
+            if let Some(tab) = app.tab_by_id_mut(tab_id) {
+                tab.manual_ocring = false;
+            }
             Task::none()
         }
         Err(e) => {
             if let Some(tab) = app.tab_by_id_mut(tab_id) {
                 tab.pending_manual_multi_ocr = None;
+                tab.manual_ocring = false;
                 tab.status = format!("Manual OCR engine failed: {e}");
             }
             // free queue weight on build failure (manual OCR)
@@ -692,7 +696,12 @@ pub fn handle_manual_ocr_selection(app: &mut App, tab_id: super::tab::TabId, sel
         if let Some(tab) = app.tab_by_id(tab_id) {
             if tab.running || tab.translating || tab.inpainting { return Task::none(); }
             #[cfg(feature = "ocr")]
-            if tab.manual_ocring { return Task::none(); }
+            if tab.manual_ocring {
+                if let Some(tab) = app.tab_by_id_mut(tab_id) {
+                    tab.status = "Wait for current task to finish.".to_string();
+                }
+                return Task::none();
+            }
         }
         let len = app.tab_by_id(tab_id).map(|t| t.images.len()).unwrap_or(0);
         let mut valid: Vec<(usize, iced::Rectangle)> = Vec::new();
@@ -748,6 +757,8 @@ pub fn handle_manual_ocr_selection(app: &mut App, tab_id: super::tab::TabId, sel
         if let Some(engine) = cached { return start_manual_ocr_selection(app, tab_id, valid, engine); }
         if let Some(tab) = app.tab_by_id_mut(tab_id) {
             tab.pending_manual_multi_ocr = Some(valid);
+            // Model load counts as the run itself so buttons disable during it.
+            tab.manual_ocring = true;
             tab.status = "Loading OCR engine for manual OCR…".to_string();
         }
         Task::perform(async move { ocr::Engine::build_with_config(cfg) }, move |res| Message::Tab(tab_id, crate::app::TabMessage::ManualOcrEngineReady(res)))

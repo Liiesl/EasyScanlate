@@ -867,6 +867,8 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
             Some(engine) => start_background_stitch(app, tid, engine, job, pad, prev, next),
             None => {
                 app.active_tab_mut().pending_background_stitch = Some((job, pad, prev, next));
+                // Model load counts as the run itself so buttons disable during it.
+                app.active_tab_mut().inpainting = true;
                 app.active_tab_mut().status = match backend {
                     InpaintBackend::Lama => "Loading LaMa model...".to_string(),
                     InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
@@ -1114,6 +1116,8 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
             Some(engine) => start_inpaint(app, engine, image_index, path, rect, quads),
             None => {
                 app.active_tab_mut().pending_manual_multi = Some(vec![(image_index, path, rect, quads)]);
+                // Model load counts as the run itself so buttons disable during it.
+                app.active_tab_mut().inpainting = true;
                 app.active_tab_mut().status = match backend {
                     easyscanlate_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
                     easyscanlate_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
@@ -1257,6 +1261,8 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
         eprintln!("[manual::inpaint] no cached engine -> pending_manual_multi len={} status loading", data.len());
         let tid = app.active_tab().id;
         app.active_tab_mut().pending_manual_multi = Some(data);
+        // Model load counts as the run itself so buttons disable during it.
+        app.active_tab_mut().inpainting = true;
         app.active_tab_mut().status = match backend {
             InpaintBackend::Lama => "Loading LaMa model...".to_string(),
             InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
@@ -1847,11 +1853,13 @@ pub fn handle_inpaint_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId
             if let Some(d) = data { return start_inpaint_selection(app, tab_id, engine, d); }
             let bg = app.tabs[idx].pending_background_stitch.take();
             if let Some((job, pad, prev, next)) = bg { return start_background_stitch(app, tab_id, engine, job, pad, prev, next); }
+            app.tabs[idx].inpainting = false;
             Task::none()
         }
         Err(e) => {
             app.tabs[idx].pending_manual_multi = None;
             app.tabs[idx].pending_background_stitch = None;
+            app.tabs[idx].inpainting = false;
             app.tabs[idx].status = e.clone();
             // free queue weight for manual inpaint (any backend) on build failure
             let mut freed = false;
@@ -1872,6 +1880,7 @@ pub fn handle_auto_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, b
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     match result {
         Ok(engine) => {
+            app.tabs[idx].auto_inpaint_loading = false;
             match backend {
                 InpaintBackend::Telea => {
                     app.engines.auto_telea = Some(engine.clone());
@@ -1897,6 +1906,7 @@ pub fn handle_auto_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, b
                 InpaintBackend::Lama => app.tabs[idx].pending_auto_lama_jobs = None,
                 InpaintBackend::Aot => app.tabs[idx].pending_auto_aot_jobs = None,
             }
+            app.tabs[idx].auto_inpaint_loading = false;
             app.tabs[idx].status = format!("Auto-inpaint engine failed: {e}");
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
             { app.tabs[idx].pipeline_active = false; }
@@ -2267,6 +2277,9 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
             InpaintBackend::Lama => app.tabs[idx].pending_auto_lama_jobs = Some(jobs),
             InpaintBackend::Aot => app.tabs[idx].pending_auto_aot_jobs = Some(jobs),
         }
+        // Model load counts as the run itself so buttons disable during it.
+        // (Queued stash above intentionally leaves this unset.)
+        app.tabs[idx].auto_inpaint_loading = true;
         app.tabs[idx].status = match backend { InpaintBackend::Telea => "Loading Telea for auto-inpaint...".to_string(), InpaintBackend::Lama => "Loading LaMa for auto-inpaint...".to_string(), InpaintBackend::Aot => "Loading AOT-GAN for auto-inpaint...".to_string()};
         let tid = tab_id;
         Task::perform(async move { InpaintEngine::build(backend, radius) }, move |r| Message::Tab(tid, crate::app::TabMessage::AutoInpaintEngineReady(backend, r)))

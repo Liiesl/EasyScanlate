@@ -95,11 +95,13 @@ fn primary_button<'a>(label: &'a str, enabled: bool, msg: Option<UiEvent>) -> El
             ..Default::default()
         }
     };
-    button(text(label).size(scale::s(13.0)).center())
-        .padding([scale::s(8.0), scale::s(16.0)])
-        .style(style)
-        .on_press_maybe(if enabled { msg } else { None })
-        .into()
+    crate::button::with_disabled_cursor(
+        button(text(label).size(scale::s(13.0)).center())
+            .padding([scale::s(8.0), scale::s(16.0)])
+            .style(style)
+            .on_press_maybe(if enabled { msg } else { None })
+            .into(),
+    )
 }
 
 fn secondary_button<'a>(label: &'a str, msg: UiEvent) -> Element<'a, UiEvent> {

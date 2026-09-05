@@ -97,26 +97,29 @@ fn tab<'a>(label: &'a str, active: bool, on_press: Option<UiEvent>) -> Element<'
         Space::new().height(scale::s(2.0)).into()
     };
     column![
-        button(text(label).size(scale::s(11.0)))
-            .width(FillLength)
-            .padding([scale::s(5.0), scale::s(0.0)])
-            .on_press_maybe(on_press)
-            .style(move |_theme, status: Status| {
-                let bg = match status {
-                    Status::Disabled => Color::from_rgba8(34, 36, 44, 0.35),
-                    Status::Hovered => Color::from_rgba8(46, 48, 62, 0.82),
-                    Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
-                    Status::Active => crate::panel::PANEL_BG,
-                };
-                let txt = if active { TEXT_MAIN } else { MUTED_FG };
-                button::Style {
-                    background: Some(Background::Color(bg)),
-                    border: Border::default(),
-                    shadow: Shadow::default(),
-                    text_color: txt,
-                    ..button::Style::default()
-                }
-            }),
+        crate::button::with_disabled_cursor(
+            button(text(label).size(scale::s(11.0)))
+                .width(FillLength)
+                .padding([scale::s(5.0), scale::s(0.0)])
+                .on_press_maybe(on_press)
+                .style(move |_theme, status: Status| {
+                    let bg = match status {
+                        Status::Disabled => Color::from_rgba8(34, 36, 44, 0.35),
+                        Status::Hovered => Color::from_rgba8(46, 48, 62, 0.82),
+                        Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
+                        Status::Active => crate::panel::PANEL_BG,
+                    };
+                    let txt = if active { TEXT_MAIN } else { MUTED_FG };
+                    button::Style {
+                        background: Some(Background::Color(bg)),
+                        border: Border::default(),
+                        shadow: Shadow::default(),
+                        text_color: txt,
+                        ..button::Style::default()
+                    }
+                })
+                .into(),
+        ),
         underline,
     ]
     .width(FillLength)
@@ -137,30 +140,32 @@ fn fill_tabs<'a>(gradient: bool, selected: bool) -> Element<'a, UiEvent> {
 /// picker for `field`. `on_open` is `None` (button disabled) while no entry
 /// is selected.
 fn swatch_button(color: Color, on_open: Option<UiEvent>) -> Element<'static, UiEvent> {
-    button(Space::new())
-        .width(scale::s(SWATCH_SIDE))
-        .height(scale::s(SWATCH_SIDE))
-        .padding(Padding::ZERO)
-        .style(crate::panel::button_style)
+    crate::button::with_disabled_cursor(
+        button(Space::new())
+            .width(scale::s(SWATCH_SIDE))
+            .height(scale::s(SWATCH_SIDE))
+            .padding(Padding::ZERO)
+            .style(crate::panel::button_style)
             .on_press_maybe(on_open)
-        .style(move |_theme, status: Status| {
-            let border_color = if matches!(status, Status::Hovered | Status::Pressed) {
-                Color::from_rgb8(230, 230, 230)
-            } else {
-                Color::from_rgb8(90, 90, 90)
-            };
-            button::Style {
-                background: Some(Background::Color(color)),
-                border: Border {
-                    radius: scale::s(3.0).into(),
-                    width: scale::s(1.0),
-                    color: border_color,
-                },
-                shadow: Shadow::default(),
-                ..button::Style::default()
-            }
-        })
-        .into()
+            .style(move |_theme, status: Status| {
+                let border_color = if matches!(status, Status::Hovered | Status::Pressed) {
+                    Color::from_rgb8(230, 230, 230)
+                } else {
+                    Color::from_rgb8(90, 90, 90)
+                };
+                button::Style {
+                    background: Some(Background::Color(color)),
+                    border: Border {
+                        radius: scale::s(3.0).into(),
+                        width: scale::s(1.0),
+                        color: border_color,
+                    },
+                    shadow: Shadow::default(),
+                    ..button::Style::default()
+                }
+            })
+            .into(),
+    )
 }
 
 /// A color field for `field`: a swatch with an always-visible, editable hex
@@ -280,14 +285,14 @@ fn header_row<'a, S: UiState + ?Sized>(state: &'a S, selected: bool) -> Element<
     .style(crate::panel::button_style)
     .on_press_maybe(can_auto.then_some(UiEvent::StyleAutoDetect))
     .padding(scale::s(6.0));
-    let auto: Element<'_, UiEvent> = tooltip(auto_btn, tip("Auto detect style"), tooltip::Position::Top)
+    let auto: Element<'_, UiEvent> = tooltip(crate::button::with_disabled_cursor(auto_btn.into()), tip("Auto detect style"), tooltip::Position::Top)
         .gap(scale::s(4.0))
         .into();
     let reset_btn = button(crate::icon::lucide(Icon::RotateCcw).size(scale::s(14.0)).center())
         .style(crate::panel::button_style)
         .on_press_maybe(None::<UiEvent>)
         .padding(scale::s(6.0));
-    let reset: Element<'_, UiEvent> = tooltip(reset_btn, tip("Reset style"), tooltip::Position::Top)
+    let reset: Element<'_, UiEvent> = tooltip(crate::button::with_disabled_cursor(reset_btn.into()), tip("Reset style"), tooltip::Position::Top)
         .gap(scale::s(4.0))
         .into();
     row![
@@ -446,18 +451,21 @@ fn background_section<'a, S: UiState + ?Sized>(
         ]
         .spacing(scale::s(8.0)),
         tooltip(
-            button(
-                row![
-                    crate::icon::lucide(Icon::Eraser).size(scale::s(14.0)).center(),
-                    text("Inpaint Background").size(scale::s(11.0))
-                ]
-                .spacing(scale::s(4.0))
-                .align_y(iced::Alignment::Center),
-            )
-            .width(FillLength)
-            .padding(scale::s(6.0))
-            .style(crate::panel::button_style)
-            .on_press_maybe((selected && !state.is_bulk_busy()).then_some(UiEvent::StyleInpaintBackground)),
+            crate::button::with_disabled_cursor(
+                button(
+                    row![
+                        crate::icon::lucide(Icon::Eraser).size(scale::s(14.0)).center(),
+                        text("Inpaint Background").size(scale::s(11.0))
+                    ]
+                    .spacing(scale::s(4.0))
+                    .align_y(iced::Alignment::Center),
+                )
+                .width(FillLength)
+                .padding(scale::s(6.0))
+                .style(crate::panel::button_style)
+                .on_press_maybe((selected && !state.is_bulk_busy()).then_some(UiEvent::StyleInpaintBackground))
+                .into(),
+            ),
             tip("Inpaint background"),
             tooltip::Position::Top,
         )
@@ -501,29 +509,32 @@ fn square_tile<'a>(
     fill: Option<Color>,
     on_press: Option<UiEvent>,
 ) -> Element<'a, UiEvent> {
-    let button = button(glyph)
-        .width(FillLength)
-        .height(FillLength)
-        .padding(Padding::ZERO)
-        .style(crate::panel::button_style)
+    let button = crate::button::with_disabled_cursor(
+        button(glyph)
+            .width(FillLength)
+            .height(FillLength)
+            .padding(Padding::ZERO)
+            .style(crate::panel::button_style)
             .on_press_maybe(on_press)
-        .style(move |_theme, status: Status| {
-            let border_color = if matches!(status, Status::Hovered | Status::Pressed) {
-                Color::from_rgb8(230, 230, 230)
-            } else {
-                Color::from_rgb8(90, 90, 90)
-            };
-            button::Style {
-                background: fill.map(Background::Color),
-                border: Border {
-                    radius: scale::s(PRESET_RADIUS).into(),
-                    width: scale::s(1.0),
-                    color: border_color,
-                },
-                shadow: Shadow::default(),
-                ..button::Style::default()
-            }
-        });
+            .style(move |_theme, status: Status| {
+                let border_color = if matches!(status, Status::Hovered | Status::Pressed) {
+                    Color::from_rgb8(230, 230, 230)
+                } else {
+                    Color::from_rgb8(90, 90, 90)
+                };
+                button::Style {
+                    background: fill.map(Background::Color),
+                    border: Border {
+                        radius: scale::s(PRESET_RADIUS).into(),
+                        width: scale::s(1.0),
+                        color: border_color,
+                    },
+                    shadow: Shadow::default(),
+                    ..button::Style::default()
+                }
+            })
+            .into(),
+    );
     iced::widget::stack![underlay, button]
         .width(iced::Length::Fixed(scale::s(PRESET_SIDE)))
         .height(iced::Length::Fixed(scale::s(PRESET_SIDE)))

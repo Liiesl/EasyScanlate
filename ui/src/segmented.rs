@@ -33,31 +33,33 @@ pub fn segment<'a>(
     on_press: Option<UiEvent>,
     font: Font,
 ) -> Element<'a, UiEvent> {
-    button(text(glyph).size(scale::s(12.0)).font(font).width(FillLength).center())
-        .width(FillLength)
-        .padding([scale::s(8.0), scale::s(0.0)])
-        .on_press_maybe(on_press)
-        .style(move |_theme, status: Status| {
-            let bg = match status {
-                Status::Disabled => Color::from_rgba8(34, 36, 44, 0.35),
-                Status::Hovered => Color::from_rgba8(46, 48, 62, 0.82),
-                Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
-                Status::Active => crate::panel::PANEL_BG,
-            };
-            let txt = match status {
-                Status::Disabled => MUTED_FG,
-                _ if active => crate::accent::accent(),
-                _ => TEXT_MAIN,
-            };
-            button::Style {
-                background: Some(Background::Color(bg)),
-                border: Border::default(),
-                shadow: Shadow::default(),
-                text_color: txt,
-                ..button::Style::default()
-            }
-        })
-        .into()
+    crate::button::with_disabled_cursor(
+        button(text(glyph).size(scale::s(12.0)).font(font).width(FillLength).center())
+            .width(FillLength)
+            .padding([scale::s(8.0), scale::s(0.0)])
+            .on_press_maybe(on_press)
+            .style(move |_theme, status: Status| {
+                let bg = match status {
+                    Status::Disabled => Color::from_rgba8(34, 36, 44, 0.35),
+                    Status::Hovered => Color::from_rgba8(46, 48, 62, 0.82),
+                    Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
+                    Status::Active => crate::panel::PANEL_BG,
+                };
+                let txt = match status {
+                    Status::Disabled => MUTED_FG,
+                    _ if active => crate::accent::accent(),
+                    _ => TEXT_MAIN,
+                };
+                button::Style {
+                    background: Some(Background::Color(bg)),
+                    border: Border::default(),
+                    shadow: Shadow::default(),
+                    text_color: txt,
+                    ..button::Style::default()
+                }
+            })
+            .into(),
+    )
 }
 
 /// One cell of a segmented control with a Lucide icon.
@@ -66,31 +68,33 @@ pub fn segment_icon<'a>(
     icon: Icon,
     on_press: Option<UiEvent>,
 ) -> Element<'a, UiEvent> {
-    button(crate::icon::lucide(icon).size(scale::s(12.0)).width(FillLength).center())
-        .width(FillLength)
-        .padding([scale::s(4.0), scale::s(0.0)])
-        .on_press_maybe(on_press)
-        .style(move |_theme, status: Status| {
-            let bg = match status {
-                Status::Disabled => Color::from_rgba8(34, 36, 44, 0.35),
-                Status::Hovered => Color::from_rgba8(46, 48, 62, 0.82),
-                Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
-                Status::Active => crate::panel::PANEL_BG,
-            };
-            let txt = match status {
-                Status::Disabled => MUTED_FG,
-                _ if active => crate::accent::accent(),
-                _ => TEXT_MAIN,
-            };
-            button::Style {
-                background: Some(Background::Color(bg)),
-                border: Border::default(),
-                shadow: Shadow::default(),
-                text_color: txt,
-                ..button::Style::default()
-            }
-        })
-        .into()
+    crate::button::with_disabled_cursor(
+        button(crate::icon::lucide(icon).size(scale::s(12.0)).width(FillLength).center())
+            .width(FillLength)
+            .padding([scale::s(4.0), scale::s(0.0)])
+            .on_press_maybe(on_press)
+            .style(move |_theme, status: Status| {
+                let bg = match status {
+                    Status::Disabled => Color::from_rgba8(34, 36, 44, 0.35),
+                    Status::Hovered => Color::from_rgba8(46, 48, 62, 0.82),
+                    Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
+                    Status::Active => crate::panel::PANEL_BG,
+                };
+                let txt = match status {
+                    Status::Disabled => MUTED_FG,
+                    _ if active => crate::accent::accent(),
+                    _ => TEXT_MAIN,
+                };
+                button::Style {
+                    background: Some(Background::Color(bg)),
+                    border: Border::default(),
+                    shadow: Shadow::default(),
+                    text_color: txt,
+                    ..button::Style::default()
+                }
+            })
+            .into(),
+    )
 }
 
 /// A bordered pill holding equally-sized [`segment`]s.

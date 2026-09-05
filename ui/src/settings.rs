@@ -341,27 +341,29 @@ fn recommended_row<'a>(
 // ---------------------------------------------------------------------------
 
 fn stepper_button<'a>(enabled: bool, label: &'a str, msg: Option<UiEvent>) -> Element<'a, UiEvent> {
-    button(text(label).size(scale::s(14.0)).width(FillLength).center())
-        .width(Length::Fixed(scale::s(30.0)))
-        .height(Length::Fixed(scale::s(30.0)))
-        .padding(0)
-        .on_press_maybe(if enabled { msg } else { None })
-        .style(move |_theme: &iced::Theme, status| {
-            let bg = if !enabled {
-                Color::from_rgba8(255, 255, 255, 0.06)
-            } else if status == iced::widget::button::Status::Hovered {
-                Color::from_rgba8(255, 255, 255, 0.30)
-            } else {
-                Color::from_rgba8(255, 255, 255, 0.15)
-            };
-            iced::widget::button::Style {
-                background: Some(bg.into()),
-                border: iced::Border::default().rounded(scale::s(15.0)),
-                text_color: if enabled { Color::WHITE } else { MUTED_FG },
-                ..Default::default()
-            }
-        })
-        .into()
+    crate::button::with_disabled_cursor(
+        button(text(label).size(scale::s(14.0)).width(FillLength).center())
+            .width(Length::Fixed(scale::s(30.0)))
+            .height(Length::Fixed(scale::s(30.0)))
+            .padding(0)
+            .on_press_maybe(if enabled { msg } else { None })
+            .style(move |_theme: &iced::Theme, status| {
+                let bg = if !enabled {
+                    Color::from_rgba8(255, 255, 255, 0.06)
+                } else if status == iced::widget::button::Status::Hovered {
+                    Color::from_rgba8(255, 255, 255, 0.30)
+                } else {
+                    Color::from_rgba8(255, 255, 255, 0.15)
+                };
+                iced::widget::button::Style {
+                    background: Some(bg.into()),
+                    border: iced::Border::default().rounded(scale::s(15.0)),
+                    text_color: if enabled { Color::WHITE } else { MUTED_FG },
+                    ..Default::default()
+                }
+            })
+            .into(),
+    )
 }
 
 // Used by the ocr/inpaint cards; dead in translation-only builds.
@@ -494,13 +496,15 @@ fn appearance_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             let count_label = if count == 1 { "Solid".to_string() } else { format!("{} | {}", count, schema.label()) };
             let dec_btn = stepper_button(count > 1, "−", Some(UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(count - 1))));
             let inc_btn = stepper_button(count < 5, "+", Some(UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(count + 1))));
-            let schema_btn: Element<'static, UiEvent> = button(text("⟳").size(scale::s(16.0)).width(FillLength).center())
-                .width(Length::Fixed(scale::s(30.0))).height(Length::Fixed(scale::s(30.0))).padding(0)
-                .on_press_maybe((count > 1).then(|| UiEvent::SettingEdit(SettingEdit::AuroraSchema(schema.index().wrapping_add(1) % 4))))
-                .style(|_theme: &iced::Theme, status| {
-                    let bg = if status == iced::widget::button::Status::Hovered { Color::from_rgba8(255,255,255,0.30) } else { Color::from_rgba8(255,255,255,0.15) };
-                    iced::widget::button::Style{ background: Some(bg.into()), border: iced::Border::default().rounded(scale::s(15.0)), text_color: Color::WHITE, ..Default::default() }
-                }).into();
+            let schema_btn: Element<'static, UiEvent> = crate::button::with_disabled_cursor(
+                button(text("⟳").size(scale::s(16.0)).width(FillLength).center())
+                    .width(Length::Fixed(scale::s(30.0))).height(Length::Fixed(scale::s(30.0))).padding(0)
+                    .on_press_maybe((count > 1).then(|| UiEvent::SettingEdit(SettingEdit::AuroraSchema(schema.index().wrapping_add(1) % 4))))
+                    .style(|_theme: &iced::Theme, status| {
+                        let bg = if status == iced::widget::button::Status::Hovered { Color::from_rgba8(255,255,255,0.30) } else { Color::from_rgba8(255,255,255,0.15) };
+                        iced::widget::button::Style{ background: Some(bg.into()), border: iced::Border::default().rounded(scale::s(15.0)), text_color: Color::WHITE, ..Default::default() }
+                    }).into(),
+            );
             let count_row: Element<'static, UiEvent> = row![
                 dec_btn,
                 container(text(count_label).size(scale::s(11.0)).color(Color::WHITE).width(FillLength).center()).width(Length::Fixed(scale::s(80.0))),

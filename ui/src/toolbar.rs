@@ -38,7 +38,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     .style(crate::panel::button_style)
     .on_press_maybe(can_toggle.then_some(UiEvent::ToggleOverlayText));
     let toggle_text: Element<'_, UiEvent> =
-        tooltip(toggle_text_btn, tip("Toggle text overlay"), tooltip::Position::Right)
+        tooltip(crate::button::with_disabled_cursor(toggle_text_btn.into()), tip("Toggle text overlay"), tooltip::Position::Right)
             .gap(scale::s(4.0))
             .into();
 
@@ -57,7 +57,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     .style(crate::panel::button_style)
     .on_press_maybe(can_toggle.then_some(UiEvent::ToggleInpaintLayer));
     let toggle_inpaint: Element<'_, UiEvent> =
-        tooltip(toggle_inpaint_btn, tip("Toggle inpaint layer"), tooltip::Position::Right)
+        tooltip(crate::button::with_disabled_cursor(toggle_inpaint_btn.into()), tip("Toggle inpaint layer"), tooltip::Position::Right)
             .gap(scale::s(4.0))
             .into();
 
@@ -85,7 +85,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         None
     });
     let inpaint: Element<'_, UiEvent> =
-        tooltip(inpaint_btn, tip(if inpaint_active { "Exit inpaint" } else { "Inpaint (multi-select)" }), tooltip::Position::Right)
+        tooltip(crate::button::with_disabled_cursor(inpaint_btn.into()), tip(if inpaint_active { "Exit inpaint" } else { "Inpaint (multi-select)" }), tooltip::Position::Right)
             .gap(scale::s(4.0))
             .into();
 
@@ -111,7 +111,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         None
     });
     let manual_ocr: Element<'_, UiEvent> =
-        tooltip(ocr_btn, tip(if ocr_active { "Exit manual OCR" } else { "Manual OCR (multi-select)" }), tooltip::Position::Right)
+        tooltip(crate::button::with_disabled_cursor(ocr_btn.into()), tip(if ocr_active { "Exit manual OCR" } else { "Manual OCR (multi-select)" }), tooltip::Position::Right)
             .gap(scale::s(4.0))
             .into();
 

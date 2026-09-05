@@ -362,7 +362,7 @@ impl UiState for ActiveTab<'_> {
 
     fn is_auto_inpainting(&self) -> bool {
         #[cfg(feature = "inpaint")]
-        { self.tab.auto_inpaint_pending > 0 }
+        { self.tab.auto_inpaint_pending > 0 || self.tab.auto_inpaint_loading }
         #[cfg(not(feature = "inpaint"))]
         { false }
     }
@@ -652,7 +652,7 @@ impl UiState for App {
     }
     fn is_auto_inpainting(&self) -> bool {
         #[cfg(feature = "inpaint")]
-        { self.tabs[self.active].auto_inpaint_pending > 0 }
+        { self.tabs[self.active].auto_inpaint_pending > 0 || self.tabs[self.active].auto_inpaint_loading }
         #[cfg(not(feature = "inpaint"))]
         { false }
     }

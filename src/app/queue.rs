@@ -422,6 +422,8 @@ fn dispatch_ocr(app: &mut crate::app::App, tab_id: super::tab::TabId) -> Task<cr
             } else {
                 let cfg = easyscanlate_settings::get(|s| easyscanlate_ocr::config_with(0.0, s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000)));
                 app.tabs[idx].pending_manual_multi_ocr = Some(data);
+                // Model load counts as the run itself so buttons disable during it.
+                app.tabs[idx].manual_ocring = true;
                 app.tabs[idx].status = "Loading OCR engine for manual OCR…".to_string();
                 let tid = tab_id;
                 return Task::perform(
@@ -509,6 +511,8 @@ fn dispatch_inpaint(
             } else {
                 // store back for engine-ready path and build
                 app.tabs[idx].pending_manual_multi = Some(data);
+                // Model load counts as the run itself so buttons disable during it.
+                app.tabs[idx].inpainting = true;
                 app.tabs[idx].status = match backend {
                     easyscanlate_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
                     easyscanlate_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
@@ -530,6 +534,8 @@ fn dispatch_inpaint(
                 return crate::app::inpaint::start_background_stitch(app, tab_id, engine, job, pad, prev, next);
             } else {
                 app.tabs[idx].pending_background_stitch = Some((job, pad, prev, next));
+                // Model load counts as the run itself so buttons disable during it.
+                app.tabs[idx].inpainting = true;
                 app.tabs[idx].status = match backend {
                     easyscanlate_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
                     easyscanlate_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),

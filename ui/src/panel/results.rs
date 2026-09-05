@@ -144,7 +144,7 @@ fn entry_row<'a, S: UiState + ?Sized>(
             .then_some(UiEvent::RetranslateEntry((index, entry_id))),
         );
     let retranslate_tip: Element<'_, UiEvent> =
-        tooltip(retranslate_btn, tip_label("Retranslate"), tooltip::Position::Top)
+        tooltip(crate::button::with_disabled_cursor(retranslate_btn.into()), tip_label("Retranslate"), tooltip::Position::Top)
             .gap(scale::s(4.0))
             .into();
     let buttons: Vec<Element<'_, UiEvent>> = vec![retranslate_tip, delete_tip];
@@ -507,7 +507,7 @@ fn translate_bar<'a, S: UiState + ?Sized>(
                     .then_some(UiEvent::Translate)
             );
         let translate: Element<'_, UiEvent> =
-            tooltip(translate_btn, tip_label("Translate"), tooltip::Position::Top)
+            tooltip(crate::button::with_disabled_cursor(translate_btn.into()), tip_label("Translate"), tooltip::Position::Top)
                 .gap(scale::s(4.0))
                 .into();
         row![
