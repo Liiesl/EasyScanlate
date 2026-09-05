@@ -3,7 +3,7 @@
 //! compact row across the panel's full width.
 
 use iced::widget::{button, container, progress_bar, row, text, tooltip};
-use iced::{Color, Element, Length};
+use iced::{Element, Length};
 use lucide_icons::Icon;
 
 use crate::event::UiEvent;
@@ -36,11 +36,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             progress_bar(0.0..=1.0, frac)
                 .girth(Length::Fixed(scale::s(6.0)))
                 .length(Length::Fixed(scale::s(60.0)))
-                .style(|_theme: &iced::Theme| iced::widget::progress_bar::Style {
-                    background: Color::from_rgba8(255, 255, 255, 0.12).into(),
-                    bar: crate::segmented::ACCENT.into(),
-                    border: iced::Border::default().rounded(scale::s(3.0)),
-                }),
+                .style(|_theme: &iced::Theme| crate::accent::progress_style_live()),
             text(pct)
                 .size(scale::s(11.0))
                 .width(Length::Fixed(scale::s(38.0))),

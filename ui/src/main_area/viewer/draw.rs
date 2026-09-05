@@ -1,15 +1,14 @@
 use iced::advanced::graphics::geometry::{self, Fill, Path, Stroke, Text};
 use iced::border::Radius;
-use iced::{Color, Font, Pixels, Point, Rectangle, Size};
+use iced::{Font, Pixels, Point, Rectangle, Size};
 
 use crate::main_area::geometry::order_quad;
 use crate::scale;
 use lucide_icons::Icon;
 
 use super::constants::{
-    FAILED_BG, FAILED_FG, HANDLE_BORDER, HANDLE_FILL, HANDLE_SIZE, INPAINT_FILL, INPAINT_STROKE,
-    PLACEHOLDER_BG, PLACEHOLDER_FG, SCROLLBAR_THUMB, SCROLLBAR_TRACK, TOOLBAR_BG, TOOLBAR_FG,
-    TOOLBAR_HOVER_BG,
+    FAILED_BG, FAILED_FG, HANDLE_FILL, HANDLE_SIZE, PLACEHOLDER_BG, PLACEHOLDER_FG,
+    SCROLLBAR_THUMB, SCROLLBAR_TRACK, TOOLBAR_BG, TOOLBAR_FG, TOOLBAR_HOVER_BG,
 };
 use super::hit_test::{hit_inpaint_toolbar_button, hit_toolbar_button};
 use super::interaction::Interaction;
@@ -60,10 +59,16 @@ where
     let x1 = start.x.max(current.x).clamp(0.0, tile.width);
     let y1 = start.y.max(current.y).clamp(0.0, tile.height);
     let rect = Rectangle::new(Point::new(x0, y0), Size::new(x1 - x0, y1 - y0));
-    frame.fill_rectangle(rect.position(), rect.size(), Fill::from(INPAINT_FILL));
+    frame.fill_rectangle(
+        rect.position(),
+        rect.size(),
+        Fill::from(super::constants::inpaint_fill()),
+    );
     frame.stroke(
         &Path::rectangle(rect.position(), rect.size()),
-        Stroke::default().with_color(INPAINT_STROKE).with_width(1.0),
+        Stroke::default()
+            .with_color(super::constants::inpaint_stroke())
+            .with_width(1.0),
     );
 }
 
@@ -295,11 +300,18 @@ where
 {
     frame.stroke(
         &Path::line(decor.stem_from, decor.anchor),
-        Stroke::default().with_color(HANDLE_BORDER).with_width(scale::s(1.5)),
+        Stroke::default()
+            .with_color(super::constants::handle_border())
+            .with_width(scale::s(1.5)),
     );
     let knob = Path::circle(decor.anchor, scale::s(HANDLE_SIZE) / 2.0);
     frame.fill(&knob, Fill::from(HANDLE_FILL));
-    frame.stroke(&knob, Stroke::default().with_color(HANDLE_BORDER).with_width(scale::s(1.5)));
+    frame.stroke(
+        &knob,
+        Stroke::default()
+            .with_color(super::constants::handle_border())
+            .with_width(scale::s(1.5)),
+    );
     if show_revert {
         draw_action_button(frame, decor.revert, Icon::Undo2, hover);
     }
@@ -351,7 +363,9 @@ pub fn draw_selection_decorations<'a, F>(
             frame.fill_rectangle(handle.position(), handle.size(), Fill::from(HANDLE_FILL));
             frame.stroke(
                 &Path::rectangle(handle.position(), handle.size()),
-                Stroke::default().with_color(HANDLE_BORDER).with_width(scale::s(1.0)),
+                Stroke::default()
+                    .with_color(super::constants::handle_border())
+                    .with_width(scale::s(1.0)),
             );
         }
         let decor = top_decor_geometry(rect, quad, frame.width(), flip_from, flip_at);
@@ -412,14 +426,14 @@ pub fn draw_inpaint_decorations<'a, F>(
         frame.stroke(
             &path,
             Stroke::default()
-                .with_color(Color::from_rgba8(92, 190, 255, 1.0))
+                .with_color(crate::accent::accent())
                 .with_width(scale::s(2.0)),
         );
     } else {
         frame.stroke(
             &Path::rectangle(rect.position(), rect.size()),
             Stroke::default()
-                .with_color(Color::from_rgba8(92, 190, 255, 1.0))
+                .with_color(crate::accent::accent())
                 .with_width(scale::s(2.0)),
         );
     }

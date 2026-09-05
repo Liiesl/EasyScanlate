@@ -97,7 +97,7 @@ fn panel_editor<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                 border: Border::default().rounded(scale::s(0.0)),
                 placeholder: MUTED_FG,
                 value: Color::from_rgb(0.9, 0.9, 0.9),
-                selection: Color::from_rgba8(92, 190, 255, 0.35),
+                selection: crate::accent::accent_translucent(0.35),
             }),
     )
 }

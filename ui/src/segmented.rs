@@ -10,6 +10,8 @@ use crate::event::UiEvent;
 use crate::scale;
 
 /// Accent color of active segments, tabs and glyphs.
+/// Aurora-synced at render time via `crate::accent`; kept as fallback for
+/// callers that need a const context.
 pub const ACCENT: Color = Color::from_rgb8(92, 190, 255);
 /// Near-white label color, for active tab labels.
 pub const TEXT_MAIN: Color = Color::from_rgb8(243, 244, 246);
@@ -44,7 +46,7 @@ pub fn segment<'a>(
             };
             let txt = match status {
                 Status::Disabled => MUTED_FG,
-                _ if active => ACCENT,
+                _ if active => crate::accent::accent(),
                 _ => TEXT_MAIN,
             };
             button::Style {
@@ -77,7 +79,7 @@ pub fn segment_icon<'a>(
             };
             let txt = match status {
                 Status::Disabled => MUTED_FG,
-                _ if active => ACCENT,
+                _ if active => crate::accent::accent(),
                 _ => TEXT_MAIN,
             };
             button::Style {

@@ -1,12 +1,12 @@
-//! Void → Cerulean loading bar.
+//! Aurora-synced loading bar.
 //! Matches the HTML/CSS specification:
 //! - Track: 4px transparent, rounded pill caps
-//! - Bar: linear gradient #111827 (Void) → #0ea5e9 (Cerulean) → #111827 (Void)
+//! - Bar: linear gradient transparent Void → aurora accent → transparent Void
 //! - background-size: 200% 100%
 //! - Animations:
 //!     - snap-asym: 3s ease-in-out infinite (fast stretch 15%, slow snap 35%)
 //!     - pan-grad: 2s linear infinite
-//! - Optional label: uppercase text in Slate-400 (#94a3b8)
+//! - Optional label: uppercase text, mode-aware slate for contrast
 
 use iced::alignment::Horizontal;
 use iced::widget::canvas::{self, Cache, Frame, Geometry, Path};
@@ -16,10 +16,10 @@ use iced::{Color, Element, Length, Point, Rectangle, Size, Theme, mouse};
 use crate::event::UiEvent;
 use crate::scale;
 
-// Colors matching the HTML/CSS snippet
-const VOID: Color = Color::from_rgb8(17, 24, 39);          // #111827
-const CERULEAN: Color = Color::from_rgb8(14, 165, 233);    // #0ea5e9
-const LABEL_COLOR: Color = Color::from_rgb8(148, 163, 184); // #94a3b8 (Slate-400)
+// Edge is transparent void; core is aurora-synced at view time via
+// `crate::accent::loading_pair`; see `crate::accent` for the derivation
+// (brightened hue + auto contrast).
+const VOID_TRANSPARENT: Color = Color::from_rgba8(17, 24, 39, 0.0); // transparent void
 
 // --- Perceptual sRGB Color Blending (Fixes GPU linear-gamma dark falloff) ---
 #[inline]
@@ -27,15 +27,16 @@ fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
-/// Blends between VOID (0.0) and CERULEAN (1.0) with sRGB perceptual gamma correction.
-fn blend_void_cerulean(t: f32) -> Color {
+/// Blends between transparent void edge (0.0) and accent (1.0) with sRGB perceptual gamma correction.
+fn blend_edge_accent(edge: Color, core: Color, t: f32) -> Color {
     let t = t.clamp(0.0, 1.0);
-    // Apply gamma curve to maintain vibrant cerulean body matching CSS browser interpolation
+    // Apply gamma curve to maintain vibrant body matching CSS browser interpolation
     let t_adj = t.powf(0.65);
-    Color::from_rgb(
-        lerp_f32(VOID.r, CERULEAN.r, t_adj),
-        lerp_f32(VOID.g, CERULEAN.g, t_adj),
-        lerp_f32(VOID.b, CERULEAN.b, t_adj),
+    Color::from_rgba(
+        lerp_f32(edge.r, core.r, t_adj),
+        lerp_f32(edge.g, core.g, t_adj),
+        lerp_f32(edge.b, core.b, t_adj),
+        lerp_f32(edge.a, core.a, t_adj),
     )
 }
 
@@ -130,14 +131,21 @@ impl LoadingBar {
 
     pub fn view(self) -> Element<'static, UiEvent> {
         let h = scale::s(4.0);
-        let bar_canvas = iced::widget::canvas(LoadingBarCanvas { phase: self.phase })
-            .width(Length::Fill)
-            .height(Length::Fixed(h));
+        let (_pair_edge, core) = crate::accent::loading_pair();
+        // Void edge stays transparent so the bar fades into the aurora.
+        let edge = VOID_TRANSPARENT;
+        let bar_canvas = iced::widget::canvas(LoadingBarCanvas {
+            phase: self.phase,
+            edge,
+            core,
+        })
+        .width(Length::Fill)
+        .height(Length::Fixed(h));
 
         if let Some(label_text) = self.label {
             let label = text(label_text.to_uppercase())
                 .size(scale::s(13.6)) // ~0.85rem
-                .color(LABEL_COLOR)
+                .color(crate::accent::label())
                 .align_x(Horizontal::Center)
                 .width(Length::Fill);
 
@@ -153,6 +161,8 @@ impl LoadingBar {
 
 struct LoadingBarCanvas {
     phase: f32,
+    edge: Color,
+    core: Color,
 }
 
 impl canvas::Program<UiEvent> for LoadingBarCanvas {
@@ -195,8 +205,8 @@ impl canvas::Program<UiEvent> for LoadingBarCanvas {
         let grad_start = Point::new(bar_x + shift - period, 0.0);
         let grad_end = Point::new(bar_x + shift + 2.0 * period, 0.0);
 
-        let mid_glow = blend_void_cerulean(0.70);
-        let outer_glow = blend_void_cerulean(0.35);
+        let mid_glow = blend_edge_accent(self.edge, self.core, 0.70);
+        let outer_glow = blend_edge_accent(self.edge, self.core, 0.35);
 
         let gradient = {
             use iced::widget::canvas::Gradient;
@@ -204,19 +214,20 @@ impl canvas::Program<UiEvent> for LoadingBarCanvas {
 
             let mut linear = GLinear::new(grad_start, grad_end);
 
-            // Add packed, multi-stop wave cycles so Cerulean stays vibrant without wide black dips
+            // Add packed, multi-stop wave cycles so the accent stays vibrant
+            // while fading to transparent void at the wave edges.
             for p in 0..3 {
                 let base = p as f32 / 3.0;
                 let step = 1.0 / 3.0;
 
                 linear = linear
-                    .add_stop(base + step * 0.00, VOID)
+                    .add_stop(base + step * 0.00, self.edge)
                     .add_stop(base + step * 0.20, outer_glow)
                     .add_stop(base + step * 0.35, mid_glow)
-                    .add_stop(base + step * 0.50, CERULEAN)
+                    .add_stop(base + step * 0.50, self.core)
                     .add_stop(base + step * 0.65, mid_glow)
                     .add_stop(base + step * 0.80, outer_glow)
-                    .add_stop(base + step * 1.00, VOID);
+                    .add_stop(base + step * 1.00, self.edge);
             }
 
             Gradient::Linear(linear)

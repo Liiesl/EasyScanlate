@@ -56,7 +56,7 @@ pub fn edit_overlay<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             border: Border::default().rounded(0.0),
             placeholder: text_color,
             value: text_color,
-            selection: Color::from_rgba8(92, 190, 255, 0.35),
+            selection: crate::accent::accent_translucent(0.35),
         });
     let block_top = rect.y + (rect.height - fitted_height).max(0.0) / 2.0;
     iced::widget::Pin::new(editor).x(rect.x).y(block_top).into()

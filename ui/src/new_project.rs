@@ -4,7 +4,7 @@ use iced::{Background, Border, Color, Element, Length, Fill as FillLength};
 use crate::event::UiEvent;
 use crate::panel::PANEL_BG;
 use crate::scale;
-use crate::segmented::{ACCENT, BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
+use crate::segmented::{BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
 use crate::state::UiState;
 
 const MODAL_WIDTH: f32 = 640.0;
@@ -19,7 +19,7 @@ fn input_style(_theme: &iced::Theme, _status: text_input::Status) -> text_input:
         },
         placeholder: MUTED_FG,
         value: TEXT_MAIN,
-        selection: ACCENT,
+        selection: crate::accent::accent(),
         icon: MUTED_FG,
     }
 }

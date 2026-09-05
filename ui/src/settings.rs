@@ -29,7 +29,6 @@ use crate::segmented::{segment, segmented_group};
 use crate::state::UiState;
 
 const TAB_WIDTH: f32 = 170.0;
-const ACCENT: Color = Color::from_rgb8(92, 190, 255);
 const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);
 const CARD_BG: Color = Color::from_rgba8(255, 255, 255, 0.06);
 const CARD_BORDER: Color = Color::from_rgba8(255, 255, 255, 0.08);
@@ -103,7 +102,7 @@ fn card_header<'a>(icon: Icon, title: &'a str, subtitle: Option<&'a str>) -> Ele
     row![
         crate::icon::lucide(icon)
             .size(scale::s(14.0))
-            .color(ACCENT),
+            .color(crate::accent::accent()),
         column![
             text(title).size(scale::s(13.0)).color(Color::WHITE),
             subtitle_el,
@@ -127,14 +126,14 @@ fn tab_button<'a, S: UiState + ?Sized>(
     let selected = state.settings_tab() == tab;
     let icon_el = crate::icon::lucide(icon)
         .size(scale::s(14.0))
-        .color(if selected { ACCENT } else { MUTED_FG });
+        .color(if selected { crate::accent::accent() } else { MUTED_FG });
     let label_el = text(label)
         .size(scale::s(13.0))
         .color(if selected { Color::WHITE } else { MUTED_FG });
     // left accent bar 3px
     let accent = container(space::horizontal().width(Length::Fixed(scale::s(3.0))).height(Length::Fixed(scale::s(18.0))))
         .style(move |_| container::Style {
-            background: Some(if selected { ACCENT.into() } else { Color::TRANSPARENT.into() }),
+            background: Some(if selected { crate::accent::accent().into() } else { Color::TRANSPARENT.into() }),
             border: iced::Border::default().rounded(scale::s(2.0)),
             ..Default::default()
         });
@@ -221,7 +220,7 @@ fn provider_row_with_connection<'a>(
             .style(crate::panel::button_style)
             .on_press(UiEvent::TranslateConnect(provider.id.clone())),
     };
-    let dot_color = if status.starts_with("Connected") { ACCENT } else { MUTED_FG };
+    let dot_color = if status.starts_with("Connected") { crate::accent::accent() } else { MUTED_FG };
     row![
         container(space::horizontal().width(Length::Fixed(scale::s(6.0))).height(Length::Fixed(scale::s(6.0))))
             .style(move |_| container::Style {
@@ -253,7 +252,7 @@ fn custom_row_with_connection<'a>(
         .as_ref()
         .map(|connection| format!("Connected · {}", mask_key(&connection.api_key)))
         .unwrap_or_else(|| "Not connected".to_string());
-    let dot_color = if status.starts_with("Connected") { ACCENT } else { MUTED_FG };
+    let dot_color = if status.starts_with("Connected") { crate::accent::accent() } else { MUTED_FG };
     let button = match connected {
         Some(_) => button(text("Disconnect").size(scale::s(11.0)))
             .padding([scale::s(3.0), scale::s(8.0)])
@@ -296,11 +295,11 @@ fn recommended_row<'a>(
     let badge = container(
         text("Recommended")
             .size(scale::s(9.0))
-            .color(ACCENT),
+            .color(crate::accent::accent()),
     )
     .padding([scale::s(2.0), scale::s(6.0)])
     .style(|_theme| container::Style {
-        background: Some(Color::from_rgba8(92, 190, 255, 0.15).into()),
+        background: Some(crate::accent::accent_translucent(0.15).into()),
         border: iced::Border::default().rounded(scale::s(4.0)),
         ..container::Style::default()
     });
@@ -436,7 +435,7 @@ fn appearance_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         .into();
         let font_section = column![
             row![
-                crate::icon::lucide(Icon::Type).size(scale::s(14.0)).color(ACCENT),
+                crate::icon::lucide(Icon::Type).size(scale::s(14.0)).color(crate::accent::accent()),
                 text("UI Font Size").size(scale::s(13.0)).color(Color::WHITE),
             ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
             row![
@@ -1311,7 +1310,7 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
         let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
         content.push(
             row![
-                crate::icon::lucide(Icon::PlugZap).size(scale::s(14.0)).color(ACCENT),
+                crate::icon::lucide(Icon::PlugZap).size(scale::s(14.0)).color(crate::accent::accent()),
                 text("Connected").size(scale::s(13.0)).color(Color::WHITE),
                 space::horizontal(),
                 text(if connected_rows.is_empty() { "—".to_string() } else { format!("{} connected", connected_rows.len()) }).size(scale::s(11.0)).color(MUTED_FG),
@@ -1338,7 +1337,7 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
         let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
         content.push(
             row![
-                crate::icon::lucide(Icon::Star).size(scale::s(14.0)).color(ACCENT),
+                crate::icon::lucide(Icon::Star).size(scale::s(14.0)).color(crate::accent::accent()),
                 text("Recommended").size(scale::s(13.0)).color(Color::WHITE),
                 space::horizontal(),
                 text(if recommended_rows.is_empty() { "—".to_string() } else { format!("{} recommended", recommended_rows.len()) }).size(scale::s(11.0)).color(MUTED_FG),
@@ -1528,7 +1527,7 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
         content.push(
             row![
-                crate::icon::lucide(Icon::PlugZap).size(scale::s(14.0)).color(ACCENT),
+                crate::icon::lucide(Icon::PlugZap).size(scale::s(14.0)).color(crate::accent::accent()),
                 text("Connected").size(scale::s(13.0)).color(Color::WHITE),
                 space::horizontal(),
                 text(if connected_rows.is_empty() { "—".to_string() } else { format!("{} connected", connected_rows.len()) }).size(scale::s(11.0)).color(MUTED_FG),
@@ -1553,7 +1552,7 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
         content.push(
             row![
-                crate::icon::lucide(Icon::Star).size(scale::s(14.0)).color(ACCENT),
+                crate::icon::lucide(Icon::Star).size(scale::s(14.0)).color(crate::accent::accent()),
                 text("Recommended").size(scale::s(13.0)).color(Color::WHITE),
                 space::horizontal(),
                 text(if recommended_rows.is_empty() { "—".to_string() } else { format!("{} recommended", recommended_rows.len()) }).size(scale::s(11.0)).color(MUTED_FG),
@@ -1667,7 +1666,7 @@ fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
     col.push(item_separator());
 
     if ready {
-        col.push(text("Update ready — restart to apply.").size(scale::s(12.0)).color(ACCENT).into());
+        col.push(text("Update ready — restart to apply.").size(scale::s(12.0)).color(crate::accent::accent()).into());
         if let Some(v) = available.clone() {
             col.push(text(format!("Ready: v{} → v{}", current, v)).size(scale::s(11.0)).color(MUTED_FG).into());
         }
@@ -1681,20 +1680,20 @@ fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
         col.push(helper_text("The app will restart and install the update (Velopack — per-user, no admin)."));
     } else if downloading {
         let pct = progress.clamp(0, 100);
-        col.push(text(format!("Downloading update {}% — please don't close", pct)).size(scale::s(12.0)).color(ACCENT).into());
+        col.push(text(format!("Downloading update {}% — please don't close", pct)).size(scale::s(12.0)).color(crate::accent::accent()).into());
         col.push(
             progress_bar(0.0..=100.0, pct as f32)
                 .girth(Length::Fixed(scale::s(6.0)))
                 .style(|_theme: &iced::Theme| iced::widget::progress_bar::Style {
-                    background: Color::from_rgba8(255, 255, 255, 0.12).into(),
-                    bar: ACCENT.into(),
+                    background: crate::accent::track().into(),
+                    bar: crate::accent::accent().into(),
                     border: iced::Border::default().rounded(scale::s(3.0)),
                 })
                 .into(),
         );
         col.push(text(format!("{}% — Velopack will restart when done", pct)).size(scale::s(11.0)).color(MUTED_FG).into());
     } else if let Some(v) = available.clone() {
-        col.push(text(format!("Update available: v{} → v{}", current, v)).size(scale::s(12.0)).color(ACCENT).into());
+        col.push(text(format!("Update available: v{} → v{}", current, v)).size(scale::s(12.0)).color(crate::accent::accent()).into());
         if let Some(n) = notes.clone() {
             col.push(container(text(n).size(scale::s(11.0)).color(MUTED_FG)).padding(scale::s(6.0)).style(|_| container::Style{ background: Some(Color::from_rgba8(255,255,255,0.04).into()), border: iced::Border::default().rounded(scale::s(6.0)), ..Default::default() }).into());
         }

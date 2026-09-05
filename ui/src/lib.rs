@@ -5,6 +5,7 @@
 //! [`UiEvent`]: crate::event::UiEvent
 
 pub mod background;
+pub mod accent;
 pub mod chrome;
 pub mod color;
 pub mod connect;

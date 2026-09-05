@@ -30,8 +30,11 @@ use self::gradient::fill_gradient_text;
 use self::text::LINE_HEIGHT;
 use self::warp::{affine_error, draw_warped_text};
 
-const SELECTED_COLOR: Color = Color::from_rgba8(92, 190, 255, 1.0);
 const SELECTED_WIDTH: f32 = 2.0;
+
+fn selected_color() -> Color {
+    crate::accent::accent()
+}
 
 /// Draws one translucent box + label per entry on top of the image inside `frame`.
 pub fn draw_entries<'a, I, F>(
@@ -104,7 +107,7 @@ pub fn draw_entries<'a, I, F>(
                     frame.stroke(
                         &bg,
                         Stroke::default()
-                            .with_color(SELECTED_COLOR)
+                            .with_color(selected_color())
                             .with_width(SELECTED_WIDTH),
                     );
                 }
@@ -127,7 +130,7 @@ pub fn draw_entries<'a, I, F>(
                     frame.stroke(
                         &bg,
                         Stroke::default()
-                            .with_color(SELECTED_COLOR)
+                            .with_color(selected_color())
                             .with_width(SELECTED_WIDTH),
                     );
                 }
@@ -143,7 +146,7 @@ pub fn draw_entries<'a, I, F>(
                     frame.stroke(
                         &bg,
                         Stroke::default()
-                            .with_color(SELECTED_COLOR)
+                            .with_color(selected_color())
                             .with_width(SELECTED_WIDTH),
                     );
                 }
@@ -162,7 +165,7 @@ pub fn draw_entries<'a, I, F>(
                 frame.stroke(
                     &bg,
                     Stroke::default()
-                        .with_color(SELECTED_COLOR)
+                        .with_color(selected_color())
                         .with_width(SELECTED_WIDTH),
                 );
             }

@@ -16,7 +16,6 @@ use iced::{Background, Border, Color, Element, Length, Shadow, Theme};
 use crate::event::UiEvent;
 use crate::state::UiState;
 
-const ACCENT: Color = Color::from_rgb8(92, 190, 255);
 const PANEL_BG: Color = Color::from_rgba8(34, 36, 44, 0.70);
 const PANEL_HOVER: Color = Color::from_rgba8(46, 48, 62, 0.82);
 const PANEL_PRESSED: Color = Color::from_rgba8(55, 57, 72, 0.87);
@@ -171,7 +170,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             };
 
             let dirty: Element<'_, UiEvent> = if meta.dirty {
-                container(text("•").size(11).color(ACCENT))
+                container(text("•").size(11).color(crate::accent::accent()))
                     .width(Length::Fixed(8.0))
                     .center_x(Length::Fixed(8.0))
                     .center_y(Length::Fixed(14.0))

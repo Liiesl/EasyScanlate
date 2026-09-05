@@ -10,15 +10,14 @@ use crate::panel::PANEL_BG;
 use crate::scale;
 use crate::state::UiState;
 
-const ACCENT: Color = Color::from_rgb8(92, 190, 255);
 const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);
 
 fn accent_button_style(_theme: &iced::Theme, status: button::Status) -> button::Style {
     let bg = match status {
-        button::Status::Hovered => Color::from_rgba8(92, 190, 255, 0.90),
-        button::Status::Pressed => Color::from_rgba8(72, 170, 235, 0.95),
-        button::Status::Active => ACCENT,
-        button::Status::Disabled => Color::from_rgba8(92, 190, 255, 0.40),
+        button::Status::Hovered => crate::accent::accent_hover(),
+        button::Status::Pressed => crate::accent::accent(),
+        button::Status::Active => crate::accent::accent(),
+        button::Status::Disabled => crate::accent::accent_translucent(0.40),
     };
     button::Style {
         background: Some(bg.into()),

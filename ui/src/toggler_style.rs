@@ -6,7 +6,6 @@
 use iced::{Color, Theme};
 use iced::widget::toggler;
 
-const ACCENT: Color = Color::from_rgb8(92, 190, 255);
 const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);
 
 pub fn style(_theme: &Theme, status: toggler::Status) -> toggler::Style {
@@ -34,9 +33,9 @@ pub fn style(_theme: &Theme, status: toggler::Status) -> toggler::Style {
     if is_on {
         toggler::Style {
             background: (if is_hovered {
-                Color::from_rgb8(110, 200, 255)
+                crate::accent::accent_hover()
             } else {
-                ACCENT
+                crate::accent::accent()
             })
             .into(),
             background_border_width: 0.0,

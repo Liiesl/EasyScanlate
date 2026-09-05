@@ -35,7 +35,7 @@ use easyscanlate_model::{EntryStyle, TextAlign, TextGradientDir};
 
 use crate::event::{StyleField, UiEvent};
 use crate::main_area::overlay::styled_font;
-use crate::segmented::{segment_icon, segmented_group, ACCENT, BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
+use crate::segmented::{segment_icon, segmented_group, BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
 use crate::scale;
 use crate::state::UiState;
 use lucide_icons::Icon;
@@ -87,7 +87,7 @@ fn tab<'a>(label: &'a str, active: bool, on_press: Option<UiEvent>) -> Element<'
     let underline: Element<'a, UiEvent> = if active {
         rule::horizontal(scale::s(2.0))
             .style(|_theme: &iced::Theme| rule::Style {
-                color: ACCENT,
+                color: crate::accent::accent(),
                 radius: scale::s(0.0).into(),
                 fill_mode: rule::FillMode::Full,
                 snap: true,
@@ -208,7 +208,7 @@ fn color_field<'a, S: UiState + ?Sized>(
                     icon: MUTED_FG,
                     placeholder: MUTED_FG,
                     value: TEXT_MAIN,
-                    selection: ACCENT,
+                    selection: crate::accent::accent(),
                 }),
         ]
         .spacing(scale::s(6.0))
@@ -243,7 +243,7 @@ fn number_field<'a>(
                     icon: MUTED_FG,
                     placeholder: MUTED_FG,
                     value: TEXT_MAIN,
-                    selection: ACCENT,
+                    selection: crate::accent::accent(),
                 }),
         ]
         .spacing(scale::s(6.0))

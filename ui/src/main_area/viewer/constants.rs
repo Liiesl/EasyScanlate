@@ -29,7 +29,21 @@ pub const TOOLBAR_BG: Color = Color::from_rgba8(34, 36, 44, 0.70);
 pub const TOOLBAR_HOVER_BG: Color = Color::from_rgba8(46, 48, 62, 0.82);
 pub const TOOLBAR_FG: Color = Color::from_rgba8(215, 220, 235, 1.0);
 pub const HANDLE_FILL: Color = Color::WHITE;
+/// Aurora-synced handle border (live). `HANDLE_BORDER` stays as fallback for const contexts.
 pub const HANDLE_BORDER: Color = Color::from_rgba8(92, 190, 255, 1.0);
+
+/// Live aurora-synced viewer accents.
+pub fn handle_border() -> Color {
+    crate::accent::accent()
+}
+/// Live aurora-synced inpaint fill (translucent).
+pub fn inpaint_fill() -> Color {
+    crate::accent::accent_translucent(0.16)
+}
+/// Live aurora-synced inpaint stroke.
+pub fn inpaint_stroke() -> Color {
+    crate::accent::accent()
+}
 
 /// Geometry of the quick-action overlay buttons pinned to the viewer's bottom-left corner.
 /// Top/Bottom are circles, Save is a rectangle with icon + label.
@@ -57,7 +71,8 @@ pub const FAILED_FG: Color = Color::from_rgba8(200, 120, 120, 1.0);
 pub const SCROLLBAR_TRACK: Color = Color::from_rgba8(255, 255, 255, 0.07);
 pub const SCROLLBAR_THUMB: Color = Color::from_rgba8(255, 255, 255, 0.35);
 
-/// Inpainting range marquee colors.
+/// Inpainting range marquee colors (fallbacks for const contexts; prefer
+/// `inpaint_fill()` / `inpaint_stroke()` for the live aurora-synced values).
 pub const INPAINT_FILL: Color = Color::from_rgba8(92, 190, 255, 0.16);
 pub const INPAINT_STROKE: Color = Color::from_rgba8(92, 190, 255, 1.0);
 

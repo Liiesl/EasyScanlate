@@ -17,7 +17,6 @@ use crate::state::UiState;
 
 const MODAL_WIDTH: f32 = 360.0;
 const MODAL_HEIGHT: f32 = 250.0;
-const ACCENT: Color = Color::from_rgb8(92, 190, 255);
 const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);
 const ERROR_FG: Color = Color::from_rgb8(255, 110, 110);
 
@@ -180,4 +179,10 @@ pub fn view<'a, S: UiState + ?Sized>(
 }
 
 /// The accent color used by connect buttons in the settings list.
-pub const CONNECT_ACCENT: Color = ACCENT;
+/// Aurora-synced; read live so it follows the background theme.
+pub fn connect_accent() -> Color {
+    crate::accent::accent()
+}
+
+/// Backwards-compatible accent constant (fallback when a const context is needed).
+pub const CONNECT_ACCENT: Color = Color::from_rgb8(92, 190, 255);

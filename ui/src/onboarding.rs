@@ -14,7 +14,6 @@ use crate::scale;
 use crate::panel::PANEL_BG;
 use crate::state::UiState;
 
-const ACCENT: Color = Color::from_rgb8(92, 190, 255);
 const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);
 const CARD_BG: Color = Color::from_rgba8(255, 255, 255, 0.06);
 const CARD_BORDER: Color = Color::from_rgba8(255, 255, 255, 0.08);
@@ -51,13 +50,13 @@ fn item_separator() -> Element<'static, UiEvent> {
 /// One step dot.
 fn step_dot(active: bool, done: bool) -> Element<'static, UiEvent> {
     let bg = if done {
-        ACCENT
+        crate::accent::accent()
     } else if active {
-        Color::from_rgba8(92, 190, 255, 0.5)
+        crate::accent::accent_translucent(0.5)
     } else {
         Color::from_rgba8(255, 255, 255, 0.12)
     };
-    let border = if active { ACCENT } else { Color::TRANSPARENT };
+    let border = if active { crate::accent::accent() } else { Color::TRANSPARENT };
     container(space::horizontal().width(Length::Fixed(scale::s(1.0))).height(Length::Fixed(scale::s(1.0))))
         .width(Length::Fixed(scale::s(10.0)))
         .height(Length::Fixed(scale::s(10.0)))
@@ -85,9 +84,9 @@ fn primary_button<'a>(label: &'a str, enabled: bool, msg: Option<UiEvent>) -> El
         let bg = if !enabled {
             Color::from_rgba8(255, 255, 255, 0.08)
         } else if status == iced::widget::button::Status::Hovered {
-            Color::from_rgb8(80, 170, 235)
+            crate::accent::accent_hover()
         } else {
-            ACCENT
+            crate::accent::accent()
         };
         iced::widget::button::Style {
             background: Some(bg.into()),
@@ -187,9 +186,9 @@ fn inline_form(modal: &crate::connect::ConnectModal) -> Element<'static, UiEvent
             .padding([scale::s(4.0), scale::s(10.0)])
             .style(|_, status| {
                 let bg = if status == iced::widget::button::Status::Hovered {
-                    Color::from_rgb8(80, 170, 235)
+                    crate::accent::accent_hover()
                 } else {
-                    ACCENT
+                    crate::accent::accent()
                 };
                 iced::widget::button::Style {
                     background: Some(bg.into()),
@@ -229,7 +228,7 @@ fn onboarding_provider_row(
             }
         })
         .unwrap_or_else(|| "Not connected".to_string());
-    let dot_color = if status.starts_with("Connected") { ACCENT } else { MUTED_FG };
+    let dot_color = if status.starts_with("Connected") { crate::accent::accent() } else { MUTED_FG };
     let dot = container(space::horizontal().width(Length::Fixed(scale::s(6.0))).height(Length::Fixed(scale::s(6.0))))
         .style(move |_| container::Style {
             background: Some(dot_color.into()),
@@ -309,7 +308,7 @@ fn onboarding_custom_row(
         .as_ref()
         .map(|c| format!("Connected · {}", mask_key(&c.api_key)))
         .unwrap_or_else(|| "Not connected".to_string());
-    let dot_color = if status.starts_with("Connected") { ACCENT } else { MUTED_FG };
+    let dot_color = if status.starts_with("Connected") { crate::accent::accent() } else { MUTED_FG };
     let dot = container(space::horizontal().width(Length::Fixed(scale::s(6.0))).height(Length::Fixed(scale::s(6.0))))
         .style(move |_| container::Style {
             background: Some(dot_color.into()),
@@ -383,10 +382,10 @@ fn onboarding_recommended_row(
     modal: Option<&crate::connect::ConnectModal>,
 ) -> Element<'static, UiEvent> {
     let is_expanded = modal.is_some_and(|m| m.provider_id == provider.id);
-    let badge = container(text("Recommended").size(scale::s(9.0)).color(ACCENT))
+    let badge = container(text("Recommended").size(scale::s(9.0)).color(crate::accent::accent()))
         .padding([scale::s(2.0), scale::s(6.0)])
         .style(|_| container::Style {
-            background: Some(Color::from_rgba8(92, 190, 255, 0.15).into()),
+            background: Some(crate::accent::accent_translucent(0.15).into()),
             border: iced::Border::default().rounded(scale::s(4.0)),
             ..Default::default()
         });
@@ -457,7 +456,7 @@ fn onboarding_recommended_row(
 
 fn welcome_step() -> Element<'static, UiEvent> {
     column![
-        crate::icon::lucide(Icon::Sparkles).size(scale::s(28.0)).color(ACCENT),
+        crate::icon::lucide(Icon::Sparkles).size(scale::s(28.0)).color(crate::accent::accent()),
         text("Welcome to EasyScanlate").size(scale::s(22.0)).color(Color::WHITE),
         text("EasyScanlate — manga / manhwa OCR, translation and inpainting.")
             .size(scale::s(12.0))
@@ -465,15 +464,15 @@ fn welcome_step() -> Element<'static, UiEvent> {
         container(
             column![
                 row![
-                    crate::icon::lucide(Icon::Download).size(scale::s(14.0)).color(ACCENT),
+                    crate::icon::lucide(Icon::Download).size(scale::s(14.0)).color(crate::accent::accent()),
                     text("Downloads required models (OCR, styling, segmentation, inpainting)").size(scale::s(12.0)).color(Color::WHITE),
                 ].spacing(scale::s(8.0)).align_y(iced::Alignment::Center),
                 row![
-                    crate::icon::lucide(Icon::Palette).size(scale::s(14.0)).color(ACCENT),
+                    crate::icon::lucide(Icon::Palette).size(scale::s(14.0)).color(crate::accent::accent()),
                     text("Pick appearance & automation preferences").size(scale::s(12.0)).color(Color::WHITE),
                 ].spacing(scale::s(8.0)).align_y(iced::Alignment::Center),
                 row![
-                    crate::icon::lucide(Icon::Languages).size(scale::s(14.0)).color(ACCENT),
+                    crate::icon::lucide(Icon::Languages).size(scale::s(14.0)).color(crate::accent::accent()),
                     text("Connect a translation service (optional, can skip)").size(scale::s(12.0)).color(Color::WHITE),
                 ].spacing(scale::s(8.0)).align_y(iced::Alignment::Center),
             ].spacing(scale::s(8.0))
@@ -507,8 +506,8 @@ fn models_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent> {
             progress_bar(0.0..=1.0, overall)
                 .girth(Length::Fixed(scale::s(6.0)))
                 .style(|_| iced::widget::progress_bar::Style {
-                    background: Color::from_rgba8(255, 255, 255, 0.12).into(),
-                    bar: ACCENT.into(),
+                    background: crate::accent::track().into(),
+                    bar: crate::accent::accent().into(),
                     border: iced::Border::default().rounded(scale::s(3.0)),
                 }),
         ].spacing(scale::s(8.0)).align_y(iced::Alignment::Center),
@@ -541,8 +540,8 @@ fn models_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent> {
         let bar: Element<'static, UiEvent> = progress_bar(0.0..=1.0, pct)
             .girth(Length::Fixed(scale::s(5.0)))
             .style(move |_| iced::widget::progress_bar::Style {
-                background: Color::from_rgba8(255, 255, 255, 0.1).into(),
-                bar: if is_failed { ERROR_FG.into() } else { ACCENT.into() },
+                background: crate::accent::track().into(),
+                bar: if is_failed { ERROR_FG.into() } else { crate::accent::accent().into() },
                 border: iced::Border::default().rounded(scale::s(2.0)),
             })
             .into();
@@ -561,7 +560,7 @@ fn models_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent> {
                 row![
                     text(id.clone()).size(scale::s(12.0)).color(Color::WHITE).width(Length::Fixed(scale::s(120.0))),
                     text(desc.clone()).size(scale::s(11.0)).color(MUTED_FG).width(FillLength),
-                    text(label).size(scale::s(11.0)).color(if is_done { ACCENT } else { MUTED_FG }),
+                    text(label).size(scale::s(11.0)).color(if is_done { crate::accent::accent() } else { MUTED_FG }),
                     retry_btn,
                 ].spacing(scale::s(8.0)).align_y(iced::Alignment::Center),
                 bar,
@@ -576,13 +575,13 @@ fn models_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent> {
     let download_btn: Element<'static, UiEvent> = if all_done {
         container(
             row![
-                crate::icon::lucide(Icon::Check).size(scale::s(14.0)).color(ACCENT),
-                text("All models ready").size(scale::s(12.0)).color(ACCENT),
+                crate::icon::lucide(Icon::Check).size(scale::s(14.0)).color(crate::accent::accent()),
+                text("All models ready").size(scale::s(12.0)).color(crate::accent::accent()),
             ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center)
         ).padding(scale::s(8.0)).into()
     } else if downloading {
         row![
-            crate::icon::lucide(Icon::RefreshCw).size(scale::s(14.0)).color(ACCENT),
+            crate::icon::lucide(Icon::RefreshCw).size(scale::s(14.0)).color(crate::accent::accent()),
             text("Downloading…").size(scale::s(12.0)).color(MUTED_FG),
             text("(you can keep the app open; progress is resumable)").size(scale::s(11.0)).color(MUTED_FG),
         ].spacing(scale::s(8.0)).align_y(iced::Alignment::Center).into()
@@ -595,7 +594,7 @@ fn models_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent> {
         )
         .padding([scale::s(8.0), scale::s(16.0)])
         .style(|_, s| {
-            let bg = if s == iced::widget::button::Status::Hovered { Color::from_rgb8(80,170,235) } else { ACCENT };
+            let bg = if s == iced::widget::button::Status::Hovered { crate::accent::accent_hover() } else { crate::accent::accent() };
             iced::widget::button::Style { background: Some(bg.into()), border: iced::Border::default().rounded(scale::s(6.0)), text_color: Color::WHITE, ..Default::default() }
         })
         .on_press(UiEvent::OnboardingDownloadAll)
@@ -617,7 +616,7 @@ fn preferences_step() -> Element<'static, UiEvent> {
     let appearance: Element<'static, UiEvent> = container(
         column![
             row![
-                crate::icon::lucide(Icon::Palette).size(scale::s(14.0)).color(ACCENT),
+                crate::icon::lucide(Icon::Palette).size(scale::s(14.0)).color(crate::accent::accent()),
                 text("Appearance").size(scale::s(13.0)).color(Color::WHITE),
             ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
             row![
@@ -652,7 +651,7 @@ fn preferences_step() -> Element<'static, UiEvent> {
             ].spacing(scale::s(8.0)).align_y(iced::Alignment::Center).padding([scale::s(4.0), 0.0]).into()
         };
         let col: Element<'static, UiEvent> = column![
-            row![crate::icon::lucide(Icon::Sparkles).size(scale::s(14.0)).color(ACCENT), text("Automation").size(scale::s(13.0)).color(Color::WHITE)].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
+            row![crate::icon::lucide(Icon::Sparkles).size(scale::s(14.0)).color(crate::accent::accent()), text("Automation").size(scale::s(13.0)).color(Color::WHITE)].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
             mk_row("Auto-detect entry styles", "Classify OCR entries via ONNX styling model", auto_style, UiEvent::OnboardingToggleAutoStyle),
             mk_row("Auto-filter SFX", "Remove SFX outside balloons via segmentation", auto_sfx, UiEvent::OnboardingToggleAutoSfx),
             mk_row("Auto inpaint (bg-aware)", "Gradient/artwork bubbles → transparent + inpaint", auto_inpaint, UiEvent::OnboardingToggleAutoInpaint),
@@ -721,7 +720,7 @@ fn translation_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent>
         let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
         col.push(
             row![
-                crate::icon::lucide(Icon::PlugZap).size(scale::s(14.0)).color(ACCENT),
+                crate::icon::lucide(Icon::PlugZap).size(scale::s(14.0)).color(crate::accent::accent()),
                 text("Connected").size(scale::s(13.0)).color(Color::WHITE),
                 space::horizontal(),
                 text(if connected_rows.is_empty() { "—".to_string() } else { format!("{} connected", connected_rows.len()) }).size(scale::s(11.0)).color(MUTED_FG),
@@ -750,7 +749,7 @@ fn translation_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent>
         let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
         col.push(
             row![
-                crate::icon::lucide(Icon::Star).size(scale::s(14.0)).color(ACCENT),
+                crate::icon::lucide(Icon::Star).size(scale::s(14.0)).color(crate::accent::accent()),
                 text("Recommended").size(scale::s(13.0)).color(Color::WHITE),
                 space::horizontal(),
                 text(format!("{} recommended", len)).size(scale::s(11.0)).color(MUTED_FG),
@@ -804,7 +803,7 @@ fn translation_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent>
 
 fn done_step() -> Element<'static, UiEvent> {
     column![
-        crate::icon::lucide(Icon::Sparkles).size(scale::s(28.0)).color(ACCENT),
+        crate::icon::lucide(Icon::Sparkles).size(scale::s(28.0)).color(crate::accent::accent()),
         text("You're all set!").size(scale::s(20.0)).color(Color::WHITE),
         text("Models are ready, preferences saved. You can replay this wizard from Settings → General.").size(scale::s(12.0)).color(MUTED_FG),
         container(

@@ -306,10 +306,13 @@ fn export_overlay<'a>(app: &'a App, base: Element<'a, Message>) -> Element<'a, M
         progress_bar(0.0..=1.0, frac)
             .girth(Length::Fixed(scale::s(8.0)))
             .length(Length::Fill)
-            .style(|_: &iced::Theme| iced::widget::progress_bar::Style {
-                background: Color::from_rgba8(255, 255, 255, 0.12).into(),
-                bar: Color::from_rgb8(56, 189, 248).into(),
-                border: iced::Border::default().rounded(scale::s(4.0)),
+            .style(|_: &iced::Theme| {
+                let cfg = easyscanlate_ui::background::AuroraConfig::from_store();
+                iced::widget::progress_bar::Style {
+                    background: easyscanlate_ui::accent::aurora_track(&cfg).into(),
+                    bar: easyscanlate_ui::accent::aurora_accent(&cfg).into(),
+                    border: iced::Border::default().rounded(scale::s(4.0)),
+                }
             }),
         text(pct)
             .size(scale::s(11.0))
