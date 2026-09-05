@@ -242,10 +242,6 @@ pub fn draw_entries<'a, I, F>(
                             (entry.style.stroke_width > 0.0).then(|| {
                                 (rgba_to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
                             }),
-                            layout_transform.as_ref(),
-                            layout_position,
-                            layout_width,
-                            layout_height,
                         );
                     } else {
                         if entry.style.stroke_width > 0.0 {
@@ -317,10 +313,6 @@ pub fn draw_entries<'a, I, F>(
                     (entry.style.stroke_width > 0.0).then(|| {
                         (rgba_to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
                     }),
-                    layout_transform.as_ref(),
-                    layout_position,
-                    layout_width,
-                    layout_height,
                 );
             } else {
                 if entry.style.stroke_width > 0.0 {

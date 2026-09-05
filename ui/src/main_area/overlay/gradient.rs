@@ -1,12 +1,8 @@
+use iced::advanced::graphics::gradient::Linear;
 use iced::advanced::graphics::geometry::{self, Fill, Path, Stroke, Text};
-use iced::{Color, Point, Rectangle, Size, Vector};
+use iced::{Color, Point, Rectangle, Vector};
 
 use easyscanlate_model::TextGradientDir;
-
-use crate::main_area::geometry::QuadTransform;
-
-/// Number of color bands a gradient text is split into.
-const GRADIENT_BANDS: u32 = 16;
 
 pub fn lerp_color(a: [u8; 4], b: [u8; 4], t: f32) -> Color {
     let t = t.clamp(0.0, 1.0);
@@ -16,16 +12,6 @@ pub fn lerp_color(a: [u8; 4], b: [u8; 4], t: f32) -> Color {
         (a[2] as f32 + (b[2] as f32 - a[2] as f32) * t).round() as u8,
         (a[3] as f32 + (b[3] as f32 - a[3] as f32) * t) / 255.0,
     )
-}
-
-fn with_clip<F, R>(frame: &mut F, region: Rectangle, f: impl FnOnce(&mut F) -> R) -> R
-where
-    F: geometry::frame::Backend,
-{
-    let mut draft = frame.draft(region);
-    let result = f(&mut draft);
-    frame.paste(draft);
-    result
 }
 
 pub fn gradient_t(dir: TextGradientDir, box_rect: Rectangle, p: Point) -> f32 {
@@ -46,9 +32,37 @@ pub fn gradient_t(dir: TextGradientDir, box_rect: Rectangle, p: Point) -> f32 {
     t.clamp(0.0, 1.0)
 }
 
-// Gradient text needs every band param at the draw call; a params struct would
-// add indirection for a single call site.
-#[allow(clippy::too_many_arguments)]
+/// Gradient endpoints in layout coords for each direction: stop 0 (`a`) at
+/// `start`, stop 1 (`b`) at `end`. Consistent with [`gradient_t`].
+pub fn gradient_start_end(dir: TextGradientDir, box_rect: Rectangle) -> (Point, Point) {
+    let x = box_rect.x;
+    let y = box_rect.y;
+    let w = box_rect.width;
+    let h = box_rect.height;
+    let (cx, cy) = (x + w / 2.0, y + h / 2.0);
+    match dir {
+        TextGradientDir::TopToBottom => (Point::new(cx, y), Point::new(cx, y + h)),
+        TextGradientDir::BottomToTop => (Point::new(cx, y + h), Point::new(cx, y)),
+        TextGradientDir::LeftToRight => (Point::new(x, cy), Point::new(x + w, cy)),
+        TextGradientDir::RightToLeft => (Point::new(x + w, cy), Point::new(x, cy)),
+        TextGradientDir::TopLeftToBottomRight => (Point::new(x, y), Point::new(x + w, y + h)),
+        TextGradientDir::BottomRightToTopLeft => (Point::new(x + w, y + h), Point::new(x, y)),
+        TextGradientDir::TopRightToBottomLeft => (Point::new(x + w, y), Point::new(x, y + h)),
+        TextGradientDir::BottomLeftToTopRight => (Point::new(x, y + h), Point::new(x + w, y)),
+    }
+}
+
+fn rgba8(c: [u8; 4]) -> Color {
+    Color::from_rgba8(c[0], c[1], c[2], c[3] as f32 / 255.0)
+}
+
+// Gradient text is drawn as vector glyph outlines filled with a single linear
+// gradient shader, directly on the parent frame so the caller's transform
+// (tile offset + quad/rotated transform) applies naturally to both the paths
+// and the gradient endpoints. Banded `draft`/`paste` clipping reset the frame
+// transform to identity, which dropped the tile translation (gradient
+// invisible past the first image) and clipped rotated text with axis-aligned
+// strips (slivers nowhere near the glyphs).
 pub fn fill_gradient_text<F>(
     frame: &mut F,
     text: &Text,
@@ -57,54 +71,10 @@ pub fn fill_gradient_text<F>(
     a: [u8; 4],
     b: [u8; 4],
     stroke: Option<(Color, f32)>,
-    transform: Option<&QuadTransform>,
-    position: Point,
-    width: f32,
-    height: f32,
 ) where
     F: geometry::frame::Backend,
 {
-    match dir {
-        TextGradientDir::TopToBottom
-        | TextGradientDir::BottomToTop
-        | TextGradientDir::LeftToRight
-        | TextGradientDir::RightToLeft => {
-            let vertical = matches!(dir, TextGradientDir::TopToBottom | TextGradientDir::BottomToTop);
-            let reversed = matches!(dir, TextGradientDir::BottomToTop | TextGradientDir::RightToLeft);
-            for band in 0..GRADIENT_BANDS {
-                let t0 = band as f32 / GRADIENT_BANDS as f32;
-                let t1 = (band + 1) as f32 / GRADIENT_BANDS as f32;
-                let t = if reversed { 1.0 - (t0 + t1) / 2.0 } else { (t0 + t1) / 2.0 };
-                let color = lerp_color(a, b, t);
-                let strip = if vertical {
-                    Rectangle::new(
-                        Point::new(box_rect.x, box_rect.y + t0 * box_rect.height),
-                        Size::new(box_rect.width, (t1 - t0) * box_rect.height),
-                    )
-                } else {
-                    Rectangle::new(
-                        Point::new(box_rect.x + t0 * box_rect.width, box_rect.y),
-                        Size::new((t1 - t0) * box_rect.width, box_rect.height),
-                    )
-                };
-                with_clip(frame, strip, |f| {
-                    if let Some(transform) = transform {
-                        f.push_transform();
-                        crate::main_area::geometry::apply_quad_transform(f, transform, position, width, height);
-                    }
-                    let colored = Text { color, ..text.clone() };
-                    if let Some((stroke_color, stroke_width)) = stroke {
-                        f.stroke_text(
-                            colored.clone(),
-                            Stroke::default().with_color(stroke_color).with_width(stroke_width),
-                        );
-                    }
-                    f.fill_text(colored);
-                });
-            }
-        }
-        _ => fill_gradient_glyphs(frame, text, box_rect, dir, a, b, stroke),
-    }
+    fill_gradient_glyphs(frame, text, box_rect, dir, a, b, stroke)
 }
 
 fn fill_gradient_glyphs<F>(
@@ -144,17 +114,18 @@ fn fill_gradient_glyphs<F>(
     let buffer = paragraph.buffer();
     let mut swash_cache = cosmic_text::SwashCache::new();
     let mut font_system = gfx_text::font_system().write().expect("Write font system");
+    let (grad_start, grad_end) = gradient_start_end(dir, box_rect);
+    let gradient_fill = Fill::from(
+        Linear::new(grad_start, grad_end)
+            .add_stop(0.0, rgba8(a))
+            .add_stop(1.0, rgba8(b)),
+    );
     for run in buffer.layout_runs() {
         for glyph in run.glyphs.iter() {
             let physical_glyph = glyph.physical((0.0, 0.0), 1.0);
             let start_x = translation_x + glyph.x + glyph.x_offset;
             let start_y = translation_y + glyph.y_offset + run.line_y;
             let offset = Vector::new(start_x, start_y);
-            let color = lerp_color(
-                a,
-                b,
-                gradient_t(dir, box_rect, Point::new(start_x + glyph.w / 2.0, start_y + text.size.0 / 2.0)),
-            );
             if let Some(commands) =
                 swash_cache.get_outline_commands(font_system.raw(), physical_glyph.cache_key)
             {
@@ -187,25 +158,32 @@ fn fill_gradient_glyphs<F>(
                         Stroke::default().with_color(stroke_color).with_width(stroke_width),
                     );
                 }
-                frame.fill(&glyph_path, Fill::from(color));
+                frame.fill(&glyph_path, gradient_fill);
             } else {
-                let [r, g, bl, al] = color.into_rgba8();
+                // Color glyphs without outlines (rare): sample the gradient per
+                // pixel for smoothness, modulating the lerped alpha by the
+                // glyph coverage so solid `Fill`s stay export-safe.
                 swash_cache.with_pixels(
                     font_system.raw(),
                     physical_glyph.cache_key,
-                    cosmic_text::Color::rgba(r, g, bl, al),
+                    cosmic_text::Color::rgba(255, 255, 255, 255),
                     |x, y, pixel| {
+                        let coverage = pixel.a() as f32 / 255.0;
+                        if coverage <= 0.0 {
+                            return;
+                        }
+                        let base = lerp_color(
+                            a,
+                            b,
+                            gradient_t(dir, box_rect, Point::new(x as f32, y as f32) + offset),
+                        );
+                        let [r, g, bl, al] = base.into_rgba8();
                         frame.fill(
                             &Path::rectangle(
                                 Point::new(x as f32, y as f32) + offset,
                                 Size::new(1.0, 1.0),
                             ),
-                            Fill::from(Color::from_rgba8(
-                                pixel.r(),
-                                pixel.g(),
-                                pixel.b(),
-                                pixel.a() as f32 / 255.0,
-                            )),
+                            Fill::from(Color::from_rgba8(r, g, bl, al as f32 / 255.0 * coverage)),
                         );
                     },
                 );

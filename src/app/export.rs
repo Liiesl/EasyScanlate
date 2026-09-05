@@ -77,20 +77,50 @@ fn into_paint(style: geometry::Style) -> Paint<'static> {
                     .expect("valid color"),
             ),
             GStyle::Gradient(grad) => {
-                // Simplified: treat any gradient as solid first stop (export always uses per-glyph solid for gradients)
-                let solid = match grad {
-                    iced::advanced::graphics::Gradient::Linear(l) => l
-                        .stops
-                        .into_iter()
-                        .flatten()
-                        .next()
-                        .map(|s| s.color)
-                        .unwrap_or(iced::Color::BLACK),
-                };
-                Shader::SolidColor(
-                    tiny_skia::Color::from_rgba(solid.b, solid.g, solid.r, solid.a)
-                        .expect("valid color"),
-                )
+                // Real linear gradient (mirrors iced_tiny_skia::geometry): the
+                // overlay now fills glyph paths with a gradient shader, so
+                // export must rasterize it, not collapse to the first stop.
+                match grad {
+                    iced::advanced::graphics::Gradient::Linear(l) => {
+                        let stops: Vec<tiny_skia::GradientStop> = l
+                            .stops
+                            .into_iter()
+                            .flatten()
+                            .map(|s| {
+                                tiny_skia::GradientStop::new(
+                                    s.offset,
+                                    tiny_skia::Color::from_rgba(
+                                        s.color.r, s.color.g, s.color.b, s.color.a,
+                                    )
+                                    .expect("valid color"),
+                                )
+                            })
+                            .collect();
+                        let stops = if stops.is_empty() {
+                            vec![tiny_skia::GradientStop::new(
+                                0.0,
+                                tiny_skia::Color::BLACK,
+                            )]
+                        } else {
+                            stops
+                        };
+                        tiny_skia::LinearGradient::new(
+                            tiny_skia::Point {
+                                x: l.start.x,
+                                y: l.start.y,
+                            },
+                            tiny_skia::Point {
+                                x: l.end.x,
+                                y: l.end.y,
+                            },
+                            stops,
+                            tiny_skia::SpreadMode::Pad,
+                            tiny_skia::Transform::identity(),
+                        )
+                        .expect("valid gradient")
+                        .into()
+                    }
+                }
             }
         },
         anti_alias: true,
@@ -130,7 +160,7 @@ struct ExportFrame {
     clip: Option<Rectangle>,
     clip_stack: Vec<Option<Rectangle>>,
     // Single-entry cache for the full-size clip mask. Gradient text draws
-    // every glyph once per band with the same clip, so rebuilding
+    // every glyph once with the same clip, so rebuilding
     // `Mask::new(w,h)` per glyph was the dominant raster cost. Same bits,
     // just reused (bit-identical output).
     mask_cache: RefCell<Option<(u32, u32, u32, u32, u32, u32, Mask)>>,
