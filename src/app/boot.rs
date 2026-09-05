@@ -202,13 +202,29 @@ pub fn boot(
     // Store single-instance listener (so subscription can poll for forwarded .mmtl).
     app.ipc_listener = ipc_listener;
 
-    // Velopack update check (GithubSource Liiesl/EasyScanlate, per-user). Mirrors
-    // ManhwaOCR update.py 2s startup delay + settings toggle; here always on
-    // at boot, results surface in Settings → Updates and Home badge.
-    let update_task = Task::perform(
-        async { tokio::task::spawn_blocking(crate::updater::check_for_updates).await.unwrap_or(None) },
-        |info| Message::UpdateCheckResult(Box::new(info)),
-    );
+    // Velopack update check (GithubSource Liiesl/EasyScanlate,
+    // per-user). Mirrors ManhwaOCR update.py 2s startup delay + settings
+    // toggle: gated on `auto_check_updates`, results surface in a blocking
+    // popup (blurred backdrop) or, when deferred, in Settings → Updates.
+    let auto_check = easyscanlate_settings::get(|s| s.auto_check_updates);
+    #[cfg(not(feature = "updates"))]
+    let auto_check = {
+        let _ = &auto_check;
+        false
+    };
+    let update_task = if auto_check {
+        Task::perform(
+            async {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                tokio::task::spawn_blocking(crate::updater::check_for_updates)
+                    .await
+                    .unwrap_or(None)
+            },
+            |info| Message::UpdateCheckResult(Box::new(info)),
+        )
+    } else {
+        Task::none()
+    };
 
     // CLI open: if an .mmtl was passed on the command line, open a loading tab
     // immediately so feedback is instant (mirrors ManhwaOCR main.py:216-226).

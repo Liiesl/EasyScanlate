@@ -39,6 +39,11 @@ const LOADING_H: f32 = 280.0;
 /// same card geometry as the loading splash so the crop aligns).
 const EXPORT_W: f32 = 520.0;
 const EXPORT_H: f32 = 280.0;
+/// Update-available popup card size (mirrors `ui/src/dialog/update.rs`, which
+/// renders `scale::s(UPDATE_W) × scale::s(UPDATE_H)` with
+/// `rounded(scale::s(16.0))`).
+const UPDATE_W: f32 = 480.0;
+const UPDATE_H: f32 = 320.0;
 
 /// Which modal the pending/ready backdrop belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +52,7 @@ pub enum BackdropKind {
     ManageModels,
     Loading,
     Export,
+    Update,
 }
 
 /// A deferred project-load trigger, stashed while the clean-base screenshot
@@ -160,6 +166,27 @@ pub fn handle_ready(
         }
         return task;
     }
+    if kind == BackdropKind::Update {
+        if frame.is_some() {
+            if let Some(f) = frame {
+                app.update_blur = crop_for(&f, kind);
+                app.backdrop_frame = Some(f);
+            }
+        } else {
+            app.update_blur = None;
+        }
+        // Only show when there is still an update to offer and nothing
+        // blocking (onboarding defers via `update_pending_popup`).
+        if app.update_info.is_some() && app.onboarding.is_none() {
+            app.update_popup_visible = true;
+        } else {
+            app.update_blur = None;
+            if app.update_info.is_some() && app.onboarding.is_some() {
+                app.update_pending_popup = true;
+            }
+        }
+        return Task::none();
+    }
     if let Some(f) = frame {
         app.backdrop_blur = crop_for(&f, kind);
         app.backdrop_frame = Some(f);
@@ -172,7 +199,7 @@ pub fn handle_ready(
             app.manage_models_open = true;
             app.manage_models_search.clear();
         }
-        BackdropKind::Loading | BackdropKind::Export => unreachable!("handled above"),
+        BackdropKind::Loading | BackdropKind::Export | BackdropKind::Update => unreachable!("handled above"),
     }
     Task::none()
 }
@@ -244,6 +271,36 @@ pub fn begin_export(app: &mut App, op: super::export::PendingExport) -> Task<Mes
     app.export_blur = None;
     app.backdrop_pending = Some(BackdropKind::Export);
     capture_task(app, BackdropKind::Export)
+}
+
+/// Entry point for the update-available popup: captures the clean base
+/// first so the screenshot never contains the popup, then shows it on
+/// `BackdropReady`. Falls back to a flat (no-blur) popup when headless/in
+/// tests or while another capture is in flight.
+pub fn begin_update(app: &mut App) -> Task<Message> {
+    if app.update_info.is_none() || app.update_popup_visible {
+        return Task::none();
+    }
+    if app.onboarding.is_some() {
+        app.update_pending_popup = true;
+        return Task::none();
+    }
+    if let Some(frame) = app.backdrop_frame.clone() {
+        app.update_blur = crop_for(&frame, BackdropKind::Update);
+        app.update_popup_visible = true;
+        app.update_pending_popup = false;
+        return Task::none();
+    }
+    if app.frame.primary_window().is_none() || app.backdrop_pending.is_some() {
+        app.update_blur = None;
+        app.update_popup_visible = true;
+        app.update_pending_popup = false;
+        return Task::none();
+    }
+    app.update_blur = None;
+    app.update_pending_popup = false;
+    app.backdrop_pending = Some(BackdropKind::Update);
+    capture_task(app, BackdropKind::Update)
 }
 
 /// Re-crop the stored fullscreen frame for `kind` (microseconds; no
@@ -438,6 +495,14 @@ fn panel_rect_lowres(frame: &CapturedBackdrop, kind: BackdropKind) -> Option<(u3
             ch,
             easyscanlate_ui::scale::s(EXPORT_W),
             easyscanlate_ui::scale::s(EXPORT_H),
+        ),
+        BackdropKind::Update => centered_fixed(
+            cx,
+            cy,
+            cw,
+            ch,
+            easyscanlate_ui::scale::s(UPDATE_W),
+            easyscanlate_ui::scale::s(UPDATE_H),
         ),
     };
     // Logical → physical → low-res, clamped into the frame.

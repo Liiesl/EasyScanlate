@@ -75,13 +75,14 @@ jobs:
             Write-Error "EasyScanlate-Installer.exe not produced by NSIS"
             exit 1
           }
-          # Keep Velopack nupkg + RELEASES for delta updates; remove raw Setup.exe from publish (wrapper is the single installer)
-          Remove-Item Releases/EasyScanlate-win-Setup.exe -Force -ErrorAction SilentlyContinue
+          # Keep Releases/EasyScanlate-win-Setup.exe: vpk upload reads assets.win.json
+          # and requires it. Both Setup.exe (fresh installs) and the wrapper
+          # Installer.exe (legacy auto-updater + admin migration) are published.
 
-      - name: Publish to GitHub
+      - name: Upload to GitHub (draft)
         shell: bash
         run: |
-          vpk upload github --repoUrl https://github.com/Liiesl/EasyScanlate --publish --tag v${{ steps.version.outputs.VERSION }} --token ${{ secrets.GITHUB_TOKEN }} || true
+          vpk upload github --repoUrl https://github.com/Liiesl/EasyScanlate --tag v${{ steps.version.outputs.VERSION }} --token ${{ secrets.GITHUB_TOKEN }}
           # Upload the single installer (wrapper) as the legacy-named asset old clients poll
           gh release upload v${{ steps.version.outputs.VERSION }} EasyScanlate-Installer.exe --clobber
         env:

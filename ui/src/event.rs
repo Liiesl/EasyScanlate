@@ -129,6 +129,8 @@ pub enum SettingEdit {
     HiddenModelsResetAll,
     /// UI base font size, like VS Code's `editor.fontSize`. Integer only.
     UiFontSize(u32),
+    /// Auto-check GitHub releases for updates at startup.
+    AutoCheckUpdates(bool),
 }
 
 /// Widget-level events produced by the ui crate. The app maps these into its

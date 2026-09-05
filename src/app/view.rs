@@ -30,10 +30,12 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let base_with_aurora: Element<'_, Message> =
         iced::widget::Stack::with_children(vec![aurora, framed]).into();
 
+    let with_update: Element<'_, Message> = crate::app::update_popup::view(app, base_with_aurora);
+
     let with_close: Element<'_, Message> = if app.pending_close.is_some() {
-        crate::app::confirm_close::view(app, base_with_aurora)
+        crate::app::confirm_close::view(app, with_update)
     } else {
-        base_with_aurora
+        with_update
     };
 
     // Loading splash overlay: Photoshop-style — centered "Opening project…" with

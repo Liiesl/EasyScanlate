@@ -50,7 +50,23 @@ Examples:
 fn main() -> iced::Result {
     // ---- Velopack lifecycle (must be first, handles install/update/uninstall and exits) ----
     // Skipped when the `updates` feature is off (e.g. test-ui builds).
-    #[cfg(all(windows, feature = "updates"))]
+    // Fast hooks run during install/update/uninstall (also on --silent installs:
+    // --silent only skips the final auto-launch, not the hooks). They must be
+    // fast, show no UI, and never fail the install, so registry writes are
+    // best-effort. HKCU needs no elevation, unlike the legacy HKLM NSIS keys.
+    #[cfg(all(windows, feature = "updates", feature = "file-assoc"))]
+    VelopackApp::build()
+        .on_after_install_fast_callback(|_| {
+            let _ = assoc::register();
+        })
+        .on_after_update_fast_callback(|_| {
+            let _ = assoc::register();
+        })
+        .on_before_uninstall_fast_callback(|_| {
+            let _ = assoc::unregister();
+        })
+        .run();
+    #[cfg(all(windows, feature = "updates", not(feature = "file-assoc")))]
     VelopackApp::build().run();
 
     // ---- CLI flags (handled before iced / single-instance) ----------------

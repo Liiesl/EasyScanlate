@@ -425,7 +425,8 @@ pub fn handle_finish(app: &mut App) -> Task<Message> {
     // Sync translation etc.
     crate::app::translation::sync_tx_from_store(app);
     app.active_tab_mut().status = "Setup complete — welcome!".to_string();
-    Task::none()
+    // Deferred startup update check: show the popup now that the wizard is gone.
+    crate::app::update::show_pending_popup(app)
 }
 
 pub fn handle_replay(app: &mut App) -> Task<Message> {
@@ -448,6 +449,9 @@ pub fn handle_replay(app: &mut App) -> Task<Message> {
         app.pending_load = None;
         app.export_blur = None;
         app.pending_export = None;
+        app.update_blur = None;
+        app.update_popup_visible = false;
+        app.update_pending_popup = false;
         Task::none()
     }
 }

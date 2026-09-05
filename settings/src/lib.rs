@@ -429,6 +429,11 @@ pub struct Settings {
     /// `model` stays pure project data.
     #[serde(default = "default_style_presets")]
     pub style_presets: StylePresets,
+    /// Whether to check GitHub releases for updates automatically at
+    /// startup. When disabled, updates are only checked via the manual
+    /// "Check for updates" button in Settings → Updates.
+    #[serde(default = "default_true")]
+    pub auto_check_updates: bool,
     /// Whether the first-run onboarding wizard has been completed. `false` on
     /// fresh installs triggers the blocking onboarding overlay (models +
     /// preferences) before the editor is usable.
@@ -484,6 +489,7 @@ impl Default for Settings {
             auto_inpaint_model: AutoInpaintModel::default(),
             recent_projects: Vec::new(),
             style_presets: default_style_presets(),
+            auto_check_updates: true,
             onboarding_completed: false,
             onboarding_version: 0,
         }
@@ -719,6 +725,7 @@ mod tests {
             auto_inpaint_model: AutoInpaintModel::Mixed,
             recent_projects: Vec::new(),
             style_presets: StylePresets::default_presets(),
+            auto_check_updates: true,
         };
         let text = toml::to_string(&settings).unwrap();
         let back: Settings = toml::from_str(&text).unwrap();

@@ -98,6 +98,9 @@ pub fn handle_setting_edit(app: &mut App, edit: easyscanlate_ui::event::SettingE
         easyscanlate_ui::event::SettingEdit::UiFontSize(v) => {
             s.ui_font_size = v.clamp(8, 30);
         }
+        easyscanlate_ui::event::SettingEdit::AutoCheckUpdates(v) => {
+            s.auto_check_updates = v;
+        }
     });
     translation::sync_tx_from_store(app);
     app.active_tab_mut().status = "Settings saved.".to_string();

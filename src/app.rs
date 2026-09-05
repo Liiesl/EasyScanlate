@@ -49,6 +49,7 @@ pub mod entries;
 pub mod main_area;
 pub mod subscription;
 pub mod update;
+pub mod update_popup;
 pub mod export;
 pub mod view;
 pub mod tab;
@@ -273,6 +274,15 @@ pub struct App {
     pub update_ready: bool,
     pub update_rx: Option<Arc<Mutex<mpsc::Receiver<i16>>>>,
     pub update_error: Option<String>,
+    /// Blocking update-available popup (auto-check at startup). Shown with a
+    /// blurred backdrop once the clean-base screenshot is ready; `Later`
+    /// hides it but keeps `update_info` so Settings → Updates still offers
+    /// Download.
+    pub update_popup_visible: bool,
+    /// Blurred snapshot cropped to the update popup card rect.
+    pub update_blur: Option<iced::widget::image::Handle>,
+    /// Update arrived while onboarding was blocking: show after finish.
+    pub update_pending_popup: bool,
     // ——— Onboarding (first-run, blocking) ———
     pub onboarding: Option<onboarding::OnboardingState>,
     pub(crate) onboarding_rx: OnboardingRx,
@@ -348,6 +358,9 @@ impl App {
             update_ready: false,
             update_rx: None,
             update_error: None,
+            update_popup_visible: false,
+            update_blur: None,
+            update_pending_popup: false,
             onboarding: {
                 // No `models` feature (e.g. test-ui): bypass the blocking
                 // download wizard entirely — there is nothing to download.

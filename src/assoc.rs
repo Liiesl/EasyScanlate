@@ -5,7 +5,7 @@
 //!
 //! Keys written (HKCU\Software\Classes):
 //!   .mmtl                                   → EasyScanlate.MMTLFile
-//!   EasyScanlate.MMTLFile                   → "Manga OCR Tool Project"
+//!   EasyScanlate.MMTLFile                   → "EasyScanlate Project"
 //!   EasyScanlate.MMTLFile\DefaultIcon       → "\"<exe>\",0"
 //!   EasyScanlate.MMTLFile\shell\open\command→ "\"<exe>\" \"%1\""
 //!
@@ -17,7 +17,7 @@ pub const PROG_ID: &str = "EasyScanlate.MMTLFile";
 // without `--all-targets` since `#[cfg(test)]` is excluded.
 #[allow(dead_code)]
 pub const EXT: &str = ".mmtl";
-pub const PROG_DESC: &str = "Manga OCR Tool Project";
+pub const PROG_DESC: &str = "EasyScanlate Project";
 
 #[cfg(all(windows, feature = "file-assoc"))]
 mod imp {

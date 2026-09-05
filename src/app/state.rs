@@ -559,6 +559,8 @@ impl UiState for ActiveTab<'_> {
     fn update_notes(&self) -> Option<String> {
         None
     }
+    fn update_popup_visible(&self) -> bool { self.app.update_popup_visible }
+    fn update_blur(&self) -> Option<iced::widget::image::Handle> { self.app.update_blur.clone() }
 
     fn onboarding_open(&self) -> bool { self.app.onboarding.is_some() }
     fn onboarding_step(&self) -> u8 { self.app.onboarding.as_ref().map(|o| o.step).unwrap_or(0) }
@@ -776,6 +778,8 @@ impl UiState for App {
         let _ = &self.update_info;
         None
     }
+    fn update_popup_visible(&self) -> bool { self.update_popup_visible }
+    fn update_blur(&self) -> Option<iced::widget::image::Handle> { self.update_blur.clone() }
     fn onboarding_open(&self) -> bool { self.onboarding.is_some() }
     fn onboarding_step(&self) -> u8 { self.onboarding.as_ref().map(|o| o.step).unwrap_or(0) }
     fn onboarding_models(&self) -> Vec<(String, String, easyscanlate_ui::state::ModelDownloadStatus)> { self.onboarding.as_ref().map(|o| o.models.clone()).unwrap_or_default() }

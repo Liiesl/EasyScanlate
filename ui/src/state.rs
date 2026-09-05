@@ -209,6 +209,10 @@ pub trait UiState {
     fn update_progress(&self) -> i16 { 0 }
     fn update_ready(&self) -> bool { false }
     fn update_notes(&self) -> Option<String> { None }
+    /// Whether the blocking update-available popup is currently shown.
+    fn update_popup_visible(&self) -> bool { false }
+    /// Blurred snapshot cropped to the update popup card (`None` = flat).
+    fn update_blur(&self) -> Option<iced::widget::image::Handle> { None }
     // ——— Onboarding (first-run, blocking) ———
     fn onboarding_open(&self) -> bool { false }    fn onboarding_step(&self) -> u8 { 0 }
     fn onboarding_models(&self) -> Vec<(String, String, ModelDownloadStatus)> { Vec::new() }
