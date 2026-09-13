@@ -19,7 +19,7 @@ const SEG_W: f32 = 2.0;
 const STYLE_W: f32 = 1.0;
 const INPAINT_W: f32 = 3.0;
 
-pub(crate) fn pipeline_progress_for_tab(tab: &Tab) -> Option<f32> {
+pub(crate) fn pipeline_progress_for_tab(tab: &Tab, styling_building: bool) -> Option<f32> {
     // Pipeline-originated busy only (exclude manual translate/inpaint and
     // manual single style detect so the Start button stays plain for those).
     let ocr_busy = tab.running;
@@ -46,9 +46,9 @@ pub(crate) fn pipeline_progress_for_tab(tab: &Tab) -> Option<f32> {
     #[cfg(not(all(feature = "styling", feature = "inpaint")))]
     let style_pending_busy = false;
     #[cfg(feature = "styling")]
-    let style_building = tab.styling.is_building();
+    let style_building = styling_building;
     #[cfg(not(feature = "styling"))]
-    let style_building = false;
+    let style_building = { let _ = styling_building; false };
     // Only count a styling build as pipeline progress when it belongs to the
     // chain (raw OCR running, chain active, or deferred style jobs exist).
     // A manual single AutoDetect otherwise leaves the button plain.
@@ -147,7 +147,7 @@ pub(crate) fn pipeline_progress_for_tab(tab: &Tab) -> Option<f32> {
                 {
                     0.0
                 }
-            } else if tab.styling.is_building() || ocr_frac < 1.0 {
+            } else if styling_building || ocr_frac < 1.0 {
                 0.0
             } else {
                 1.0
@@ -378,7 +378,7 @@ impl UiState for ActiveTab<'_> {
         #[cfg(feature = "styling")]
         {
             if self.tab.pipeline_style_pending > 0 { return true; }
-            if self.tab.styling.is_building() { return true; }
+            if self.app.engines.is_styling_building() { return true; }
             false
         }
         #[cfg(not(feature = "styling"))]
@@ -386,7 +386,11 @@ impl UiState for ActiveTab<'_> {
     }
 
     fn pipeline_progress(&self) -> Option<f32> {
-        pipeline_progress_for_tab(self.tab)
+        #[cfg(feature = "styling")]
+        let sb = self.app.engines.is_styling_building();
+        #[cfg(not(feature = "styling"))]
+        let sb = false;
+        pipeline_progress_for_tab(self.tab, sb)
     }
 
     fn is_bulk_busy(&self) -> bool {
@@ -668,14 +672,18 @@ impl UiState for App {
         #[cfg(feature = "styling")]
         {
             if self.tabs[self.active].pipeline_style_pending > 0 { return true; }
-            if self.tabs[self.active].styling.is_building() { return true; }
+            if self.engines.is_styling_building() { return true; }
             false
         }
         #[cfg(not(feature = "styling"))]
         { false }
     }
     fn pipeline_progress(&self) -> Option<f32> {
-        self.tabs.get(self.active).and_then(pipeline_progress_for_tab)
+        #[cfg(feature = "styling")]
+        let sb = self.engines.is_styling_building();
+        #[cfg(not(feature = "styling"))]
+        let sb = false;
+        self.tabs.get(self.active).and_then(|t| pipeline_progress_for_tab(t, sb))
     }
     fn is_bulk_busy(&self) -> bool {
         self.tabs[self.active].running

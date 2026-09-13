@@ -232,8 +232,8 @@ pub fn handle_auto_detect(app: &mut App) -> Task<Message> {
             (path, quad)
         };
         app.active_tab_mut().styling.reopen(index, id);
-        // If engine already loaded, classify exactly this entry.
-        if let Some(engine) = app.active_tab_mut().styling.engine().cloned() {
+        // Global engine cache (pool, like OCR/inpaint/segment): classify immediately if loaded.
+        if let Some(engine) = app.engines.styling.clone() {
             app.active_tab_mut().styling.mark_done(index, id);
             let engine_clone = engine.clone();
             let tid = app.active_tab().id;
@@ -256,10 +256,46 @@ pub fn handle_auto_detect(app: &mut App) -> Task<Message> {
             path,
             quad,
         });
-        app.active_tab_mut().styling.mark_building();
-        app.active_tab_mut().status = "Loading the styling model...".to_string();
+        // Queue gate for the manual single build (weight 2) so parallel tabs
+        // backpressure instead of spawning duplicate builds.
         let tid = app.active_tab().id;
-        Task::perform(async move { StylingEngine::build() }, move |res| Message::Tab(tid, crate::app::TabMessage::StylingEngineReady(res)))
+        let job_id = {
+            use crate::app::queue::{AcquireResult, JobKind, owner_of};
+            // If a styling build is already in flight globally, just wait for it.
+            if app.engines.is_styling_building()
+                || app.engines.queue.running_for(owner_of(tid), JobKind::Styling).is_some()
+            {
+                return Task::none();
+            }
+            match app.engines.queue.try_acquire_or_enqueue(owner_of(tid), JobKind::Styling) {
+                AcquireResult::Acquired(job) => job.id,
+                AcquireResult::Queued(_, pos) => {
+                    let used = app.engines.queue.used_weight();
+                    app.active_tab_mut().status = format!(
+                        "Queued {} (pos {}, pool {}/{}) ...",
+                        JobKind::Styling.label(),
+                        pos,
+                        used,
+                        crate::app::queue::POOL_CAPACITY
+                    );
+                    return Task::none();
+                }
+            }
+        };
+        app.engines.mark_styling_building();
+        app.active_tab_mut().status = "Loading the styling model...".to_string();
+        Task::perform(
+            async move {
+                use crate::app::queue::engine_ready_msg;
+                use easyscanlate_engine_pool::BuiltEngine;
+                let kind = crate::app::queue::JobKind::Styling;
+                match StylingEngine::build() {
+                    Ok(engine) => engine_ready_msg(tid, job_id, kind, Ok(BuiltEngine::Styling(engine))),
+                    Err(e) => engine_ready_msg(tid, job_id, kind, Err(e)),
+                }
+            },
+            |msg| msg,
+        )
     }
     #[cfg(not(feature = "styling"))]
     {
@@ -296,14 +332,14 @@ fn collect_jobs(app: &App, tab_id: crate::app::tab::TabId) -> Vec<(usize, EntryI
 pub fn classify(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Message> {
     // queue gate — weight 2, backfill + priority (cap 5)
     {
-        use crate::app::queue::{AcquireResult, EngineKind};
-        let already_reserved = app.engines.queue.running_for(tab_id, EngineKind::Style).is_some();
+        use crate::app::queue::{AcquireResult, JobKind, owner_of};
+        let already_reserved = app.engines.queue.running_for(owner_of(tab_id), JobKind::Styling).is_some();
         if !already_reserved {
             let idx_tmp = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none()};
-            match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Style) {
+            match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), JobKind::Styling) {
                 AcquireResult::Acquired(_) => {},
                 AcquireResult::Queued(_, pos) => {
-                    app.tabs[idx_tmp].status = format!("Queued {} (pos {}, pool {}/{}) ...", EngineKind::Style.label(), pos, app.engines.queue.used_weight(), crate::app::queue::POOL_CAPACITY);
+                    app.tabs[idx_tmp].status = format!("Queued {} (pos {}, pool {}/{}) ...", JobKind::Styling.label(), pos, app.engines.queue.used_weight(), crate::app::queue::POOL_CAPACITY);
                     // mark pipeline active if deferred chain expected
                     let deferred = easyscanlate_settings::get(|s| s.auto_inpaint) && cfg!(feature = "inpaint");
                     if deferred {
@@ -317,17 +353,35 @@ pub fn classify(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Message> 
     }
     let deferred = easyscanlate_settings::get(|s| s.auto_inpaint) && cfg!(feature = "inpaint");
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
-    let engine_opt = app.tabs[idx].styling.engine().cloned();
+    let engine_opt = app.engines.styling.clone();
     match engine_opt {
         Some(engine) => start_jobs(app, tab_id, engine, deferred),
         None => {
-            app.tabs[idx].styling.mark_building();
+            app.engines.mark_styling_building();
             if deferred {
                 #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
                 { app.tabs[idx].pipeline_active = true; }
             }
             app.tabs[idx].status = format!("Loading the styling model... pool {}/{}", app.engines.queue.used_weight(), crate::app::queue::POOL_CAPACITY);
-            Task::perform(async move { StylingEngine::build() }, move |res| Message::Tab(tab_id, crate::app::TabMessage::StylingEngineReady(res)))
+            let job_id = app
+                .engines
+                .queue
+                .running_for(crate::app::queue::owner_of(tab_id), crate::app::queue::JobKind::Styling)
+                .map(|j| j.id)
+                .unwrap_or(0);
+            let tid = tab_id;
+            Task::perform(
+                async move {
+                    use crate::app::queue::engine_ready_msg;
+                    use easyscanlate_engine_pool::BuiltEngine;
+                    let kind = crate::app::queue::JobKind::Styling;
+                    match StylingEngine::build() {
+                        Ok(engine) => engine_ready_msg(tid, job_id, kind, Ok(BuiltEngine::Styling(engine))),
+                        Err(e) => engine_ready_msg(tid, job_id, kind, Err(e)),
+                    }
+                },
+                |msg| msg,
+            )
         }
     }
 }
@@ -390,7 +444,7 @@ pub fn handle_styling_ready(app: &mut App, tab_id: crate::app::tab::TabId, resul
                 #[cfg(not(all(feature = "styling", feature = "inpaint", feature = "segment")))]
                 { false }
             };
-            let was_building = app.tabs[idx].styling.set_engine(engine.clone());
+            let was_building = app.engines.set_styling_engine(engine.clone());
             if !was_building { return Task::none(); }
             if let Some(pending) = app.tabs[idx].styling.take_pending_single() {
                 let (pi, pid, ppath, pquad) = (pending.index, pending.id, pending.path, pending.quad);
@@ -415,12 +469,13 @@ pub fn handle_styling_ready(app: &mut App, tab_id: crate::app::tab::TabId, resul
             }
         }
         Err(e) => {
-            app.tabs[idx].styling.fail_build();
+            app.engines.fail_styling_build();
+            app.tabs[idx].styling.clear_pending_single();
             app.tabs[idx].status = e.clone();
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
             { app.tabs[idx].pipeline_active = false; }
             // free queue weight (build failed) and promote
-            app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Style);
+            app.engines.queue.complete(crate::app::queue::owner_of(tab_id), crate::app::queue::JobKind::Styling);
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
             promote
@@ -431,7 +486,7 @@ pub fn handle_styling_ready(app: &mut App, tab_id: crate::app::tab::TabId, resul
 pub fn handle_style_detected(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, id: EntryId, result: Result<EntryStyle, String>) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     // For single style detect (manual), free queue weight after completion
-    let is_queued_style = app.engines.queue.running_for(tab_id, crate::app::queue::EngineKind::Style).is_some();
+    let is_queued_style = app.engines.queue.running_for(crate::app::queue::owner_of(tab_id), crate::app::queue::JobKind::Styling).is_some();
     match result {
         Ok(style) => {
             if index < app.tabs[idx].images.len() {
@@ -448,7 +503,7 @@ pub fn handle_style_detected(app: &mut App, tab_id: crate::app::tab::TabId, inde
         // For bulk pipeline, free is handled in pipeline handler's pending==0.
         // Detect bulk by pipeline_style_pending >0 — don't free yet
         if app.tabs[idx].pipeline_style_pending == 0 {
-            app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Style);
+            app.engines.queue.complete(crate::app::queue::owner_of(tab_id), crate::app::queue::JobKind::Styling);
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
             return promote;
@@ -469,7 +524,7 @@ pub fn handle_pipeline_style_detected(app: &mut App, tab_id: crate::app::tab::Ta
     app.tabs[idx].pipeline_style_pending = app.tabs[idx].pipeline_style_pending.saturating_sub(1);
     if app.tabs[idx].pipeline_style_pending == 0 {
         // style bulk done — free queue weight for Style
-        app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Style);
+        app.engines.queue.complete(crate::app::queue::owner_of(tab_id), crate::app::queue::JobKind::Styling);
         crate::app::queue::refresh_queued_statuses(app);
         let buffered = std::mem::take(&mut app.tabs[idx].pipeline_style_results);
         // dispatch_inpaint will enqueue inpaint jobs via queue (backfill + priority)

@@ -18,8 +18,8 @@ pub(crate) fn close_tab_immediate(app: &mut App, id: TabId) -> Task<Message> {
             return Task::none();
         }
         crate::app::export::cancel_export_for_tab(app, id);
-        app.engines.queue.cancel_pending_for_tab(id);
-        let freed = !app.engines.queue.cancel_running_for_tab(id).is_empty();
+        app.engines.queue.cancel_pending_for_tab(crate::app::queue::owner_of(id));
+        let freed = !app.engines.queue.cancel_running_for_tab(crate::app::queue::owner_of(id)).is_empty();
         let promote = if freed {
             crate::app::queue::dispatch_pending(app)
         } else {
@@ -47,8 +47,8 @@ pub(crate) fn close_tab_immediate(app: &mut App, id: TabId) -> Task<Message> {
 
 fn cleanup_queue_for_tabs(app: &mut App, ids: &[TabId]) {
     for rid in ids {
-        app.engines.queue.cancel_pending_for_tab(*rid);
-        app.engines.queue.cancel_running_for_tab(*rid);
+        app.engines.queue.cancel_pending_for_tab(crate::app::queue::owner_of(*rid));
+        app.engines.queue.cancel_running_for_tab(crate::app::queue::owner_of(*rid));
     }
 }
 

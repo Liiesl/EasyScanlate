@@ -26,7 +26,7 @@ pub const IMG_SIZE: u32 = grid::IMG_SIZE;
 /// Class names in the Koharu ONNX.
 pub const CLASSES: &[&str] = &["frame", "dialogue_text", "balloon", "onomatopoeia_text"];
 
-const MODEL_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../models");
+const MODEL_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models");
 const MODEL_FILE_KOHARU: &str = "yolo26s-seg.onnx";
 const MODEL_FILE_FALLBACK: &str = "best.onnx";
 

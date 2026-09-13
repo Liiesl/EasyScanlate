@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["model", "inpaint", "ocr", "styling", "translation", "ui", "settings", "segment", "mmtl", "models-store"]
+members = ["model", "translation", "ui", "settings", "mmtl", "engine-pool", "engine-pool/ocr", "engine-pool/segment", "engine-pool/styling", "engine-pool/inpaint", "engine-pool/model-store"]
 resolver = "3"
 exclude = ["iced", "rapidocr-core", "NeverLiieIcedWidgets"]
 
@@ -47,12 +47,13 @@ tempfile = "3"
 # Internal path dependencies
 easyscanlate-model = { path = "model" }
 easyscanlate-settings = { path = "settings" }
-easyscanlate-models = { path = "models-store" }
-easyscanlate-inpaint = { path = "inpaint" }
-easyscanlate-ocr = { path = "ocr" }
-easyscanlate-styling = { path = "styling" }
+easyscanlate-models = { path = "engine-pool/model-store" }
+easyscanlate-inpaint = { path = "engine-pool/inpaint" }
+easyscanlate-ocr = { path = "engine-pool/ocr" }
+easyscanlate-styling = { path = "engine-pool/styling" }
 easyscanlate-translation = { path = "translation" }
-easyscanlate-segment = { path = "segment" }
+easyscanlate-segment = { path = "engine-pool/segment" }
+easyscanlate-engine-pool = { path = "engine-pool" }
 easyscanlate-ui = { path = "ui", default-features = false }
 easyscanlate-mmtl = { path = "mmtl" }
 neverliie-iced-widgets = { path = "NeverLiieIcedWidgets" }
@@ -65,15 +66,16 @@ rapidocr-core = { version = "0.2.2", default-features = false }
 # (`models`) are compiled or linked. Disabled subsystems show a
 # "unavailable in this build" status instead of running.
 default = ["ocr", "inpaint", "styling", "translation", "segment", "directml", "file-assoc", "updates", "models"]
-ocr = ["dep:easyscanlate-ocr", "easyscanlate-ui/ocr"]
-inpaint = ["dep:easyscanlate-inpaint", "easyscanlate-ui/inpaint"]
-styling = ["dep:easyscanlate-styling", "easyscanlate-ui/styling"]
+ocr = ["dep:easyscanlate-ocr", "easyscanlate-engine-pool/ocr", "easyscanlate-ui/ocr"]
+inpaint = ["dep:easyscanlate-inpaint", "easyscanlate-engine-pool/inpaint", "easyscanlate-ui/inpaint"]
+styling = ["dep:easyscanlate-styling", "easyscanlate-engine-pool/styling", "easyscanlate-ui/styling"]
 translation = ["dep:easyscanlate-translation", "easyscanlate-ui/translation"]
-segment = ["dep:easyscanlate-segment", "easyscanlate-ui/segment"]
+segment = ["dep:easyscanlate-segment", "easyscanlate-engine-pool/segment", "easyscanlate-ui/segment"]
 directml = [
     "easyscanlate-ocr/directml",
     "easyscanlate-segment/directml",
     "easyscanlate-inpaint/directml",
+    "easyscanlate-engine-pool/directml",
 ]
 # Convenience aliases: UI-only iteration (fake white image + fake OCR entries
 # at boot, no ML backends), or exactly one real subsystem at a time.
@@ -83,7 +85,7 @@ directml = [
 # `--features test-ui` on top of `default` still pulls the full weight
 # because Cargo features are additive and cannot disable defaults.
 updates = ["dep:velopack"]
-models = ["dep:easyscanlate-models"]
+models = ["dep:easyscanlate-models", "easyscanlate-engine-pool/model-store"]
 test-ui = []
 test-ocr = ["ocr"]
 test-inpaint = ["inpaint"]
@@ -106,6 +108,7 @@ easyscanlate-ocr = { workspace = true, optional = true }
 easyscanlate-styling = { workspace = true, optional = true }
 easyscanlate-translation = { workspace = true, optional = true }
 easyscanlate-segment = { workspace = true, optional = true }
+easyscanlate-engine-pool = { workspace = true }
 easyscanlate-ui = { workspace = true }
 easyscanlate-mmtl = { workspace = true }
 tempfile = { workspace = true }

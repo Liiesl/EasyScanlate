@@ -21,7 +21,7 @@ pub use session::{RunEvent, RunSession};
 
 use easyscanlate_model::{EntrySource, NewEntry, Project, Quad};
 
-const MODEL_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../models");
+const MODEL_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models");
 
 /// Fraction of an OCR run's body height stitched above and below it from the
 /// neighboring page content, so speech bubbles cut by the run's boundary stay

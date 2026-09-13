@@ -1,0 +1,30 @@
+[package]
+name = "easyscanlate-engine-pool"
+version.workspace = true
+edition.workspace = true
+description = "Unified engine pool: queue + cached engines + UI-agnostic exec for OCR/segment/styling/inpaint"
+
+[features]
+default = ["ocr", "segment", "styling", "inpaint", "model-store"]
+ocr = ["dep:easyscanlate-ocr"]
+segment = ["dep:easyscanlate-segment"]
+styling = ["dep:easyscanlate-styling"]
+inpaint = ["dep:easyscanlate-inpaint"]
+model-store = ["dep:easyscanlate-models"]
+directml = [
+    "easyscanlate-ocr/directml",
+    "easyscanlate-segment/directml",
+    "easyscanlate-inpaint/directml",
+]
+
+[dependencies]
+easyscanlate-model = { workspace = true }
+easyscanlate-settings = { workspace = true }
+easyscanlate-ocr = { workspace = true, optional = true }
+easyscanlate-segment = { workspace = true, optional = true }
+easyscanlate-styling = { workspace = true, optional = true }
+easyscanlate-inpaint = { workspace = true, optional = true }
+easyscanlate-models = { workspace = true, optional = true }
+image = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }

@@ -6,18 +6,10 @@ use std::sync::{Arc, Mutex, mpsc};
 use iced::{Color, Element, Font, Subscription, Task, Theme};
 use neverliie_iced_widgets::title_bar::{FrameAction, NativeFrame};
 
-#[cfg(feature = "inpaint")]
-use easyscanlate_inpaint::Engine as InpaintEngine;
 use easyscanlate_model::{EntryId, EntryStyle, ModelEvent, NewEntry};
 use easyscanlate_settings::StylePresets;
-#[cfg(feature = "inpaint")]
-use easyscanlate_settings::InpaintBackend;
 #[cfg(feature = "ocr")]
-use easyscanlate_ocr::{self as ocr_engine, ParallelEngine};
-#[cfg(feature = "styling")]
-use easyscanlate_styling::Engine as StylingEngine;
-#[cfg(feature = "segment")]
-use easyscanlate_segment::Engine as SegmentEngine;
+use easyscanlate_ocr::{self as ocr_engine};
 use easyscanlate_ui::translation as ui_translation;
 use easyscanlate_ui::main_area::decode::{DecodedPage, Tier};
 use easyscanlate_ui::{
@@ -121,10 +113,6 @@ pub enum TabMessage {
     FullDecoded(usize, Result<Arc<DecodedPage>, String>),
     SettleElapsed(u64),
     #[cfg(feature = "ocr")]
-    ParallelEngineReady(Result<ParallelEngine, String>),
-    #[cfg(feature = "ocr")]
-    ManualOcrEngineReady(Result<easyscanlate_ocr::Engine, String>),
-    #[cfg(feature = "ocr")]
     ManualOcrMultiFinished(Result<Vec<(usize, Vec<NewEntry>)>, String>),
     #[cfg(feature = "ocr")]
     OcrStreamRun(Result<ocr_engine::RunEvent, String>),
@@ -135,11 +123,7 @@ pub enum TabMessage {
     TranslateTick,
     LoadingTick,
     #[cfg(feature = "inpaint")]
-    InpaintEngineReady(Result<InpaintEngine, String>),
-    #[cfg(feature = "inpaint")]
     ManualMultiInpaintFinished(ManualInpaintResult),
-    #[cfg(feature = "inpaint")]
-    AutoInpaintEngineReady(InpaintBackend, Result<InpaintEngine, String>),
     #[cfg(feature = "inpaint")]
     AutoInpaintFinished(usize, EntryId, AutoInpaintResult),
     #[cfg(feature = "inpaint")]
@@ -151,15 +135,13 @@ pub enum TabMessage {
     #[cfg(all(feature = "styling", feature = "inpaint"))]
     PipelineStyleDetected(usize, EntryId, Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>),
     #[cfg(feature = "styling")]
-    StylingEngineReady(Result<StylingEngine, String>),
-    #[cfg(feature = "styling")]
     StyleDetected(usize, EntryId, Result<EntryStyle, String>),
-    #[cfg(feature = "segment")]
-    SegmentEngineReady(Result<SegmentEngine, String>),
     #[cfg(feature = "segment")]
     SegmentStreamRun(Result<SegmentStreamItem, String>),
     #[cfg(feature = "segment")]
     SegmentStreamFailed(String),
+    /// Unified engine-pool completion: single envelope carrying the `JobKind`.
+    EnginePool(easyscanlate_engine_pool::EngineOutcome),
     TranslateFinished(
         Vec<(usize, EntryId, String, String)>,
         Result<Vec<String>, String>,
@@ -410,6 +392,86 @@ pub fn boot(
 
 pub(crate) use state::handle_model_event;
 
+/// Unified engine-pool completion router: unpacks `EngineOutcome` (which always
+/// carries its `JobKind` + `job_id`) into the existing per-engine handlers.
+/// All engine-build sites emit `TabMessage::EnginePool`; there are no legacy
+/// per-engine `*EngineReady` variants.
+fn handle_engine_pool_message(
+    app: &mut App,
+    tab_id: TabId,
+    outcome: easyscanlate_engine_pool::EngineOutcome,
+) -> Task<Message> {
+    use easyscanlate_engine_pool::{BuiltEngine, EngineOutcome};
+    match outcome {
+        EngineOutcome::EngineReady {
+            job_id,
+            kind,
+            result,
+            ..
+        } => match result {
+            Ok(built) => match built {
+                #[cfg(feature = "ocr")]
+                BuiltEngine::OcrParallel(engine) => ocr::handle_parallel_ready(app, tab_id, Ok(engine)),
+                #[cfg(feature = "ocr")]
+                BuiltEngine::OcrManual(engine) => ocr::handle_manual_ocr_engine_ready(app, tab_id, Ok(engine)),
+                #[cfg(feature = "segment")]
+                BuiltEngine::Segment(engine) => segment::handle_engine_ready(app, tab_id, Ok(engine)),
+                #[cfg(feature = "styling")]
+                BuiltEngine::Styling(engine) => styling::handle_styling_ready(app, tab_id, Ok(engine)),
+                #[cfg(feature = "inpaint")]
+                BuiltEngine::Inpaint { backend, engine } => {
+                    // Manual/background vs auto share the inpaint slot: route by
+                    // which pending payload exists (same rule as the legacy split).
+                    let is_manual = app
+                        .tab_by_id(tab_id)
+                        .map(|t| t.pending_manual_multi.is_some() || t.pending_background_stitch.is_some())
+                        .unwrap_or(false);
+                    if is_manual {
+                        inpaint::handle_inpaint_engine_ready(app, tab_id, Ok(engine))
+                    } else {
+                        inpaint::handle_auto_engine_ready(app, tab_id, backend, Ok(engine))
+                    }
+                }
+                #[allow(unreachable_patterns)]
+                _ => Task::none(),
+            },
+            Err(e) => {
+                // Free the precise queue slot first (idempotent with the
+                // per-handler `complete` calls below, which become no-ops).
+                // `job_id == 0` is a safe no-op (ids start at 1).
+                app.engines.queue.complete_by_id(job_id);
+                // Build failure without a payload: attribute by kind.
+                match kind {
+                    #[cfg(feature = "ocr")]
+                    easyscanlate_engine_pool::JobKind::Ocr(mode) => match mode {
+                        easyscanlate_engine_pool::OcrMode::Auto => ocr::handle_parallel_ready(app, tab_id, Err(e)),
+                        easyscanlate_engine_pool::OcrMode::Manual => ocr::handle_manual_ocr_engine_ready(app, tab_id, Err(e)),
+                    },
+                    #[cfg(feature = "segment")]
+                    easyscanlate_engine_pool::JobKind::Segment => segment::handle_engine_ready(app, tab_id, Err(e)),
+                    #[cfg(feature = "styling")]
+                    easyscanlate_engine_pool::JobKind::Styling => styling::handle_styling_ready(app, tab_id, Err(e)),
+                    #[cfg(feature = "inpaint")]
+                    easyscanlate_engine_pool::JobKind::Inpaint(backend) => {
+                        let is_manual = app
+                            .tab_by_id(tab_id)
+                            .map(|t| t.pending_manual_multi.is_some() || t.pending_background_stitch.is_some())
+                            .unwrap_or(false);
+                        if is_manual {
+                            inpaint::handle_inpaint_engine_ready(app, tab_id, Err(e))
+                        } else {
+                            inpaint::handle_auto_engine_ready(app, tab_id, backend, Err(e))
+                        }
+                    }
+                    #[allow(unreachable_patterns)]
+                    _ => Task::none(),
+                }
+            }
+        },
+        EngineOutcome::UnitFinished { .. } => Task::none(),
+    }
+}
+
 fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Message> {
     // New-tab creations carry a fresh TabId not yet in `tabs` (allocated at spawn
     // time). Handle them before the `idx` guard so the push isn't dropped.
@@ -544,10 +606,6 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
             tab.scheduler.settle_with_project(&mut tab.images, &project_clone, move |i, r| Message::Tab(tid, TabMessage::FullDecoded(i, r)))
         }
         #[cfg(feature = "ocr")]
-        TabMessage::ParallelEngineReady(result) => ocr::handle_parallel_ready(app, tab_id, result),
-        #[cfg(feature = "ocr")]
-        TabMessage::ManualOcrEngineReady(result) => ocr::handle_manual_ocr_engine_ready(app, tab_id, result),
-        #[cfg(feature = "ocr")]
         TabMessage::ManualOcrMultiFinished(result) => ocr::handle_manual_ocr_finished(app, tab_id, result),
         #[cfg(feature = "ocr")]
         TabMessage::OcrStreamRun(result) => ocr::handle_ocr_stream_run(app, tab_id, result),
@@ -574,16 +632,10 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
             }
             Task::none()
         }
-        #[cfg(feature = "inpaint")]
-        TabMessage::InpaintEngineReady(result) => inpaint::handle_inpaint_engine_ready(app, tab_id, result),
-        #[cfg(feature = "styling")]
-        TabMessage::StylingEngineReady(result) => styling::handle_styling_ready(app, tab_id, result),
         #[cfg(feature = "styling")]
         TabMessage::StyleDetected(index, id, result) => styling::handle_style_detected(app, tab_id, index, id, result),
         #[cfg(all(feature = "styling", feature = "inpaint"))]
         TabMessage::PipelineStyleDetected(index, id, result) => styling::handle_pipeline_style_detected(app, tab_id, index, id, result),
-        #[cfg(feature = "inpaint")]
-        TabMessage::AutoInpaintEngineReady(backend, result) => inpaint::handle_auto_engine_ready(app, tab_id, backend, result),
         #[cfg(feature = "inpaint")]
         TabMessage::AutoInpaintFinished(index, id, result) => inpaint::handle_auto_finished(app, tab_id, index, id, result),
         #[cfg(feature = "inpaint")]
@@ -593,13 +645,12 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
         #[cfg(feature = "inpaint")]
         TabMessage::ManualInpaintStreamRun(result) => inpaint::handle_manual_stream_run(app, tab_id, result),
         #[cfg(feature = "segment")]
-        TabMessage::SegmentEngineReady(result) => segment::handle_engine_ready(app, tab_id, result),
-        #[cfg(feature = "segment")]
         TabMessage::SegmentStreamRun(result) => segment::handle_stream_run(app, tab_id, result),
         #[cfg(feature = "segment")]
         TabMessage::SegmentStreamFailed(e) => segment::handle_stream_failed(app, tab_id, e),
         #[cfg(feature = "inpaint")]
         TabMessage::ManualMultiInpaintFinished(result) => inpaint::handle_inpaint_finished(app, tab_id, result),
+        TabMessage::EnginePool(outcome) => handle_engine_pool_message(app, tab_id, outcome),
         TabMessage::TranslateFinished(jobs, result) => translation::handle_translate_finished(app, tab_id, jobs, result),
         TabMessage::RetranslateFinished((index, entry_id), result) => translation::handle_retranslate_finished(app, tab_id, index, entry_id, result),
         TabMessage::MmtlSavePicked(picked) => mmtl::handle_save_picked(app, tab_id, picked),

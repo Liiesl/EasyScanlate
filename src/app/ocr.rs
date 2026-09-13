@@ -9,6 +9,7 @@ use easyscanlate_ui::UiState;
 use easyscanlate_ocr::{self as ocr, ParallelEngine};
 
 use super::{App, Message};
+use crate::app::queue::owner_of;
 
 #[cfg(feature = "ocr")]
 pub fn start_ocr_stream(app: &mut App, tab_id: super::tab::TabId) -> Task<Message> {
@@ -110,8 +111,8 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
         let already_busy = {
             let tab = app.tab_by_id(tab_id).unwrap();
             tab.running
-                || app.engines.queue.is_tab_queued(tab_id)
-                || app.engines.queue.is_tab_running(tab_id)
+                || app.engines.queue.is_tab_queued(owner_of(tab_id))
+                || app.engines.queue.is_tab_running(owner_of(tab_id))
                 || {
                     // also check is_bulk_busy for this tab (inpaint/style/segment etc)
                     let idx = app.tabs.iter().position(|t| t.id == tab_id).unwrap();
@@ -149,7 +150,7 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
                         }
                         || {
                             #[cfg(feature = "styling")]
-                            { t.pipeline_style_pending > 0 || t.styling.is_building() }
+                            { t.pipeline_style_pending > 0 || app.engines.is_styling_building() }
                             #[cfg(not(feature = "styling"))]
                             { false }
                         }
@@ -206,9 +207,12 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
             }
         }
         // queue gate — weight 4, backfill + priority (cap 5)
-        use crate::app::queue::{AcquireResult, EngineKind};
-        match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Ocr) {
-            AcquireResult::Acquired(_) => {
+        use crate::app::queue::{AcquireResult, JobKind, OcrMode, engine_ready_msg, owner_of};
+        use easyscanlate_engine_pool::BuiltEngine;
+        match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), JobKind::Ocr(OcrMode::Auto)) {
+            AcquireResult::Acquired(job) => {
+                let job_id = job.id;
+                let kind = job.kind;
                 let idx = app.tabs.iter().position(|t| t.id == tab_id).unwrap();
                 app.tabs[idx].status = format!(
                     "OCR running (pool {}/{}) on {} run(s)...",
@@ -226,8 +230,18 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
                         format!("Loading the OCR engine ({workers} detection worker(s))... pool {}/{}", app.engines.queue.used_weight(), crate::app::queue::POOL_CAPACITY);
                     let tid = tab_id;
                     return Task::perform(
-                        async move { ParallelEngine::build_with_config(cfg, workers) },
-                        move |res| Message::Tab(tid, crate::app::TabMessage::ParallelEngineReady(res)),
+                        async move {
+                            match ParallelEngine::build_with_config(cfg, workers) {
+                                Ok(engine) => engine_ready_msg(
+                                    tid,
+                                    job_id,
+                                    kind,
+                                    Ok(BuiltEngine::OcrParallel(engine)),
+                                ),
+                                Err(e) => engine_ready_msg(tid, job_id, kind, Err(e)),
+                            }
+                        },
+                        |msg| msg,
                     );
                 }
                 maybe_start_ocr(app, tab_id)
@@ -288,7 +302,7 @@ pub fn handle_parallel_ready(app: &mut App, tab_id: super::tab::TabId, result: R
                 tab.status = e.clone();
             }
             // free queue weight (build failed) and promote pending
-            app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Ocr);
+            app.engines.queue.complete_ocr(crate::app::queue::owner_of(tab_id));
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
             promote
@@ -302,9 +316,9 @@ pub fn handle_stop_ocr(app: &mut App) -> Task<Message> {
         let tab_id = app.active_tab().id;
         if let Some(token) = &app.active_tab_mut().cancel { token.cancel(); }
         // free queue weight if running/queued
-        let was_running = app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Ocr).is_some();
-        let was_queued = if app.engines.queue.is_tab_queued(tab_id) {
-            let removed = app.engines.queue.cancel_pending_for_tab(tab_id);
+        let was_running = app.engines.queue.complete_ocr(crate::app::queue::owner_of(tab_id)).is_some();
+        let was_queued = if app.engines.queue.is_tab_queued(owner_of(tab_id)) {
+            let removed = app.engines.queue.cancel_pending_for_tab(owner_of(tab_id));
             !removed.is_empty()
         } else { false };
         if was_running || was_queued {
@@ -442,7 +456,7 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
         }
         app.engines.pipeline = None;
         // free OCR weight and update queued positions
-        app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Ocr);
+        app.engines.queue.complete_ocr(crate::app::queue::owner_of(tab_id));
         crate::app::queue::refresh_queued_statuses(app);
         let cancelled_now = app.tabs[idx].ocr_cancelled;
         if !cancelled_now {
@@ -455,7 +469,7 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
                 model
             };
             // Enqueue next pipeline stages via queue (backfill + priority, weight-checked)
-            use crate::app::queue::{AcquireResult, EngineKind};
+            use crate::app::queue::{AcquireResult, JobKind, owner_of};
             if do_sfx {
                 #[cfg(feature = "segment")]
                 {
@@ -466,7 +480,7 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
                             app.tabs[idx].pipeline_active = true;
                         }
                     }
-                    match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Segment) {
+                    match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), JobKind::Segment) {
                         AcquireResult::Acquired(_) => {
                             tasks.push(super::segment::start_segment_filter(app, tab_id));
                         }
@@ -475,7 +489,7 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
                             if let Some(t) = app.tab_by_id_mut(tab_id) {
                                 t.status = format!(
                                     "Queued {} (pos {}, pool {}/{}) ...",
-                                    EngineKind::Segment.label(),
+                                    JobKind::Segment.label(),
                                     pos,
                                     used,
                                     crate::app::queue::POOL_CAPACITY
@@ -488,12 +502,12 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
                 {
                     #[cfg(feature = "styling")]
                     if do_style && !do_inpaint {
-                        match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Style) {
+                        match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), JobKind::Styling) {
                             AcquireResult::Acquired(_) => tasks.push(super::styling::classify(app, tab_id)),
                             AcquireResult::Queued(_, pos) => {
                                 let used = app.engines.queue.used_weight();
                                 if let Some(t) = app.tab_by_id_mut(tab_id) {
-                                    t.status = format!("Queued {} (pos {}, pool {}/{}) ...", EngineKind::Style.label(), pos, used, crate::app::queue::POOL_CAPACITY);
+                                    t.status = format!("Queued {} (pos {}, pool {}/{}) ...", JobKind::Styling.label(), pos, used, crate::app::queue::POOL_CAPACITY);
                                 }
                             }
                         }
@@ -501,12 +515,12 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
                     #[cfg(feature = "inpaint")]
                     if do_inpaint && !do_style {
                         let kind = match effective_model {
-                            easyscanlate_settings::AutoInpaintModel::Telea => EngineKind::InpaintTelea,
-                            easyscanlate_settings::AutoInpaintModel::Lama => EngineKind::InpaintLama,
-                            easyscanlate_settings::AutoInpaintModel::Aot => EngineKind::InpaintAot,
-                            easyscanlate_settings::AutoInpaintModel::Mixed => EngineKind::InpaintTelea,
+                            easyscanlate_settings::AutoInpaintModel::Telea => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
+                            easyscanlate_settings::AutoInpaintModel::Lama => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
+                            easyscanlate_settings::AutoInpaintModel::Aot => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
+                            easyscanlate_settings::AutoInpaintModel::Mixed => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
                         };
-                        match app.engines.queue.try_acquire_or_enqueue(tab_id, kind) {
+                        match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), kind) {
                             AcquireResult::Acquired(_) => tasks.push(super::inpaint::dispatch_auto_solo(app, tab_id, effective_model)),
                             AcquireResult::Queued(_, pos) => {
                                 let used = app.engines.queue.used_weight();
@@ -518,12 +532,12 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
                     }
                     #[cfg(all(feature = "styling", feature = "inpaint"))]
                     if do_style && do_inpaint {
-                        match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Style) {
+                        match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), JobKind::Styling) {
                             AcquireResult::Acquired(_) => tasks.push(super::styling::classify(app, tab_id)),
                             AcquireResult::Queued(_, pos) => {
                                 let used = app.engines.queue.used_weight();
                                 if let Some(t) = app.tab_by_id_mut(tab_id) {
-                                    t.status = format!("Queued {} (pos {}, pool {}/{}) ...", EngineKind::Style.label(), pos, used, crate::app::queue::POOL_CAPACITY);
+                                    t.status = format!("Queued {} (pos {}, pool {}/{}) ...", JobKind::Styling.label(), pos, used, crate::app::queue::POOL_CAPACITY);
                                 }
                             }
                         }
@@ -532,24 +546,24 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
             } else {
                 #[cfg(all(feature = "styling", feature = "inpaint"))]
                 if do_style && do_inpaint {
-                    match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Style) {
+                    match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), JobKind::Styling) {
                         AcquireResult::Acquired(_) => tasks.push(super::styling::classify(app, tab_id)),
                         AcquireResult::Queued(_, pos) => {
                                 let used = app.engines.queue.used_weight();
                                 if let Some(t) = app.tab_by_id_mut(tab_id) {
-                                    t.status = format!("Queued {} (pos {}, pool {}/{}) ...", EngineKind::Style.label(), pos, used, crate::app::queue::POOL_CAPACITY);
+                                    t.status = format!("Queued {} (pos {}, pool {}/{}) ...", JobKind::Styling.label(), pos, used, crate::app::queue::POOL_CAPACITY);
                                 }
                             }
                     }
                 }
                 #[cfg(feature = "styling")]
                 if do_style && !do_inpaint {
-                    match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Style) {
+                    match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), JobKind::Styling) {
                         AcquireResult::Acquired(_) => tasks.push(super::styling::classify(app, tab_id)),
                         AcquireResult::Queued(_, pos) => {
                                 let used = app.engines.queue.used_weight();
                                 if let Some(t) = app.tab_by_id_mut(tab_id) {
-                                    t.status = format!("Queued {} (pos {}, pool {}/{}) ...", EngineKind::Style.label(), pos, used, crate::app::queue::POOL_CAPACITY);
+                                    t.status = format!("Queued {} (pos {}, pool {}/{}) ...", JobKind::Styling.label(), pos, used, crate::app::queue::POOL_CAPACITY);
                                 }
                             }
                     }
@@ -557,12 +571,12 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
                 #[cfg(feature = "inpaint")]
                 if do_inpaint && !do_style {
                     let kind = match effective_model {
-                        easyscanlate_settings::AutoInpaintModel::Telea => EngineKind::InpaintTelea,
-                        easyscanlate_settings::AutoInpaintModel::Lama => EngineKind::InpaintLama,
-                        easyscanlate_settings::AutoInpaintModel::Aot => EngineKind::InpaintAot,
-                        easyscanlate_settings::AutoInpaintModel::Mixed => EngineKind::InpaintTelea,
+                        easyscanlate_settings::AutoInpaintModel::Telea => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
+                        easyscanlate_settings::AutoInpaintModel::Lama => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
+                        easyscanlate_settings::AutoInpaintModel::Aot => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
+                        easyscanlate_settings::AutoInpaintModel::Mixed => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
                     };
-                    match app.engines.queue.try_acquire_or_enqueue(tab_id, kind) {
+                    match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), kind) {
                         AcquireResult::Acquired(_) => tasks.push(super::inpaint::dispatch_auto_solo(app, tab_id, effective_model)),
                         AcquireResult::Queued(_, pos) => {
                                 let used = app.engines.queue.used_weight();
@@ -619,7 +633,7 @@ pub fn handle_ocr_stream_failed(app: &mut App, tab_id: super::tab::TabId, e: Str
         app.tabs[idx].cancel = None;
         app.engines.pipeline = None;
         app.tabs[idx].status = if cancelled { "OCR cancelled.".to_string() } else if failed>0 { format!("OCR done: {} line(s), {} run(s) failed.", total, failed) } else { format!("OCR done: {} line(s).", total) };
-        app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Ocr);
+        app.engines.queue.complete_ocr(crate::app::queue::owner_of(tab_id));
         let promote = crate::app::queue::dispatch_pending(app);
         crate::app::queue::refresh_queued_statuses(app);
         return promote;
@@ -630,15 +644,6 @@ pub fn handle_ocr_stream_failed(app: &mut App, tab_id: super::tab::TabId, e: Str
 // ---------------------------------------------------------------------------
 // Manual OCR (toolbar drag, same UX as inpaint, no padding, pixel-perfect)
 // ---------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
 
 
 #[cfg(feature = "ocr")]
@@ -662,7 +667,7 @@ pub fn handle_manual_ocr_engine_ready(app: &mut App, tab_id: super::tab::TabId, 
                 tab.status = format!("Manual OCR engine failed: {e}");
             }
             // free queue weight on build failure (manual OCR)
-            if app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Ocr).is_some() {
+            if app.engines.queue.complete_ocr(crate::app::queue::owner_of(tab_id)).is_some() {
                 let promote = crate::app::queue::dispatch_pending(app);
                 crate::app::queue::refresh_queued_statuses(app);
                 return promote;
@@ -673,19 +678,9 @@ pub fn handle_manual_ocr_engine_ready(app: &mut App, tab_id: super::tab::TabId, 
 }
 
 
-
 // ---------------------------------------------------------------------------
 // Manual OCR span (across two pages) – auto-OCR style stitch
 // ---------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
 
 
 pub fn handle_manual_ocr_selection(app: &mut App, tab_id: super::tab::TabId, selections: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
@@ -722,14 +717,17 @@ pub fn handle_manual_ocr_selection(app: &mut App, tab_id: super::tab::TabId, sel
             return Task::none();
         }
         // queue gate — manual OCR uses OCR weight/priority (w4, prio3)
+        let mut manual_job_id: Option<u64> = None;
         {
-            use crate::app::queue::{AcquireResult, EngineKind};
-            let kind = EngineKind::Ocr;
-            let already_running = app.engines.queue.running_for(tab_id, kind).is_some();
-            let already_queued = app.engines.queue.pending_for_tab(tab_id).iter().any(|j| j.kind == kind);
+            use crate::app::queue::{AcquireResult, JobKind, OcrMode, owner_of};
+            let kind = JobKind::Ocr(OcrMode::Manual);
+            let already_running = app.engines.queue.running_ocr_for(owner_of(tab_id)).is_some();
+            let already_queued = app.engines.queue.pending_for_tab(owner_of(tab_id)).iter().any(|j| j.kind.is_ocr());
             if !already_running && !already_queued {
-                match app.engines.queue.try_acquire_or_enqueue(tab_id, kind) {
-                    AcquireResult::Acquired(_) => {},
+                match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), kind) {
+                    AcquireResult::Acquired(job) => {
+                        manual_job_id = Some(job.id);
+                    }
                     AcquireResult::Queued(_, pos) => {
                         let used = app.engines.queue.used_weight();
                         if let Some(tab) = app.tab_by_id_mut(tab_id) {
@@ -761,7 +759,31 @@ pub fn handle_manual_ocr_selection(app: &mut App, tab_id: super::tab::TabId, sel
             tab.manual_ocring = true;
             tab.status = "Loading OCR engine for manual OCR…".to_string();
         }
-        Task::perform(async move { ocr::Engine::build_with_config(cfg) }, move |res| Message::Tab(tab_id, crate::app::TabMessage::ManualOcrEngineReady(res)))
+        // Correlate the build with the queue slot reserved above (or the
+        // running OCR slot if reservation pre-existed).
+        let job_id = manual_job_id.or_else(|| {
+            app.engines
+                .queue
+                .running_ocr_for(crate::app::queue::owner_of(tab_id))
+                .map(|j| j.id)
+        });
+        let kind = crate::app::queue::JobKind::Ocr(crate::app::queue::OcrMode::Manual);
+        Task::perform(
+            async move {
+                use crate::app::queue::engine_ready_msg;
+                use easyscanlate_engine_pool::BuiltEngine;
+                match ocr::Engine::build_with_config(cfg) {
+                    Ok(engine) => engine_ready_msg(
+                        tab_id,
+                        job_id.unwrap_or(0),
+                        kind,
+                        Ok(BuiltEngine::OcrManual(engine)),
+                    ),
+                    Err(e) => engine_ready_msg(tab_id, job_id.unwrap_or(0), kind, Err(e)),
+                }
+            },
+            |msg| msg,
+        )
     }
     #[cfg(not(feature = "ocr"))]
     {
@@ -785,15 +807,16 @@ pub(crate) fn start_manual_ocr_selection(app: &mut App, tab_id: super::tab::TabI
         tab.manual_ocring = true;
         tab.status = format!("Manual OCR on {} selection(s)...", selections.len());
     }
-    // Build per-image paths
-    let mut items: Vec<(usize, String, iced::Rectangle)> = Vec::new();
+    // Build per-image paths as pool items ([x, y, w, h] arrays, no iced types
+    // cross the exec boundary).
+    let mut items: Vec<easyscanlate_engine_pool::ManualOcrItem> = Vec::new();
     {
         let tab = match app.tab_by_id(tab_id) { Some(t) => t, None => return Task::none() };
         for (idx, rect) in selections {
             if idx >= tab.images.len() { continue; }
             let path = tab.project.image(tab.images[idx].image_id).map(|m| m.path.clone()).unwrap_or_default();
             if path.is_empty() { continue; }
-            items.push((idx, path, rect));
+            items.push((idx, path, [rect.x, rect.y, rect.width, rect.height]));
         }
     }
     if items.is_empty() {
@@ -803,239 +826,23 @@ pub(crate) fn start_manual_ocr_selection(app: &mut App, tab_id: super::tab::TabI
     let merge_cfg = easyscanlate_settings::get(|s| ocr::MergeConfig::from_threshold_str(&s.ocr_merge_threshold));
     Task::perform(
         async move {
-            tokio::task::spawn_blocking(move || run_manual_ocr_selection(engine, items, merge_cfg))
-                .await
-                .unwrap_or_else(|e| Err(format!("Manual multi OCR task cancelled: {e}")))
+            tokio::task::spawn_blocking(move || {
+                easyscanlate_engine_pool::run_manual_ocr_selection(&engine, items, merge_cfg)
+            })
+            .await
+            .unwrap_or_else(|e| Err(format!("Manual multi OCR task cancelled: {e}")))
         },
         move |res| Message::Tab(tab_id, crate::app::TabMessage::ManualOcrMultiFinished(res)),
     )
 }
 
 #[cfg(feature = "ocr")]
-fn run_manual_ocr_selection(engine: ocr::Engine, items: Vec<(usize, String, iced::Rectangle)>, merge_cfg: ocr::MergeConfig) -> Result<Vec<(usize, Vec<NewEntry>)>, String> {
-    use std::collections::HashMap;
-    // Group by image idx
-    let mut by_image: HashMap<usize, Vec<(String, iced::Rectangle)>> = HashMap::new();
-    for (idx, path, rect) in items {
-        by_image.entry(idx).or_default().push((path, rect));
-    }
-    // For each image, cluster rects by touching (AABB intersect or edge touch)
-    struct Cluster { x0: f32, y0: f32, x1: f32, y1: f32 }
-    let mut jobs: Vec<(usize, String, Cluster)> = Vec::new(); // each job is one OCR crop
-    // Need to also keep path per image (they share same path per idx, but we stored path per rect, should be same)
-    let mut path_by_idx: HashMap<usize, String> = HashMap::new();
-    for (idx, rects) in by_image {
-        if rects.is_empty() { continue; }
-        let path = rects[0].0.clone();
-        path_by_idx.insert(idx, path.clone());
-        // cluster rects
-        let mut clusters: Vec<Cluster> = Vec::new();
-        for (_, r) in rects {
-            let cur = Cluster { x0: r.x, y0: r.y, x1: r.x + r.width, y1: r.y + r.height };
-            // try to merge with existing clusters if touching
-            let mut merged_indices: Vec<usize> = Vec::new();
-            for (ci, c) in clusters.iter().enumerate() {
-                let touches = !(cur.x1 < c.x0 - 1e-3 || cur.x0 > c.x1 + 1e-3 || cur.y1 < c.y0 - 1e-3 || cur.y0 > c.y1 + 1e-3);
-                // Actually touching if intervals overlap or just touch (gap <=0)
-                // The condition above checks for separated; if not separated then touching/overlap
-                if touches {
-                    merged_indices.push(ci);
-                }
-            }
-            if merged_indices.is_empty() {
-                clusters.push(cur);
-            } else {
-                // merge all touched clusters plus cur into one
-                let mut nx0 = cur.x0;
-                let mut ny0 = cur.y0;
-                let mut nx1 = cur.x1;
-                let mut ny1 = cur.y1;
-                // sort descending to remove safely
-                merged_indices.sort_by(|a,b| b.cmp(a));
-                for mi in merged_indices {
-                    let c = clusters.remove(mi);
-                    nx0 = nx0.min(c.x0);
-                    ny0 = ny0.min(c.y0);
-                    nx1 = nx1.max(c.x1);
-                    ny1 = ny1.max(c.y1);
-                }
-                clusters.push(Cluster { x0: nx0, y0: ny0, x1: nx1, y1: ny1 });
-            }
-        }
-        for c in clusters {
-            jobs.push((idx, path.clone(), c));
-        }
-    }
-    if jobs.is_empty() { return Err("no OCR jobs".to_string()); }
-    // Decode every clustered crop once so seam-crossing pieces can be stitched
-    // vertically (auto-OCR style) instead of OCR'd as isolated single images.
-    // Tuple layout for decoded pieces:
-    // (idx, path, x0, y0, cw, ch, img_w, img_h, crop_rgba)
-    let mut decoded: Vec<(usize, String, u32, u32, u32, u32, u32, u32, image::RgbaImage)> = Vec::new();
-    for (idx, path, cluster) in jobs {
-        let dyn_img = image::ImageReader::open(&path)
-            .map_err(|e| format!("Failed to open {path}: {e}"))?
-            .with_guessed_format().map_err(|e| format!("Failed to decode {path}: {e}"))?
-            .decode().map_err(|e| format!("Failed to decode {path}: {e}"))?;
-        let rgba = dyn_img.into_rgba8();
-        let (img_w, img_h) = rgba.dimensions();
-        let x0 = cluster.x0.floor().max(0.0) as u32;
-        let y0 = cluster.y0.floor().max(0.0) as u32;
-        let x1 = cluster.x1.ceil().max(x0 as f32 +1.0) as u32;
-        let y1 = cluster.y1.ceil().max(y0 as f32 +1.0) as u32;
-        let x1 = x1.min(img_w);
-        let y1 = y1.min(img_h);
-        let cw = x1.saturating_sub(x0).max(1);
-        let ch = y1.saturating_sub(y0).max(1);
-        // Clamp origin inside the image so crop_imm cannot panic on edge-touching spans.
-        let x0 = x0.min(img_w.saturating_sub(1));
-        let y0 = y0.min(img_h.saturating_sub(1));
-        let cw = cw.min(img_w.saturating_sub(x0).max(1));
-        let ch = ch.min(img_h.saturating_sub(y0).max(1));
-        let crop = image::imageops::crop_imm(&rgba, x0, y0, cw, ch).to_image();
-        decoded.push((idx, path, x0, y0, cw, ch, img_w, img_h, crop));
-    }
-    if decoded.is_empty() { return Err("no OCR jobs".to_string()); }
-    decoded.sort_by(|a, b| a.0.cmp(&b.0).then(a.3.cmp(&b.3)).then(a.2.cmp(&b.2)));
-    // Partition sorted pieces into stitch groups: consecutive images with
-    // overlapping x-range where the upper piece touches the bottom seam and
-    // the lower piece touches the top seam belong to one logical drag.
-    let mut groups: Vec<Vec<usize>> = Vec::new();
-    for i in 0..decoded.len() {
-        if i == 0 {
-            groups.push(vec![0]);
-            continue;
-        }
-        let prev_i = *groups.last().and_then(|g| g.last()).unwrap_or(&0);
-        let (p_idx, _, p_x0, p_y0, p_cw, p_ch, p_img_w, p_img_h, _) = &decoded[prev_i];
-        let (c_idx, _, c_x0, c_y0, c_cw, _c_ch, c_img_w, _, _) = &decoded[i];
-        let consecutive = *c_idx == *p_idx + 1;
-        let mut stitch = false;
-        if consecutive && *p_img_w > 0 && *c_img_w > 0 {
-            let p_x0n = *p_x0 as f32 / *p_img_w as f32;
-            let p_x1n = (*p_x0 + *p_cw) as f32 / *p_img_w as f32;
-            let c_x0n = *c_x0 as f32 / *c_img_w as f32;
-            let c_x1n = (*c_x0 + *c_cw) as f32 / *c_img_w as f32;
-            let overlap = (p_x1n.min(c_x1n) - p_x0n.max(c_x0n)).max(0.0);
-            let min_w = (p_x1n - p_x0n).min(c_x1n - c_x0n).max(1e-6);
-            let x_overlap = overlap / min_w > 0.5;
-            let prev_touches_bottom = (*p_y0 + *p_ch) as i32 >= *p_img_h as i32 - 2;
-            let cur_touches_top = *c_y0 as i32 <= 2;
-            stitch = x_overlap && prev_touches_bottom && cur_touches_top;
-        }
-        if stitch {
-            if let Some(g) = groups.last_mut() { g.push(i); }
-        } else {
-            groups.push(vec![i]);
-        }
-    }
-    let mut per_image: HashMap<usize, Vec<NewEntry>> = HashMap::new();
-    for g in groups {
-        if g.len() == 1 {
-            let (idx, _, x0, y0, _, _, _, _, crop_rgba) = &decoded[g[0]];
-            let cropped_rgb = image::DynamicImage::ImageRgba8(crop_rgba.clone()).to_rgb8();
-            let token = ocr::OcrCancellationToken::new();
-            let lines = engine.run_image_cancellable(&cropped_rgb, &token)
-                .map_err(|e| format!("Manual OCR failed: {e}"))?;
-            let mut entries = ocr::to_entries_with(lines, merge_cfg);
-            for entry in &mut entries {
-                for p in &mut entry.quad.points {
-                    p[0] += *x0 as f32;
-                    p[1] += *y0 as f32;
-                }
-            }
-            per_image.entry(*idx).or_default().extend(entries);
-        } else {
-            // Stitched path: common width of first piece, scale the rest,
-            // single OCR over the vertical canvas, map quads back per image.
-            let common_w = decoded[g[0]].4;
-            if common_w == 0 { continue; }
-            // (idx, x0, y0, cw, ch, scaled_h, off_y, scaled_img)
-            let mut scaled: Vec<(usize, u32, u32, u32, u32, u32, u32, image::RgbaImage)> = Vec::new();
-            let mut total_h: u32 = 0;
-            for pi in &g {
-                let (idx, _, x0, y0, cw, ch, _, _, crop) = &decoded[*pi];
-                let scaled_h = if *cw == common_w {
-                    *ch
-                } else {
-                    ((*ch as f32 * common_w as f32 / *cw as f32).round().max(1.0)) as u32
-                };
-                let scaled_img = if *cw == common_w {
-                    crop.clone()
-                } else {
-                    image::imageops::resize(crop, common_w, scaled_h, image::imageops::FilterType::Triangle)
-                };
-                let off_y = total_h;
-                total_h += scaled_h;
-                scaled.push((*idx, *x0, *y0, *cw, *ch, scaled_h, off_y, scaled_img));
-            }
-            if total_h == 0 { continue; }
-            let mut stitched_rgba = image::RgbaImage::new(common_w, total_h);
-            for (_, _, _, _, _, _, off_y, img) in &scaled {
-                image::imageops::replace(&mut stitched_rgba, img, 0, *off_y as i64);
-            }
-            let stitched_rgb = image::DynamicImage::ImageRgba8(stitched_rgba).to_rgb8();
-            let token = ocr::OcrCancellationToken::new();
-            let lines = engine.run_image_cancellable(&stitched_rgb, &token)
-                .map_err(|e| format!("Manual OCR span failed: {e}"))?;
-            let mut entries = ocr::to_entries_with(lines, merge_cfg);
-            for mut entry in entries.drain(..) {
-                let ys: Vec<f32> = entry.quad.points.iter().map(|p| p[1]).collect();
-                if ys.is_empty() { continue; }
-                let y0e = ys.iter().cloned().fold(f32::INFINITY, f32::min);
-                let y1e = ys.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-                // Assign to the piece with the largest vertical overlap.
-                let mut best: usize = 0;
-                let mut best_overlap: f32 = -1.0;
-                for (pi, (_, _, _, _, _, sh, off, _)) in scaled.iter().enumerate() {
-                    let lo = *off as f32;
-                    let hi = (*off + *sh) as f32;
-                    let overlap = (y1e.min(hi) - y0e.max(lo)).max(0.0);
-                    if overlap > best_overlap {
-                        best_overlap = overlap;
-                        best = pi;
-                    }
-                }
-                if best_overlap <= 0.0 {
-                    let yc = ys.iter().sum::<f32>() / ys.len() as f32;
-                    for (pi, (_, _, _, _, _, sh, off, _)) in scaled.iter().enumerate() {
-                        let lo = *off as f32;
-                        let hi = (*off + *sh) as f32;
-                        if yc >= lo && yc < hi {
-                            best = pi;
-                            break;
-                        }
-                    }
-                    if yc >= total_h as f32 {
-                        best = scaled.len() - 1;
-                    }
-                }
-                let (t_idx, t_x0, t_y0, t_cw, _, _, t_off, _) = &scaled[best];
-                let t_idx = *t_idx;
-                let factor = *t_cw as f32 / common_w as f32;
-                let lo = *t_off as f32;
-                let hi = (*t_off + scaled[best].5) as f32;
-                for p in &mut entry.quad.points {
-                    let y_clamped = p[1].clamp(lo, hi);
-                    let x_mapped = *t_x0 as f32 + p[0] * factor;
-                    let y_mapped = *t_y0 as f32 + (y_clamped - *t_off as f32) * factor;
-                    *p = [x_mapped, y_mapped];
-                }
-                per_image.entry(t_idx).or_default().push(entry);
-            }
-        }
-    }
-    let mut out: Vec<(usize, Vec<NewEntry>)> = per_image.into_iter().collect();
-    out.sort_by_key(|(idx,_)| *idx);
-    Ok(out)
-}
-
 pub fn handle_manual_ocr_finished(app: &mut App, tab_id: super::tab::TabId, result: Result<Vec<(usize, Vec<NewEntry>)>, String>) -> Task<Message> {
     #[cfg(feature = "ocr")]
     {
         if let Some(tab) = app.tab_by_id_mut(tab_id) { tab.manual_ocring = false; }
         // Free queue weight for manual OCR (same kind as pipeline OCR) and backfill promote
-        let freed = app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Ocr).is_some();
+        let freed = app.engines.queue.complete_ocr(crate::app::queue::owner_of(tab_id)).is_some();
         let mut promote_task = Task::none();
         let mut refresh_needed = false;
         if freed {

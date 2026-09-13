@@ -6,6 +6,9 @@ use easyscanlate_model::EntryId;
 use easyscanlate_segment::Engine as SegmentEngine;
 
 use super::{App, Message};
+use crate::app::queue::owner_of;
+#[cfg(feature = "segment")]
+use easyscanlate_engine_pool::run_segment_grid;
 
 /// One granular segment stream item: grid index + this grid's deletions.
 /// Emitted per finished grid (OCR-style), so one grid failure never drops the
@@ -19,19 +22,19 @@ pub fn start_segment_filter(app: &mut App, tab_id: crate::app::tab::TabId) -> Ta
         let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none() };
         // queue gate — weight 4, backfill + priority (cap 5)
         {
-            use crate::app::queue::{AcquireResult, EngineKind};
+            use crate::app::queue::{AcquireResult, JobKind, owner_of};
             // Only gate if not already running — if already running, we are in dispatch chain, so allow
-            let already_reserved = app.engines.queue.running_for(tab_id, EngineKind::Segment).is_some();
+            let already_reserved = app.engines.queue.running_for(owner_of(tab_id), JobKind::Segment).is_some();
             if !already_reserved {
                 // if this tab is already queued/running for segment, don't duplicate
-                if app.engines.queue.is_tab_queued(tab_id) || app.engines.queue.is_tab_running(tab_id) {
+                if app.engines.queue.is_tab_queued(owner_of(tab_id)) || app.engines.queue.is_tab_running(owner_of(tab_id)) {
                     // already queued, avoid duplicate enqueue
                     // check if pending for this exact kind
-                    if app.engines.queue.pending_for_tab(tab_id).iter().any(|j| j.kind == EngineKind::Segment) || app.engines.queue.running_for(tab_id, EngineKind::Segment).is_some() {
+                    if app.engines.queue.pending_for_tab(owner_of(tab_id)).iter().any(|j| j.kind == JobKind::Segment) || app.engines.queue.running_for(owner_of(tab_id), JobKind::Segment).is_some() {
                         return Task::none();
                     }
                 }
-                match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Segment) {
+                match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), JobKind::Segment) {
                     AcquireResult::Acquired(_) => {
                         // fall through to spawn
                     }
@@ -39,7 +42,7 @@ pub fn start_segment_filter(app: &mut App, tab_id: crate::app::tab::TabId) -> Ta
                         app.tabs[idx].segment_filtering = true;
                         app.tabs[idx].status = format!(
                             "Queued {} (pos {}, pool {}/{}) ...",
-                            EngineKind::Segment.label(),
+                            JobKind::Segment.label(),
                             pos,
                             app.engines.queue.used_weight(),
                             crate::app::queue::POOL_CAPACITY
@@ -52,11 +55,11 @@ pub fn start_segment_filter(app: &mut App, tab_id: crate::app::tab::TabId) -> Ta
         let tab = &app.tabs[idx];
         if tab.images.is_empty() {
             // release reservation if we acquired
-            app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Segment);
+            app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
             return Task::none();
         }
         if !easyscanlate_settings::get(|s| s.auto_sfx_filter) {
-            app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Segment);
+            app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
             return Task::none();
         }
         match &app.engines.segment {
@@ -81,7 +84,28 @@ pub fn start_segment_filter(app: &mut App, tab_id: crate::app::tab::TabId) -> Ta
                     app.engines.queue.used_weight(),
                     crate::app::queue::POOL_CAPACITY
                 );
-                Task::perform(async move { SegmentEngine::build() }, move |res| Message::Tab(tab_id, crate::app::TabMessage::SegmentEngineReady(res)))
+                let (job_id, kind) = app
+                    .engines
+                    .queue
+                    .running_for(owner_of(tab_id), crate::app::queue::JobKind::Segment)
+                    .map(|j| (j.id, j.kind))
+                    .unwrap_or((0, crate::app::queue::JobKind::Segment));
+                Task::perform(
+                    async move {
+                        use crate::app::queue::engine_ready_msg;
+                        use easyscanlate_engine_pool::BuiltEngine;
+                        match SegmentEngine::build() {
+                            Ok(engine) => engine_ready_msg(
+                                tab_id,
+                                job_id,
+                                kind,
+                                Ok(BuiltEngine::Segment(engine)),
+                            ),
+                            Err(e) => engine_ready_msg(tab_id, job_id, kind, Err(e)),
+                        }
+                    },
+                    |msg| msg,
+                )
             }
         }
     }
@@ -109,12 +133,12 @@ fn start_segment_stream(
     use easyscanlate_segment::grid::plan_grids;
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     if dims.is_empty() {
-        app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Segment);
+        app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
         return Task::none();
     }
     let runs = plan_grids(&dims);
     if runs.is_empty() {
-        app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Segment);
+        app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
         return Task::none();
     }
     let total = runs.len();
@@ -170,68 +194,8 @@ fn start_segment_stream(
     )
 }
 
-/// Runs SFX filtering for a single grid canvas. Returns this grid's deletions.
-/// One grid's detection failure is isolated here so the stream can count it
-/// as one failed grid and continue with the rest (OCR-style granularity).
-#[cfg(feature = "segment")]
-fn run_segment_grid(
-    engine: &SegmentEngine,
-    run: &easyscanlate_segment::grid::GridRun,
-    dims: &[(u32, u32)],
-    paths: &[String],
-    ocr_boxes: &[Vec<([f32; 4], EntryId)>],
-) -> Result<Vec<(usize, EntryId)>, String> {
-    use easyscanlate_segment::filter::{DetBox, sfx_filter_indexes};
-    use easyscanlate_segment::grid::{build_grid_canvas_with_loader, grid_det_to_page};
-    use easyscanlate_segment::SegClass;
-    let mut loader = |page_idx: usize| -> image::RgbImage {
-        let path = match paths.get(page_idx) {
-            Some(p) => p,
-            None => return image::RgbImage::new(1, 1),
-        };
-        #[cfg(feature = "ocr")]
-        let img = easyscanlate_ocr::load_rgb(path).unwrap_or_else(|| image::RgbImage::new(1, 1));
-        #[cfg(not(feature = "ocr"))]
-        let img = image::open(path).map(|i| i.to_rgb8()).unwrap_or_else(|_| image::RgbImage::new(1, 1));
-        img
-    };
-    let canvas = build_grid_canvas_with_loader(run, &mut loader);
-    let dets = engine
-        .detect_canvas(&canvas)
-        .map_err(|e| format!("segment detect failed: {e}"))?;
-    let mut balloons_per_page: Vec<Vec<DetBox>> = vec![Vec::new(); dims.len()];
-    let mut sfx_per_page: Vec<Vec<DetBox>> = vec![Vec::new(); dims.len()];
-    for det in dets {
-        if let Some((page, bbox)) = grid_det_to_page(det.bbox, run, dims) {
-            let db = DetBox {
-                bbox,
-                confidence: det.confidence,
-            };
-            match det.class {
-                SegClass::Balloon => balloons_per_page[page].push(db),
-                SegClass::Onomatopoeia => sfx_per_page[page].push(db),
-                _ => {}
-            }
-        }
-    }
-    let mut touched_pages: Vec<usize> = run.cols.iter().flat_map(|c| c.pages.clone()).collect();
-    touched_pages.sort_unstable();
-    touched_pages.dedup();
-    let mut to_delete: Vec<(usize, EntryId)> = Vec::new();
-    for page in touched_pages {
-        if page >= ocr_boxes.len() {
-            continue;
-        }
-        let entries = &ocr_boxes[page];
-        let bboxes: Vec<[f32; 4]> = entries.iter().map(|(bb, _)| *bb).collect();
-        let idxs = sfx_filter_indexes(&bboxes, &balloons_per_page[page], &sfx_per_page[page]);
-        for idx in idxs {
-            let (_, id) = entries[idx];
-            to_delete.push((page, id));
-        }
-    }
-    Ok(to_delete)
-}
+/// Single-grid segment execution lives in the pool
+/// (`easyscanlate_engine_pool::run_segment_grid`); this module only streams it.
 
 #[cfg(feature = "segment")]
 pub fn handle_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<SegmentEngine, String>) -> Task<Message> {
@@ -248,7 +212,7 @@ pub fn handle_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, result
             app.tabs[idx].segment_filtering = false;
             app.tabs[idx].status = e.clone();
             // free queue weight (build failed) and promote
-            app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Segment);
+            app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
             promote
@@ -271,13 +235,13 @@ fn chain_segment_next(app: &mut App, tab_id: crate::app::tab::TabId, idx: usize,
     if need_style_inpaint {
         #[cfg(all(feature = "styling", feature = "inpaint"))]
         {
-            use crate::app::queue::{AcquireResult, EngineKind};
-            match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Style) {
+            use crate::app::queue::{AcquireResult, JobKind, owner_of};
+            match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), JobKind::Styling) {
                 AcquireResult::Acquired(_) => tasks.push(super::styling::classify(app, tab_id)),
                 AcquireResult::Queued(_, pos) => {
                     let used = app.engines.queue.used_weight();
                     if let Some(t) = app.tab_by_id_mut(tab_id) {
-                        t.status = format!("Queued {} (pos {}, pool {}/{}) ...", EngineKind::Style.label(), pos, used, crate::app::queue::POOL_CAPACITY);
+                        t.status = format!("Queued {} (pos {}, pool {}/{}) ...", JobKind::Styling.label(), pos, used, crate::app::queue::POOL_CAPACITY);
                     }
                 }
             }
@@ -292,14 +256,14 @@ fn chain_segment_next(app: &mut App, tab_id: crate::app::tab::TabId, idx: usize,
         });
         #[cfg(feature = "inpaint")]
         {
-            use crate::app::queue::{AcquireResult, EngineKind};
+            use crate::app::queue::{AcquireResult, JobKind, owner_of};
             let kind = match eff {
-                easyscanlate_settings::AutoInpaintModel::Telea => EngineKind::InpaintTelea,
-                easyscanlate_settings::AutoInpaintModel::Lama => EngineKind::InpaintLama,
-                easyscanlate_settings::AutoInpaintModel::Aot => EngineKind::InpaintAot,
-                easyscanlate_settings::AutoInpaintModel::Mixed => EngineKind::InpaintTelea,
+                easyscanlate_settings::AutoInpaintModel::Telea => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
+                easyscanlate_settings::AutoInpaintModel::Lama => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
+                easyscanlate_settings::AutoInpaintModel::Aot => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
+                easyscanlate_settings::AutoInpaintModel::Mixed => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
             };
-            match app.engines.queue.try_acquire_or_enqueue(tab_id, kind) {
+            match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), kind) {
                 AcquireResult::Acquired(_) => tasks.push(super::inpaint::dispatch_auto_solo(app, tab_id, eff)),
                 AcquireResult::Queued(_, pos) => {
                     let used = app.engines.queue.used_weight();
@@ -318,13 +282,13 @@ fn chain_segment_next(app: &mut App, tab_id: crate::app::tab::TabId, idx: usize,
         if need_style_only {
             #[cfg(feature = "styling")]
             {
-                use crate::app::queue::{AcquireResult, EngineKind};
-                match app.engines.queue.try_acquire_or_enqueue(tab_id, EngineKind::Style) {
+                use crate::app::queue::{AcquireResult, JobKind, owner_of};
+                match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), JobKind::Styling) {
                     AcquireResult::Acquired(_) => tasks.push(super::styling::classify(app, tab_id)),
                     AcquireResult::Queued(_, pos) => {
                     let used = app.engines.queue.used_weight();
                     if let Some(t) = app.tab_by_id_mut(tab_id) {
-                        t.status = format!("Queued {} (pos {}, pool {}/{}) ...", EngineKind::Style.label(), pos, used, crate::app::queue::POOL_CAPACITY);
+                        t.status = format!("Queued {} (pos {}, pool {}/{}) ...", JobKind::Styling.label(), pos, used, crate::app::queue::POOL_CAPACITY);
                     }
                 }
                 }
@@ -363,7 +327,7 @@ pub fn handle_stream_run(
             if pending == 0 {
                 app.tabs[idx].segment_filtering = false;
                 app.tabs[idx].pipeline_seg_done = true;
-                app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Segment);
+                app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
                 crate::app::queue::refresh_queued_statuses(app);
                 let is_pipeline = {
                     #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
@@ -396,7 +360,7 @@ pub fn handle_stream_run(
             if pending == 0 {
                 app.tabs[idx].segment_filtering = false;
                 app.tabs[idx].pipeline_seg_done = true;
-                app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Segment);
+                app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
                 crate::app::queue::refresh_queued_statuses(app);
                 let is_pipeline = {
                     #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
@@ -434,7 +398,7 @@ pub fn handle_stream_failed(
         app.tabs[idx].segment_pending = 0;
         app.tabs[idx].segment_filtering = false;
         app.tabs[idx].pipeline_seg_done = true;
-        app.engines.queue.complete(tab_id, crate::app::queue::EngineKind::Segment);
+        app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
         crate::app::queue::refresh_queued_statuses(app);
         let (total, removed, failed) =
             (app.tabs[idx].segment_total, app.tabs[idx].segment_removed, app.tabs[idx].segment_failed);

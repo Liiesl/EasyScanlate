@@ -1247,6 +1247,7 @@ name = "easyscanlate"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "easyscanlate-engine-pool",
  "easyscanlate-inpaint",
  "easyscanlate-mmtl",
  "easyscanlate-model",
@@ -1272,6 +1273,22 @@ dependencies = [
  "velopack",
  "winreg",
  "winres",
+]
+
+[[package]]
+name = "easyscanlate-engine-pool"
+version = "0.1.0"
+dependencies = [
+ "easyscanlate-inpaint",
+ "easyscanlate-model",
+ "easyscanlate-models",
+ "easyscanlate-ocr",
+ "easyscanlate-segment",
+ "easyscanlate-settings",
+ "easyscanlate-styling",
+ "image",
+ "serde",
+ "tokio",
 ]
 
 [[package]]

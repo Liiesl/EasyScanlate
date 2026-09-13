@@ -11,13 +11,9 @@ use std::sync::Arc;
 use iced::widget::{pane_grid, text_editor};
 use iced::Rectangle;
 
-#[cfg(feature = "inpaint")]
-use easyscanlate_inpaint::Engine as InpaintEngine;
 use easyscanlate_model::{EntryId, EntryStyle, ProfileId, Project, Quad};
 #[cfg(feature = "ocr")]
-use easyscanlate_ocr::{self as ocr_engine, OcrCancellationToken, ParallelEngine};
-#[cfg(feature = "segment")]
-use easyscanlate_segment::Engine as SegmentEngine;
+use easyscanlate_ocr::{self as ocr_engine, OcrCancellationToken};
 #[cfg(feature = "styling")]
 use easyscanlate_styling::{JobTracker, StylePrediction};
 use easyscanlate_ui::event::{EditOrigin, MainAreaMode, ManualMode, StyleField, TargetProfileSelection, TranslationPanelMode};
@@ -55,39 +51,19 @@ impl TabKind {
 }
 
 // ---------------------------------------------------------------------------
-// Per-tab pending inpaint job (mirrors `crate::app::AutoInpaintJob`)
+// Per-tab pending inpaint job — canonical type lives in the engine pool.
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
-pub(crate) struct AutoInpaintJob {
-    pub index: usize,
-    pub id: EntryId,
-    pub path: String,
-    pub quad: Quad,
-}
+/// Per-tab pending auto-inpaint job (alias to the pool's payload vocabulary).
+#[cfg(feature = "inpaint")]
+pub(crate) type AutoInpaintJob = easyscanlate_engine_pool::InpaintAutoJob;
 
 // ---------------------------------------------------------------------------
-// Engine pool — shared heavy engines (Q3). One per App.
+// Engine pool — shared heavy engines, owned by `easyscanlate-engine-pool`.
+// One per App. Styling engine is global here like OCR/inpaint/segment.
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Default)]
-pub struct EnginePool {
-    #[cfg(feature = "ocr")]
-    pub pipeline: Option<ParallelEngine>,
-    #[cfg(feature = "ocr")]
-    pub manual_ocr: Option<easyscanlate_ocr::Engine>,
-    #[cfg(feature = "inpaint")]
-    pub inpaint: Option<InpaintEngine>,
-    #[cfg(feature = "inpaint")]
-    pub auto_telea: Option<InpaintEngine>,
-    #[cfg(feature = "inpaint")]
-    pub auto_lama: Option<InpaintEngine>,
-    #[cfg(feature = "inpaint")]
-    pub auto_aot: Option<InpaintEngine>,
-    #[cfg(feature = "segment")]
-    pub segment: Option<SegmentEngine>,
-    pub queue: crate::app::queue::EngineQueue,
-}
+pub use easyscanlate_engine_pool::EnginePool;
 
 // ---------------------------------------------------------------------------
 // Shared complex payload aliases (silences `clippy::type_complexity`).
