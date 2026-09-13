@@ -1121,19 +1121,19 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
 
     // Manual inpaint
     {
-        let show_manual = matches_any(query_ref, &["inpaint", "backend", "telea", "lama", "aot", "radius", "manual", "brush"]);
+        let show_manual = matches_any(query_ref, &["inpaint", "backend", "telea", "lama", "aot", "shiftmap", "harmonic", "laplace", "poisson", "radius", "manual", "brush"]);
         if show_manual {
             #[cfg(feature = "inpaint")]
             {
                 let backend = easyscanlate_settings::get(|s| s.inpaint_backend);
                 let radius = easyscanlate_settings::get(|s| s.inpaint_radius.clone());
                 let col: Vec<Element<'static, UiEvent>> = vec![
-                    card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Telea vs ONNX")),
-                    field_row("Backend", pick_list([InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()),
-                    helper_text("Telea is instant (no model); LaMa is high-quality ONNX; AOT-GAN is 2-4× faster than LaMa (pad 8, max 1024)."),
+                    card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Telea vs ONNX vs patch/diffusion")),
+                    field_row("Backend", pick_list([InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot, InpaintBackend::ShiftMap, InpaintBackend::Harmonic], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()),
+                    helper_text("Telea is instant (no model); LaMa is high-quality ONNX; AOT-GAN is 2-4× faster than LaMa (pad 8, max 1024); ShiftMap rebuilds textures (slower, CPU); Harmonic fills smooth bubbles/gradients (instant, CPU)."),
                     item_separator(),
                     field_row("Telea radius", text_input("5", &radius).on_input(|input| set(move |s| s.inpaint_radius = input.clone())).padding(scale::s(4.0)).size(scale::s(12.0)).width(Length::Fixed(scale::s(80.0))).into()),
-                    helper_text("Pixels around mask Telea samples; larger smooths more but blurs. Ignored by LaMa/AOT."),
+                    helper_text("Pixels around mask Telea/Harmonic sample; larger smooths more but blurs. Ignored by LaMa/AOT/ShiftMap."),
                 ];
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
@@ -1196,19 +1196,19 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         }
     }
     {
-        let show_manual = matches_any(query, &["inpaint", "backend", "telea", "lama", "aot", "radius", "manual", "brush"]);
+        let show_manual = matches_any(query, &["inpaint", "backend", "telea", "lama", "aot", "shiftmap", "harmonic", "laplace", "poisson", "radius", "manual", "brush"]);
         if show_manual {
             #[cfg(feature = "inpaint")]
             {
                 let backend = easyscanlate_settings::get(|s| s.inpaint_backend);
                 let radius = easyscanlate_settings::get(|s| s.inpaint_radius.clone());
                 let col: Vec<Element<'static, UiEvent>> = vec![
-                    card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Telea vs ONNX")),
-                    field_row("Backend", pick_list([InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()),
-                    helper_text("Telea is instant (no model); LaMa is high-quality ONNX; AOT-GAN is 2-4× faster than LaMa (pad 8, max 1024)."),
+                    card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Telea vs ONNX vs patch/diffusion")),
+                    field_row("Backend", pick_list([InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot, InpaintBackend::ShiftMap, InpaintBackend::Harmonic], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()),
+                    helper_text("Telea is instant (no model); LaMa is high-quality ONNX; AOT-GAN is 2-4× faster than LaMa (pad 8, max 1024); ShiftMap rebuilds textures (slower, CPU); Harmonic fills smooth bubbles/gradients (instant, CPU)."),
                     item_separator(),
                     field_row("Telea radius", text_input("5", &radius).on_input(|input| set(move |s| s.inpaint_radius = input.clone())).padding(scale::s(4.0)).size(scale::s(12.0)).width(Length::Fixed(scale::s(80.0))).into()),
-                    helper_text("Pixels around mask Telea samples; larger smooths more but blurs. Ignored by LaMa/AOT."),
+                    helper_text("Pixels around mask Telea/Harmonic sample; larger smooths more but blurs. Ignored by LaMa/AOT/ShiftMap."),
                 ];
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }

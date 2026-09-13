@@ -86,6 +86,10 @@ pub fn dispatch_inpaint(
                 InpaintBackend::Telea => telea_jobs.push(job),
                 InpaintBackend::Lama => lama_jobs.push(job),
                 InpaintBackend::Aot => aot_jobs.push(job),
+                // Manual-only backends never arise from AutoInpaintModel
+                // routing above; keep exhaustive with weight-class twins.
+                InpaintBackend::ShiftMap => aot_jobs.push(job),
+                InpaintBackend::Harmonic => telea_jobs.push(job),
             }
         }
     }

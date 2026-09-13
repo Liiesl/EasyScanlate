@@ -59,8 +59,10 @@ impl JobKind {
             Self::Styling => 2,
             Self::Inpaint(backend) => match backend {
                 easyscanlate_settings::InpaintBackend::Telea => 1,
+                easyscanlate_settings::InpaintBackend::Harmonic => 1,
                 easyscanlate_settings::InpaintBackend::Lama => 4,
                 easyscanlate_settings::InpaintBackend::Aot => 3,
+                easyscanlate_settings::InpaintBackend::ShiftMap => 3,
             },
         }
     }
@@ -69,10 +71,12 @@ impl JobKind {
     pub fn priority(self) -> u8 {
         match self {
             Self::Inpaint(easyscanlate_settings::InpaintBackend::Telea) => 0,
+            Self::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic) => 0,
             Self::Styling => 1,
             Self::Segment => 2,
             Self::Ocr(_) => 3,
             Self::Inpaint(easyscanlate_settings::InpaintBackend::Aot) => 4,
+            Self::Inpaint(easyscanlate_settings::InpaintBackend::ShiftMap) => 4,
             Self::Inpaint(easyscanlate_settings::InpaintBackend::Lama) => 5,
         }
     }
@@ -84,8 +88,10 @@ impl JobKind {
             Self::Styling => "STYLE",
             Self::Inpaint(backend) => match backend {
                 easyscanlate_settings::InpaintBackend::Telea => "INPAINT telea",
+                easyscanlate_settings::InpaintBackend::Harmonic => "INPAINT harmonic",
                 easyscanlate_settings::InpaintBackend::Lama => "INPAINT lama",
                 easyscanlate_settings::InpaintBackend::Aot => "INPAINT aot-gan",
+                easyscanlate_settings::InpaintBackend::ShiftMap => "INPAINT shiftmap",
             },
         }
     }

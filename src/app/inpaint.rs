@@ -169,6 +169,12 @@ fn free_auto_queue(app: &mut App, tab_id: super::tab::TabId) -> bool {
     if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot)).is_some() {
         freed = true;
     }
+    if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::ShiftMap)).is_some() {
+        freed = true;
+    }
+    if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic)).is_some() {
+        freed = true;
+    }
     freed
 }
 
@@ -254,6 +260,12 @@ fn free_manual_queue(app: &mut App, tab_id: super::tab::TabId) -> bool {
     if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot)).is_some() {
         freed = true;
     }
+    if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::ShiftMap)).is_some() {
+        freed = true;
+    }
+    if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic)).is_some() {
+        freed = true;
+    }
     freed
 }
 
@@ -312,11 +324,7 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
         // queue gate for background stitch (single inpaint)
         {
             use crate::app::queue::{AcquireResult, JobKind, owner_of};
-            let kind = match backend {
-                InpaintBackend::Telea => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
-                InpaintBackend::Lama => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
-                InpaintBackend::Aot => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
-            };
+            let kind = JobKind::Inpaint(backend);
             let tab_id = app.active_tab().id;
             let already_running = app.engines.queue.running_for(owner_of(tab_id), kind).is_some();
             let already_queued = app.engines.queue.pending_for_tab(owner_of(tab_id)).iter().any(|j| j.kind == kind);
@@ -360,12 +368,10 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
                     InpaintBackend::Lama => "Loading LaMa model...".to_string(),
                     InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
                     InpaintBackend::Telea => "Inpainting background...".to_string(),
+                    InpaintBackend::ShiftMap => "Inpainting background (ShiftMap)...".to_string(),
+                    InpaintBackend::Harmonic => "Inpainting background (Harmonic)...".to_string(),
                 };
-                let kind = match backend {
-                    InpaintBackend::Telea => crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
-                    InpaintBackend::Lama => crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
-                    InpaintBackend::Aot => crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
-                };
+                let kind = crate::app::queue::JobKind::Inpaint(backend);
                 let job_id = app
                     .engines
                     .queue
@@ -590,11 +596,7 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
         // queue gate for repaint manual inpaint (single selection)
         {
             use crate::app::queue::{AcquireResult, JobKind, owner_of};
-            let kind = match backend {
-                easyscanlate_settings::InpaintBackend::Telea => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
-                easyscanlate_settings::InpaintBackend::Lama => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
-                easyscanlate_settings::InpaintBackend::Aot => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
-            };
+            let kind = JobKind::Inpaint(backend);
             let tab_id = app.active_tab().id;
             let already_running = app.engines.queue.running_for(owner_of(tab_id), kind).is_some();
             let already_queued = app.engines.queue.pending_for_tab(owner_of(tab_id)).iter().any(|j| j.kind == kind);
@@ -635,12 +637,10 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
                     easyscanlate_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
                     easyscanlate_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
                     easyscanlate_settings::InpaintBackend::Telea => "Inpainting...".to_string(),
+                    easyscanlate_settings::InpaintBackend::ShiftMap => "Inpainting (ShiftMap)...".to_string(),
+                    easyscanlate_settings::InpaintBackend::Harmonic => "Inpainting (Harmonic)...".to_string(),
                 };
-                let kind = match backend {
-                    easyscanlate_settings::InpaintBackend::Telea => crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
-                    easyscanlate_settings::InpaintBackend::Lama => crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
-                    easyscanlate_settings::InpaintBackend::Aot => crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
-                };
+                let kind = crate::app::queue::JobKind::Inpaint(backend);
                 let job_id = app
                     .engines
                     .queue
@@ -753,11 +753,7 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
     // queue gate — manual inpaint uses same backend weight/priority as auto
     {
         use crate::app::queue::{AcquireResult, JobKind, owner_of};
-        let kind = match backend {
-            InpaintBackend::Telea => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
-            InpaintBackend::Lama => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
-            InpaintBackend::Aot => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
-        };
+        let kind = JobKind::Inpaint(backend);
         let tab_id = app.active_tab().id;
         // Avoid duplicate queue if already running/queued for this tab+kind
         let already_running = app.engines.queue.running_for(owner_of(tab_id), kind).is_some();
@@ -802,12 +798,10 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
             InpaintBackend::Lama => "Loading LaMa model...".to_string(),
             InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
             InpaintBackend::Telea => "Inpainting...".to_string(),
+            InpaintBackend::ShiftMap => "Inpainting (ShiftMap)...".to_string(),
+            InpaintBackend::Harmonic => "Inpainting (Harmonic)...".to_string(),
         };
-        let kind = match backend {
-            InpaintBackend::Telea => crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
-            InpaintBackend::Lama => crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
-            InpaintBackend::Aot => crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
-        };
+        let kind = crate::app::queue::JobKind::Inpaint(backend);
         let job_id = app
             .engines
             .queue
@@ -1426,6 +1420,8 @@ pub fn handle_inpaint_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId
             if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea)).is_some() { freed = true; }
             if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama)).is_some() { freed = true; }
             if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot)).is_some() { freed = true; }
+            if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::ShiftMap)).is_some() { freed = true; }
+            if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic)).is_some() { freed = true; }
             if freed {
                 let promote = crate::app::queue::dispatch_pending(app);
                 crate::app::queue::refresh_queued_statuses(app);
@@ -1457,6 +1453,19 @@ pub fn handle_auto_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, b
                     let jobs = app.tabs[idx].pending_auto_aot_jobs.take();
                     if let Some(j) = jobs { return dispatch_auto(app, tab_id, j, InpaintBackend::Aot); }
                 }
+                // Manual-only CPU backends: cached like the other auto
+                // engines so the match stays exhaustive; the auto pipeline
+                // never routes here today.
+                InpaintBackend::ShiftMap => {
+                    app.engines.auto_shiftmap = Some(engine.clone());
+                    let jobs = app.tabs[idx].pending_auto_shiftmap_jobs.take();
+                    if let Some(j) = jobs { return dispatch_auto(app, tab_id, j, InpaintBackend::ShiftMap); }
+                }
+                InpaintBackend::Harmonic => {
+                    app.engines.auto_harmonic = Some(engine.clone());
+                    let jobs = app.tabs[idx].pending_auto_harmonic_jobs.take();
+                    if let Some(j) = jobs { return dispatch_auto(app, tab_id, j, InpaintBackend::Harmonic); }
+                }
             }
             Task::none()
         }
@@ -1465,17 +1474,15 @@ pub fn handle_auto_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, b
                 InpaintBackend::Telea => app.tabs[idx].pending_auto_telea_jobs = None,
                 InpaintBackend::Lama => app.tabs[idx].pending_auto_lama_jobs = None,
                 InpaintBackend::Aot => app.tabs[idx].pending_auto_aot_jobs = None,
+                InpaintBackend::ShiftMap => app.tabs[idx].pending_auto_shiftmap_jobs = None,
+                InpaintBackend::Harmonic => app.tabs[idx].pending_auto_harmonic_jobs = None,
             }
             app.tabs[idx].auto_inpaint_loading = false;
             app.tabs[idx].status = format!("Auto-inpaint engine failed: {e}");
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
             { app.tabs[idx].pipeline_active = false; }
             // free queue weight (build failed) and promote
-            let kind = match backend {
-                InpaintBackend::Telea => crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
-                InpaintBackend::Lama => crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
-                InpaintBackend::Aot => crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
-            };
+            let kind = crate::app::queue::JobKind::Inpaint(backend);
             app.engines.queue.complete(owner_of(tab_id), kind);
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
@@ -1537,6 +1544,10 @@ pub fn handle_auto_stream_run(
         "LaMa"
     } else if app.engines.queue.running_for(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot)).is_some() {
         "AOT-GAN"
+    } else if app.engines.queue.running_for(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::ShiftMap)).is_some() {
+        "ShiftMap"
+    } else if app.engines.queue.running_for(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic)).is_some() {
+        "Harmonic"
     } else {
         "Telea"
     };
@@ -1758,11 +1769,7 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
     // queue gate — weights 1/4/3 backfill + priority (cap 5)
     {
         use crate::app::queue::{AcquireResult, JobKind, owner_of};
-        let kind = match backend {
-            InpaintBackend::Telea => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
-            InpaintBackend::Lama => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
-            InpaintBackend::Aot => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
-        };
+        let kind = JobKind::Inpaint(backend);
         let already_reserved = app.engines.queue.running_for(owner_of(tab_id), kind).is_some();
         if !already_reserved {
             match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), kind) {
@@ -1774,6 +1781,8 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
                         InpaintBackend::Telea => app.tabs[idx_tmp].pending_auto_telea_jobs = Some(jobs),
                         InpaintBackend::Lama => app.tabs[idx_tmp].pending_auto_lama_jobs = Some(jobs),
                         InpaintBackend::Aot => app.tabs[idx_tmp].pending_auto_aot_jobs = Some(jobs),
+                        InpaintBackend::ShiftMap => app.tabs[idx_tmp].pending_auto_shiftmap_jobs = Some(jobs),
+                        InpaintBackend::Harmonic => app.tabs[idx_tmp].pending_auto_harmonic_jobs = Some(jobs),
                     }
                     app.tabs[idx_tmp].status = format!("Queued {} (pos {}, pool {}/{}) ...", kind.label(), pos, app.engines.queue.used_weight(), crate::app::queue::POOL_CAPACITY);
                     return Task::none();
@@ -1788,6 +1797,8 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
         InpaintBackend::Telea => app.engines.auto_telea.clone().filter(|e| e.radius() == radius),
         InpaintBackend::Lama => app.engines.auto_lama.clone().filter(|e| e.radius() == radius),
         InpaintBackend::Aot => app.engines.auto_aot.clone().filter(|e| e.radius() == radius),
+        InpaintBackend::ShiftMap => app.engines.auto_shiftmap.clone().filter(|e| e.radius() == radius),
+        InpaintBackend::Harmonic => app.engines.auto_harmonic.clone().filter(|e| e.radius() == radius),
     };
     if let Some(engine) = cached {
         // Fresh run resets totals; queue guarantees no concurrent same-tab run.
@@ -1827,7 +1838,11 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
                 Task::batch(tasks)
             }
             _ => {
-                let label = match backend { InpaintBackend::Lama => "LaMa", InpaintBackend::Aot => "AOT-GAN", _=> unreachable!()};
+                // Sequential stream for the model/heavy backends (LaMa,
+                // AOT-GAN, ShiftMap) and Harmonic; only Telea fans out in
+                // parallel above. ShiftMap/Harmonic never reach the auto
+                // path via pipeline routing today.
+                let label = match backend { InpaintBackend::Lama => "LaMa", InpaintBackend::Aot => "AOT-GAN", InpaintBackend::ShiftMap => "ShiftMap", InpaintBackend::Harmonic => "Harmonic", InpaintBackend::Telea => unreachable!("telea takes the parallel arm")};
                 return start_auto_stream(app, tab_id, engine, jobs, pad, label, backend);
             }
         }
@@ -1836,16 +1851,14 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
             InpaintBackend::Telea => app.tabs[idx].pending_auto_telea_jobs = Some(jobs),
             InpaintBackend::Lama => app.tabs[idx].pending_auto_lama_jobs = Some(jobs),
             InpaintBackend::Aot => app.tabs[idx].pending_auto_aot_jobs = Some(jobs),
+            InpaintBackend::ShiftMap => app.tabs[idx].pending_auto_shiftmap_jobs = Some(jobs),
+            InpaintBackend::Harmonic => app.tabs[idx].pending_auto_harmonic_jobs = Some(jobs),
         }
         // Model load counts as the run itself so buttons disable during it.
         // (Queued stash above intentionally leaves this unset.)
         app.tabs[idx].auto_inpaint_loading = true;
-        app.tabs[idx].status = match backend { InpaintBackend::Telea => "Loading Telea for auto-inpaint...".to_string(), InpaintBackend::Lama => "Loading LaMa for auto-inpaint...".to_string(), InpaintBackend::Aot => "Loading AOT-GAN for auto-inpaint...".to_string()};
-        let kind = match backend {
-            InpaintBackend::Telea => crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
-            InpaintBackend::Lama => crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
-            InpaintBackend::Aot => crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
-        };
+        app.tabs[idx].status = match backend { InpaintBackend::Telea => "Loading Telea for auto-inpaint...".to_string(), InpaintBackend::Lama => "Loading LaMa for auto-inpaint...".to_string(), InpaintBackend::Aot => "Loading AOT-GAN for auto-inpaint...".to_string(), InpaintBackend::ShiftMap => "Loading ShiftMap for auto-inpaint...".to_string(), InpaintBackend::Harmonic => "Loading Harmonic for auto-inpaint...".to_string()};
+        let kind = crate::app::queue::JobKind::Inpaint(backend);
         let job_id = app
             .engines
             .queue

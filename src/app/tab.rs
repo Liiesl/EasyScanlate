@@ -178,6 +178,13 @@ pub struct Tab {
     pub pending_auto_lama_jobs: Option<Vec<AutoInpaintJob>>,
     #[cfg(feature = "inpaint")]
     pub pending_auto_aot_jobs: Option<Vec<AutoInpaintJob>>,
+    /// Stash slots for the manual-only CPU backends. The auto pipeline
+    /// never routes to ShiftMap/Harmonic today; the slots exist only to
+    /// keep backend-conditional queue plumbing exhaustive and correct.
+    #[cfg(feature = "inpaint")]
+    pub pending_auto_shiftmap_jobs: Option<Vec<AutoInpaintJob>>,
+    #[cfg(feature = "inpaint")]
+    pub pending_auto_harmonic_jobs: Option<Vec<AutoInpaintJob>>,
     /// True while an auto-inpaint engine is being built (model load counts as
     /// the run itself so buttons disable during it). Set only at the load
     /// site, not while pool-queued.
@@ -340,6 +347,10 @@ impl Tab {
             pending_auto_lama_jobs: None,
             #[cfg(feature = "inpaint")]
             pending_auto_aot_jobs: None,
+            #[cfg(feature = "inpaint")]
+            pending_auto_shiftmap_jobs: None,
+            #[cfg(feature = "inpaint")]
+            pending_auto_harmonic_jobs: None,
             #[cfg(feature = "inpaint")]
             auto_inpaint_loading: false,
             selected: None,

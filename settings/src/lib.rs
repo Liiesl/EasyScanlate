@@ -97,6 +97,13 @@ pub enum InpaintBackend {
     /// AOT-GAN ONNX model: faster + lower memory than LaMa, variable
     /// resolution up to 1024 with pad=8, DirectML with CPU fallback.
     Aot,
+    /// Shift-Map (He & Sun 2012) + Poisson blend, pure Rust/CPU: best on
+    /// textured regions (screentone, scenery). Slower than Telea; the MRF
+    /// stage caps its long edge at 600px.
+    ShiftMap,
+    /// Harmonic (Laplace) diffusion, pure Rust/CPU: best on texture-free
+    /// regions (speech bubbles, smooth gradients). Instant, no model.
+    Harmonic,
 }
 
 impl fmt::Display for InpaintBackend {
@@ -105,6 +112,8 @@ impl fmt::Display for InpaintBackend {
             Self::Telea => "Telea (inpaint crate)",
             Self::Lama => "LaMa (ONNX)",
             Self::Aot => "AOT-GAN (ONNX)",
+            Self::ShiftMap => "ShiftMap (patch + graph-cut)",
+            Self::Harmonic => "Harmonic (Laplace)",
         })
     }
 }

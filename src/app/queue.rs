@@ -234,6 +234,8 @@ fn dispatch_inpaint(
             easyscanlate_settings::InpaintBackend::Telea => app.tabs[idx].pending_auto_telea_jobs.clone(),
             easyscanlate_settings::InpaintBackend::Lama => app.tabs[idx].pending_auto_lama_jobs.clone(),
             easyscanlate_settings::InpaintBackend::Aot => app.tabs[idx].pending_auto_aot_jobs.clone(),
+            easyscanlate_settings::InpaintBackend::ShiftMap => app.tabs[idx].pending_auto_shiftmap_jobs.clone(),
+            easyscanlate_settings::InpaintBackend::Harmonic => app.tabs[idx].pending_auto_harmonic_jobs.clone(),
         };
         if let Some(jobs) = jobs_opt {
             // Clear tab pending so re-entrance doesn't duplicate; queue holds running
@@ -241,6 +243,8 @@ fn dispatch_inpaint(
                 easyscanlate_settings::InpaintBackend::Telea => app.tabs[idx].pending_auto_telea_jobs = None,
                 easyscanlate_settings::InpaintBackend::Lama => app.tabs[idx].pending_auto_lama_jobs = None,
                 easyscanlate_settings::InpaintBackend::Aot => app.tabs[idx].pending_auto_aot_jobs = None,
+                easyscanlate_settings::InpaintBackend::ShiftMap => app.tabs[idx].pending_auto_shiftmap_jobs = None,
+                easyscanlate_settings::InpaintBackend::Harmonic => app.tabs[idx].pending_auto_harmonic_jobs = None,
             }
             return crate::app::inpaint::dispatch_auto(app, tab_id, jobs, backend);
         }
@@ -263,6 +267,8 @@ fn dispatch_inpaint(
                     easyscanlate_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
                     easyscanlate_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
                     easyscanlate_settings::InpaintBackend::Telea => "Inpainting...".to_string(),
+                    easyscanlate_settings::InpaintBackend::ShiftMap => "Inpainting (ShiftMap)...".to_string(),
+                    easyscanlate_settings::InpaintBackend::Harmonic => "Inpainting (Harmonic)...".to_string(),
                 };
                 let tid = tab_id;
                 return Task::perform(
@@ -296,6 +302,8 @@ fn dispatch_inpaint(
                     easyscanlate_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
                     easyscanlate_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
                     easyscanlate_settings::InpaintBackend::Telea => "Inpainting background...".to_string(),
+                    easyscanlate_settings::InpaintBackend::ShiftMap => "Inpainting background (ShiftMap)...".to_string(),
+                    easyscanlate_settings::InpaintBackend::Harmonic => "Inpainting background (Harmonic)...".to_string(),
                 };
                 let tid = tab_id;
                 return Task::perform(

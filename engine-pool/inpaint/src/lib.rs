@@ -1,9 +1,11 @@
-//! Image inpainting with three interchangeable backends: the pure-Rust
-//! Telea algorithm from the [`inpaint`] crate (the default: no model, no
-//! download), the LaMa ONNX model (`lama-manga.onnx`, fixed 512) and the
-//! AOT-GAN ONNX model (`inpainting_aot.onnx`, variable resolution up to
-//! 1024, pad=8 — faster + lower memory than LaMa). DirectML execution provider
-//! by default on Windows (feature `directml`), with CPU fallback.
+//! Image inpainting with interchangeable backends: the pure-Rust Telea
+//! algorithm from the [`inpaint`] crate (the default: no model, no
+//! download), ShiftMap + Poisson (pure Rust, best on textures), Harmonic
+//! Laplace diffusion (pure Rust, best on smooth regions), the LaMa ONNX
+//! model (`lama-manga.onnx`, fixed 512) and the AOT-GAN ONNX model
+//! (`inpainting_aot.onnx`, variable resolution up to 1024, pad=8 — faster +
+//! lower memory than LaMa). DirectML execution provider by default on
+//! Windows (feature `directml`) for the ONNX backends, with CPU fallback.
 //!
 //! [`Engine`] owns the backend chosen at build time. The ONNX backends hold
 //! one shared inference session (DirectML by default, CPU fallback) and
@@ -31,6 +33,18 @@ use ort::value::TensorRef;
 use easyscanlate_model::Quad;
 use easyscanlate_settings::InpaintBackend;
 
+pub(crate) mod cg;
+pub mod harmonic;
+pub mod poisson;
+pub mod shiftmap;
+
+pub use harmonic::harmonic_inpaint_rgb;
+pub use poisson::{poisson_blend, MAX_PIXELS as POISSON_MAX_PIXELS};
+pub use shiftmap::{
+    shiftmap_inpaint_rgb, MAX_EDGE as SHIFTMAP_MAX_EDGE, N_LABELS as SHIFTMAP_N_LABELS,
+    PATCH as SHIFTMAP_PATCH,
+};
+
 /// The fixed square input size of the LaMa model.
 pub const MODEL_EDGE: u32 = 512;
 
@@ -42,6 +56,11 @@ const LAMA_CONTEXT_PAD: f32 = 32.0;
 /// Context pad for AOT backend (same real-pixel expansion as LaMa, but
 /// AOT uses variable resolution + pad-to-multiple instead of mirror padding).
 const AOT_CONTEXT_PAD: f32 = 32.0;
+
+/// Context pad for the ShiftMap backend: real-pixel expansion around the
+/// selection (same value as the ONNX backends; the MRF stage additionally
+/// caps its long edge at [`SHIFTMAP_MAX_EDGE`]).
+const SHIFTMAP_CONTEXT_PAD: f32 = 32.0;
 
 /// AOT pad multiple (model was trained with stride 8).
 pub const AOT_PAD: u32 = 8;
@@ -126,7 +145,9 @@ impl Engine {
                 })
         };
         let session = match backend {
-            InpaintBackend::Telea => None,
+            InpaintBackend::Telea
+            | InpaintBackend::ShiftMap
+            | InpaintBackend::Harmonic => None,
             InpaintBackend::Lama => {
                 let path = easyscanlate_settings::resolve_model_path(MODEL_FILE);
                 #[cfg(all(feature = "directml", target_os = "windows"))]
@@ -219,6 +240,8 @@ impl Engine {
             .into_rgba8();
         match self.backend {
             InpaintBackend::Telea => telea_inpaint_crop(&image, rect, quads, self.radius),
+            InpaintBackend::ShiftMap => shiftmap_inpaint_crop(&image, rect, quads),
+            InpaintBackend::Harmonic => harmonic_inpaint_crop(&image, rect, quads, self.radius),
             InpaintBackend::Lama => {
                 let mut session = self
                     .session
@@ -254,6 +277,8 @@ impl Engine {
     ) -> InpaintResult {
         match self.backend {
             InpaintBackend::Telea => telea_inpaint_crop(image, rect, quads, self.radius),
+            InpaintBackend::ShiftMap => shiftmap_inpaint_crop(image, rect, quads),
+            InpaintBackend::Harmonic => harmonic_inpaint_crop(image, rect, quads, self.radius),
             InpaintBackend::Lama => {
                 let mut session = self
                     .session
@@ -732,6 +757,88 @@ pub fn telea_inpaint_crop(
     let out = bbox_crops(crop, exp_origin, quads);
     eprintln!("[inpaint::telea] quads={} -> {} bbox crops", quads.len(), out.len());
     Ok(out)
+}
+
+/// Runs one diffusion/MRF crop through `fill`: expands `rect` by `pad`,
+/// builds the expanded mask, converts to RGB, fills, converts back to RGBA
+/// (alpha copied from the source), then returns whole-rect or per-quad
+/// crops exactly like [`telea_inpaint_crop`].
+fn diffusion_inpaint_crop(
+    log_tag: &str,
+    image: &RgbaImage,
+    rect: [f32; 4],
+    quads: &[Quad],
+    pad: f32,
+    fill: impl FnOnce(&RgbImage, &GrayImage) -> RgbImage,
+) -> InpaintResult {
+    let [rx, ry, rw, rh] = rect;
+    let [ex, ey, exp_w, exp_h] = crop_spec(
+        [rx - pad, ry - pad, rx + rw + pad, ry + rh + pad],
+        image.width(),
+        image.height(),
+    );
+    let exp_origin = [ex as f32, ey as f32];
+    let mask = build_mask_expanded(exp_w, exp_h, quads, rect, exp_origin, image.width(), image.height());
+    eprintln!(
+        "[inpaint::{log_tag}] rect={:?} quads={} pad={} image={}x{} exp=[{},{},{},{}] mask_sum={}",
+        rect,
+        quads.len(),
+        pad,
+        image.width(),
+        image.height(),
+        ex,
+        ey,
+        exp_w,
+        exp_h,
+        mask.pixels().map(|p| p[0] as u32).sum::<u32>()
+    );
+    let crop: RgbaImage = image::imageops::crop_imm(image, ex, ey, exp_w, exp_h).to_image();
+    let rgb_crop = image::DynamicImage::ImageRgba8(crop.clone()).to_rgb8();
+    let filled_rgb = fill(&rgb_crop, &mask);
+    let mut filled: RgbaImage = image::DynamicImage::ImageRgb8(filled_rgb).into_rgba8();
+    for (px, src) in filled.pixels_mut().zip(crop.pixels()) {
+        px[3] = src[3];
+    }
+    if quads.is_empty() {
+        let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
+        let sub = image::imageops::crop_imm(&filled, ox - ex, oy - ey, ow, oh).to_image();
+        return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32], None)]);
+    }
+    let out = bbox_crops(filled, exp_origin, quads);
+    eprintln!("[inpaint::{log_tag}] quads={} -> {} bbox crops", quads.len(), out.len());
+    Ok(out)
+}
+
+/// Inpaints `rect` of `image` with the ShiftMap backend (He & Sun 2012 +
+/// Poisson blend): best for textured regions (screentone, scenery). The
+/// crop is `rect` expanded by [`SHIFTMAP_CONTEXT_PAD`] (the MRF stage caps
+/// its long edge at [`SHIFTMAP_MAX_EDGE`], giant masks fall back to
+/// harmonic diffusion). Same per-mask-box crop contract as
+/// [`telea_inpaint_crop`].
+pub fn shiftmap_inpaint_crop(
+    image: &RgbaImage,
+    rect: [f32; 4],
+    quads: &[Quad],
+) -> InpaintResult {
+    diffusion_inpaint_crop("shiftmap", image, rect, quads, SHIFTMAP_CONTEXT_PAD, |rgb, mask| {
+        shiftmap::shiftmap_inpaint_rgb(rgb, mask)
+    })
+}
+
+/// Inpaints `rect` of `image` with the Harmonic (Laplace) backend: solves
+/// `Δf = 0` inside the mask with Dirichlet boundary. Best for texture-free
+/// regions (speech bubbles, smooth gradients). Context pad is the Telea
+/// `radius`, like [`telea_inpaint_crop`]. Same per-mask-box crop contract.
+pub fn harmonic_inpaint_crop(
+    image: &RgbaImage,
+    rect: [f32; 4],
+    quads: &[Quad],
+    radius: i32,
+) -> InpaintResult {
+    let pad = radius.max(1) as f32;
+    diffusion_inpaint_crop("harmonic", image, rect, quads, pad, |rgb, mask| {
+        harmonic::harmonic_inpaint_rgb(rgb, mask)
+    })
 }
 
 /// Inpaints `rect` of `image` with the given box quads masked out, where

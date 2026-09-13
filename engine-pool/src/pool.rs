@@ -20,6 +20,14 @@ pub struct EnginePool {
     pub auto_lama: Option<easyscanlate_inpaint::Engine>,
     #[cfg(feature = "inpaint")]
     pub auto_aot: Option<easyscanlate_inpaint::Engine>,
+    /// Cached auto engines for the manual-only CPU backends. The auto
+    /// pipeline never routes to these today (see `Mixed` routing), but the
+    /// slots keep backend-conditional caching exhaustive and correct if it
+    /// ever does.
+    #[cfg(feature = "inpaint")]
+    pub auto_shiftmap: Option<easyscanlate_inpaint::Engine>,
+    #[cfg(feature = "inpaint")]
+    pub auto_harmonic: Option<easyscanlate_inpaint::Engine>,
     #[cfg(feature = "segment")]
     pub segment: Option<easyscanlate_segment::Engine>,
     /// Global styling engine (was per-tab `JobTracker.engine`).

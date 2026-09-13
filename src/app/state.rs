@@ -57,7 +57,9 @@ pub(crate) fn pipeline_progress_for_tab(tab: &Tab, styling_building: bool) -> Op
     let inpaint_busy = tab.auto_inpaint_pending > 0
         || tab.pending_auto_telea_jobs.is_some()
         || tab.pending_auto_lama_jobs.is_some()
-        || tab.pending_auto_aot_jobs.is_some();
+        || tab.pending_auto_aot_jobs.is_some()
+        || tab.pending_auto_shiftmap_jobs.is_some()
+        || tab.pending_auto_harmonic_jobs.is_some();
     #[cfg(not(feature = "inpaint"))]
     let inpaint_busy = false;
 
@@ -163,7 +165,9 @@ pub(crate) fn pipeline_progress_for_tab(tab: &Tab, styling_building: bool) -> Op
         {
             let queued = tab.pending_auto_telea_jobs.is_some()
                 || tab.pending_auto_lama_jobs.is_some()
-                || tab.pending_auto_aot_jobs.is_some();
+                || tab.pending_auto_aot_jobs.is_some()
+                || tab.pending_auto_shiftmap_jobs.is_some()
+                || tab.pending_auto_harmonic_jobs.is_some();
             let frac = if tab.auto_inpaint_pending > 0 || tab.auto_inpaint_total > 0 || queued
             {
                 if tab.auto_inpaint_total == 0 {

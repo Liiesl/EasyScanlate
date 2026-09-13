@@ -8,14 +8,18 @@
 
 use crate::job::InpaintAutoJob;
 
-/// Telea context pad vs ONNX context pad (was `auto_pad_for` in `app::inpaint`).
+/// Telea/Harmonic context pad vs ONNX/ShiftMap context pad (was
+/// `auto_pad_for` in `app::inpaint`). Harmonic diffusion is local like
+/// Telea, so it shares the `radius` pad; ShiftMap uses the 32px real-pixel
+/// expansion like the ONNX backends.
 #[cfg(feature = "inpaint")]
 pub fn inpaint_pad_for(
     backend: easyscanlate_settings::InpaintBackend,
     radius: i32,
 ) -> f32 {
     match backend {
-        easyscanlate_settings::InpaintBackend::Telea => radius as f32,
+        easyscanlate_settings::InpaintBackend::Telea
+        | easyscanlate_settings::InpaintBackend::Harmonic => radius as f32,
         _ => 32.0,
     }
 }
