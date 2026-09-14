@@ -2,6 +2,7 @@
 
 mod app;
 mod assoc;
+mod crash;
 mod single_instance;
 mod updater;
 
@@ -50,7 +51,21 @@ Examples:
 }
 
 fn main() -> iced::Result {
-    // ---- Velopack lifecycle (must be first, handles install/update/uninstall and exits) ----
+    // ---- Crash reporter child (must be first: no hook, no Velopack,
+    // no single-instance forwarding — just show the dialog and exit) ----
+    let early_args: Vec<String> = std::env::args().collect();
+    if let Some(result) = crash::run_reporter_if_requested(&early_args) {
+        return result;
+    }
+    // ---- Panic hook (catches everything below; release has no console so
+    // without this a panic would vanish silently). The hook only writes the
+    // crash log and spawns a `--crash-report` child for the dialog — it never
+    // blocks on UI itself (that deadlocks the iced thread). ----
+    crash::install_hook();
+    if early_args.iter().any(|a| a == crash::CRASH_TEST_ARG) {
+        panic!("crash-test: intentional panic to exercise the panic panel");
+    }
+    // ---- Velopack lifecycle (handles install/update/uninstall and exits) ----
     // Skipped when the `updates` feature is off (e.g. test-ui builds).
     // Fast hooks run during install/update/uninstall (also on --silent installs:
     // --silent only skips the final auto-launch, not the hooks). They must be
@@ -72,7 +87,8 @@ fn main() -> iced::Result {
     VelopackApp::build().run();
 
     // ---- CLI flags (handled before iced / single-instance) ----------------
-    let args: Vec<String> = std::env::args().collect();
+    // (`early_args` above was only for the crash reporter pre-check.)
+    let args: Vec<String> = early_args;
     let has = |flag: &str| args.iter().any(|a| a == flag);
 
     if has("--help") || has("-h") {
@@ -162,4 +178,9 @@ fn main() -> iced::Result {
     .theme(|app: &app::App| app.theme())
     .subscription(app::subscription)
     .run()
+    .map_err(|e| {
+        // Non-panic fatal (window/GPU startup): same native panic panel.
+        crash::report_iced_error(&e.to_string());
+        e
+    })
 }

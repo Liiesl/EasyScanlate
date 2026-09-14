@@ -22,6 +22,23 @@ fn main() {
         res.set("CompanyName", "Liie");
         res.set("LegalCopyright", "© Liie");
         res.set_language(0x0409); // en-US
+        // App manifest: required for comctl32 v6 (TaskDialog used by rfd's
+        // `common-controls-v6` message dialogs, e.g. the crash reporter with
+        // its custom "Report issue" button). Without this dependency the
+        // loader resolves comctl32 v5, which has no TaskDialogIndirect.
+        // Side effect: v6 visual styles for native dialogs app-wide.
+        res.set_manifest(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity version="1.0.0.0" processorArchitecture="*" name="Liie.EasyScanlate" type="win32"/>
+  <description>EasyScanlate — Manga Translation Tool</description>
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>
+    </dependentAssembly>
+  </dependency>
+</assembly>"#,
+        );
         if let Err(e) = res.compile() {
             eprintln!("winres compile failed: {e}");
         }
