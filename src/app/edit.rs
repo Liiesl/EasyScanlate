@@ -218,7 +218,27 @@ pub fn handle_edit_action(app: &mut App, action: text_editor::Action) -> Task<Me
         let tab = app.active_tab_mut();
         let content = tab.edit_content.as_mut().unwrap();
         content.perform(action);
-        let text = content.text();
+        let mut text = content.text();
+        let cursor = content.cursor();
+        // Workaround for iced_graphics editor.rs:243 underflow (`layout[i-1]`
+        // with `i == 0`): a caret at (0,0) with a leading space/tab on line 0
+        // panics in `Editor::selection()`. Leading whitespace is glyph-less
+        // here (centered overlay), so strip it. Applies to any action so
+        // paste/IME paths are covered too, not just Backspace/Delete.
+        if cursor.position.line == 0
+            && cursor.position.column == 0
+            && cursor.selection.is_none()
+            && text.starts_with([' ', '\t'])
+        {
+            let fixed = text.trim_start_matches([' ', '\t']).to_owned();
+            let mut fresh = text_editor::Content::with_text(&fixed);
+            fresh.move_to(text_editor::Cursor {
+                position: text_editor::Position { line: 0, column: 0 },
+                selection: None,
+            });
+            tab.edit_content = Some(fresh);
+            text = fixed;
+        }
         (text, tab.editing, tab.editing_dirty)
     };
     let Some((_index, id)) = editing else {
