@@ -835,6 +835,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::ToggleInpaintLayer) => main_area::handle_toggle_inpaint(app),
         Message::Ui(UiEvent::MainAreaMode(mode)) => main_area::handle_mode(app, mode),
         Message::Ui(UiEvent::ViewerScroll(anchor)) => main_area::handle_viewer_scroll(app, anchor),
+        Message::Ui(UiEvent::PanelScroll(anchor)) => translation::handle_panel_scroll(app, anchor),
         Message::Ui(UiEvent::EntryToolbar((index, id, action))) => edit::handle_entry_toolbar(app, index, id, action),
         Message::Ui(UiEvent::EntryMoved((index, id, quad))) => edit::handle_entry_moved(app, index, id, quad),
         Message::Ui(UiEvent::EditAction(action)) => edit::handle_edit_action(app, action),

@@ -155,6 +155,11 @@ pub trait UiState {
     /// the same centered row stays visible instead of the same absolute
     /// offset.
     fn viewer_scroll(&self) -> f32;
+    /// The latest scroll relative offset of the results panel (`0..1`).
+    /// Restored on `Edit↔Translate` so the same fraction stays visible.
+    fn panel_scroll(&self) -> f32 {
+        0.0
+    }
     /// True while the settings modal is open.
     fn settings_open(&self) -> bool;
     /// The settings tab currently shown in the modal.

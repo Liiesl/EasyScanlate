@@ -602,7 +602,12 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         scrollable(Column::with_children(results_list).spacing(scale::s(8.0)))
             .id(PANEL_LIST_ID)
             .height(FillLength)
-            .width(FillLength),
+            .width(FillLength)
+            .on_scroll(|viewport| {
+                let y = viewport.relative_offset().y;
+                let anchor = if y.is_finite() { y.clamp(0.0, 1.0) } else { 0.0 };
+                UiEvent::PanelScroll(anchor)
+            }),
     );
     if state.translating() {
         col = col.push(crate::loading_bar::LoadingBar::new(state.translation_anim_phase()).view());
@@ -691,4 +696,23 @@ where
         row_y: None,
         row_h: None,
     })
+}
+
+/// Restores the results list to a previously published relative offset
+/// (`0..1`). Used on `Edit↔Translate` so the same fraction stays visible
+/// despite different row heights. Generic over the message type so the app
+/// can return it directly.
+pub fn restore_panel_scroll<T>(anchor: f32) -> iced::Task<T>
+where
+    T: Send + 'static,
+{
+    let y = if anchor.is_finite() {
+        anchor.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    iced::widget::operation::snap_to(
+        WidgetId::new(PANEL_LIST_ID),
+        iced::widget::operation::RelativeOffset { x: None, y: Some(y) },
+    )
 }

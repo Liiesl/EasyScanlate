@@ -418,7 +418,17 @@ pub fn handle_connect_modal_cancel(app: &mut App) -> Task<Message> {
     Task::none()
 }
 
+pub fn handle_panel_scroll(app: &mut App, anchor: f32) -> Task<Message> {
+    app.active_tab_mut().panel_scroll = if anchor.is_finite() {
+        anchor.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    Task::none()
+}
+
 pub fn handle_panel_mode(app: &mut App, mode: easyscanlate_ui::event::TranslationPanelMode) -> Task<Message> {
+    let prev = app.active_tab().translation_panel_mode;
     if mode == easyscanlate_ui::event::TranslationPanelMode::Translate && app.active_tab_mut().translation_panel_mode != easyscanlate_ui::event::TranslationPanelMode::Translate {
         if app.active_tab_mut().translate_base.is_none() && !app.active_tab_mut().images.is_empty() {
             app.active_tab_mut().translate_base = Some(app.active_tab_mut().project.profiles.selected_id());
@@ -446,7 +456,11 @@ pub fn handle_panel_mode(app: &mut App, mode: easyscanlate_ui::event::Translatio
     if app.active_tab_mut().editing.is_some() && app.active_tab_mut().editing_origin == easyscanlate_ui::event::EditOrigin::Panel {
         crate::app::edit::clear_editing(app);
     }
-    Task::none()
+    if prev == mode {
+        return Task::none();
+    }
+    let anchor = app.active_tab().panel_scroll;
+    easyscanlate_ui::panel::results::restore_panel_scroll::<Message>(anchor)
 }
 
 pub fn handle_base_select(app: &mut App, id: easyscanlate_model::ProfileId) -> Task<Message> {

@@ -138,6 +138,7 @@ pub struct Tab {
     pub show_inpaint: bool,
     pub view_mode: MainAreaMode,
     pub viewer_scroll: f32,
+    pub panel_scroll: f32,
 
     // styling / segment / pipeline counters (per-tab)
     #[cfg(feature = "styling")]
@@ -313,6 +314,7 @@ impl Tab {
             show_inpaint: true,
             view_mode: MainAreaMode::View,
             viewer_scroll: 0.0,
+            panel_scroll: 0.0,
             #[cfg(feature = "styling")]
             styling: JobTracker::new(),
             #[cfg(feature = "segment")]

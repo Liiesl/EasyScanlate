@@ -424,6 +424,10 @@ impl UiState for ActiveTab<'_> {
         self.tab.viewer_scroll
     }
 
+    fn panel_scroll(&self) -> f32 {
+        self.tab.panel_scroll
+    }
+
     fn settings_open(&self) -> bool {
         self.app.settings_open
     }
@@ -712,6 +716,7 @@ impl UiState for App {
     fn show_inpaint(&self) -> bool { self.tabs[self.active].show_inpaint }
     fn view_mode(&self) -> MainAreaMode { self.tabs[self.active].view_mode }
     fn viewer_scroll(&self) -> f32 { self.tabs[self.active].viewer_scroll }
+    fn panel_scroll(&self) -> f32 { self.tabs[self.active].panel_scroll }
     fn settings_open(&self) -> bool { self.settings_open }
     fn settings_tab(&self) -> SettingsTab { self.settings_tab }
     fn settings_search(&self) -> &str { &self.settings_search }
