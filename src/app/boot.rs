@@ -204,6 +204,10 @@ pub fn boot(
     // Store single-instance listener (so subscription can poll for forwarded .mmtl).
     app.ipc_listener = ipc_listener;
 
+    // Best-effort prune of stale central autosaves (>30 days) so crash
+    // leftovers never grow unbounded next to default-config.toml.
+    super::autosave::prune_old_autosaves(30 * 86400);
+
     // Velopack update check (GithubSource Liiesl/EasyScanlate,
     // per-user). Mirrors ManhwaOCR update.py 2s startup delay + settings
     // toggle: gated on `auto_check_updates`, results surface in a blocking

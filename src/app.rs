@@ -47,8 +47,18 @@ pub mod view;
 pub mod tab;
 pub mod tabs;
 pub mod confirm_close;
+pub mod autosave;
+pub mod autosave_prompt;
 pub mod queue;
 pub mod onboarding;
+
+/// Pending autosave-recovery prompt for one tab (in-app modal).
+#[derive(Debug, Clone)]
+pub struct AutosavePrompt {
+    pub tab_id: TabId,
+    pub saved_at_display: String,
+    pub dir: std::path::PathBuf,
+}
 
 use tab::{AutoInpaintJob, EnginePool, Tab, TabId};
 
@@ -162,6 +172,8 @@ pub enum TabMessage {
     ExportStreamFailed(String),
     TilesVisible(std::ops::Range<usize>),
     TileScrollEnded,
+    AutosaveDone(Result<String, String>),
+    AutosaveCheckDone(Option<autosave::AutosaveFound>),
 }
 
 #[derive(Debug, Clone)]
@@ -206,6 +218,10 @@ pub enum Message {
     // ——— Blurred backdrop (Settings / Manage Models) ———
     BackdropCaptured(Box<iced::window::Screenshot>, backdrop::BackdropKind),
     BackdropReady(Option<backdrop::CapturedBackdrop>, backdrop::BackdropKind),
+    /// Periodic autosave tick (dirty project tabs → central delta dir).
+    AutosaveTick,
+    /// No-op completion for fire-and-forget autosave cleanup after save.
+    AutosaveCleared,
 }
 
 impl From<UiEvent> for Message {
@@ -269,6 +285,8 @@ pub struct App {
     pub onboarding: Option<onboarding::OnboardingState>,
     pub(crate) onboarding_rx: OnboardingRx,
     pub(crate) onboarding_active_id: Option<String>,
+    // ——— Autosave recovery (central delta dir, in-app modal) ———
+    pub(crate) autosave_prompt: Option<AutosavePrompt>,
 }
 
 impl App {
@@ -359,6 +377,7 @@ impl App {
             },
             onboarding_rx: None,
             onboarding_active_id: None,
+            autosave_prompt: None,
         }
     }
 
@@ -667,6 +686,8 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
         TabMessage::ExportFinished(result) => export::handle_export_finished(app, tab_id, result),
         TabMessage::ExportStreamRun(result) => export::handle_export_stream_run(app, tab_id, result),
         TabMessage::ExportStreamFailed(e) => export::handle_export_stream_failed(app, tab_id, e),
+        TabMessage::AutosaveDone(result) => autosave::handle_done(app, tab_id, result),
+        TabMessage::AutosaveCheckDone(found) => autosave::handle_check_done(app, tab_id, found),
         TabMessage::MmtlLoaded(_) | TabMessage::CreateProjectPicked(_) | TabMessage::RecentPickedToLoad(_) => {
             unreachable!("MmtlLoaded/Create/Recent are handled before the idx guard")
         }
@@ -852,6 +873,11 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::SaveProject) => mmtl::handle_save(app),
         Message::Ui(UiEvent::ExportAll) => export::handle_export_all(app),
         Message::Ui(UiEvent::ExportCancel) => export::handle_export_cancel(app),
+        Message::Ui(UiEvent::AutosaveLoad(raw)) => autosave::handle_load(app, raw),
+        Message::Ui(UiEvent::AutosaveDiscard(raw)) => autosave::handle_discard(app, raw),
+        Message::Ui(UiEvent::AutosaveLater) => autosave::handle_later(app),
+        Message::AutosaveTick => autosave::handle_tick(app),
+        Message::AutosaveCleared => Task::none(),
         // ——— Onboarding (first-run, blocking) ———
         Message::Ui(UiEvent::OnboardingNext) => onboarding::handle_next(app),
         Message::Ui(UiEvent::OnboardingBack) => onboarding::handle_back(app),

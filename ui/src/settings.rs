@@ -732,6 +732,55 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
         }
     }
 
+    // ── Autosave card: central crash-recovery delta
+    {
+        let show_autosave = matches_any(query_ref, &["autosave", "auto", "save", "backup", "recovery", "crash", "general"]);
+        if show_autosave {
+            let enabled = easyscanlate_settings::get(|s| s.autosave_enabled);
+            let raw_secs = easyscanlate_settings::get(|s| s.autosave_interval_secs);
+            let secs = raw_secs.clamp(15, 600);
+            let secs_str = secs.to_string();
+            let dec = stepper_button(secs > 15, "−", Some(UiEvent::SettingEdit(SettingEdit::AutosaveInterval(secs.saturating_sub(15).max(15)))));
+            let inc = stepper_button(secs < 600, "+", Some(UiEvent::SettingEdit(SettingEdit::AutosaveInterval((secs + 15).min(600)))));
+            let interval_row: Element<'static, UiEvent> = row![
+                dec,
+                text_input("60", &secs_str)
+                    .on_input(move |input| {
+                        if let Ok(v) = input.trim().parse::<u64>() {
+                            set(move |s| s.autosave_interval_secs = v.clamp(15, 600))
+                        } else {
+                            UiEvent::SettingsChanged
+                        }
+                    })
+                    .padding(scale::s(4.0))
+                    .size(scale::s(12.0))
+                    .width(Length::Fixed(scale::s(64.0))),
+                inc,
+                text("seconds").size(scale::s(11.0)).color(MUTED_FG),
+            ]
+            .spacing(scale::s(6.0))
+            .align_y(iced::Alignment::Center)
+            .into();
+            let col: Vec<Element<'static, UiEvent>> = vec![
+                card_header(Icon::Download, "Autosave", Some("Crash recovery in config/autosave")),
+                column![
+                    checkbox(enabled)
+                        .label("Autosave dirty projects")
+                        .text_size(scale::s(12.0))
+                        .on_toggle(|v| set(move |s| s.autosave_enabled = v)),
+                    helper_text("Periodically saves project.xml + unsaved inpaint layers next to default-config.toml. Opening a project offers to restore the backup."),
+                ].spacing(scale::s(4.0)).into(),
+                item_separator(),
+                column![
+                    text("Interval").size(scale::s(12.0)).color(Color::WHITE),
+                    interval_row,
+                    helper_text("15–600 seconds. Only dirty project tabs are written."),
+                ].spacing(scale::s(4.0)).into(),
+            ];
+            cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+        }
+    }
+
     // ── Help & Support card
     if help_support_visible(query_ref) {
         cards.push(help_support_card());
@@ -830,6 +879,52 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                         .style(crate::panel::button_style)
                         .on_press(UiEvent::OnboardingReplay),
                 ].spacing(scale::s(6.0)).into(),
+            ];
+            cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+        }
+    }
+    {
+        let show_autosave = matches_any(query, &["autosave", "auto", "save", "backup", "recovery", "crash", "general"]);
+        if show_autosave {
+            let enabled = easyscanlate_settings::get(|s| s.autosave_enabled);
+            let secs = easyscanlate_settings::get(|s| s.autosave_interval_secs).clamp(15, 600);
+            let secs_str = secs.to_string();
+            let dec = stepper_button(secs > 15, "−", Some(UiEvent::SettingEdit(SettingEdit::AutosaveInterval(secs.saturating_sub(15).max(15)))));
+            let inc = stepper_button(secs < 600, "+", Some(UiEvent::SettingEdit(SettingEdit::AutosaveInterval((secs + 15).min(600)))));
+            let interval_row: Element<'static, UiEvent> = row![
+                dec,
+                text_input("60", &secs_str)
+                    .on_input(move |input| {
+                        if let Ok(v) = input.trim().parse::<u64>() {
+                            set(move |s| s.autosave_interval_secs = v.clamp(15, 600))
+                        } else {
+                            UiEvent::SettingsChanged
+                        }
+                    })
+                    .padding(scale::s(4.0))
+                    .size(scale::s(12.0))
+                    .width(Length::Fixed(scale::s(64.0))),
+                inc,
+                text("seconds").size(scale::s(11.0)).color(MUTED_FG),
+            ]
+            .spacing(scale::s(6.0))
+            .align_y(iced::Alignment::Center)
+            .into();
+            let col: Vec<Element<'static, UiEvent>> = vec![
+                card_header(Icon::Download, "Autosave", Some("Crash recovery in config/autosave")),
+                column![
+                    checkbox(enabled)
+                        .label("Autosave dirty projects")
+                        .text_size(scale::s(12.0))
+                        .on_toggle(|v| set(move |s| s.autosave_enabled = v)),
+                    helper_text("Periodically saves project.xml + unsaved inpaint layers next to default-config.toml. Opening a project offers to restore the backup."),
+                ].spacing(scale::s(4.0)).into(),
+                item_separator(),
+                column![
+                    text("Interval").size(scale::s(12.0)).color(Color::WHITE),
+                    interval_row,
+                    helper_text("15–600 seconds. Only dirty project tabs are written."),
+                ].spacing(scale::s(4.0)).into(),
             ];
             cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
         }

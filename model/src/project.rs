@@ -16,6 +16,10 @@ use super::{
 /// `Profiles` is shared across all images.
 #[derive(Debug, Clone)]
 pub struct Project {
+    /// Stable identity for autosave discovery across moves/renames.
+    /// `None` only for legacy files loaded from before the ID existed;
+    /// stamped on next save/autosave via `ensure_project_id()`.
+    project_id: Option<String>,
     /// Images in this chapter, insertion order. Immutable after add.
     images: Vec<ImageMeta>,
     next_image_id: u64,
@@ -35,8 +39,39 @@ pub struct Project {
 }
 
 impl Project {
+    /// Generate a new UUID v4 project id.
+    pub fn new_project_id() -> String {
+        uuid::Uuid::new_v4().to_string()
+    }
+
+    /// Stable id, if present (`None` = legacy file, not yet stamped).
+    pub fn project_id(&self) -> Option<&str> {
+        self.project_id.as_deref()
+    }
+
+    /// Set an explicit id (load path).
+    pub fn set_project_id(&mut self, id: Option<String>) {
+        self.project_id = id;
+    }
+
+    /// Ensure an id exists, generating one for legacy projects. Returns the id.
+    pub fn ensure_project_id(&mut self) -> String {
+        if self.project_id.is_none() {
+            self.project_id = Some(Self::new_project_id());
+        }
+        self.project_id.clone().unwrap_or_default()
+    }
+
+    /// Fork a fresh id (Save As / duplicate): diverged autosave identity.
+    pub fn fork_project_id(&mut self) -> String {
+        let id = Self::new_project_id();
+        self.project_id = Some(id.clone());
+        id
+    }
+
     pub fn new() -> Self {
         Self {
+            project_id: Some(Self::new_project_id()),
             images: Vec::new(),
             next_image_id: 0,
             ocr: OcrResult::new(),
@@ -170,7 +205,9 @@ impl Project {
     }
 
     /// Reconstruct from raw parts (for persistence).
+    /// `project_id` is `None` only for legacy payloads predating the id.
     pub fn from_raw(
+        project_id: Option<String>,
         images: Vec<ImageMeta>,
         next_image_id: u64,
         ocr: OcrResult,
@@ -185,7 +222,7 @@ impl Project {
             .map(|p| p.id.0 + 1)
             .max()
             .unwrap_or(0);
-        Self { images, next_image_id, ocr, profiles, styles, view_quads, extras, next_inpaint_id }
+        Self { project_id, images, next_image_id, ocr, profiles, styles, view_quads, extras, next_inpaint_id }
     }
 
     /// Append entries for `image_id`. `EntryId` remains globally unique.

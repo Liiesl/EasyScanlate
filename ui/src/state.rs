@@ -32,6 +32,14 @@ pub struct TabMeta {
     pub is_home: bool,
 }
 
+/// Pending autosave-recovery prompt shown as an in-app modal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutosavePromptMeta {
+    pub id: u64,
+    pub title: String,
+    pub saved_at_display: String,
+}
+
 /// One selectable model: `(model id, display name)`.
 pub type ModelOptionPair = (String, String);
 /// One provider group: `(provider id, display name, models)`.
@@ -192,6 +200,7 @@ pub trait UiState {
     fn tab_metas(&self) -> Vec<TabMeta> { Vec::new() }
     fn active_tab_id(&self) -> u64 { 0 }
     fn pending_close(&self) -> Option<TabMeta> { None }
+    fn autosave_prompt(&self) -> Option<AutosavePromptMeta> { None }
     fn titlebar_height(&self) -> f32 { 32.0 }
     fn editor_panes(
         &self,

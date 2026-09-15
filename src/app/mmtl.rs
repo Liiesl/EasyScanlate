@@ -49,9 +49,11 @@ fn extract_inpaint_data(tab: &Tab) -> Vec<easyscanlate_mmtl::InpaintImageData> {
 }
 
 pub fn handle_save(app: &mut App) -> Task<Message> {
-    let tab = app.active_tab();
-    let tab_id = tab.id;
-    if let Some(path) = tab.mmtl_path.clone() {
+    let tab_id = app.active_tab().id;
+    let path_opt = app.active_tab().mmtl_path.clone();
+    if let Some(path) = path_opt {
+        let tab = app.active_tab_mut();
+        tab.project.ensure_project_id();
         return do_save(tab_id, tab.project.clone(), extract_inpaint_data(tab), path);
     }
     handle_save_as(app)
@@ -95,6 +97,13 @@ pub fn handle_save_picked(app: &mut App, tab_id: crate::app::tab::TabId, picked:
     let path = PathBuf::from(&path_str);
     {
         let tab = &mut app.tabs[idx];
+        // True Save As (already-saved project saved elsewhere) forks a fresh
+        // autosave identity so the copy diverges; first save keeps its id.
+        if tab.mmtl_path.as_ref().is_some_and(|old| old != &path) {
+            tab.project.fork_project_id();
+        } else {
+            tab.project.ensure_project_id();
+        }
         tab.mmtl_path = Some(path.clone());
     }
     let tab = &app.tabs[idx];
@@ -127,6 +136,8 @@ fn do_save(tab_id: crate::app::tab::TabId, project: easyscanlate_model::Project,
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
+                let mut project = project;
+                project.ensure_project_id();
                 easyscanlate_mmtl::save_mmtl(&project, &inpaint, &path).map(|_| path.to_string_lossy().to_string()).map_err(|e| e.to_string())
             })
             .await
@@ -232,16 +243,19 @@ pub(crate) fn push_project_tab(
             app.active = idx;
             easyscanlate_settings::touch_recent(display_path.clone());
             app.recent_projects = easyscanlate_settings::get(|s| s.recent_projects.clone());
+            let tid = app.tabs[idx].id;
+            let pid = app.tabs[idx].project.project_id().map(str::to_owned);
+            let check = super::autosave::check_after_load(app, tid, path, pid);
             if len > 0 {
-                let tid = app.tabs[idx].id;
                 let new_tab = &mut app.tabs[idx];
-                return new_tab.scheduler.decode_thumbs_with_project(
+                let thumbs = new_tab.scheduler.decode_thumbs_with_project(
                     &mut new_tab.images,
                     &project_clone,
                     move |i, r| Message::Tab(tid, crate::app::TabMessage::ThumbDecoded(i, r)),
                 );
+                return Task::batch(vec![thumbs, check]);
             }
-            return Task::none();
+            return check;
         }
 
     // Non-hydration (legacy or placeholder was closed before load finished).
@@ -297,16 +311,19 @@ pub(crate) fn push_project_tab(
     app.recent_projects = easyscanlate_settings::get(|s| s.recent_projects.clone());
     // Update status on the newly created tab (project_from_loaded already sets Loaded, keep it)
     // but ensure recent already touched; no extra status override needed.
+    let pid = project_clone.project_id().map(str::to_owned);
+    let check = super::autosave::check_after_load(app, use_id, path, pid);
     if len > 0 {
         let new_tab = &mut app.tabs[app.active];
         let tid = new_tab.id;
-        return new_tab.scheduler.decode_thumbs_with_project(
+        let thumbs = new_tab.scheduler.decode_thumbs_with_project(
             &mut new_tab.images,
             &project_clone,
             move |i, r| Message::Tab(tid, crate::app::TabMessage::ThumbDecoded(i, r)),
         );
+        return Task::batch(vec![thumbs, check]);
     }
-    Task::none()
+    check
 }
 
 pub fn handle_open_picked(app: &mut App, tab_id: crate::app::tab::TabId, picked: Option<String>) -> Task<Message> {
@@ -365,6 +382,8 @@ pub fn handle_saved(app: &mut App, tab_id: crate::app::tab::TabId, result: Resul
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     match result {
         Ok(path) => {
+            // Capture the id before a pending-close removal shifts tabs.
+            let pid = app.tabs.get(idx).and_then(|t| t.project.project_id().map(str::to_owned));
             {
                 let tab = &mut app.tabs[idx];
                 tab.status = format!("Saved to {path}");
@@ -384,6 +403,9 @@ pub fn handle_saved(app: &mut App, tab_id: crate::app::tab::TabId, result: Resul
                     }
                 app.pending_close = None;
             }
+            // Manual save makes the central autosave delta redundant.
+            // Pass the tab's id so moved-project orphans are cleared too.
+            return super::autosave::clear_for_mmtl_path(&PathBuf::from(&path), pid);
         }
         Err(e) => {
             app.tabs[idx].status = format!("Save failed: {e}");

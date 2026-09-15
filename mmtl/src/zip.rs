@@ -69,6 +69,12 @@ pub fn save_mmtl(
         })
         .collect();
     let rel_project = Project::from_raw(
+        Some(
+            project
+                .project_id()
+                .map(str::to_owned)
+                .unwrap_or_else(Project::new_project_id),
+        ),
         rel_images,
         project.next_image_id(),
         project.ocr.clone(),
@@ -249,6 +255,7 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
     }
     if !new_images.is_empty() {
         // reconstruct project with new images paths
+        let pid = project.project_id().map(str::to_owned);
         let ocr = std::mem::replace(&mut project.ocr, OcrResult::from_raw(Vec::new(), 0));
         let profiles = std::mem::take(&mut project.profiles);
         let styles = project.styles().clone();
@@ -264,7 +271,7 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
         // Let's build new project correctly by using from_raw with collected data
         // We lost next_image_id, so recompute
         let next_image_id = new_images.iter().map(|m| m.id.0+1).max().unwrap_or(0);
-        let rebuilt = Project::from_raw(new_images, next_image_id, ocr, profiles, styles_map, view_quads, extras);
+        let rebuilt = Project::from_raw(pid, new_images, next_image_id, ocr, profiles, styles_map, view_quads, extras);
         project = rebuilt;
     }
 
@@ -454,13 +461,14 @@ fn load_legacy_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
         new_images.push(ImageMeta { id: meta.id, path: abs_path, width: meta.width, height: meta.height });
     }
     // reconstruct with new paths
+    let pid = project.project_id().map(str::to_owned);
     let ocr = std::mem::replace(&mut project.ocr, OcrResult::from_raw(Vec::new(), 0));
     let profiles = std::mem::take(&mut project.profiles);
     let styles = project.styles().clone();
     let view_quads = project.view_quads().clone();
     let extras = std::mem::take(&mut project.extras);
     let next_image_id = new_images.iter().map(|m| m.id.0+1).max().unwrap_or(0);
-    let rebuilt = Project::from_raw(new_images.clone(), next_image_id, ocr, profiles, styles, view_quads, extras);
+    let rebuilt = Project::from_raw(pid, new_images.clone(), next_image_id, ocr, profiles, styles, view_quads, extras);
     let mut image_paths = HashMap::new();
     for m in &new_images {
         image_paths.insert(m.id, PathBuf::from(&m.path));
@@ -487,12 +495,13 @@ mod tests {
         // update project path to real file
         let mut images = project.images().to_vec();
         images[0].path = img_path.to_string_lossy().to_string();
+        let pid = project.project_id().map(str::to_owned);
         let ocr = std::mem::replace(&mut project.ocr, OcrResult::from_raw(Vec::new(),0));
         let profiles = std::mem::take(&mut project.profiles);
         let styles = project.styles().clone();
         let view_quads = project.view_quads().clone();
         let extras = std::mem::take(&mut project.extras);
-        let project2 = Project::from_raw(images, 1, ocr, profiles, styles, view_quads, extras);
+        let project2 = Project::from_raw(pid, images, 1, ocr, profiles, styles, view_quads, extras);
         let mut project = project2;
         project.ocr.append_for_image(id, NewEntry{ source: EntrySource::AutoOcr, text:"hi".into(), score:0.9, quad: Quad{points:[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]]}});
         let dest = tmp.path().join("out.mmtl");

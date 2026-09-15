@@ -102,6 +102,14 @@ pub fn subscription(app: &App) -> Subscription<Message> {
         subs.push(iced::time::every(Duration::from_millis(250)).map(|_| Message::IpcPoll));
     }
 
+    // Periodic autosave: cheap 5s poll; `handle_tick` throttles per-tab by
+    // the configured interval and only writes dirty project tabs.
+    if easyscanlate_settings::autosave_enabled()
+        && app.tabs.iter().any(|t| t.is_project() && t.dirty)
+    {
+        subs.push(iced::time::every(Duration::from_secs(5)).map(|_| Message::AutosaveTick));
+    }
+
     subs.extend(ticks_subscriptions(app));
 
     if app.update_downloading {

@@ -593,6 +593,15 @@ impl UiState for ActiveTab<'_> {
         let tab = self.app.tab_by_id(id).or_else(|| self.app.tabs.get(self.app.active))?;
         Some(TabMeta { id: id.0, title: tab.title.clone(), dirty: tab.dirty, is_home: false })
     }
+    fn autosave_prompt(&self) -> Option<easyscanlate_ui::state::AutosavePromptMeta> {
+        let p = self.app.autosave_prompt.as_ref()?;
+        let tab = self.app.tab_by_id(p.tab_id)?;
+        Some(easyscanlate_ui::state::AutosavePromptMeta {
+            id: p.tab_id.0,
+            title: tab.title.clone(),
+            saved_at_display: p.saved_at_display.clone(),
+        })
+    }
     fn titlebar_height(&self) -> f32 { self.app.frame.config().title_bar_height }
     fn editor_panes(&self) -> Option<(&iced::widget::pane_grid::State<PaneKind>, &iced::widget::pane_grid::State<SidePaneKind>, &iced::widget::pane_grid::State<StylingPaneKind>)> {
         if self.tab.is_home() { return None; }
@@ -811,6 +820,15 @@ impl UiState for App {
         let id = self.pending_close?;
         let tab = self.tab_by_id(id).or_else(|| self.tabs.get(self.active))?;
         Some(TabMeta { id: id.0, title: tab.title.clone(), dirty: tab.dirty, is_home: false })
+    }
+    fn autosave_prompt(&self) -> Option<easyscanlate_ui::state::AutosavePromptMeta> {
+        let p = self.autosave_prompt.as_ref()?;
+        let tab = self.tab_by_id(p.tab_id)?;
+        Some(easyscanlate_ui::state::AutosavePromptMeta {
+            id: p.tab_id.0,
+            title: tab.title.clone(),
+            saved_at_display: p.saved_at_display.clone(),
+        })
     }
     fn titlebar_height(&self) -> f32 { self.frame.config().title_bar_height }
     fn editor_panes(&self) -> Option<(&iced::widget::pane_grid::State<PaneKind>, &iced::widget::pane_grid::State<SidePaneKind>, &iced::widget::pane_grid::State<StylingPaneKind>)> {

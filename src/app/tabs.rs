@@ -40,6 +40,9 @@ pub(crate) fn close_tab_immediate(app: &mut App, id: TabId) -> Task<Message> {
         if app.pending_close == Some(id) {
             app.pending_close = None;
         }
+        if app.autosave_prompt.as_ref().is_some_and(|p| p.tab_id == id) {
+            app.autosave_prompt = None;
+        }
         return promote;
     }
     Task::none()
@@ -81,6 +84,7 @@ pub fn handle_close_confirmed(app: &mut App, raw: u64, save: bool) -> Task<Messa
         app.pending_close = Some(id);
         let path_opt = app.tabs[idx].mmtl_path.clone();
         if let Some(path) = path_opt {
+            app.tabs[idx].project.ensure_project_id();
             let project = app.tabs[idx].project.clone();
             let tid = id;
             let inpaint = {
@@ -108,6 +112,8 @@ pub fn handle_close_confirmed(app: &mut App, raw: u64, save: bool) -> Task<Messa
             Task::perform(
                 async move {
                     tokio::task::spawn_blocking(move || {
+                        let mut project = project;
+                        project.ensure_project_id();
                         easyscanlate_mmtl::save_mmtl(&project, &inpaint, &path).map(|_| path.to_string_lossy().to_string()).map_err(|e| e.to_string())
                     }).await.unwrap_or_else(|e| Err(format!("save task failed: {e}")))
                 },
@@ -181,6 +187,7 @@ pub fn handle_close_all(app: &mut App) -> Task<Message> {
     app.tabs.retain(|t| t.is_home());
     app.active = 0;
     app.pending_close = None;
+    app.autosave_prompt = None;
     let promote = crate::app::queue::dispatch_pending(app);
     crate::app::queue::refresh_queued_statuses(app);
     promote

@@ -164,6 +164,7 @@ pub fn project_from_legacy(
         let entries = project.ocr.entries().to_vec();
         let ocr = OcrResult::from_raw(entries, desired);
         // reconstruct project with new ocr
+        let pid = project.project_id().map(str::to_owned);
         let images = project.images().to_vec();
         let next_image_id = project.next_image_id();
         let profiles = std::mem::take(&mut project.profiles);
@@ -171,7 +172,7 @@ pub fn project_from_legacy(
         let styles = project.styles().clone();
         let view_quads = project.view_quads().clone();
         let extras = std::mem::take(&mut project.extras);
-        let new_proj = Project::from_raw(images, next_image_id, ocr, profiles, styles, view_quads, extras);
+        let new_proj = Project::from_raw(pid, images, next_image_id, ocr, profiles, styles, view_quads, extras);
         return Ok(new_proj);
     }
 

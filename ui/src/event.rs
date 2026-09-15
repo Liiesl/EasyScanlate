@@ -131,6 +131,10 @@ pub enum SettingEdit {
     UiFontSize(u32),
     /// Auto-check GitHub releases for updates at startup.
     AutoCheckUpdates(bool),
+    /// Periodic autosave of dirty projects into the central delta dir.
+    AutosaveEnabled(bool),
+    /// Autosave period in seconds (clamped 15..=600 when applied).
+    AutosaveInterval(u64),
 }
 
 /// Widget-level events produced by the ui crate. The app maps these into its
@@ -344,6 +348,12 @@ pub enum UiEvent {
     TabNew,
     /// Dismiss the dirty-close confirmation modal (Cancel / backdrop / Esc).
     TabCloseCancel,
+    /// Load the autosaved delta for tab `id` (recovery modal).
+    AutosaveLoad(u64),
+    /// Discard the autosaved delta for tab `id` (deletes its autosave dir).
+    AutosaveDiscard(u64),
+    /// Dismiss the autosave recovery modal without loading or deleting.
+    AutosaveLater,
     // ——— Updates (Velopack) ———
     UpdateCheck,
     UpdateDownload,

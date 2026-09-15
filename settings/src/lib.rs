@@ -70,6 +70,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_autosave_interval_secs() -> u64 {
+    60
+}
+
 /// One stored translation connection: the API key plus (for custom
 /// endpoints) the base URL and the single model id. Persisted one entry per
 /// provider id. Owned here (the settings crate) so both the translation
@@ -443,6 +447,13 @@ pub struct Settings {
     /// "Check for updates" button in Settings → Updates.
     #[serde(default = "default_true")]
     pub auto_check_updates: bool,
+    /// Whether dirty project tabs are periodically autosaved (lightweight
+    /// `project.xml` + unsaved inpaint PNGs) into `config_dir()/autosave/`.
+    #[serde(default = "default_true")]
+    pub autosave_enabled: bool,
+    /// Autosave period in seconds. Clamped to 15..=600 when read.
+    #[serde(default = "default_autosave_interval_secs")]
+    pub autosave_interval_secs: u64,
     /// Whether the first-run onboarding wizard has been completed. `false` on
     /// fresh installs triggers the blocking onboarding overlay (models +
     /// preferences) before the editor is usable.
@@ -499,6 +510,8 @@ impl Default for Settings {
             recent_projects: Vec::new(),
             style_presets: default_style_presets(),
             auto_check_updates: true,
+            autosave_enabled: true,
+            autosave_interval_secs: default_autosave_interval_secs(),
             onboarding_completed: false,
             onboarding_version: 0,
         }
@@ -592,6 +605,73 @@ pub fn ensure_models_dir() -> std::io::Result<std::path::PathBuf> {
     let dir = models_dir();
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
+}
+
+/// Returns the central autosave root: a sibling `autosave/` directory next
+/// to the settings file, e.g. `%APPDATA%\easyscanlate\config\autosave\`.
+pub fn autosave_root() -> std::path::PathBuf {
+    config_dir().join("autosave")
+}
+
+/// Like [`autosave_root`] but derived from an explicit config file path (useful for tests).
+pub fn autosave_root_for_config_path(config_path: &std::path::Path) -> std::path::PathBuf {
+    config_path
+        .parent()
+        .map(|p| p.join("autosave"))
+        .unwrap_or_else(|| std::path::PathBuf::from("autosave"))
+}
+
+/// Stable per-project autosave directory for an `.mmtl` path:
+/// `<root>/<sanitized_stem>__<hash8>/`. The hash is FNV-1a64 over the
+/// lowercased absolute path string so same-name projects in different
+/// folders never collide.
+pub fn autosave_dir_for(mmtl_path: &std::path::Path) -> std::path::PathBuf {
+    autosave_dir_for_in_root(&autosave_root(), mmtl_path)
+}
+
+/// Variant of [`autosave_dir_for`] rooted at an explicit dir (useful for tests).
+pub fn autosave_dir_for_in_root(
+    root: &std::path::Path,
+    mmtl_path: &std::path::Path,
+) -> std::path::PathBuf {
+    let abs = mmtl_path
+        .canonicalize()
+        .unwrap_or_else(|_| mmtl_path.to_path_buf());
+    let key = abs.to_string_lossy().to_lowercase();
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for b in key.bytes() {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    let stem = mmtl_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("project");
+    let mut clean = String::with_capacity(stem.len());
+    for c in stem.chars() {
+        if c.is_alphanumeric() || c == '-' || c == '_' {
+            clean.push(c);
+        } else {
+            clean.push('_');
+        }
+    }
+    if clean.is_empty() {
+        clean.push_str("project");
+    }
+    if clean.len() > 48 {
+        clean.truncate(48);
+    }
+    root.join(format!("{clean}__{hash:016x}"))
+}
+
+/// Effective autosave period in seconds, clamped to 15..=600.
+pub fn autosave_interval_secs() -> u64 {
+    get(|s| s.autosave_interval_secs.clamp(15, 600))
+}
+
+/// Whether periodic autosave is enabled.
+pub fn autosave_enabled() -> bool {
+    get(|s| s.autosave_enabled)
 }
 
 /// Marks onboarding as completed at the current version.
@@ -752,6 +832,8 @@ mod tests {
             recent_projects: Vec::new(),
             style_presets: StylePresets::default_presets(),
             auto_check_updates: true,
+            autosave_enabled: true,
+            autosave_interval_secs: 60,
         };
         let text = toml::to_string(&settings).unwrap();
         let back: Settings = toml::from_str(&text).unwrap();
@@ -784,6 +866,8 @@ mod tests {
         assert!(back.auto_sfx_filter);
         assert!(back.auto_inpaint);
         assert_eq!(back.auto_inpaint_model, AutoInpaintModel::Mixed);
+        assert!(back.autosave_enabled);
+        assert_eq!(back.autosave_interval_secs, 60);
     }
 
     #[test]
@@ -811,6 +895,8 @@ mod tests {
         assert!(back.auto_inpaint);
         assert_eq!(back.auto_inpaint_model, AutoInpaintModel::Mixed);
         assert_eq!(back.style_presets, StylePresets::default_presets());
+        assert!(back.autosave_enabled);
+        assert_eq!(back.autosave_interval_secs, 60);
     }
 
     #[test]

@@ -51,7 +51,7 @@ fn should_show(app: &App) -> bool {
     if !app.update_popup_visible || app.update_info.is_none() {
         return false;
     }
-    if app.onboarding.is_some() || app.pending_close.is_some() {
+    if app.onboarding.is_some() || app.pending_close.is_some() || app.autosave_prompt.is_some() {
         return false;
     }
     if app.settings_open

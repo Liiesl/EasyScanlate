@@ -71,6 +71,9 @@ pub fn to_xml_string(project: &Project) -> Result<String, String> {
 
     let mut root = BytesStart::new("project");
     root.push_attribute(("version", VERSION.to_string().as_str()));
+    if let Some(id) = project.project_id() {
+        root.push_attribute(("id", esc(id).as_str()));
+    }
     writer
         .write_event(Event::Start(root))
         .map_err(|e| e.to_string())?;
@@ -553,6 +556,7 @@ pub fn to_xml_string(project: &Project) -> Result<String, String> {
 // ---------------------------------------------------------------------------
 
 struct ParseCtx {
+    project_id: Option<String>,
     images: Vec<ImageMeta>,
     next_image_id: u64,
     ocr_entries: Vec<OcrEntry>,
@@ -570,6 +574,7 @@ struct ParseCtx {
 impl Default for ParseCtx {
     fn default() -> Self {
         Self {
+            project_id: None,
             images: Vec::new(),
             next_image_id: 0,
             ocr_entries: Vec::new(),
@@ -625,6 +630,12 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                     "project" => {
                         if let Some(v) = attr(&e, b"version") {
                             let _ = v; // ignore version for now
+                        }
+                        if let Some(id) = attr(&e, b"id") {
+                            let id = unesc(&id);
+                            if !id.trim().is_empty() {
+                                ctx.project_id = Some(id);
+                            }
                         }
                     }
                     "images" => {
@@ -1028,7 +1039,7 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
 
     let extras = Extras { notes: ctx.notes, inpaint_patches: ctx.inpaint_patches, shapes: ctx.shapes };
 
-    let project = Project::from_raw(ctx.images, next_image_id, ocr, profiles, ctx.styles, ctx.view_quads, extras);
+    let project = Project::from_raw(ctx.project_id, ctx.images, next_image_id, ocr, profiles, ctx.styles, ctx.view_quads, extras);
     Ok(project)
 }
 

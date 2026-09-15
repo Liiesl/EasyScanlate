@@ -233,6 +233,10 @@ pub struct Tab {
     /// Shared abort flag for the running export stream. Checked per chunk;
     /// set by `ExportCancel` so late `ExportStreamRun` messages are ignored.
     pub export_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+
+    // periodic autosave (crash recovery, not a save): throttle + in-flight guard.
+    pub last_autosave_unix: i64,
+    pub autosave_busy: bool,
 }
 
 impl Tab {
@@ -388,6 +392,8 @@ impl Tab {
             export_errors: Vec::new(),
             export_folder: None,
             export_cancel: None,
+            last_autosave_unix: 0,
+            autosave_busy: false,
         }
     }
 

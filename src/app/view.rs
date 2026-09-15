@@ -38,15 +38,21 @@ pub fn view(app: &App) -> Element<'_, Message> {
         with_update
     };
 
+    let with_autosave: Element<'_, Message> = if app.autosave_prompt.is_some() {
+        crate::app::autosave_prompt::view(app, with_close)
+    } else {
+        with_close
+    };
+
     // Loading splash overlay: Photoshop-style — centered "Opening project…" with
     // top-left cycling status (Unpacking / Parsing / Decoding…). Active tab is
     // already the placeholder (titlebar chip exists), underlying editor is empty until hydrate.
     let is_loading = !app.active_is_home()
         && app.tabs.get(app.active).is_some_and(|t| t.loading);
     let with_loading: Element<'_, Message> = if is_loading {
-        loading_overlay(app, with_close)
+        loading_overlay(app, with_autosave)
     } else {
-        with_close
+        with_autosave
     };
 
     // Raster-export progress overlay: same blocking card language as the
@@ -72,7 +78,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
         && app.onboarding.is_none()
         && !is_loading
         && !is_exporting
-        && app.pending_close.is_none();
+        && app.pending_close.is_none()
+        && app.autosave_prompt.is_none();
     let with_titlebar_dim: Element<'_, Message> = if has_inner_overlay {
         let h = app.frame.config().title_bar_height;
         let alpha = if app.manage_models_open {

@@ -101,6 +101,12 @@ pub fn handle_setting_edit(app: &mut App, edit: easyscanlate_ui::event::SettingE
         easyscanlate_ui::event::SettingEdit::AutoCheckUpdates(v) => {
             s.auto_check_updates = v;
         }
+        easyscanlate_ui::event::SettingEdit::AutosaveEnabled(v) => {
+            s.autosave_enabled = v;
+        }
+        easyscanlate_ui::event::SettingEdit::AutosaveInterval(v) => {
+            s.autosave_interval_secs = v.clamp(15, 600);
+        }
     });
     translation::sync_tx_from_store(app);
     app.active_tab_mut().status = "Settings saved.".to_string();
