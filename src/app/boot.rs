@@ -59,6 +59,8 @@ pub fn boot(
     ipc_listener: Option<crate::single_instance::Listener>,
 ) -> (App, Task<Message>) {
     easyscanlate_settings::init();
+    // Sanitize Home recents: drop entries whose .mmtl path no longer exists.
+    easyscanlate_settings::prune_missing_recents();
     let font_task = match std::fs::read(KOREAN_FONT_PATH) {
         Ok(bytes) => iced::font::load(bytes).map(|_| Message::FontLoaded),
         Err(_) => Task::none(),

@@ -64,7 +64,7 @@ pub fn view<'a, S: crate::state::UiState + ?Sized>(state: &'a S) -> Element<'a, 
         .into()
     } else {
         let mut col = column![].spacing(scale::s(2.0));
-        for rp in recents {
+        for rp in recents.iter().take(10) {
             let path = rp.path.clone();
             let name = rp.name.clone();
             let rel = easyscanlate_settings::format_relative(rp.last_opened);

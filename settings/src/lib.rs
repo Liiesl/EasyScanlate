@@ -661,7 +661,7 @@ pub fn resolve_model_path_with_legacy(filename: &str, legacy_filename: Option<&s
 }
 
 /// Bump `recent_projects` with `path`, moving it to front and updating
-/// `last_opened`. Keeps at most 20 entries.
+/// `last_opened`. Keeps at most 10 entries.
 pub fn touch_recent(path: String) {
     let name = std::path::Path::new(&path)
         .file_name()
@@ -678,10 +678,27 @@ pub fn touch_recent(path: String) {
                 last_opened: now,
             },
         );
-        if s.recent_projects.len() > 20 {
-            s.recent_projects.truncate(20);
+        if s.recent_projects.len() > 10 {
+            s.recent_projects.truncate(10);
         }
     });
+}
+
+/// Drop `recent_projects` entries whose `.mmtl` path no longer exists on
+/// disk. Runs once at startup so Home never lists deleted/moved projects.
+/// Skips the disk write when nothing is stale.
+pub fn prune_missing_recents() {
+    let has_missing = get(|s| {
+        s.recent_projects.iter().any(|r| {
+            r.path.trim().is_empty() || !std::path::Path::new(&r.path).exists()
+        })
+    });
+    if has_missing {
+        let _ = modify(|s| {
+            s.recent_projects
+                .retain(|r| !r.path.trim().is_empty() && std::path::Path::new(&r.path).exists());
+        });
+    }
 }
 
 #[cfg(test)]
