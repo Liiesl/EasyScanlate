@@ -356,7 +356,7 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
         let pad = auto_pad_for(backend, radius);
         let (prev, next) = neighbor_paths(app, index);
         let job = AutoInpaintJob { index, id, path: path.clone(), quad };
-        let cached = app.engines.inpaint.clone().filter(|engine| engine.backend() == backend && engine.radius() == radius);
+        let cached = app.engines.shared_inpaint(backend, radius);
         let tid = app.active_tab().id;
         match cached {
             Some(engine) => start_background_stitch(app, tid, engine, job, pad, prev, next),
@@ -621,11 +621,7 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
                 return Task::none();
             }
         }
-        let cached = app
-            .engines
-            .inpaint
-            .clone()
-            .filter(|engine| engine.backend() == backend && engine.radius() == radius);
+        let cached = app.engines.shared_inpaint(backend, radius);
         let tid = app.active_tab().id;
         match cached {
             Some(engine) => start_inpaint(app, engine, image_index, path, rect, quads),
@@ -690,7 +686,7 @@ pub fn handle_inpaint_toolbar(app: &mut App, image_index: usize, patch_idx: usiz
 pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
     {
         let tab = app.active_tab();
-        eprintln!("[manual::inpaint] handle_inpaint_selection selections={} cached_engine={} running={} translating={} inpainting={}", selections.len(), app.engines.inpaint.is_some(), tab.running, tab.translating, tab.inpainting);
+        eprintln!("[manual::inpaint] handle_inpaint_selection selections={} cached_any={} running={} translating={} inpainting={}", selections.len(), app.engines.has_any_shared_inpaint(), tab.running, tab.translating, tab.inpainting);
     }
     for (i, (idx, r)) in selections.iter().enumerate() {
         eprintln!("[manual::inpaint]   sel {}: idx={} rect=[{:.1},{:.1},{:.1},{:.1}] w={:.1} h={:.1}", i, idx, r.x, r.y, r.width, r.height, r.width, r.height);
@@ -749,7 +745,7 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
     data.sort_by_key(|(idx, _, _, _)| *idx);
     eprintln!("[manual::inpaint] data sorted len={} idxs={:?} rects={:?}", data.len(), data.iter().map(|(idx,_,_,_)| *idx).collect::<Vec<_>>(), data.iter().map(|(_,_,r,_)| *r).collect::<Vec<_>>());
     let (backend, radius) = easyscanlate_settings::get(|s| (s.inpaint_backend, s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1)));
-    eprintln!("[manual::inpaint] backend={:?} radius={} cached_match={}", backend, radius, app.engines.inpaint.as_ref().map(|e| e.backend()==backend && e.radius()==radius).unwrap_or(false));
+    eprintln!("[manual::inpaint] backend={:?} radius={} cached_match={}", backend, radius, app.engines.has_shared_inpaint(backend, radius));
     // queue gate — manual inpaint uses same backend weight/priority as auto
     {
         use crate::app::queue::{AcquireResult, JobKind, owner_of};
@@ -782,7 +778,7 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
             return Task::none();
         }
     }
-    let cached = app.engines.inpaint.clone().filter(|e| e.backend() == backend && e.radius() == radius);
+    let cached = app.engines.shared_inpaint(backend, radius);
     // Store pending for engine build path (weight already reserved via queue)
     if let Some(engine) = cached {
         eprintln!("[manual::inpaint] using cached engine -> start_inpaint_selection");
@@ -1402,7 +1398,7 @@ pub fn handle_inpaint_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     match result {
         Ok(engine) => {
-            app.engines.inpaint = Some(engine.clone());
+            app.engines.set_shared_inpaint(engine.backend(), engine.clone());
             let data = app.tabs[idx].pending_manual_multi.take();
             if let Some(d) = data { return start_inpaint_selection(app, tab_id, engine, d); }
             let bg = app.tabs[idx].pending_background_stitch.take();
@@ -1793,13 +1789,7 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
     let radius = easyscanlate_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
     let pad = auto_pad_for(backend, radius);
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
-    let cached: Option<InpaintEngine> = match backend {
-        InpaintBackend::Telea => app.engines.auto_telea.clone().filter(|e| e.radius() == radius),
-        InpaintBackend::Lama => app.engines.auto_lama.clone().filter(|e| e.radius() == radius),
-        InpaintBackend::Aot => app.engines.auto_aot.clone().filter(|e| e.radius() == radius),
-        InpaintBackend::ShiftMap => app.engines.auto_shiftmap.clone().filter(|e| e.radius() == radius),
-        InpaintBackend::Harmonic => app.engines.auto_harmonic.clone().filter(|e| e.radius() == radius),
-    };
+    let cached: Option<InpaintEngine> = app.engines.shared_inpaint(backend, radius);
     if let Some(engine) = cached {
         // Fresh run resets totals; queue guarantees no concurrent same-tab run.
         if app.tabs[idx].auto_inpaint_pending == 0 {

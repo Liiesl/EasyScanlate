@@ -13,8 +13,6 @@ pub struct EnginePool {
     #[cfg(feature = "ocr")]
     pub manual_ocr: Option<easyscanlate_ocr::Engine>,
     #[cfg(feature = "inpaint")]
-    pub inpaint: Option<easyscanlate_inpaint::Engine>,
-    #[cfg(feature = "inpaint")]
     pub auto_telea: Option<easyscanlate_inpaint::Engine>,
     #[cfg(feature = "inpaint")]
     pub auto_lama: Option<easyscanlate_inpaint::Engine>,
@@ -42,6 +40,77 @@ impl EnginePool {
     #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Shared manual+auto inpaint lookup: manual and auto use the same
+    /// per-backend slots so `Lama <-> Telea <-> Lama` (or `AOT`) switches
+    /// are cache hits instead of full model reloads.
+    /// `radius` only matters for `Telea`/`Harmonic` (context pad); the
+    /// ONNX/`ShiftMap` backends ignore it so a radius-slider change does
+    /// not evict a loaded model.
+    #[cfg(feature = "inpaint")]
+    pub fn shared_inpaint(
+        &self,
+        backend: easyscanlate_settings::InpaintBackend,
+        radius: i32,
+    ) -> Option<easyscanlate_inpaint::Engine> {
+        match backend {
+            easyscanlate_settings::InpaintBackend::Telea => {
+                self.auto_telea.clone().filter(|e| e.radius() == radius)
+            }
+            easyscanlate_settings::InpaintBackend::Harmonic => {
+                self.auto_harmonic.clone().filter(|e| e.radius() == radius)
+            }
+            easyscanlate_settings::InpaintBackend::Lama => self.auto_lama.clone(),
+            easyscanlate_settings::InpaintBackend::Aot => self.auto_aot.clone(),
+            easyscanlate_settings::InpaintBackend::ShiftMap => self.auto_shiftmap.clone(),
+        }
+    }
+
+    /// Store a freshly built engine into the shared per-backend slot.
+    #[cfg(feature = "inpaint")]
+    pub fn set_shared_inpaint(
+        &mut self,
+        backend: easyscanlate_settings::InpaintBackend,
+        engine: easyscanlate_inpaint::Engine,
+    ) {
+        match backend {
+            easyscanlate_settings::InpaintBackend::Telea => {
+                self.auto_telea = Some(engine);
+            }
+            easyscanlate_settings::InpaintBackend::Lama => {
+                self.auto_lama = Some(engine);
+            }
+            easyscanlate_settings::InpaintBackend::Aot => {
+                self.auto_aot = Some(engine);
+            }
+            easyscanlate_settings::InpaintBackend::ShiftMap => {
+                self.auto_shiftmap = Some(engine);
+            }
+            easyscanlate_settings::InpaintBackend::Harmonic => {
+                self.auto_harmonic = Some(engine);
+            }
+        }
+    }
+
+    /// True when any shared inpaint engine is cached (for status logging).
+    #[cfg(feature = "inpaint")]
+    pub fn has_any_shared_inpaint(&self) -> bool {
+        self.auto_telea.is_some()
+            || self.auto_lama.is_some()
+            || self.auto_aot.is_some()
+            || self.auto_shiftmap.is_some()
+            || self.auto_harmonic.is_some()
+    }
+
+    /// Backend-specific shared hit test (for status logging).
+    #[cfg(feature = "inpaint")]
+    pub fn has_shared_inpaint(
+        &self,
+        backend: easyscanlate_settings::InpaintBackend,
+        radius: i32,
+    ) -> bool {
+        self.shared_inpaint(backend, radius).is_some()
     }
 
     /// Global styling engine handle.

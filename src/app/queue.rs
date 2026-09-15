@@ -252,9 +252,9 @@ fn dispatch_inpaint(
         if app.tabs[idx].pending_manual_multi.is_some() {
             let data = app.tabs[idx].pending_manual_multi.take().unwrap();
             // Need to dispatch manual inpaint now that weight is reserved (queue already popped to running)
-            // Check cached engine for this backend; if not cached, build it (weight remains reserved)
+            // Check shared per-backend cache (manual+auto); if not cached, build it (weight remains reserved)
             let radius = easyscanlate_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
-            let cached = app.engines.inpaint.clone().filter(|e| e.backend() == backend && e.radius() == radius);
+            let cached = app.engines.shared_inpaint(backend, radius);
             if let Some(engine) = cached {
                 // use helper that takes tab_id-aware start
                 return crate::app::inpaint::start_inpaint_selection(app, tab_id, engine, data);
@@ -291,7 +291,7 @@ fn dispatch_inpaint(
         if app.tabs[idx].pending_background_stitch.is_some() {
             let (job, pad, prev, next) = app.tabs[idx].pending_background_stitch.take().unwrap();
             let radius = easyscanlate_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
-            let cached = app.engines.inpaint.clone().filter(|e| e.backend() == backend && e.radius() == radius);
+            let cached = app.engines.shared_inpaint(backend, radius);
             if let Some(engine) = cached {
                 return crate::app::inpaint::start_background_stitch(app, tab_id, engine, job, pad, prev, next);
             } else {
