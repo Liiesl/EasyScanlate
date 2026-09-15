@@ -1277,7 +1277,7 @@ async fn complete(
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok(choice_text(&response))
+            choice_text(&response)
         }
         CompatKind::Anthropic => {
             let client = rig::providers::anthropic::Client::builder()
@@ -1294,7 +1294,7 @@ async fn complete(
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok(choice_text(&response))
+            choice_text(&response)
         }
         CompatKind::Gemini => {
             let client = rig::providers::gemini::Client::builder()
@@ -1310,7 +1310,7 @@ async fn complete(
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok(choice_text(&response))
+            choice_text(&response)
         }
         CompatKind::Xai => {
             let client = rig::providers::xai::Client::builder()
@@ -1326,7 +1326,7 @@ async fn complete(
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok(choice_text(&response))
+            choice_text(&response)
         }
         CompatKind::Mistral => {
             let client = rig::providers::mistral::Client::builder()
@@ -1342,7 +1342,7 @@ async fn complete(
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok(choice_text(&response))
+            choice_text(&response)
         }
         CompatKind::DeepSeek => {
             let client = rig::providers::deepseek::Client::builder()
@@ -1358,7 +1358,7 @@ async fn complete(
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok(choice_text(&response))
+            choice_text(&response)
         }
         CompatKind::OpenRouter => {
             let client = rig::providers::openrouter::Client::builder()
@@ -1374,7 +1374,7 @@ async fn complete(
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok(choice_text(&response))
+            choice_text(&response)
         }
         CompatKind::Moonshot => {
             let client = rig::providers::moonshot::Client::builder()
@@ -1390,7 +1390,7 @@ async fn complete(
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok(choice_text(&response))
+            choice_text(&response)
         }
         CompatKind::Zai => {
             let client = rig::providers::zai::Client::builder()
@@ -1406,7 +1406,7 @@ async fn complete(
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok(choice_text(&response))
+            choice_text(&response)
         }
         CompatKind::MiniMax => {
             // MiniMax's Anthropic-compatible endpoint (api.minimax.io/anthropic)
@@ -1426,7 +1426,7 @@ async fn complete(
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok(choice_text(&response))
+            choice_text(&response)
         }
         CompatKind::Ollama => {
             // Local Ollama uses its own `api/chat` protocol, not OpenAI compat.
@@ -1456,7 +1456,7 @@ async fn complete(
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok(choice_text(&response))
+            choice_text(&response)
         }
     }
 }
@@ -1703,10 +1703,13 @@ fn align(items: &[TranslateItem], parsed: HashMap<(String, u64), String>) -> Res
 }
 
 /// Extracts the assistant's text from a completion response.
-fn choice_text<R>(response: &CompletionResponse<R>) -> String {
-    match response.choice.first_ref() {
-        AssistantContent::Text(text) => text.text.clone(),
-        _ => String::new(),
+/// rig 0.42 returns empty/truncated turns as `Ok` with an empty choice
+/// (previously `Err`), so both spellings of "nothing" (`[]` and a single
+/// empty text part) are reported as an error to preserve pre-0.42 UX.
+fn choice_text(response: &CompletionResponse) -> Result<String, String> {
+    match response.choice.first() {
+        Some(AssistantContent::Text(text)) if !text.text.is_empty() => Ok(text.text.clone()),
+        _ => Err("Translation failed: model returned an empty response".to_string()),
     }
 }
 
