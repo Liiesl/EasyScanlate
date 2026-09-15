@@ -175,8 +175,14 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .height(Length::Fill)
             .into();
 
+        // Single floating color picker above the pane grid but below the
+        // modals: outside every scrollable so the header drag clamps against
+        // the full window viewport and the window stays movable.
+        let with_picker: Element<'_, UiEvent> =
+            panel::styling::overlay_host(state, padded_content);
+
         let inner_with_modals: Element<'_, UiEvent> = {
-            let base: Element<'_, UiEvent> = padded_content;
+            let base: Element<'_, UiEvent> = with_picker;
             let v: Element<'_, UiEvent> = if state.settings_open() {
                 settings_modal::view(state, base)
             } else {

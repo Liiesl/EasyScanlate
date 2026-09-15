@@ -3475,6 +3475,7 @@ dependencies = [
 name = "neverliie-iced-widgets"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "iced",
  "num-traits",
  "unicode-segmentation",

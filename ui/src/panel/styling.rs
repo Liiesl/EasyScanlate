@@ -5,9 +5,9 @@
 //! (solid vs gradient tabs), the stroke and the background/corner radius.
 //! All controls edit exactly one OCR entry: the one selected in the main
 //! area. When no entry is selected the controls stay visible but are inert.
-//! Colors are picked with the `neverliie_iced_widgets` `ColorPicker`; its
-//! button underlay is a flat rectangle filled with the entry's current
-//! color, shown next to its hex value.
+//! Colors are picked with the `neverliie_iced_widgets` `ColorPicker` hosted
+//! once at the shell root (`overlay_host`); each field shows a flat rectangle
+//! swatch button filled with the entry's current color next to its hex value.
 //!
 //! Below the sections a horizontally scrollable grid of style presets (in
 //! memory only): one square per preset slot — checkerboard underlay, the
@@ -23,13 +23,13 @@ use iced::widget::{
     button, column, container, pick_list, row, rule, scrollable, space::Space, text, text_input, tooltip,
 };
 use iced::{
-    Background, Border, Color, Element, Fill as FillLength, Font, Length, Padding, Shadow, Vector,
+    Background, Border, Color, Element, Fill as FillLength, Font, Length, Padding, Shadow,
 };
 
 use neverliie_iced_widgets::advanced_dropdown::{advanced_dropdown, Item, MenuItem};
-use neverliie_iced_widgets::color_picker::ColorPicker;
+use neverliie_iced_widgets::color_picker::floating_color_picker;
 use neverliie_iced_widgets::context_menu::{ContextMenu, Menu};
-use neverliie_iced_widgets::overlay::{Anchor, Position};
+use neverliie_iced_widgets::overlay::Position;
 
 use easyscanlate_model::{EntryStyle, TextAlign, TextGradientDir};
 
@@ -169,8 +169,10 @@ fn swatch_button(color: Color, on_open: Option<UiEvent>) -> Element<'static, UiE
 }
 
 /// A color field for `field`: a swatch with an always-visible, editable hex
-/// input, wrapped in an input-style box. The picker opens anchored to the
-/// bottom-right corner of the swatch; the hex `text_input` is live-applying:
+/// input, wrapped in an input-style box. The swatch just requests the picker;
+/// the single floating picker is hosted at the shell root (outside the panel
+/// scrollable) so its header drag clamps against the full window viewport.
+/// The hex `text_input` is live-applying:
 /// every valid edit (`#RGB`/`#RGBA`/`#RRGGBB`/`#RRGGBBAA` or `None`) updates
 /// the working style immediately. Intermediate invalid text is kept in a per-
 /// field buffer (`UiState::style_hex_override`) so typing does not snap back.
@@ -179,7 +181,6 @@ fn color_field<'a, S: UiState + ?Sized>(
     field: StyleField,
     color: Color,
 ) -> Element<'a, UiEvent> {
-    let show_picker = state.style_picker_open() == Some(field);
     let on_open = state.selected().map(|_| UiEvent::StyleColorOpen(field));
     let selected = state.selected().is_some();
     let canonical = crate::color::hex_label(color);
@@ -190,17 +191,7 @@ fn color_field<'a, S: UiState + ?Sized>(
         .unwrap_or_else(|| canonical.clone());
     field_wrap(
         row![
-            ColorPicker::new(
-                show_picker,
-                color,
-                swatch_button(color, on_open),
-                UiEvent::StyleColorCancel(field),
-                move |picked| UiEvent::StyleColorSubmit(field, picked),
-            )
-            .position(Position::Parent {
-                anchor: Anchor::BottomRight,
-                offset: Vector::new(0.0, 4.0),
-            }),
+            swatch_button(color, on_open),
             text_input(&canonical, &hex_value)
                 .on_input_maybe(selected.then_some(move |s: String| UiEvent::StyleHexInput(field, s)))
                 .padding(scale::s(0.0))
@@ -681,5 +672,38 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     .spacing(scale::s(10.0)))
     .width(FillLength)
     .height(FillLength)
+    .into()
+}
+
+/// Single floating color picker for the whole editor, hosted at the shell
+/// root (outside the styling panel's scrollable) so the window's header drag
+/// clamps against the full window viewport and stays movable.
+///
+/// The panel swatches only emit `StyleColorOpen`; this host shows the window
+/// for `style_picker_open()`. It stays mounted while closed (hidden) so the
+/// dragged position survives close/reopen per the widget contract. Initial
+/// placement is viewport-relative so panel scroll never moves the window.
+pub fn overlay_host<'a, S: UiState + ?Sized>(
+    state: &'a S,
+    base: Element<'a, UiEvent>,
+) -> Element<'a, UiEvent> {
+    let (show, field, color) = match state.style_picker_open() {
+        Some(StyleField::Text) => (true, StyleField::Text, state.style_text_color()),
+        Some(StyleField::Stroke) => (true, StyleField::Stroke, state.style_stroke_color()),
+        Some(StyleField::Background) => {
+            (true, StyleField::Background, state.style_bg_color())
+        }
+        Some(StyleField::GradientA) => (true, StyleField::GradientA, state.style_gradient_a()),
+        Some(StyleField::GradientB) => (true, StyleField::GradientB, state.style_gradient_b()),
+        None => (false, StyleField::Text, Color::BLACK),
+    };
+    floating_color_picker(
+        show,
+        color,
+        base,
+        UiEvent::StyleColorCancel(field),
+        move |picked| UiEvent::StyleColorSubmit(field, picked),
+    )
+    .position(Position::ViewportCenter)
     .into()
 }

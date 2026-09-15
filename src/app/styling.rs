@@ -2,7 +2,7 @@ use iced::Task;
 use easyscanlate_model::{EntryId, EntryStyle, Quad, TextAlign, TextGradientDir};
 #[cfg(feature = "styling")]
 use easyscanlate_styling::Engine as StylingEngine;
-use easyscanlate_ui::event::StyleField;
+use easyscanlate_ui::event::{StyleField, UiEvent};
 
 use easyscanlate_ui::UiState;
 
@@ -90,6 +90,17 @@ pub fn handle_gradient_dir(app: &mut App, dir: TextGradientDir) -> Task<Message>
 }
 
 pub fn handle_color_open(app: &mut App, field: StyleField) -> Task<Message> {
+    let current = app.active_tab_mut().style_picker;
+    if current == Some(field) {
+        return Task::none();
+    }
+    if current.is_some() {
+        // Switch while open: the shared top-level picker owns its color while
+        // shown and only re-seeds on close->reopen, so close first and reopen
+        // on the next update to pick up the new field's color.
+        app.active_tab_mut().style_picker = None;
+        return Task::done(Message::Ui(UiEvent::StyleColorOpen(field)));
+    }
     app.active_tab_mut().style_picker = Some(field);
     Task::none()
 }
