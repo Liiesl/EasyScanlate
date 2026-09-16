@@ -1,35 +1,32 @@
 # what i need
 
-## done (milestone 0.4.0 release)
+## done (milestone 0.4.2 release)
 
 #### addition
 
-- 2 pane view of manhwa (for original and translated view side by side)
-- tabbed multi project workflow
-- auto detect and apply textbox style
-- auto filter sfx
-- lama and aot-gan inpaint backend
-- directml backend for ml inference
-- auto multi page ocr (seam handling)
-- auto multi page inpaint
-- add anthropic, openai, openrouter, moonshotai, zai, xai, deepseek, minimax, mistral, nvidia, opencode, kilo, ollama, vllm, llama.cpp, and custom openai/anthropic compatible
-- add onboarding workflow.
+- 
 
 #### fixes
 
-- fix skew/free transform
+- 
 
 #### modification
 
-- rewrite app to Rust
-- save edited state of textboxitem to .mmtl
-- make font to be from system
-- highlight sync ocr
-- deprecate split/stitch page in favor of auto ocr detection/rendering.
-- improved translation provider and auto model listing handling
-- separate models from binary installer (cause of growing number of ml models)
+- 
 
 ## currently in progress
+
+#### modification
+
+- enhance font selection
+  - display font preview
+  - add more default fonts
+
+#### fixes
+
+- font
+  - bitmap font did not render properly
+  - some font did not appear
 
 ## not yet started
 
@@ -48,10 +45,13 @@
 - add window pos and size saves (remember from last session)
 - split ocr result
 - add z index and reordering of textbox on the same img
+- watermark detection
+  - auto inpaint detected watermark with backed based on the bg
+- 
 
 #### fixes
 
-- fix translation panel card styling
+- 
 
 #### modification
 
@@ -67,4 +67,4 @@
   - free form selection (pen tools/draw)
   - switch on/off from selection
   - undo/redo
-- enhance ocr result merging
+-
