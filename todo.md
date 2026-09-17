@@ -19,6 +19,7 @@
 #### modification
 
 - add more default fonts
+- optimize harmonic inpaint backend
 
 ## not yet started
 
