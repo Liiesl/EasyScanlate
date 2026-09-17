@@ -247,13 +247,7 @@ fn chain_segment_next(app: &mut App, tab_id: crate::app::tab::TabId, idx: usize,
             }
         }
     } else if need_inpaint_solo {
-        let eff = easyscanlate_settings::get(|s| {
-            if !s.auto_style_detect && s.auto_inpaint_model == easyscanlate_settings::AutoInpaintModel::Mixed {
-                easyscanlate_settings::AutoInpaintModel::Telea
-            } else {
-                s.auto_inpaint_model
-            }
-        });
+        let eff = easyscanlate_settings::get(|s| s.auto_inpaint_model);
         #[cfg(feature = "inpaint")]
         {
             use crate::app::queue::{AcquireResult, JobKind, owner_of};
@@ -261,7 +255,7 @@ fn chain_segment_next(app: &mut App, tab_id: crate::app::tab::TabId, idx: usize,
                 easyscanlate_settings::AutoInpaintModel::Telea => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
                 easyscanlate_settings::AutoInpaintModel::Lama => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
                 easyscanlate_settings::AutoInpaintModel::Aot => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
-                easyscanlate_settings::AutoInpaintModel::Mixed => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
+                easyscanlate_settings::AutoInpaintModel::Mixed => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic),
             };
             match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), kind) {
                 AcquireResult::Acquired(_) => tasks.push(super::inpaint::dispatch_auto_solo(app, tab_id, eff)),

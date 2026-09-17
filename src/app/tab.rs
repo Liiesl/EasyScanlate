@@ -180,8 +180,9 @@ pub struct Tab {
     #[cfg(feature = "inpaint")]
     pub pending_auto_aot_jobs: Option<Vec<AutoInpaintJob>>,
     /// Stash slots for the manual-only CPU backends. The auto pipeline
-    /// never routes to ShiftMap/Harmonic today; the slots exist only to
-    /// keep backend-conditional queue plumbing exhaustive and correct.
+    /// routes Gradient to Harmonic today (see `Mixed` routing); only
+    /// ShiftMap never routes. The slots exist to keep backend-conditional
+    /// queue plumbing exhaustive and correct.
     #[cfg(feature = "inpaint")]
     pub pending_auto_shiftmap_jobs: Option<Vec<AutoInpaintJob>>,
     #[cfg(feature = "inpaint")]

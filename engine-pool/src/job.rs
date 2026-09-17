@@ -62,7 +62,7 @@ impl JobKind {
                 easyscanlate_settings::InpaintBackend::Harmonic => 1,
                 easyscanlate_settings::InpaintBackend::Lama => 4,
                 easyscanlate_settings::InpaintBackend::Aot => 3,
-                easyscanlate_settings::InpaintBackend::ShiftMap => 3,
+                easyscanlate_settings::InpaintBackend::ShiftMap => 4,
             },
         }
     }

@@ -4,29 +4,21 @@
 
 #### addition
 
-- 
+- display font preview
 
 #### fixes
 
-- 
+- bitmap font did not render properly
 
 #### modification
 
-- 
+- swap telea to harmonic for mixed backend
 
 ## currently in progress
 
 #### modification
 
-- enhance font selection
-  - display font preview
-  - add more default fonts
-
-#### fixes
-
-- font
-  - bitmap font did not render properly
-  - some font did not appear
+- add more default fonts
 
 ## not yet started
 
@@ -46,6 +38,7 @@
 - split ocr result
 - add z index and reordering of textbox on the same img
 - watermark detection
+  - custom model for detecting watermark
   - auto inpaint detected watermark with backed based on the bg
 - 
 

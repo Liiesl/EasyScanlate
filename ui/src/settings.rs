@@ -1179,19 +1179,19 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
                 col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("After OCR: style-detect → per bg type")));
                 col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
-                col.push(helper_text("Solid keeps bg color, Gradient → Telea, Artwork → LaMa. Mixed needs Auto-detect style."));
+                col.push(helper_text("Solid keeps bg color, Gradient → Harmonic, Artwork → LaMa. Mixed needs Auto-detect style."));
                 let all_models = [AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot, AutoInpaintModel::Mixed];
                 let available: Vec<AutoInpaintModel> = if auto_style { all_models.to_vec() } else { vec![AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot] };
                 let pick_value = if auto_style || auto_model != AutoInpaintModel::Mixed { Some(auto_model) } else { Some(AutoInpaintModel::Telea) };
                 col.push(row![
                     container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
                     pick_list(available, pick_value, move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
-                    if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style { warning_text("Mixed disabled — falling back to Telea.".to_string()) } else { text("").size(scale::s(11.0)).color(MUTED_FG).into() },
+                    if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style { warning_text("Mixed disabled — falling back to Harmonic.".to_string()) } else { text("").size(scale::s(11.0)).color(MUTED_FG).into() },
                 ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center).into());
                 if !auto_style && auto_model == AutoInpaintModel::Mixed {
-                    col.push(warning_text("Pick Telea, Lama or AOT while Auto-detect style is off; Mixed will auto-fallback to Telea.".to_string()));
+                    col.push(warning_text("Pick Telea, Lama or AOT while Auto-detect style is off; Mixed will auto-fallback to Harmonic.".to_string()));
                 }
-                col.push(helper_text("Full pipeline runs once when OCR finishes if all toggles are on. Telea in parallel, LaMa/AOT sequentially."));
+                col.push(helper_text("Full pipeline runs once when OCR finishes if all toggles are on. Telea/Harmonic in parallel, LaMa/AOT sequentially."));
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
             #[cfg(all(feature = "inpaint", not(all(feature = "styling", feature = "segment"))))]
@@ -1200,7 +1200,7 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
                 col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("Bg-aware pipeline")).into());
                 col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
-                col.push(helper_text("Needs Styling + Segmentation for full bg-aware pipeline; fallback is Telea.").into());
+                col.push(helper_text("Needs Styling + Segmentation for full bg-aware pipeline; fallback is Harmonic.").into());
                 col.push(row![
                     container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
                     pick_list([AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot], Some(if auto_model == AutoInpaintModel::Mixed { AutoInpaintModel::Telea } else { auto_model }), move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
@@ -1256,19 +1256,19 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
                 col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("After OCR: style-detect → per bg type")));
                 col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
-                col.push(helper_text("Solid keeps bg color, Gradient → Telea, Artwork → LaMa. Mixed needs Auto-detect style."));
+                col.push(helper_text("Solid keeps bg color, Gradient → Harmonic, Artwork → LaMa. Mixed needs Auto-detect style."));
                 let all_models = [AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot, AutoInpaintModel::Mixed];
                 let available: Vec<AutoInpaintModel> = if auto_style { all_models.to_vec() } else { vec![AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot] };
                 let pick_value = if auto_style || auto_model != AutoInpaintModel::Mixed { Some(auto_model) } else { Some(AutoInpaintModel::Telea) };
                 col.push(row![
                     container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
                     pick_list(available, pick_value, move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
-                    if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style { warning_text("Mixed disabled — falling back to Telea.".to_string()) } else { text("").size(scale::s(11.0)).color(MUTED_FG).into() },
+                    if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style { warning_text("Mixed disabled — falling back to Harmonic.".to_string()) } else { text("").size(scale::s(11.0)).color(MUTED_FG).into() },
                 ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center).into());
                 if !auto_style && auto_model == AutoInpaintModel::Mixed {
-                    col.push(warning_text("Pick Telea, Lama or AOT while Auto-detect style is off; Mixed will auto-fallback to Telea.".to_string()));
+                    col.push(warning_text("Pick Telea, Lama or AOT while Auto-detect style is off; Mixed will auto-fallback to Harmonic.".to_string()));
                 }
-                col.push(helper_text("Full pipeline runs once when OCR finishes if all toggles are on. Telea in parallel, LaMa/AOT sequentially."));
+                col.push(helper_text("Full pipeline runs once when OCR finishes if all toggles are on. Telea/Harmonic in parallel, LaMa/AOT sequentially."));
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
             #[cfg(all(feature = "inpaint", not(all(feature = "styling", feature = "segment"))))]
@@ -1277,7 +1277,7 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
                 col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("Bg-aware pipeline")).into());
                 col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
-                col.push(helper_text("Needs Styling + Segmentation for full bg-aware pipeline; fallback is Telea.").into());
+                col.push(helper_text("Needs Styling + Segmentation for full bg-aware pipeline; fallback is Harmonic.").into());
                 col.push(row![
                     container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
                     pick_list([AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot], Some(if auto_model == AutoInpaintModel::Mixed { AutoInpaintModel::Telea } else { auto_model }), move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),

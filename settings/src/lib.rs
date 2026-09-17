@@ -124,7 +124,7 @@ impl fmt::Display for InpaintBackend {
 
 /// Which inpaint model the **auto** post-OCR pipeline uses. Distinct from
 /// [`InpaintBackend`] (manual tool) because `Mixed` is a bg-aware routing:
-/// `Solid`→no inpaint, `Gradient`→Telea, `Artwork`→LaMa (Aot available
+/// `Solid`→no inpaint, `Gradient`→Harmonic, `Artwork`→LaMa (Aot available
 /// as explicit choice; user requested to keep Lama in Mixed for now).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

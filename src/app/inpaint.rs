@@ -1449,9 +1449,9 @@ pub fn handle_auto_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, b
                     let jobs = app.tabs[idx].pending_auto_aot_jobs.take();
                     if let Some(j) = jobs { return dispatch_auto(app, tab_id, j, InpaintBackend::Aot); }
                 }
-                // Manual-only CPU backends: cached like the other auto
+                // ShiftMap is manual-only: cached like the other auto
                 // engines so the match stays exhaustive; the auto pipeline
-                // never routes here today.
+                // never routes here today (Harmonic does, via Mixed).
                 InpaintBackend::ShiftMap => {
                     app.engines.auto_shiftmap = Some(engine.clone());
                     let jobs = app.tabs[idx].pending_auto_shiftmap_jobs.take();
@@ -1762,7 +1762,7 @@ pub fn handle_manual_stream_run(
 #[cfg(feature = "inpaint")]
 pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<AutoInpaintJob>, backend: InpaintBackend) -> Task<Message> {
     if jobs.is_empty() { return Task::none(); }
-    // queue gate — weights 1/4/3 backfill + priority (cap 5)
+    // queue gate — weights 1/4/3/4 backfill + priority (cap 5)
     {
         use crate::app::queue::{AcquireResult, JobKind, owner_of};
         let kind = JobKind::Inpaint(backend);
@@ -1799,8 +1799,13 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
         app.tabs[idx].auto_inpaint_pending += jobs.len();
         app.tabs[idx].auto_inpaint_total += jobs.len();
         match backend {
-            InpaintBackend::Telea => {
-                app.tabs[idx].status = format!("Auto-inpaint (Telea) {} regions in parallel...", jobs.len());
+            InpaintBackend::Telea | InpaintBackend::Harmonic => {
+                let label = match backend {
+                    InpaintBackend::Telea => "Telea",
+                    InpaintBackend::Harmonic => "Harmonic",
+                    _ => unreachable!("parallel arm is Telea/Harmonic only"),
+                };
+                app.tabs[idx].status = format!("Auto-inpaint ({label}) {} regions in parallel...", jobs.len());
                 let neighbor_map: std::collections::HashMap<usize, (Option<String>, Option<String>)> = {
                     let mut map = std::collections::HashMap::new();
                     let tab = &app.tabs[idx];
@@ -1829,10 +1834,10 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
             }
             _ => {
                 // Sequential stream for the model/heavy backends (LaMa,
-                // AOT-GAN, ShiftMap) and Harmonic; only Telea fans out in
-                // parallel above. ShiftMap/Harmonic never reach the auto
-                // path via pipeline routing today.
-                let label = match backend { InpaintBackend::Lama => "LaMa", InpaintBackend::Aot => "AOT-GAN", InpaintBackend::ShiftMap => "ShiftMap", InpaintBackend::Harmonic => "Harmonic", InpaintBackend::Telea => unreachable!("telea takes the parallel arm")};
+                // AOT-GAN, ShiftMap); Telea/Harmonic fan out in parallel
+                // above. ShiftMap never reaches the auto path via pipeline
+                // routing today.
+                let label = match backend { InpaintBackend::Lama => "LaMa", InpaintBackend::Aot => "AOT-GAN", InpaintBackend::ShiftMap => "ShiftMap", InpaintBackend::Harmonic | InpaintBackend::Telea => unreachable!("telea/harmonic take the parallel arm")};
                 return start_auto_stream(app, tab_id, engine, jobs, pad, label, backend);
             }
         }
@@ -1895,7 +1900,7 @@ pub fn dispatch_auto_solo(app: &mut App, tab_id: crate::app::tab::TabId, effecti
         let ev = app.tabs[idx].project.set_entry_style_with_event(job.id, style);
         crate::app::handle_model_event(&mut app.tabs[idx], ev);
     }
-    let backend = match effective_model { easyscanlate_settings::AutoInpaintModel::Telea=>InpaintBackend::Telea, easyscanlate_settings::AutoInpaintModel::Lama=>InpaintBackend::Lama, easyscanlate_settings::AutoInpaintModel::Aot=>InpaintBackend::Aot, easyscanlate_settings::AutoInpaintModel::Mixed=>InpaintBackend::Telea };
+    let backend = match effective_model { easyscanlate_settings::AutoInpaintModel::Telea=>InpaintBackend::Telea, easyscanlate_settings::AutoInpaintModel::Lama=>InpaintBackend::Lama, easyscanlate_settings::AutoInpaintModel::Aot=>InpaintBackend::Aot, easyscanlate_settings::AutoInpaintModel::Mixed=>InpaintBackend::Harmonic };
     dispatch_auto(app, tab_id, jobs, backend)
 }
 #[cfg(feature = "inpaint")]

@@ -23,6 +23,7 @@ pub fn dispatch_inpaint(
         std::mem::take(&mut app.tabs[idx].pipeline_style_results)
     };
     let mut telea_jobs: Vec<AutoInpaintJob> = Vec::new();
+    let mut harmonic_jobs: Vec<AutoInpaintJob> = Vec::new();
     let mut lama_jobs: Vec<AutoInpaintJob> = Vec::new();
     let mut aot_jobs: Vec<AutoInpaintJob> = Vec::new();
     let effective_model = easyscanlate_settings::get(|s| {
@@ -68,7 +69,7 @@ pub fn dispatch_inpaint(
         let need = match pred.bg_type {
             easyscanlate_styling::BgType::Solid => None,
             easyscanlate_styling::BgType::Gradient => Some(match effective_model {
-                easyscanlate_settings::AutoInpaintModel::Mixed => InpaintBackend::Telea,
+                easyscanlate_settings::AutoInpaintModel::Mixed => InpaintBackend::Harmonic,
                 easyscanlate_settings::AutoInpaintModel::Telea => InpaintBackend::Telea,
                 easyscanlate_settings::AutoInpaintModel::Lama => InpaintBackend::Lama,
                 easyscanlate_settings::AutoInpaintModel::Aot => InpaintBackend::Aot,
@@ -84,12 +85,13 @@ pub fn dispatch_inpaint(
             let job = AutoInpaintJob { index, id, path: path.clone(), quad };
             match backend {
                 InpaintBackend::Telea => telea_jobs.push(job),
+                InpaintBackend::Harmonic => harmonic_jobs.push(job),
                 InpaintBackend::Lama => lama_jobs.push(job),
                 InpaintBackend::Aot => aot_jobs.push(job),
-                // Manual-only backends never arise from AutoInpaintModel
-                // routing above; keep exhaustive with weight-class twins.
+                // ShiftMap is manual-only and never arises from
+                // AutoInpaintModel routing above; keep exhaustive with its
+                // weight-class twin.
                 InpaintBackend::ShiftMap => aot_jobs.push(job),
-                InpaintBackend::Harmonic => telea_jobs.push(job),
             }
         }
     }
@@ -97,6 +99,9 @@ pub fn dispatch_inpaint(
     let mut tasks: Vec<Task<Message>> = Vec::new();
     if !telea_jobs.is_empty() {
         tasks.push(super::inpaint::dispatch_auto(app, tab_id, telea_jobs, InpaintBackend::Telea));
+    }
+    if !harmonic_jobs.is_empty() {
+        tasks.push(super::inpaint::dispatch_auto(app, tab_id, harmonic_jobs, InpaintBackend::Harmonic));
     }
     if !lama_jobs.is_empty() {
         tasks.push(super::inpaint::dispatch_auto(app, tab_id, lama_jobs, InpaintBackend::Lama));

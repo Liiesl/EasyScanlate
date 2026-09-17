@@ -463,11 +463,7 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
             let (do_sfx, do_style, do_inpaint, model) = easyscanlate_settings::get(|s| {
                 (s.auto_sfx_filter, s.auto_style_detect, s.auto_inpaint, s.auto_inpaint_model)
             });
-            let effective_model = if !do_style && model == easyscanlate_settings::AutoInpaintModel::Mixed {
-                easyscanlate_settings::AutoInpaintModel::Telea
-            } else {
-                model
-            };
+            let effective_model = model;
             // Enqueue next pipeline stages via queue (backfill + priority, weight-checked)
             use crate::app::queue::{AcquireResult, JobKind, owner_of};
             if do_sfx {
@@ -518,7 +514,7 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
                             easyscanlate_settings::AutoInpaintModel::Telea => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
                             easyscanlate_settings::AutoInpaintModel::Lama => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
                             easyscanlate_settings::AutoInpaintModel::Aot => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
-                            easyscanlate_settings::AutoInpaintModel::Mixed => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
+                            easyscanlate_settings::AutoInpaintModel::Mixed => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic),
                         };
                         match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), kind) {
                             AcquireResult::Acquired(_) => tasks.push(super::inpaint::dispatch_auto_solo(app, tab_id, effective_model)),
@@ -574,7 +570,7 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
                         easyscanlate_settings::AutoInpaintModel::Telea => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
                         easyscanlate_settings::AutoInpaintModel::Lama => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
                         easyscanlate_settings::AutoInpaintModel::Aot => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
-                        easyscanlate_settings::AutoInpaintModel::Mixed => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
+                        easyscanlate_settings::AutoInpaintModel::Mixed => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic),
                     };
                     match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), kind) {
                         AcquireResult::Acquired(_) => tasks.push(super::inpaint::dispatch_auto_solo(app, tab_id, effective_model)),

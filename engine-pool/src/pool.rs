@@ -19,9 +19,9 @@ pub struct EnginePool {
     #[cfg(feature = "inpaint")]
     pub auto_aot: Option<easyscanlate_inpaint::Engine>,
     /// Cached auto engines for the manual-only CPU backends. The auto
-    /// pipeline never routes to these today (see `Mixed` routing), but the
-    /// slots keep backend-conditional caching exhaustive and correct if it
-    /// ever does.
+    /// pipeline routes `Gradient` to Harmonic today (see `Mixed` routing);
+    /// only ShiftMap never routes, but the slots keep backend-conditional
+    /// caching exhaustive and correct.
     #[cfg(feature = "inpaint")]
     pub auto_shiftmap: Option<easyscanlate_inpaint::Engine>,
     #[cfg(feature = "inpaint")]

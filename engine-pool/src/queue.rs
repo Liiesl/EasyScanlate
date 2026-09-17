@@ -6,11 +6,13 @@
 //!   SEGMENT        = 4
 //!   STYLE          = 2
 //!   INPAINT telea  = 1
+//!   INPAINT harmonic = 1
 //!   INPAINT lama   = 4
 //!   INPAINT aot    = 3
+//!   INPAINT shiftmap = 4
 //!
 //! Spec priorities (lower = run sooner, based on expected time; time-efficient):
-//!   INPAINT telea (0) < STYLE auto-detect (1) < SEGMENT (2) < OCR (3) < INPAINT aot (4) < INPAINT lama (5)
+//!   INPAINT telea/harmonic (0) < STYLE auto-detect (1) < SEGMENT (2) < OCR (3) < INPAINT aot/shiftmap (4) < INPAINT lama (5)
 //! Weight caps concurrency, priority decides dispatch order.
 //!
 //! Queue is FIFO insertion + priority backfill scan: insertion order is FIFO
