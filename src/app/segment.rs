@@ -253,6 +253,7 @@ fn chain_segment_next(app: &mut App, tab_id: crate::app::tab::TabId, idx: usize,
             use crate::app::queue::{AcquireResult, JobKind, owner_of};
             let kind = match eff {
                 easyscanlate_settings::AutoInpaintModel::Telea => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
+                easyscanlate_settings::AutoInpaintModel::Harmonic => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic),
                 easyscanlate_settings::AutoInpaintModel::Lama => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
                 easyscanlate_settings::AutoInpaintModel::Aot => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
                 easyscanlate_settings::AutoInpaintModel::Mixed => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic),

@@ -1171,7 +1171,7 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
 
     // Auto inpaint (bg-aware) — moved from General automation
     {
-        let show_auto = matches_any(query_ref, &["inpaint", "auto", "bg", "telea", "lama", "aot", "mixed", "pipeline", "artwork", "gradient", "solid", "automation"]);
+        let show_auto = matches_any(query_ref, &["inpaint", "auto", "bg", "telea", "harmonic", "lama", "aot", "mixed", "pipeline", "artwork", "gradient", "solid", "automation"]);
         if show_auto {
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
             {
@@ -1180,8 +1180,8 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
                 col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("After OCR: style-detect → per bg type")));
                 col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
                 col.push(helper_text("Solid keeps bg color, Gradient → Harmonic, Artwork → LaMa. Mixed needs Auto-detect style."));
-                let all_models = [AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot, AutoInpaintModel::Mixed];
-                let available: Vec<AutoInpaintModel> = if auto_style { all_models.to_vec() } else { vec![AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot] };
+                let all_models = [AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot, AutoInpaintModel::Mixed];
+                let available: Vec<AutoInpaintModel> = if auto_style { all_models.to_vec() } else { vec![AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot] };
                 let pick_value = if auto_style || auto_model != AutoInpaintModel::Mixed { Some(auto_model) } else { Some(AutoInpaintModel::Telea) };
                 col.push(row![
                     container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
@@ -1189,7 +1189,7 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
                     if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style { warning_text("Mixed disabled — falling back to Harmonic.".to_string()) } else { text("").size(scale::s(11.0)).color(MUTED_FG).into() },
                 ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center).into());
                 if !auto_style && auto_model == AutoInpaintModel::Mixed {
-                    col.push(warning_text("Pick Telea, Lama or AOT while Auto-detect style is off; Mixed will auto-fallback to Harmonic.".to_string()));
+                    col.push(warning_text("Pick Telea, Harmonic, Lama or AOT while Auto-detect style is off; Mixed will auto-fallback to Harmonic.".to_string()));
                 }
                 col.push(helper_text("Full pipeline runs once when OCR finishes if all toggles are on. Telea/Harmonic in parallel, LaMa/AOT sequentially."));
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
@@ -1203,7 +1203,7 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
                 col.push(helper_text("Needs Styling + Segmentation for full bg-aware pipeline; fallback is Harmonic.").into());
                 col.push(row![
                     container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
-                    pick_list([AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot], Some(if auto_model == AutoInpaintModel::Mixed { AutoInpaintModel::Telea } else { auto_model }), move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
+                    pick_list([AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot], Some(if auto_model == AutoInpaintModel::Mixed { AutoInpaintModel::Telea } else { auto_model }), move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
                 ].spacing(scale::s(6.0)).into());
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
@@ -1223,9 +1223,9 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
                 let backend = easyscanlate_settings::get(|s| s.inpaint_backend);
                 let radius = easyscanlate_settings::get(|s| s.inpaint_radius.clone());
                 let col: Vec<Element<'static, UiEvent>> = vec![
-                    card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Telea vs ONNX vs patch/diffusion")),
-                    field_row("Backend", pick_list([InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot, InpaintBackend::ShiftMap, InpaintBackend::Harmonic], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()),
-                    helper_text("Telea is instant (no model); LaMa is high-quality ONNX; AOT-GAN is 2-4× faster than LaMa (pad 8, max 1024); ShiftMap rebuilds textures (slower, CPU); Harmonic fills smooth bubbles/gradients (instant, CPU)."),
+                    card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Harmonic vs Telea vs ONNX vs patch/diffusion")),
+                    field_row("Backend", pick_list([InpaintBackend::Harmonic, InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot, InpaintBackend::ShiftMap], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()),
+                    helper_text("Harmonic is fast (no model), recommended for thin/medium patches with gradient/non-textured bg; Telea is fast, recommended for thin/medium patches with semi-art bg; LaMa is high-quality ONNX; AOT-GAN is 2-4× faster than LaMa (pad 8, max 1024); ShiftMap rebuilds textures (slower, CPU)."),
                     item_separator(),
                     field_row("Telea radius", text_input("5", &radius).on_input(|input| set(move |s| s.inpaint_radius = input.clone())).padding(scale::s(4.0)).size(scale::s(12.0)).width(Length::Fixed(scale::s(80.0))).into()),
                     helper_text("Pixels around mask Telea/Harmonic sample; larger smooths more but blurs. Ignored by LaMa/AOT/ShiftMap."),
@@ -1248,7 +1248,7 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
 fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
     {
-        let show_auto = matches_any(query, &["inpaint", "auto", "bg", "telea", "lama", "aot", "mixed", "pipeline", "artwork", "gradient", "solid", "automation"]);
+        let show_auto = matches_any(query, &["inpaint", "auto", "bg", "telea", "harmonic", "lama", "aot", "mixed", "pipeline", "artwork", "gradient", "solid", "automation"]);
         if show_auto {
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
             {
@@ -1257,8 +1257,8 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                 col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("After OCR: style-detect → per bg type")));
                 col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
                 col.push(helper_text("Solid keeps bg color, Gradient → Harmonic, Artwork → LaMa. Mixed needs Auto-detect style."));
-                let all_models = [AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot, AutoInpaintModel::Mixed];
-                let available: Vec<AutoInpaintModel> = if auto_style { all_models.to_vec() } else { vec![AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot] };
+                let all_models = [AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot, AutoInpaintModel::Mixed];
+                let available: Vec<AutoInpaintModel> = if auto_style { all_models.to_vec() } else { vec![AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot] };
                 let pick_value = if auto_style || auto_model != AutoInpaintModel::Mixed { Some(auto_model) } else { Some(AutoInpaintModel::Telea) };
                 col.push(row![
                     container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
@@ -1266,7 +1266,7 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                     if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style { warning_text("Mixed disabled — falling back to Harmonic.".to_string()) } else { text("").size(scale::s(11.0)).color(MUTED_FG).into() },
                 ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center).into());
                 if !auto_style && auto_model == AutoInpaintModel::Mixed {
-                    col.push(warning_text("Pick Telea, Lama or AOT while Auto-detect style is off; Mixed will auto-fallback to Harmonic.".to_string()));
+                    col.push(warning_text("Pick Telea, Harmonic, Lama or AOT while Auto-detect style is off; Mixed will auto-fallback to Harmonic.".to_string()));
                 }
                 col.push(helper_text("Full pipeline runs once when OCR finishes if all toggles are on. Telea/Harmonic in parallel, LaMa/AOT sequentially."));
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
@@ -1280,7 +1280,7 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                 col.push(helper_text("Needs Styling + Segmentation for full bg-aware pipeline; fallback is Harmonic.").into());
                 col.push(row![
                     container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
-                    pick_list([AutoInpaintModel::Telea, AutoInpaintModel::Lama, AutoInpaintModel::Aot], Some(if auto_model == AutoInpaintModel::Mixed { AutoInpaintModel::Telea } else { auto_model }), move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
+                    pick_list([AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot], Some(if auto_model == AutoInpaintModel::Mixed { AutoInpaintModel::Telea } else { auto_model }), move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
                 ].spacing(scale::s(6.0)).into());
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
@@ -1298,9 +1298,9 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                 let backend = easyscanlate_settings::get(|s| s.inpaint_backend);
                 let radius = easyscanlate_settings::get(|s| s.inpaint_radius.clone());
                 let col: Vec<Element<'static, UiEvent>> = vec![
-                    card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Telea vs ONNX vs patch/diffusion")),
-                    field_row("Backend", pick_list([InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot, InpaintBackend::ShiftMap, InpaintBackend::Harmonic], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()),
-                    helper_text("Telea is instant (no model); LaMa is high-quality ONNX; AOT-GAN is 2-4× faster than LaMa (pad 8, max 1024); ShiftMap rebuilds textures (slower, CPU); Harmonic fills smooth bubbles/gradients (instant, CPU)."),
+                    card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Harmonic vs Telea vs ONNX vs patch/diffusion")),
+                    field_row("Backend", pick_list([InpaintBackend::Harmonic, InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot, InpaintBackend::ShiftMap], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()),
+                    helper_text("Harmonic is fast (no model), recommended for thin/medium patches with gradient/non-textured bg; Telea is fast, recommended for thin/medium patches with semi-art bg; LaMa is high-quality ONNX; AOT-GAN is 2-4× faster than LaMa (pad 8, max 1024); ShiftMap rebuilds textures (slower, CPU)."),
                     item_separator(),
                     field_row("Telea radius", text_input("5", &radius).on_input(|input| set(move |s| s.inpaint_radius = input.clone())).padding(scale::s(4.0)).size(scale::s(12.0)).width(Length::Fixed(scale::s(80.0))).into()),
                     helper_text("Pixels around mask Telea/Harmonic sample; larger smooths more but blurs. Ignored by LaMa/AOT/ShiftMap."),

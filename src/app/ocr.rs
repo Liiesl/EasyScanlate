@@ -512,6 +512,7 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
                     if do_inpaint && !do_style {
                         let kind = match effective_model {
                             easyscanlate_settings::AutoInpaintModel::Telea => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
+                            easyscanlate_settings::AutoInpaintModel::Harmonic => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic),
                             easyscanlate_settings::AutoInpaintModel::Lama => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
                             easyscanlate_settings::AutoInpaintModel::Aot => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
                             easyscanlate_settings::AutoInpaintModel::Mixed => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic),
@@ -568,6 +569,7 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
                 if do_inpaint && !do_style {
                     let kind = match effective_model {
                         easyscanlate_settings::AutoInpaintModel::Telea => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
+                        easyscanlate_settings::AutoInpaintModel::Harmonic => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic),
                         easyscanlate_settings::AutoInpaintModel::Lama => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
                         easyscanlate_settings::AutoInpaintModel::Aot => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
                         easyscanlate_settings::AutoInpaintModel::Mixed => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic),

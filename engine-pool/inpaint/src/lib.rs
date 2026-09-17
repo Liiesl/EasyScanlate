@@ -44,6 +44,7 @@ pub(crate) mod cg;
 pub mod common;
 pub mod harmonic;
 pub mod lama;
+pub(crate) mod laplace;
 pub mod poisson;
 pub mod shiftmap;
 pub mod telea;
@@ -51,7 +52,7 @@ pub mod telea;
 pub use common::{
     harmonic_inpaint_crop, manual_square_params, shiftmap_inpaint_crop, InpaintPatch, InpaintResult,
 };
-pub use harmonic::harmonic_inpaint_rgb;
+pub use harmonic::{harmonic_inpaint_rgb, harmonic_inpaint_rgba};
 pub use poisson::{poisson_blend, MAX_PIXELS as POISSON_MAX_PIXELS};
 pub use shiftmap::{
     shiftmap_inpaint_rgb, MAX_EDGE as SHIFTMAP_MAX_EDGE, N_LABELS as SHIFTMAP_N_LABELS,

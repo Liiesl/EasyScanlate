@@ -16,5 +16,6 @@ ndarray = { workspace = true, optional = true }
 ort = { workspace = true, optional = true }
 push_relabel = { workspace = true }
 rand = { workspace = true }
+rayon = { workspace = true }
 easyscanlate-model = { workspace = true }
 easyscanlate-settings = { workspace = true }

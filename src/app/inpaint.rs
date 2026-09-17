@@ -1900,7 +1900,7 @@ pub fn dispatch_auto_solo(app: &mut App, tab_id: crate::app::tab::TabId, effecti
         let ev = app.tabs[idx].project.set_entry_style_with_event(job.id, style);
         crate::app::handle_model_event(&mut app.tabs[idx], ev);
     }
-    let backend = match effective_model { easyscanlate_settings::AutoInpaintModel::Telea=>InpaintBackend::Telea, easyscanlate_settings::AutoInpaintModel::Lama=>InpaintBackend::Lama, easyscanlate_settings::AutoInpaintModel::Aot=>InpaintBackend::Aot, easyscanlate_settings::AutoInpaintModel::Mixed=>InpaintBackend::Harmonic };
+    let backend = match effective_model { easyscanlate_settings::AutoInpaintModel::Telea=>InpaintBackend::Telea, easyscanlate_settings::AutoInpaintModel::Harmonic=>InpaintBackend::Harmonic, easyscanlate_settings::AutoInpaintModel::Lama=>InpaintBackend::Lama, easyscanlate_settings::AutoInpaintModel::Aot=>InpaintBackend::Aot, easyscanlate_settings::AutoInpaintModel::Mixed=>InpaintBackend::Harmonic };
     dispatch_auto(app, tab_id, jobs, backend)
 }
 #[cfg(feature = "inpaint")]

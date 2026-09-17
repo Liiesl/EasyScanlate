@@ -91,8 +91,9 @@ pub struct Connection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum InpaintBackend {
-    /// The pure-Rust Telea algorithm from the `inpaint` crate: no model, no
-    /// download, works instantly on CPU.
+    /// The pure-Rust Telea algorithm from the `inpaint` crate: fast, no
+    /// model, no download. Recommended for thin/medium patches with
+    /// semi-art bg. Works instantly on CPU.
     #[default]
     Telea,
     /// The LaMa ONNX model: better on complex backgrounds, needs the
@@ -105,8 +106,9 @@ pub enum InpaintBackend {
     /// textured regions (screentone, scenery). Slower than Telea; the MRF
     /// stage caps its long edge at 600px.
     ShiftMap,
-    /// Harmonic (Laplace) diffusion, pure Rust/CPU: best on texture-free
-    /// regions (speech bubbles, smooth gradients). Instant, no model.
+    /// Harmonic (Laplace) diffusion, pure Rust/CPU: fast (same speed as
+    /// Telea), no model. Recommended for thin/medium patches with
+    /// gradient/non-textured bg.
     Harmonic,
 }
 
@@ -130,6 +132,7 @@ impl fmt::Display for InpaintBackend {
 #[serde(rename_all = "lowercase")]
 pub enum AutoInpaintModel {
     Telea,
+    Harmonic,
     Lama,
     Aot,
     #[default]
@@ -140,6 +143,7 @@ impl fmt::Display for AutoInpaintModel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Telea => "Telea",
+            Self::Harmonic => "Harmonic",
             Self::Lama => "LaMa",
             Self::Aot => "AOT-GAN",
             Self::Mixed => "Mixed (bg-aware)",

@@ -179,8 +179,9 @@ pub(crate) fn bbox_crops(patch: RgbaImage, origin: [f32; 2], quads: &[Quad]) -> 
 
 /// Runs one diffusion/MRF crop through `fill`: expands `rect` by `pad`,
 /// builds the expanded mask, converts to RGB, fills, converts back to RGBA
-/// (alpha copied from the source), then returns whole-rect or per-quad
-/// crops exactly like the Telea path.
+/// with **diffused** alpha (harmonic Laplace on the alpha plane — copying
+/// source alpha leaves a colour fringe on partial-alpha holes), then
+/// returns whole-rect or per-quad crops exactly like the Telea path.
 pub(crate) fn diffusion_inpaint_crop(
     log_tag: &str,
     image: &RgbaImage,
@@ -214,8 +215,14 @@ pub(crate) fn diffusion_inpaint_crop(
     let rgb_crop = image::DynamicImage::ImageRgba8(crop.clone()).to_rgb8();
     let filled_rgb = fill(&rgb_crop, &mask);
     let mut filled: RgbaImage = image::DynamicImage::ImageRgb8(filled_rgb).into_rgba8();
-    for (px, src) in filled.pixels_mut().zip(crop.pixels()) {
-        px[3] = src[3];
+    // Diffuse alpha with the same Neumann Laplace system instead of copying:
+    // opaque surrounds stay opaque, partial-alpha holes composite correctly.
+    let diffused = crate::harmonic::diffuse_alpha_plane(&crop, &mask);
+    for (x, y, px) in filled.enumerate_pixels_mut() {
+        let di = y as usize * exp_w as usize + x as usize;
+        if let Some(&a) = diffused.get(di) {
+            px[3] = a;
+        }
     }
     if quads.is_empty() {
         let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
@@ -246,6 +253,10 @@ pub fn shiftmap_inpaint_crop(
 /// `Δf = 0` inside the mask with Dirichlet boundary. Best for texture-free
 /// regions (speech bubbles, smooth gradients). Context pad is the Telea
 /// `radius`, like the Telea path. Same per-mask-box crop contract.
+///
+/// Unlike [`diffusion_inpaint_crop`], this builds the RGBA system once and
+/// diffuses RGB+alpha together (single CSR assembly, 4 channel-parallel
+/// solves), so partial-alpha holes do not fringe.
 pub fn harmonic_inpaint_crop(
     image: &RgbaImage,
     rect: [f32; 4],
@@ -253,9 +264,37 @@ pub fn harmonic_inpaint_crop(
     radius: i32,
 ) -> InpaintResult {
     let pad = radius.max(1) as f32;
-    diffusion_inpaint_crop("harmonic", image, rect, quads, pad, |rgb, mask| {
-        crate::harmonic::harmonic_inpaint_rgb(rgb, mask)
-    })
+    let [rx, ry, rw, rh] = rect;
+    let [ex, ey, exp_w, exp_h] = crop_spec(
+        [rx - pad, ry - pad, rx + rw + pad, ry + rh + pad],
+        image.width(),
+        image.height(),
+    );
+    let exp_origin = [ex as f32, ey as f32];
+    let mask = build_mask_expanded(exp_w, exp_h, quads, rect, exp_origin, image.width(), image.height());
+    eprintln!(
+        "[inpaint::harmonic] rect={:?} quads={} pad={} image={}x{} exp=[{},{},{},{}] mask_sum={}",
+        rect,
+        quads.len(),
+        pad,
+        image.width(),
+        image.height(),
+        ex,
+        ey,
+        exp_w,
+        exp_h,
+        mask.pixels().map(|p| p[0] as u32).sum::<u32>()
+    );
+    let crop: RgbaImage = image::imageops::crop_imm(image, ex, ey, exp_w, exp_h).to_image();
+    let filled = crate::harmonic::harmonic_inpaint_rgba(&crop, &mask);
+    if quads.is_empty() {
+        let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
+        let sub = image::imageops::crop_imm(&filled, ox - ex, oy - ey, ow, oh).to_image();
+        return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32], None)]);
+    }
+    let out = bbox_crops(filled, exp_origin, quads);
+    eprintln!("[inpaint::harmonic] quads={} -> {} bbox crops", quads.len(), out.len());
+    Ok(out)
 }
 
 /// Manual multi oversized: square crop per spec Q3.

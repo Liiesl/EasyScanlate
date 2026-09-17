@@ -71,12 +71,14 @@ pub fn dispatch_inpaint(
             easyscanlate_styling::BgType::Gradient => Some(match effective_model {
                 easyscanlate_settings::AutoInpaintModel::Mixed => InpaintBackend::Harmonic,
                 easyscanlate_settings::AutoInpaintModel::Telea => InpaintBackend::Telea,
+                easyscanlate_settings::AutoInpaintModel::Harmonic => InpaintBackend::Harmonic,
                 easyscanlate_settings::AutoInpaintModel::Lama => InpaintBackend::Lama,
                 easyscanlate_settings::AutoInpaintModel::Aot => InpaintBackend::Aot,
             }),
             easyscanlate_styling::BgType::Artwork => Some(match effective_model {
                 easyscanlate_settings::AutoInpaintModel::Mixed => InpaintBackend::Lama,
                 easyscanlate_settings::AutoInpaintModel::Telea => InpaintBackend::Telea,
+                easyscanlate_settings::AutoInpaintModel::Harmonic => InpaintBackend::Harmonic,
                 easyscanlate_settings::AutoInpaintModel::Lama => InpaintBackend::Lama,
                 easyscanlate_settings::AutoInpaintModel::Aot => InpaintBackend::Aot,
             }),

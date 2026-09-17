@@ -1306,6 +1306,7 @@ dependencies = [
  "ort",
  "push_relabel",
  "rand 0.9.5",
+ "rayon",
 ]
 
 [[package]]
