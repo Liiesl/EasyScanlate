@@ -413,6 +413,18 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
     }
 }
 
+/// Menu pick of the styling panel's "Inpaint Background" split button:
+/// persist the new default backend (select-only — starts no job; the main
+/// area runs via [`handle_style_inpaint_background`], which reads the store).
+pub fn handle_style_inpaint_backend_selected(
+    app: &mut App,
+    backend: easyscanlate_settings::InpaintBackend,
+) -> Task<Message> {
+    let _ = easyscanlate_settings::modify(|s| s.inpaint_backend = backend);
+    app.active_tab_mut().status = format!("Inpaint backend: {backend}.");
+    Task::none()
+}
+
 pub fn handle_inpaint_clicked(app: &mut App, selection: Option<(usize, usize)>) -> Task<Message> {
     use super::edit::clear_editing;
     clear_editing(app);

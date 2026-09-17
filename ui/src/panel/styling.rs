@@ -27,11 +27,13 @@ use iced::{
 };
 
 use neverliie_iced_widgets::advanced_dropdown::{advanced_dropdown, Item, MenuItem};
+use neverliie_iced_widgets::split_button::split_button;
 use neverliie_iced_widgets::color_picker::floating_color_picker;
 use neverliie_iced_widgets::context_menu::{ContextMenu, Menu};
 use neverliie_iced_widgets::overlay::Position;
 
 use easyscanlate_model::{EntryStyle, TextAlign, TextGradientDir};
+use easyscanlate_settings::InpaintBackend;
 
 use crate::event::{StyleField, UiEvent};
 use crate::main_area::overlay::{preview_font, styled_font};
@@ -446,14 +448,129 @@ fn stroke_section<'a, S: UiState + ?Sized>(
     .into()
 }
 
+/// Split-button value for the "Inpaint Background" control. `SplitButton`
+/// renders the selected *value's* `Display` on its face (item labels only
+/// appear in the menu rows), so this wrapper carries the full face text
+/// (`Inpaint Background (<backend>)`) while the menu rows use the short
+/// backend names from the item labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PanelBackend(InpaintBackend);
+
+impl std::fmt::Display for PanelBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let short = match self.0 {
+            InpaintBackend::Harmonic => "Harmonic",
+            InpaintBackend::Telea => "Telea",
+            InpaintBackend::Lama => "LaMa",
+            InpaintBackend::Aot => "AOT-GAN",
+            InpaintBackend::ShiftMap => "ShiftMap",
+        };
+        write!(f, "Inpaint Background ({short})")
+    }
+}
+
 /// The "Background & Corner" section: background color plus corner radius,
-/// with an "Inpaint Background" action that makes the bg transparent and
-/// inpaints the *current* view quad (not the original OCR quad) — i.e. the
-/// box's present position/size after any move/resize/rotate/distort.
+/// with an "Inpaint Background" split button. The main area makes the bg
+/// transparent and inpaints the *current* view quad (not the original OCR
+/// quad) — i.e. the box's present position/size after any
+/// move/resize/rotate/distort — with the default backend; the arrow zone
+/// opens a menu to switch the default inpaint backend directly (select-only:
+/// it persists `inpaint_backend` without running anything).
+/// While nothing is selected or a bulk job is busy the whole control falls
+/// back to a plain inert button, since `SplitButton` has no disabled state
+/// (omitting `on_press` alone would still leave the arrow menu live).
 fn background_section<'a, S: UiState + ?Sized>(
     state: &'a S,
     selected: bool,
 ) -> Element<'a, UiEvent> {
+    let backend = easyscanlate_settings::get(|s| s.inpaint_backend);
+    let action: Element<'a, UiEvent> = if selected && !state.is_bulk_busy() {
+        let options = [
+            MenuItem::Item(
+                Item::new(PanelBackend(InpaintBackend::Harmonic), "Harmonic").icon(
+                    crate::icon::lucide(Icon::Eraser).size(scale::s(14.0)).center(),
+                ),
+            ),
+            MenuItem::Item(
+                Item::new(PanelBackend(InpaintBackend::Telea), "Telea").icon(
+                    crate::icon::lucide(Icon::Eraser).size(scale::s(14.0)).center(),
+                ),
+            ),
+            MenuItem::Item(
+                Item::new(PanelBackend(InpaintBackend::Lama), "LaMa").icon(
+                    crate::icon::lucide(Icon::Eraser).size(scale::s(14.0)).center(),
+                ),
+            ),
+            MenuItem::Item(
+                Item::new(PanelBackend(InpaintBackend::Aot), "AOT-GAN").icon(
+                    crate::icon::lucide(Icon::Eraser).size(scale::s(14.0)).center(),
+                ),
+            ),
+            MenuItem::Item(
+                Item::new(PanelBackend(InpaintBackend::ShiftMap), "ShiftMap").icon(
+                    crate::icon::lucide(Icon::Eraser).size(scale::s(14.0)).center(),
+                ),
+            ),
+        ];
+        split_button(
+            options,
+            Some(PanelBackend(backend)),
+            |pick: PanelBackend| UiEvent::StyleInpaintBackendSelected(pick.0),
+        )
+            .on_press(|_| UiEvent::StyleInpaintBackground)
+            .width(FillLength)
+            .padding(scale::s(6.0))
+            .text_size(scale::s(11.0))
+            .style(
+                |_theme, status: neverliie_iced_widgets::split_button::Status| {
+                    use neverliie_iced_widgets::split_button::Status as SplitStatus;
+                    let (bg, txt) = match status {
+                        SplitStatus::Active => (crate::panel::PANEL_BG, TEXT_MAIN),
+                        SplitStatus::Hovered => {
+                            (Color::from_rgba8(46, 48, 62, 0.82), TEXT_MAIN)
+                        }
+                        SplitStatus::Opened { .. } => {
+                            (Color::from_rgba8(55, 57, 72, 0.87), TEXT_MAIN)
+                        }
+                        SplitStatus::Disabled => {
+                            (Color::from_rgba8(34, 36, 44, 0.35), MUTED_FG)
+                        }
+                    };
+                    neverliie_iced_widgets::split_button::Style {
+                        text_color: txt,
+                        placeholder_color: txt,
+                        handle_color: txt,
+                        background: Background::Color(bg),
+                        border: Border {
+                            radius: scale::s(4.0).into(),
+                            // Width stays 0 (no outline drawn), but the color
+                            // must be visible: SplitButton reuses it as the
+                            // source for the main|arrow divider (0.35 alpha)
+                            // and the per-zone hover tints (0.10 main, 0.25
+                            // arrow). TRANSPARENT here would hide both.
+                            width: 0.0,
+                            color: TEXT_MAIN,
+                        },
+                        shadow: Shadow::default(),
+                    }
+                },
+            )
+            .into()
+    } else {
+        button(
+            row![
+                crate::icon::lucide(Icon::Eraser).size(scale::s(14.0)).center(),
+                text(PanelBackend(backend).to_string()).size(scale::s(11.0))
+            ]
+            .spacing(scale::s(4.0))
+            .align_y(iced::Alignment::Center),
+        )
+        .width(FillLength)
+        .padding(scale::s(6.0))
+        .style(crate::panel::button_style)
+        .on_press_maybe(None::<UiEvent>)
+        .into()
+    };
     column![
         section_title("Background & Corner"),
         row![
@@ -471,26 +588,7 @@ fn background_section<'a, S: UiState + ?Sized>(
             .width(Length::FillPortion(1)),
         ]
         .spacing(scale::s(8.0)),
-        tooltip(
-            crate::button::with_disabled_cursor(
-                button(
-                    row![
-                        crate::icon::lucide(Icon::Eraser).size(scale::s(14.0)).center(),
-                        text("Inpaint Background").size(scale::s(11.0))
-                    ]
-                    .spacing(scale::s(4.0))
-                    .align_y(iced::Alignment::Center),
-                )
-                .width(FillLength)
-                .padding(scale::s(6.0))
-                .style(crate::panel::button_style)
-                .on_press_maybe((selected && !state.is_bulk_busy()).then_some(UiEvent::StyleInpaintBackground))
-                .into(),
-            ),
-            tip("Inpaint background"),
-            tooltip::Position::Top,
-        )
-        .gap(scale::s(4.0)),
+        crate::button::with_disabled_cursor(action),
     ]
     .spacing(scale::s(8.0))
     .into()

@@ -862,6 +862,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::StyleStrokeWidth(text)) => styling::handle_stroke_width(app, text),
         Message::Ui(UiEvent::StyleBgRadius(text)) => styling::handle_bg_radius(app, text),
         Message::Ui(UiEvent::StyleInpaintBackground) => inpaint::handle_style_inpaint_background(app),
+        Message::Ui(UiEvent::StyleInpaintBackendSelected(backend)) => inpaint::handle_style_inpaint_backend_selected(app, backend),
         Message::Ui(UiEvent::StylePresetApply(preset)) => styling::handle_preset_apply(app, preset),
         Message::Ui(UiEvent::StylePresetAdd) => styling::handle_preset_add(app),
         Message::Ui(UiEvent::StylePresetReplace(preset)) => styling::handle_preset_replace(app, preset),

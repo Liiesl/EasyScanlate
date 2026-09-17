@@ -17,7 +17,8 @@
 
 - swap telea to harmonic for mixed backend
 - optimize harmonic inpaint backend
-- 
+- choose inpaint backend instantly on styling panel
+-
 
 ## currently in progress
 

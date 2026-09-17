@@ -5,6 +5,7 @@ use iced::widget::text_editor;
 use iced::{Color, Rectangle};
 
 use easyscanlate_model::{EntryId, ProfileId, Quad, TextAlign, TextGradientDir};
+use easyscanlate_settings::InpaintBackend;
 
 /// The actions offered by the floating inpaint toolbar under the selected patch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -309,6 +310,11 @@ pub enum UiEvent {
     /// position/size after moves/resizes/rotations. Mirrors the auto pipeline's
     /// use of `view_quad` for the `rect` + `quads` fed to the inpaint engine.
     StyleInpaintBackground,
+    /// The user picked a default inpaint backend from the styling panel's
+    /// "Inpaint Background" split button; select-only (persists the backend,
+    /// does not start inpainting — the main area runs via
+    /// `StyleInpaintBackground`).
+    StyleInpaintBackendSelected(InpaintBackend),
     /// The user dragged the divider between the main area and the side panel.
     PanelResized(pane_grid::ResizeEvent),
     /// The user dragged the divider between the styling and the translation/results panels.
