@@ -332,10 +332,10 @@ impl App {
             font: None,
             system_fonts: HashMap::new(),
             installed_fonts: Vec::new(),
-            loaded_fonts: HashSet::from([
-                easyscanlate_model::ANIME_ACE_FAMILY.to_string(),
-                easyscanlate_model::AUGIE_FAMILY.to_string(),
-            ]),
+            loaded_fonts: easyscanlate_model::BUNDLED_FONTS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             presets: easyscanlate_settings::get(|s| s.style_presets.clone()),
             tx: ui_translation::Session::default(),
             connect_modal: None,

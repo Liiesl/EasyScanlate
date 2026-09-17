@@ -5,21 +5,27 @@
 #### addition
 
 - display font preview
+- add more default fonts
+-
 
 #### fixes
 
 - bitmap font did not render properly
+-
 
 #### modification
 
 - swap telea to harmonic for mixed backend
+- optimize harmonic inpaint backend
+- 
 
 ## currently in progress
 
 #### modification
 
-- add more default fonts
-- optimize harmonic inpaint backend
+- make bold and italic disabled if the font family dont have one
+- 
+
 
 ## not yet started
 

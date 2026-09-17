@@ -52,5 +52,6 @@ pub use project::Project;
 pub use sort::natural_cmp;
 pub use style::{
     EntryStyle, TextAlign, TextGradientDir, ANIME_ACE_FAMILY, AUGIE_FAMILY, BUNDLED_FONTS,
-    DEFAULT_FONT_FAMILY,
+    DEFAULT_FONT_FAMILY, FUZZY_BUBBLES_FAMILY, KOMIKA_HAND_FAMILY, KOMIKA_JAM_FAMILY,
+    KOMIKA_SLICK_FAMILY, KOMIKA_SLIM_FAMILY, NANUM_PEN_FAMILY,
 };

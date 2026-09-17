@@ -89,10 +89,25 @@ impl TextGradientDir {
 /// `src/main.rs` and `src/app.rs` merging).
 pub const ANIME_ACE_FAMILY: &str = "Anime Ace";
 pub const AUGIE_FAMILY: &str = "augie";
+pub const FUZZY_BUBBLES_FAMILY: &str = "Fuzzy Bubbles";
+pub const KOMIKA_HAND_FAMILY: &str = "Komika Hand";
+pub const KOMIKA_JAM_FAMILY: &str = "Komika Jam";
+pub const KOMIKA_SLICK_FAMILY: &str = "Komika Slick";
+pub const KOMIKA_SLIM_FAMILY: &str = "Komika Slim";
+pub const NANUM_PEN_FAMILY: &str = "Nanum Pen";
 /// The default font family for new entries/presets. Always bundled.
 pub const DEFAULT_FONT_FAMILY: &str = ANIME_ACE_FAMILY;
 /// All families that are bundled in the binary (no install needed).
-pub const BUNDLED_FONTS: &[&str] = &[ANIME_ACE_FAMILY, AUGIE_FAMILY];
+pub const BUNDLED_FONTS: &[&str] = &[
+    ANIME_ACE_FAMILY,
+    AUGIE_FAMILY,
+    FUZZY_BUBBLES_FAMILY,
+    KOMIKA_HAND_FAMILY,
+    KOMIKA_JAM_FAMILY,
+    KOMIKA_SLICK_FAMILY,
+    KOMIKA_SLIM_FAMILY,
+    NANUM_PEN_FAMILY,
+];
 
 /// Per-entry rendering style for the text overlay and future image export.
 ///
@@ -176,6 +191,12 @@ mod tests {
         assert_eq!(DEFAULT_FONT_FAMILY, ANIME_ACE_FAMILY);
         assert!(BUNDLED_FONTS.contains(&ANIME_ACE_FAMILY));
         assert!(BUNDLED_FONTS.contains(&AUGIE_FAMILY));
+        assert!(BUNDLED_FONTS.contains(&FUZZY_BUBBLES_FAMILY));
+        assert!(BUNDLED_FONTS.contains(&KOMIKA_HAND_FAMILY));
+        assert!(BUNDLED_FONTS.contains(&KOMIKA_JAM_FAMILY));
+        assert!(BUNDLED_FONTS.contains(&KOMIKA_SLICK_FAMILY));
+        assert!(BUNDLED_FONTS.contains(&KOMIKA_SLIM_FAMILY));
+        assert!(BUNDLED_FONTS.contains(&NANUM_PEN_FAMILY));
         let style = EntryStyle::default();
         assert_eq!(style.font_family.as_deref(), Some(ANIME_ACE_FAMILY));
     }

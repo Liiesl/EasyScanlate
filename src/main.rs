@@ -168,12 +168,27 @@ fn main() -> iced::Result {
     )
     .window(settings)
     .font(LUCIDE_FONT_BYTES)
-    // Bundled text fonts: Anime Ace (regular + bold + italic) as default, and Augie.
+    // Bundled text fonts: Anime Ace (regular + bold + italic) as default, Augie,
+    // Komika (Hand/Jam/Slick/Slim incl. bold/italic), Fuzzy Bubbles, Nanum Pen.
     // Embedded at compile time — no system install or `assets/fonts/` at runtime needed.
+    // (Nanum Gothic/Myeongjo deliberately excluded: ~15.5MB saved, OS CJK fallback covers Korean.)
     .font(include_bytes!("../assets/fonts/animeace.ttf"))
     .font(include_bytes!("../assets/fonts/anime-ace.bold.ttf"))
     .font(include_bytes!("../assets/fonts/anime-ace.italic.ttf"))
     .font(include_bytes!("../assets/fonts/augie.ttf"))
+    .font(include_bytes!("../assets/fonts/KOMIKAH_.ttf"))
+    .font(include_bytes!("../assets/fonts/KOMIKAHB.ttf"))
+    .font(include_bytes!("../assets/fonts/KOMIKHI_.ttf"))
+    .font(include_bytes!("../assets/fonts/KOMIKHBI.ttf"))
+    .font(include_bytes!("../assets/fonts/KOMIKJ__.ttf"))
+    .font(include_bytes!("../assets/fonts/KOMIKJI_.ttf"))
+    .font(include_bytes!("../assets/fonts/KOMIKASK.ttf"))
+    .font(include_bytes!("../assets/fonts/KOMIKSKI.ttf"))
+    .font(include_bytes!("../assets/fonts/KOMIKASL.ttf"))
+    .font(include_bytes!("../assets/fonts/KOMIKSLI.ttf"))
+    .font(include_bytes!("../assets/fonts/FuzzyBubbles-Regular.ttf"))
+    .font(include_bytes!("../assets/fonts/FuzzyBubbles-Bold.ttf"))
+    .font(include_bytes!("../assets/fonts/NanumPenScript-Regular.ttf"))
     .title("EasyScanlate")
     .theme(|app: &app::App| app.theme())
     .subscription(app::subscription)
