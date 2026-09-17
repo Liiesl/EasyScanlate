@@ -545,13 +545,17 @@ fn appearance_tab_filtered(query: String) -> Element<'static, UiEvent> {
             .padding(scale::s(14.0))
             .style(|_| card_style()),
         )
+        .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
         .height(Length::Fill)
         .into();
     }
 
     let content = column(outer).spacing(scale::s(16.0)).width(FillLength);
     let padded = container(content).width(FillLength).padding(scale::s(8.0));
-    scrollable(padded).height(Length::Fill).into()
+    scrollable(padded)
+        .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
+        .height(Length::Fill)
+        .into()
 }
 
 // ---------------------------------------------------------------------------
@@ -806,6 +810,7 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
     scrollable(
         column(cards).spacing(scale::s(10.0))
     )
+    .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
     .height(Length::Fill)
     .into()
 }
@@ -1052,7 +1057,7 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
             ].spacing(scale::s(6.0))).padding(scale::s(14.0)).style(|_| card_style()).into()
         );
     }
-    scrollable(column(cards).spacing(scale::s(10.0))).height(Length::Fill).into()
+    scrollable(column(cards).spacing(scale::s(10.0))).spacing(scale::s(crate::scroll::EMBEDDED_SPACING)).height(Length::Fill).into()
 }
 
 // `query` only feeds the `#[cfg(feature = "ocr")]` block below.
@@ -1242,7 +1247,7 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
     if cards.is_empty() {
         cards.push(container(column![row![crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG), text(format!("No inpaint settings match “{query}”")).size(scale::s(12.0)).color(MUTED_FG)].spacing(scale::s(6.0)).align_y(iced::Alignment::Center)].spacing(scale::s(6.0))).padding(scale::s(14.0)).style(|_| card_style()).into());
     }
-    scrollable(column(cards).spacing(scale::s(10.0))).height(Length::Fill).into()
+    scrollable(column(cards).spacing(scale::s(10.0))).spacing(scale::s(crate::scroll::EMBEDDED_SPACING)).height(Length::Fill).into()
 }
 
 fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
@@ -1550,6 +1555,7 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
     }
 
     scrollable(column(cards).spacing(scale::s(10.0)))
+        .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
         .height(Length::Fill)
         .into()
 }
@@ -1832,9 +1838,9 @@ fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
 fn updates_tab_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Element<'static, UiEvent> {
     let cards = updates_cards(state, &query);
     if cards.is_empty() {
-        return scrollable(container(text(format!("No update settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG)).padding(scale::s(14.0)).style(|_| card_style())).height(Length::Fill).into();
+        return scrollable(container(text(format!("No update settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG)).padding(scale::s(14.0)).style(|_| card_style())).spacing(scale::s(crate::scroll::EMBEDDED_SPACING)).height(Length::Fill).into();
     }
-    scrollable(column(cards).spacing(scale::s(10.0))).height(Length::Fill).into()
+    scrollable(column(cards).spacing(scale::s(10.0))).spacing(scale::s(crate::scroll::EMBEDDED_SPACING)).height(Length::Fill).into()
 }
 
 fn global_search_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Element<'static, UiEvent> {
@@ -1881,7 +1887,7 @@ fn global_search_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Elem
         );
     }
 
-    scrollable(column(all).spacing(scale::s(10.0))).height(Length::Fill).into()
+    scrollable(column(all).spacing(scale::s(10.0))).spacing(scale::s(crate::scroll::EMBEDDED_SPACING)).height(Length::Fill).into()
 }
 
 /// The field area of the currently selected tab.

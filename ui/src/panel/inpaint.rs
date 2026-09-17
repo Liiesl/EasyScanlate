@@ -339,7 +339,10 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     column![
         header,
         container(
-            scrollable(list).width(FillLength).height(FillLength)
+            scrollable(list)
+                .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
+                .width(FillLength)
+                .height(FillLength)
         )
         .width(FillLength)
         .height(FillLength)

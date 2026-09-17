@@ -7,7 +7,8 @@
 //! Trailing `Fill` gap falls through to `draggable` in
 //! `NeverLiieIcedWidgets/src/title_bar/mod.rs:628,653`.
 //!
-//! Overflow via `scrollable` horizontal with `Scrollbar::new()`.
+//! Overflow via `scrollable` horizontal with embedded `Scrollbar`
+//! (`crate::scroll::horizontal()`).
 
 use iced::border::Radius;
 use iced::widget::{Responsive, button, container, row, scrollable, space, text};
@@ -238,7 +239,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
 
         let chips_scroll: Element<'_, UiEvent> = scrollable::Scrollable::with_direction(
             chips_row,
-            scrollable::Direction::Horizontal(scrollable::Scrollbar::new()),
+            scrollable::Direction::Horizontal(crate::scroll::horizontal()),
         )
         .width(Length::Fixed(viewport_w))
         .height(Length::Fixed(h))

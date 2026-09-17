@@ -601,6 +601,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     col = col.push(
         scrollable(Column::with_children(results_list).spacing(scale::s(8.0)))
             .id(PANEL_LIST_ID)
+            .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
             .height(FillLength)
             .width(FillLength)
             .on_scroll(|viewport| {

@@ -23,6 +23,7 @@ pub mod onboarding;
 pub mod panel;
 pub mod icon;
 pub mod scale;
+pub mod scroll;
 pub mod segmented;
 pub mod shell;
 pub mod settings;

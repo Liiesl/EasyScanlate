@@ -655,7 +655,7 @@ fn presets_grid<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
     }
     let strip = scrollable::Scrollable::with_direction(
         row(columns).spacing(scale::s(4.0)),
-        scrollable::Direction::Horizontal(scrollable::Scrollbar::new()),
+        scrollable::Direction::Horizontal(crate::scroll::horizontal()),
     )
     .width(FillLength)
     .height(scale::s(PRESET_SIDE * 2.0 + 4.0 + 10.0));
@@ -682,6 +682,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         text(HINT).size(scale::s(12.0)).color(MUTED_FG),
     ]
     .spacing(scale::s(10.0)))
+    .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
     .width(FillLength)
     .height(FillLength)
     .into()

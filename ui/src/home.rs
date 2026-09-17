@@ -93,7 +93,10 @@ pub fn view<'a, S: crate::state::UiState + ?Sized>(state: &'a S) -> Element<'a, 
             .on_press(UiEvent::HomeRecentClicked(path));
             col = col.push(row_btn);
         }
-        scrollable(col).height(Length::Fill).into()
+        scrollable(col)
+            .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
+            .height(Length::Fill)
+            .into()
     };
 
     let main = container(

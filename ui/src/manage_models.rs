@@ -266,6 +266,7 @@ pub fn view<'a, S: UiState + ?Sized>(
             .into()
         } else {
             scrollable(column(provider_cols).spacing(scale::s(10.0)))
+                .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
                 .height(Length::Fill)
                 .into()
         }

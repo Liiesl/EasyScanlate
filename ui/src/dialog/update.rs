@@ -65,6 +65,7 @@ fn card<'a, S: UiState + ?Sized>(state: &'a S, available: &str) -> Element<'a, U
             items.push(
                 container(
                     scrollable(text(body).size(scale::s(11.0)).color(MUTED_FG))
+                        .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
                         .height(Length::Fixed(scale::s(72.0))),
                 )
                 .padding(scale::s(6.0))

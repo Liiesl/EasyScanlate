@@ -603,7 +603,9 @@ fn models_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent> {
         .into()
     };
 
-    let scroll = scrollable(column![header, list, download_btn].spacing(scale::s(10.0))).height(Length::Fill);
+    let scroll = scrollable(column![header, list, download_btn].spacing(scale::s(10.0)))
+        .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
+        .height(Length::Fill);
 
     scroll.into()
 }
@@ -663,7 +665,10 @@ fn preferences_step() -> Element<'static, UiEvent> {
         automation
     };
 
-    scrollable(column![appearance, automation].spacing(scale::s(10.0))).height(Length::Fill).into()
+    scrollable(column![appearance, automation].spacing(scale::s(10.0)))
+        .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
+        .height(Length::Fill)
+        .into()
 }
 
 fn translation_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent> {
@@ -800,7 +805,10 @@ fn translation_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent>
     if let Some(card) = recommended_card { content.push(card); }
     content.push(available_card);
     content.push(tip);
-    scrollable(column(content).spacing(scale::s(10.0))).height(Length::Fill).into()
+    scrollable(column(content).spacing(scale::s(10.0)))
+        .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
+        .height(Length::Fill)
+        .into()
 }
 
 fn done_step() -> Element<'static, UiEvent> {
