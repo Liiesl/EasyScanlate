@@ -64,6 +64,8 @@ pub fn handle_font(app: &mut App, name: String) -> Task<Message> {
 /// First-screen batch for the font dropdown's visible-only lazy preload:
 /// with `menu_max_height(300)` about 5–6 families are visible (each takes
 /// a label + a preview row), so 12 covers the first screen plus over-scroll.
+/// Taken in dropdown display order (Featured first, then All fonts);
+/// bundled Featured families skip loading in `preview_load_task` anyway.
 const FONT_PREVIEW_BATCH: usize = 12;
 
 fn is_bundled(name: &str) -> bool {
@@ -103,11 +105,12 @@ fn preview_load_task(app: &mut App, names: &[String]) -> Task<Message> {
 }
 
 pub fn handle_font_preview_open(app: &mut App) -> Task<Message> {
-    let names: Vec<String> = app
-        .installed_fonts
-        .iter()
+    let (featured, rest) = easyscanlate_model::partition_featured_fonts(&app.installed_fonts);
+    let names: Vec<String> = featured
+        .into_iter()
+        .chain(rest)
         .take(FONT_PREVIEW_BATCH)
-        .cloned()
+        .map(|index| app.installed_fonts[index].clone())
         .collect();
     preview_load_task(app, &names)
 }

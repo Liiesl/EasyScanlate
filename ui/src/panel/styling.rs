@@ -298,17 +298,35 @@ fn header_row<'a, S: UiState + ?Sized>(state: &'a S, selected: bool) -> Element<
 }
 
 /// The font picker: a searchable `advanced_dropdown` over the installed
-/// fonts, alternating a group label (family name in the UI font) and one
-/// item (the same name previewed in the family's own face), emitting
+/// fonts, grouped into a "Featured" section (the embedded families in
+/// `BUNDLED_FONTS` order) and an "All fonts" section (everything else,
+/// deduped against Featured). Each family keeps the current pattern:
+/// a group label (family name in the UI font) alternating with one item
+/// (the same name previewed in the family's own face), emitting
 /// `StyleFont` on selection. The closed field stays in the UI font;
 /// only the open rows preview. Font files load lazily: the first visible
 /// families on open plus the hovered row (see `StyleFontPreviewOpen` /
 /// `StyleFontPreviewHover`).
 fn font_field<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
-    let fonts = state.installed_fonts();
+    use easyscanlate_model::{ALL_FONTS_LABEL, FEATURED_FONTS_LABEL, partition_featured_fonts};
+    let installed = state.installed_fonts();
+    let (featured, rest) = partition_featured_fonts(installed);
     let mut entries: Vec<MenuItem<'a, String, UiEvent, iced::Theme, iced::Renderer>> =
-        Vec::with_capacity(fonts.len() * 2);
-    for family in fonts {
+        Vec::with_capacity(2 + featured.len() * 2 + 3 + rest.len() * 2);
+    entries.push(MenuItem::Label(FEATURED_FONTS_LABEL));
+    entries.push(MenuItem::Separator);
+    for &index in &featured {
+        let family = &installed[index];
+        entries.push(MenuItem::Label(family.as_str()));
+        entries.push(MenuItem::Item(
+            Item::new(family.clone(), family.clone()).font(preview_font(family)),
+        ));
+    }
+    entries.push(MenuItem::Separator);
+    entries.push(MenuItem::Label(ALL_FONTS_LABEL));
+    entries.push(MenuItem::Separator);
+    for &index in &rest {
+        let family = &installed[index];
         entries.push(MenuItem::Label(family.as_str()));
         entries.push(MenuItem::Item(
             Item::new(family.clone(), family.clone()).font(preview_font(family)),

@@ -100,14 +100,43 @@ pub const DEFAULT_FONT_FAMILY: &str = ANIME_ACE_FAMILY;
 /// All families that are bundled in the binary (no install needed).
 pub const BUNDLED_FONTS: &[&str] = &[
     ANIME_ACE_FAMILY,
+    NANUM_PEN_FAMILY,
     AUGIE_FAMILY,
     FUZZY_BUBBLES_FAMILY,
     KOMIKA_HAND_FAMILY,
     KOMIKA_JAM_FAMILY,
     KOMIKA_SLICK_FAMILY,
     KOMIKA_SLIM_FAMILY,
-    NANUM_PEN_FAMILY,
 ];
+
+/// Section titles of the font-picker dropdown.
+pub const FEATURED_FONTS_LABEL: &str = "Featured";
+pub const ALL_FONTS_LABEL: &str = "All fonts";
+
+/// Split `installed` (the sorted, deduped union of system + bundled families)
+/// into `(featured, rest)` index lists for the font-picker dropdown.
+///
+/// - `featured` holds indices into `installed` in the curated
+///   [`BUNDLED_FONTS`] order, matched case-insensitively; bundled names
+///   missing from `installed` are skipped. Indices borrow from the caller's
+///   slice so dropdown labels can borrow them for the widget lifetime.
+/// - `rest` holds the remaining indices in `installed` order (the "All
+///   fonts" section is deduped against Featured).
+pub fn partition_featured_fonts(installed: &[String]) -> (Vec<usize>, Vec<usize>) {
+    let mut featured = Vec::with_capacity(BUNDLED_FONTS.len());
+    for bundled in BUNDLED_FONTS {
+        if let Some(index) = installed.iter().position(|n| n.eq_ignore_ascii_case(bundled)) {
+            featured.push(index);
+        }
+    }
+    let rest: Vec<usize> = installed
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| !BUNDLED_FONTS.iter().any(|b| n.eq_ignore_ascii_case(b)))
+        .map(|(index, _)| index)
+        .collect();
+    (featured, rest)
+}
 
 /// Per-entry rendering style for the text overlay and future image export.
 ///
@@ -213,5 +242,33 @@ mod tests {
         for label in TextGradientDir::LABELS {
             assert_eq!(TextGradientDir::from_label(label).label(), label);
         }
+    }
+
+    #[test]
+    fn partition_keeps_bundled_order_and_dedupes_rest() {
+        let installed = ["Arial", "Anime Ace", "augie", "Verdana"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
+        let (featured, rest) = partition_featured_fonts(&installed);
+        let names = |indices: &[usize]| {
+            indices
+                .iter()
+                .map(|&i| installed[i].clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(&featured), vec!["Anime Ace".to_string(), "augie".to_string()]);
+        assert_eq!(names(&rest), vec!["Arial".to_string(), "Verdana".to_string()]);
+    }
+
+    #[test]
+    fn partition_skips_missing_bundled_and_matches_case_insensitively() {
+        let installed = ["ANIME ACE", "Arial"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
+        let (featured, rest) = partition_featured_fonts(&installed);
+        assert_eq!(featured, vec![0]);
+        assert_eq!(rest, vec![1]);
     }
 }
