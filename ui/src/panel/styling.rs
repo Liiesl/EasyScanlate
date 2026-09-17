@@ -34,7 +34,7 @@ use neverliie_iced_widgets::overlay::Position;
 use easyscanlate_model::{EntryStyle, TextAlign, TextGradientDir};
 
 use crate::event::{StyleField, UiEvent};
-use crate::main_area::overlay::styled_font;
+use crate::main_area::overlay::{preview_font, styled_font};
 use crate::segmented::{segment_icon, segmented_group, BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
 use crate::scale;
 use crate::state::UiState;
@@ -298,13 +298,22 @@ fn header_row<'a, S: UiState + ?Sized>(state: &'a S, selected: bool) -> Element<
 }
 
 /// The font picker: a searchable `advanced_dropdown` over the installed
-/// fonts, emitting `StyleFont` on selection.
+/// fonts, alternating a group label (family name in the UI font) and one
+/// item (the same name previewed in the family's own face), emitting
+/// `StyleFont` on selection. The closed field stays in the UI font;
+/// only the open rows preview. Font files load lazily: the first visible
+/// families on open plus the hovered row (see `StyleFontPreviewOpen` /
+/// `StyleFontPreviewHover`).
 fn font_field<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
-    let entries: Vec<MenuItem<'a, String, UiEvent, iced::Theme, iced::Renderer>> = state
-        .installed_fonts()
-        .iter()
-        .map(|font| MenuItem::Item(Item::new(font.clone(), font.clone())))
-        .collect();
+    let fonts = state.installed_fonts();
+    let mut entries: Vec<MenuItem<'a, String, UiEvent, iced::Theme, iced::Renderer>> =
+        Vec::with_capacity(fonts.len() * 2);
+    for family in fonts {
+        entries.push(MenuItem::Label(family.as_str()));
+        entries.push(MenuItem::Item(
+            Item::new(family.clone(), family.clone()).font(preview_font(family)),
+        ));
+    }
     advanced_dropdown(
         entries,
         state.style_working().font_family.clone(),
@@ -313,6 +322,9 @@ fn font_field<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
     .searchable(true)
     .text_size(scale::s(12.0))
     .width(FillLength)
+    .menu_max_height(300.0)
+    .on_open(UiEvent::StyleFontPreviewOpen)
+    .on_option_hovered(|name: String| UiEvent::StyleFontPreviewHover(name))
     .into()
 }
 

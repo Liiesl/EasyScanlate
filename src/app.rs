@@ -197,6 +197,10 @@ pub enum Message {
     FontLoaded,
     SystemFonts(Vec<(String, String)>),
     StyleFontLoaded(String),
+    /// A lazy font-preview file finished loading. Silent: unlike
+    /// `StyleFontLoaded` it never touches the status bar (hover/open
+    /// preloading would otherwise spam it on every row).
+    StyleFontPreviewLoaded(String),
     CjkFallbackLoaded(usize),
     FetchModels,
     ModelsFetched(std::collections::HashMap<String, ui_translation::Provider>),
@@ -730,6 +734,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             | Message::FontLoaded
             | Message::SystemFonts(_)
             | Message::StyleFontLoaded(_)
+            | Message::StyleFontPreviewLoaded(_)
             | Message::CjkFallbackLoaded(_)
             | Message::UpdateCheckResult(_)
             | Message::UpdatePoll
@@ -788,6 +793,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::FontLoaded => boot::handle_font_loaded(app),
         Message::SystemFonts(fonts) => boot::handle_system_fonts(app, fonts),
         Message::StyleFontLoaded(name) => boot::handle_style_font_loaded(app, name),
+        Message::StyleFontPreviewLoaded(_) => Task::none(),
         Message::CjkFallbackLoaded(count) => boot::handle_cjk_fallback_loaded(app, count),
         Message::Ui(UiEvent::ProfileSelect(id)) => profile::handle_select(app, id),
         Message::Ui(UiEvent::ProfileCreate) => profile::handle_create(app),
@@ -844,6 +850,8 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::StyleBold(bold)) => styling::handle_bold(app, bold),
         Message::Ui(UiEvent::StyleItalic(italic)) => styling::handle_italic(app, italic),
         Message::Ui(UiEvent::StyleFont(name)) => styling::handle_font(app, name),
+        Message::Ui(UiEvent::StyleFontPreviewOpen) => styling::handle_font_preview_open(app),
+        Message::Ui(UiEvent::StyleFontPreviewHover(name)) => styling::handle_font_preview_hover(app, name),
         Message::Ui(UiEvent::StyleTextAlign(align)) => styling::handle_text_align(app, align),
         Message::Ui(UiEvent::StyleGradientToggle(enabled)) => styling::handle_gradient_toggle(app, enabled),
         Message::Ui(UiEvent::StyleGradientDir(dir)) => styling::handle_gradient_dir(app, dir),

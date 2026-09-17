@@ -9,7 +9,7 @@ use easyscanlate_model::EntryStyle;
 use super::fallback::contains_cjk;
 
 /// A `Font` for the installed family `name`, memoized: iced's `Font::with_name` requires `&'static str`.
-fn family_font(name: &str) -> Font {
+pub(crate) fn family_font(name: &str) -> Font {
     static NAMES: OnceLock<Mutex<HashMap<String, &'static str>>> = OnceLock::new();
     let names = NAMES.get_or_init(|| Mutex::new(HashMap::new()));
     let mut guard = names.lock().expect("font name cache poisoned");
@@ -191,4 +191,20 @@ fn scan_nearest_weight(
 /// weight/style are applied verbatim.
 pub(crate) fn styled_font(font: Font, style: &EntryStyle) -> Font {
     styled_font_for_text(font, style, "")
+}
+
+/// Preview `Font` for the font-picker dropdown: the family's own face at
+/// plain Normal, with the weight clamped like the overlay does, so
+/// single-weight bitmap families whose only face is not 400 (e.g.
+/// Minecraft at 500) render their real face instead of silently falling
+/// back to another family.
+pub(crate) fn preview_font(name: &str) -> Font {
+    let mut font = family_font(name);
+    font.weight = match font.family {
+        FontFamily::Name(n) => {
+            nearest_available_weight(n, FontWeight::Normal, font.style, font.stretch)
+        }
+        _ => font.weight,
+    };
+    font
 }

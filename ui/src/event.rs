@@ -275,6 +275,12 @@ pub enum UiEvent {
     StyleBgRadius(String),
     /// The user picked an installed font family name for the selected entry.
     StyleFont(String),
+    /// The font dropdown was opened: load the first visible families so
+    /// their preview rows render in the real face (visible-only lazy load).
+    StyleFontPreviewOpen,
+    /// The user hovered a font row: load that family for its preview
+    /// without changing the selection.
+    StyleFontPreviewHover(String),
     /// The user picked the text alignment mode for the selected entry.
     StyleTextAlign(TextAlign),
     /// The user toggled the two-color text gradient for the selected entry.

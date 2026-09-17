@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use iced::Task;
 use easyscanlate_model::{EntryId, EntryStyle, Quad, TextAlign, TextGradientDir};
 #[cfg(feature = "styling")]
@@ -40,10 +42,7 @@ pub fn handle_font(app: &mut App, name: String) -> Task<Message> {
     // Bundled fonts are already embedded in the binary via `include_bytes!`
     // in `main.rs` — no `font::load` needed. System-installed duplicates are
     // already in the fontdb scan. Only load non-bundled families on demand.
-    let is_bundled = easyscanlate_model::BUNDLED_FONTS
-        .iter()
-        .any(|f| f.eq_ignore_ascii_case(&name));
-    if is_bundled {
+    if is_bundled(&name) {
         // Ensure it's marked loaded even if picker injected it without a system path.
         app.loaded_fonts.insert(name);
         return Task::none();
@@ -60,6 +59,61 @@ pub fn handle_font(app: &mut App, name: String) -> Task<Message> {
     } else {
         Task::none()
     }
+}
+
+/// First-screen batch for the font dropdown's visible-only lazy preload:
+/// with `menu_max_height(300)` about 5–6 families are visible (each takes
+/// a label + a preview row), so 12 covers the first screen plus over-scroll.
+const FONT_PREVIEW_BATCH: usize = 12;
+
+fn is_bundled(name: &str) -> bool {
+    easyscanlate_model::BUNDLED_FONTS
+        .iter()
+        .any(|f| f.eq_ignore_ascii_case(name))
+}
+
+/// Queue `iced::font::load` for `names` that are neither bundled (already
+/// embedded) nor loaded before. Marks families loaded optimistically and
+/// dedupes shared files within the batch; completion is the silent
+/// `StyleFontPreviewLoaded` (never touches the status bar or the style).
+fn preview_load_task(app: &mut App, names: &[String]) -> Task<Message> {
+    let mut tasks = Vec::new();
+    let mut seen_paths = HashSet::new();
+    for name in names {
+        if is_bundled(name) || app.loaded_fonts.contains(name) {
+            continue;
+        }
+        let Some(path) = app.system_fonts.get(name).cloned() else {
+            continue;
+        };
+        if !seen_paths.insert(path.clone()) {
+            app.loaded_fonts.insert(name.clone());
+            continue;
+        }
+        app.loaded_fonts.insert(name.clone());
+        if let Ok(bytes) = std::fs::read(&path) {
+            let name = name.clone();
+            tasks.push(
+                iced::font::load(bytes)
+                    .map(move |_| Message::StyleFontPreviewLoaded(name.clone())),
+            );
+        }
+    }
+    Task::batch(tasks)
+}
+
+pub fn handle_font_preview_open(app: &mut App) -> Task<Message> {
+    let names: Vec<String> = app
+        .installed_fonts
+        .iter()
+        .take(FONT_PREVIEW_BATCH)
+        .cloned()
+        .collect();
+    preview_load_task(app, &names)
+}
+
+pub fn handle_font_preview_hover(app: &mut App, name: String) -> Task<Message> {
+    preview_load_task(app, &[name])
 }
 
 pub fn handle_text_align(app: &mut App, align: TextAlign) -> Task<Message> {
