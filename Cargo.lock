@@ -1475,7 +1475,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1564,8 +1564,8 @@ dependencies = [
 
 [[package]]
 name = "fast-down"
-version = "5.0.2"
-source = "git+https://github.com/fast-down/core.git#577562e2907bec5ecbf7ca24e5416d32ed345163"
+version = "6.0.1"
+source = "git+https://github.com/fast-down/core.git#b93ab2c0eb11ffe7acbced5dd200afd7fe45b623"
 dependencies = [
  "async-stream",
  "bytes",
@@ -1584,13 +1584,14 @@ dependencies = [
 
 [[package]]
 name = "fast-down-api"
-version = "0.1.0"
-source = "git+https://github.com/fast-down/core.git#577562e2907bec5ecbf7ca24e5416d32ed345163"
+version = "0.1.1"
+source = "git+https://github.com/fast-down/core.git#b93ab2c0eb11ffe7acbced5dd200afd7fe45b623"
 dependencies = [
  "anyhow",
  "chrono",
  "crossfire",
  "fast-down",
+ "file_alloc",
  "humantime-serde",
  "inherit-config",
  "parking_lot",
@@ -1608,8 +1609,8 @@ dependencies = [
 
 [[package]]
 name = "fast-pull"
-version = "5.0.2"
-source = "git+https://github.com/fast-down/core.git#577562e2907bec5ecbf7ca24e5416d32ed345163"
+version = "6.0.1"
+source = "git+https://github.com/fast-down/core.git#b93ab2c0eb11ffe7acbced5dd200afd7fe45b623"
 dependencies = [
  "bytes",
  "crossfire",
@@ -1623,8 +1624,8 @@ dependencies = [
 
 [[package]]
 name = "fast-steal"
-version = "6.5.4"
-source = "git+https://github.com/fast-down/core.git#577562e2907bec5ecbf7ca24e5416d32ed345163"
+version = "7.0.0"
+source = "git+https://github.com/fast-down/core.git#b93ab2c0eb11ffe7acbced5dd200afd7fe45b623"
 dependencies = [
  "parking_lot",
  "portable-atomic",
@@ -1649,6 +1650,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
 dependencies = [
  "simd-adler32",
+]
+
+[[package]]
+name = "file_alloc"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "152d511127cc6e0cf61912eb7f7f1a7e5c910c8c43d43f1f0ba7eb26d674f511"
+dependencies = [
+ "rustix 1.1.4",
+ "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2377,7 +2389,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -4154,9 +4166,9 @@ checksum = "35fb2e5f958ec131621fdd531e9fc186ed768cbe395337403ae56c17a74c68ec"
 
 [[package]]
 name = "path_helper"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1cf0534c5a78bd12bd2c8d9ad3231f22ef07fc2205b5093e63e40cab4c4a8fc"
+checksum = "5c1b0eb8451e0718ff71661887df7206b717b33a17ebebe3bb74771ff5e8c1e1"
 dependencies = [
  "mime_guess",
  "sanitize-filename",
@@ -4518,7 +4530,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5108,7 +5120,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5167,7 +5179,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5857,10 +5869,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7055,7 +7067,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
