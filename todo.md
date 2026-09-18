@@ -12,6 +12,8 @@
 
 - bitmap font did not render properly
 - failed inpaint in some case
+- cursor cropped overflow while on edge
+- 
 
 #### modification
 
@@ -19,6 +21,7 @@
 - optimize harmonic inpaint backend
 - choose inpaint backend instantly on styling panel
 - make bold and italic disabled if the font family dont have one
+- use word+glyph wrap for cosmic text editor on main area
 - 
 
 ## currently in progress

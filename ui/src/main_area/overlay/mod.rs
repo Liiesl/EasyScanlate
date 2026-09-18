@@ -52,6 +52,13 @@ pub fn draw_entries<'a, I, F>(
         if hide_text {
             continue;
         }
+        // While editing, the floating editor owns the box (expanded + padded
+        // with its own selection border). Hide the canvas bg/selection/text
+        // so the tight canvas rect doesn't show through underneath the editor
+        // and erase the visible gap.
+        if entry.hide_text {
+            continue;
+        }
         let quad = entry.quad.points.map(|p| [p[0] * scale, p[1] * scale]);
         let rotated = rotated_rect_geometry(quad).and_then(|(tl, w, h, angle)| {
             let upright = angle.rem_euclid(2.0 * std::f32::consts::PI);
