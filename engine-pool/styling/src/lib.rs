@@ -17,7 +17,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 
 use image::{Rgb, RgbImage};
-use imageproc::geometric_transformations::{warp_into, Interpolation, Projection};
+use imageproc::geometric_transformations::{warp_into, Border, Interpolation, Projection};
 use ndarray::{Array4, ArrayD};
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
@@ -202,9 +202,9 @@ fn warp_quad(image: &RgbImage, quad: &Quad) -> Option<RgbImage> {
     let mut out = RgbImage::new(w, h);
     warp_into(
         image,
-        &projection,
+        projection,
         Interpolation::Bilinear,
-        Rgb([0, 0, 0]),
+        Border::Constant(Rgb([0, 0, 0])),
         &mut out,
     );
     Some(out)

@@ -38,7 +38,7 @@ serde = { version = "1", features = ["derive"] }
 lucide-icons = { version = "1", features = ["iced"] }
 ndarray = "0.17"
 ort = "2.0.0-rc.12"
-imageproc = "0.25"
+imageproc = "0.27"
 inpaint = { version = "0.1", features = ["image"] }
 serde_json = "1"
 reqwest = { version = "0.13", features = ["json"] }
