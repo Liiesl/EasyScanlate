@@ -25,8 +25,9 @@ pub const BORDER: Color = Color::from_rgb8(50, 50, 62);
 pub const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);
 
 /// One cell of a segmented control: equal-width button that lights up with
-/// the accent when `active`. `on_press` is `None` (inert); the disabled
-/// state renders identically to the idle one.
+/// the accent when `active`. `on_press` is `None` (inert); a disabled yet
+/// active cell (e.g. auto-detected Bold on a font without a Bold face) keeps
+/// the accent text on the disabled fill so the stored value stays visible.
 pub fn segment<'a>(
     active: bool,
     glyph: &'a str,
@@ -45,10 +46,12 @@ pub fn segment<'a>(
                     Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
                     Status::Active => crate::panel::PANEL_BG,
                 };
-                let txt = match status {
-                    Status::Disabled => MUTED_FG,
-                    _ if active => crate::accent::accent(),
-                    _ => TEXT_MAIN,
+                let txt = if active {
+                    crate::accent::accent()
+                } else if matches!(status, Status::Disabled) {
+                    MUTED_FG
+                } else {
+                    TEXT_MAIN
                 };
                 button::Style {
                     background: Some(Background::Color(bg)),
@@ -62,7 +65,9 @@ pub fn segment<'a>(
     )
 }
 
-/// One cell of a segmented control with a Lucide icon.
+/// One cell of a segmented control with a Lucide icon. Like [`segment`],
+/// a disabled yet active cell keeps the accent so an unavailable but stored
+/// Bold/Italic (e.g. from Auto Detect) stays visually selected.
 pub fn segment_icon<'a>(
     active: bool,
     icon: Icon,
@@ -80,10 +85,12 @@ pub fn segment_icon<'a>(
                     Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
                     Status::Active => crate::panel::PANEL_BG,
                 };
-                let txt = match status {
-                    Status::Disabled => MUTED_FG,
-                    _ if active => crate::accent::accent(),
-                    _ => TEXT_MAIN,
+                let txt = if active {
+                    crate::accent::accent()
+                } else if matches!(status, Status::Disabled) {
+                    MUTED_FG
+                } else {
+                    TEXT_MAIN
                 };
                 button::Style {
                     background: Some(Background::Color(bg)),

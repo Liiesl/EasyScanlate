@@ -36,7 +36,7 @@ use easyscanlate_model::{EntryStyle, TextAlign, TextGradientDir};
 use easyscanlate_settings::InpaintBackend;
 
 use crate::event::{StyleField, UiEvent};
-use crate::main_area::overlay::{preview_font, styled_font};
+use crate::main_area::overlay::{font_support, preview_font, styled_font};
 use crate::segmented::{segment_icon, segmented_group, BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
 use crate::scale;
 use crate::state::UiState;
@@ -349,15 +349,72 @@ fn font_field<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
 }
 
 /// The bold/italic toggles next to the alignment segments.
+///
+/// Availability is per selected font (see `font_support`): a toggle is
+/// disabled when the family has no such face. The stored flag is kept, so an
+/// auto-detected Bold/Italic on an unsupported family stays visually selected
+/// (accent on disabled fill, see `segment_icon`) with a tooltip explaining
+/// the missing face. Families with Bold + Italic but no BoldItalic act as an
+/// exclusive switcher — enforced in `handle_bold`/`handle_italic`.
 fn format_align_row<'a>(
     style: &EntryStyle,
     selected: bool,
 ) -> Element<'a, UiEvent> {
+    let support = font_support(style.font_family.as_deref());
+    let family = style.font_family.as_deref().unwrap_or("Default font");
+    let can_bold = selected && support.has_bold;
+    let can_italic = selected && support.has_italic;
+    let bold_btn: Element<'a, UiEvent> = segment_icon(
+        style.bold,
+        Icon::Bold,
+        can_bold.then_some(UiEvent::StyleBold(!style.bold)),
+    );
+    let italic_btn: Element<'a, UiEvent> = segment_icon(
+        style.italic,
+        Icon::Italic,
+        can_italic.then_some(UiEvent::StyleItalic(!style.italic)),
+    );
+    // Only explain missing faces when an entry is selected; with no selection
+    // both toggles are inert anyway. Tooltip content owns its `String` so the
+    // returned element does not borrow locals.
+    let bold_btn: Element<'a, UiEvent> = if selected && !support.has_bold {
+        let msg = if style.bold {
+            format!("Bold not available in {family} — showing detected value")
+        } else {
+            format!("Bold not available in {family}")
+        };
+        tooltip(
+            bold_btn,
+            container(text(msg).size(scale::s(11.0)))
+                .padding(scale::s(6.0))
+                .style(container::rounded_box),
+            tooltip::Position::Top,
+        )
+        .gap(scale::s(4.0))
+        .into()
+    } else {
+        bold_btn
+    };
+    let italic_btn: Element<'a, UiEvent> = if selected && !support.has_italic {
+        let msg = if style.italic {
+            format!("Italic not available in {family} — showing detected value")
+        } else {
+            format!("Italic not available in {family}")
+        };
+        tooltip(
+            italic_btn,
+            container(text(msg).size(scale::s(11.0)))
+                .padding(scale::s(6.0))
+                .style(container::rounded_box),
+            tooltip::Position::Top,
+        )
+        .gap(scale::s(4.0))
+        .into()
+    } else {
+        italic_btn
+    };
     row![
-        container(segmented_group(vec![
-            segment_icon(style.bold, Icon::Bold, selected.then_some(UiEvent::StyleBold(!style.bold))),
-            segment_icon(style.italic, Icon::Italic, selected.then_some(UiEvent::StyleItalic(!style.italic))),
-        ]))
+        container(segmented_group(vec![bold_btn, italic_btn]))
         .width(Length::FillPortion(1)),
         container(segmented_group(vec![
             segment_icon(

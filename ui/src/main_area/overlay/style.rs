@@ -19,30 +19,142 @@ pub(crate) fn family_font(name: &str) -> Font {
     Font::with_name(leaked)
 }
 
+/// Per-family Bold/Italic face availability in the live renderer DB.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FontSupport {
+    pub has_bold: bool,
+    pub has_italic: bool,
+    pub has_bold_italic: bool,
+}
+
+impl FontSupport {
+    fn full() -> Self {
+        Self {
+            has_bold: true,
+            has_italic: true,
+            has_bold_italic: true,
+        }
+    }
+
+    /// True when Bold and Italic exist separately but no combined
+    /// BoldItalic face exists: the two toggles must act as an exclusive
+    /// switcher (enabling one clears the other).
+    pub fn is_exclusive(&self) -> bool {
+        self.has_bold && self.has_italic && !self.has_bold_italic
+    }
+}
+
+/// Bold/Italic availability for the selected family (`None` = default font).
+///
+/// Scans the live renderer font DB like [`nearest_available_weight`]:
+/// weight `>= 600` (Semibold and above) counts as Bold, `Italic`/`Oblique`
+/// counts as Italic. Unknown families (not yet lazily loaded) optimistically
+/// report full support and are *not* cached, so a later `font::load`
+/// (bumped [`Version`]) is picked up. `None` also reports full support.
+pub fn font_support(family: Option<&str>) -> FontSupport {
+    use iced::advanced::graphics::text::{Version, font_system};
+
+    let Some(family) = family else {
+        return FontSupport::full();
+    };
+    static SUPPORT: OnceLock<Mutex<HashMap<(Version, String), FontSupport>>> =
+        OnceLock::new();
+    let cache = SUPPORT.get_or_init(|| Mutex::new(HashMap::new()));
+    let version = font_system()
+        .read()
+        .expect("Read font system")
+        .version();
+    let key = (version, family.to_ascii_lowercase());
+    if let Some(&hit) = cache.lock().expect("support cache poisoned").get(&key) {
+        return hit;
+    }
+    let Some(hit) = scan_font_support(family) else {
+        // Unknown family (not in DB yet): optimistic, no cache.
+        return FontSupport::full();
+    };
+    cache
+        .lock()
+        .expect("support cache poisoned")
+        .insert(key, hit);
+    hit
+}
+
+/// Single scan of the live renderer DB for Bold/Italic faces.
+/// Returns `None` when the family has no faces at all (unknown / not loaded).
+fn scan_font_support(family: &str) -> Option<FontSupport> {
+    use iced::advanced::graphics::text::{cosmic_text, font_system};
+
+    let mut guard = font_system().write().expect("Write font system");
+    let mut found = false;
+    let mut has_bold = false;
+    let mut has_italic = false;
+    let mut has_bold_italic = false;
+    for face in guard.raw().db().faces() {
+        if !face
+            .families
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case(family))
+        {
+            continue;
+        }
+        found = true;
+        let bold = face.weight.0 >= 600;
+        let italic = matches!(
+            face.style,
+            cosmic_text::fontdb::Style::Italic | cosmic_text::fontdb::Style::Oblique
+        );
+        has_bold |= bold;
+        has_italic |= italic;
+        has_bold_italic |= bold && italic;
+    }
+    found.then_some(FontSupport {
+        has_bold,
+        has_italic,
+        has_bold_italic,
+    })
+}
+
 /// Entry's font family + weight/style applied on top of base font, with
 /// CJK-aware degradation: when `text` contains Hangul/Han/Kana and bold or
 /// italic is requested, the weight/style are forced to `Normal` so that
 /// cosmic-text's fallback (Malgun Gothic / Noto) finds the glyph. Otherwise
-/// the requested weight/style are preserved. This prevents `□` tofu and
+/// the requested weight/style are preserved, except when the selected family
+/// lacks the face (see [`font_support`]): the stored [`EntryStyle`] flags are
+/// kept intact (so auto-detected values survive a font switch) but rendering
+/// degrades to an available face instead of silently falling back to another
+/// family. This prevents `□` tofu and
 /// avoids expensive fallback scans for missing `Bold Italic` CJK faces
 /// (issue #24).
-pub(crate) fn styled_font_for_text(font: Font, style: &EntryStyle, text: &str) -> Font {
+pub fn styled_font_for_text(font: Font, style: &EntryStyle, text: &str) -> Font {
     let mut font = style
         .font_family
         .as_deref()
         .map(family_font)
         .unwrap_or(font);
     let cjk = contains_cjk(text);
+    // Availability of the resolved family; generic families report full.
+    let support = match font.family {
+        FontFamily::Name(name) => font_support(Some(name)),
+        _ => FontSupport::full(),
+    };
     // For CJK scripts bold/italic have no dedicated faces in the OS
     // fallback set (the boot task loads only `Normal` CJK files). Degrade
     // to Normal so fallback scoring matches; Latin keeps the requested
-    // weight/style.
-    font.style = if style.italic && !cjk {
+    // weight/style unless the family lacks the face.
+    let mut want_italic = style.italic && !cjk && support.has_italic;
+    let want_bold = style.bold && !cjk && support.has_bold;
+    // Exclusive families (Bold + Italic but no BoldItalic): requesting both
+    // would miss the family gate and fall back to another family. Keep Bold,
+    // the more visible emphasis for manhwa shouting.
+    if support.is_exclusive() && want_bold && want_italic {
+        want_italic = false;
+    }
+    font.style = if want_italic {
         FontStyle::Italic
     } else {
         FontStyle::Normal
     };
-    let want = if style.bold && !cjk {
+    let want = if want_bold {
         FontWeight::Bold
     } else {
         FontWeight::Normal
@@ -170,7 +282,11 @@ fn scan_nearest_weight(
         if face.style != want_style || face.stretch != want_stretch {
             continue;
         }
-        if !face.families.iter().any(|(name, _)| name == family) {
+        if !face
+            .families
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case(family))
+        {
             continue;
         }
         let weight = face.weight.0;
@@ -189,7 +305,7 @@ fn scan_nearest_weight(
 /// Wrapper that preserves the old signature for callers without text
 /// (e.g. preset preview); CJK detection is skipped and the requested
 /// weight/style are applied verbatim.
-pub(crate) fn styled_font(font: Font, style: &EntryStyle) -> Font {
+pub fn styled_font(font: Font, style: &EntryStyle) -> Font {
     styled_font_for_text(font, style, "")
 }
 
@@ -198,7 +314,7 @@ pub(crate) fn styled_font(font: Font, style: &EntryStyle) -> Font {
 /// single-weight bitmap families whose only face is not 400 (e.g.
 /// Minecraft at 500) render their real face instead of silently falling
 /// back to another family.
-pub(crate) fn preview_font(name: &str) -> Font {
+pub fn preview_font(name: &str) -> Font {
     let mut font = family_font(name);
     font.weight = match font.family {
         FontFamily::Name(n) => {

@@ -18,15 +18,14 @@
 - swap telea to harmonic for mixed backend
 - optimize harmonic inpaint backend
 - choose inpaint backend instantly on styling panel
--
-
-## currently in progress
-
-#### modification
-
 - make bold and italic disabled if the font family dont have one
 - 
 
+## currently in progress
+
+#### fixes
+
+- failed inpaint in some case.
 
 ## not yet started
 

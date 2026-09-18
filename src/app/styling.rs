@@ -17,7 +17,25 @@ use super::edit::seed_style_inputs;
 
 pub fn handle_bold(app: &mut App, bold: bool) -> Task<Message> {
     let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
-    app.active_tab_mut().style_working.bold = bold;
+    // Per-font availability: ignore enabling Bold when the selected family
+    // has no Bold face (button is disabled in the panel; this is defense for
+    // stale events). Clearing is always allowed.
+    // Exclusive families (Bold + Italic but no BoldItalic) act as a switcher:
+    // enabling Bold clears Italic in the same single undo event.
+    if bold {
+        let support = easyscanlate_ui::main_area::overlay::font_support(
+            app.active_tab().style_working.font_family.as_deref(),
+        );
+        if !support.has_bold {
+            return Task::none();
+        }
+        app.active_tab_mut().style_working.bold = true;
+        if support.is_exclusive() {
+            app.active_tab_mut().style_working.italic = false;
+        }
+    } else {
+        app.active_tab_mut().style_working.bold = false;
+    }
     let style = app.active_tab().style_working.clone();
     let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
@@ -26,7 +44,22 @@ pub fn handle_bold(app: &mut App, bold: bool) -> Task<Message> {
 
 pub fn handle_italic(app: &mut App, italic: bool) -> Task<Message> {
     let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
-    app.active_tab_mut().style_working.italic = italic;
+    // Mirror of `handle_bold`: ignore enabling Italic without an Italic face;
+    // exclusive families switch off Bold when Italic turns on.
+    if italic {
+        let support = easyscanlate_ui::main_area::overlay::font_support(
+            app.active_tab().style_working.font_family.as_deref(),
+        );
+        if !support.has_italic {
+            return Task::none();
+        }
+        app.active_tab_mut().style_working.italic = true;
+        if support.is_exclusive() {
+            app.active_tab_mut().style_working.bold = false;
+        }
+    } else {
+        app.active_tab_mut().style_working.italic = false;
+    }
     let style = app.active_tab().style_working.clone();
     let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
@@ -35,6 +68,10 @@ pub fn handle_italic(app: &mut App, italic: bool) -> Task<Message> {
 
 pub fn handle_font(app: &mut App, name: String) -> Task<Message> {
     let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    // Intentionally preserves `bold`/`italic`: when the new family lacks the
+    // face, the panel shows the stored (e.g. auto-detected) value as disabled
+    // yet visually selected instead of clearing it. Rendering degrades in
+    // `styled_font_for_text`.
     app.active_tab_mut().style_working.font_family = Some(name.clone());
     let style = app.active_tab().style_working.clone();
     let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
