@@ -52,6 +52,26 @@ pub fn dispatch_inpaint(
         app.tabs[idx].status = "Applied deferred styles (no auto-inpaint).".to_string();
         return Task::none();
     }
+    let (page_ws, page_hs, page_paths, offsets) = {
+        let tab = &app.tabs[idx];
+        let n = tab.images.len();
+        let mut ws = Vec::with_capacity(n);
+        let mut hs = Vec::with_capacity(n);
+        let mut paths = Vec::with_capacity(n);
+        for img in &tab.images {
+            if let Some(m) = tab.project.image(img.image_id) {
+                ws.push(m.width);
+                hs.push(m.height);
+                paths.push(m.path.clone());
+            } else {
+                ws.push(0.0);
+                hs.push(0.0);
+                paths.push(String::new());
+            }
+        }
+        let offsets = super::inpaint::inpaint_global_offsets(&hs);
+        (ws, hs, paths, offsets)
+    };
     for (index, id, result, quad, path) in results {
         let (_style, pred) = match result {
             Ok(v) => v,
@@ -66,6 +86,7 @@ pub fn dispatch_inpaint(
             let ev = tab.project.set_entry_style_with_event(id, applied);
             crate::app::handle_model_event(tab, ev);
         }
+        let _ = path;
         let need = match pred.bg_type {
             easyscanlate_styling::BgType::Solid => None,
             easyscanlate_styling::BgType::Gradient => Some(match effective_model {
@@ -84,16 +105,38 @@ pub fn dispatch_inpaint(
             }),
         };
         if let Some(backend) = need {
-            let job = AutoInpaintJob { index, id, path: path.clone(), quad };
-            match backend {
-                InpaintBackend::Telea => telea_jobs.push(job),
-                InpaintBackend::Harmonic => harmonic_jobs.push(job),
-                InpaintBackend::Lama => lama_jobs.push(job),
-                InpaintBackend::Aot => aot_jobs.push(job),
-                // ShiftMap is manual-only and never arises from
-                // AutoInpaintModel routing above; keep exhaustive with its
-                // weight-class twin.
-                InpaintBackend::ShiftMap => aot_jobs.push(job),
+            let parts = super::inpaint::split_quad_global(quad, index, &page_ws, &page_hs, &offsets);
+            if parts.is_empty() {
+                let [bx0, by0, bx1, by1] = quad.bounds();
+                eprintln!(
+                    "[auto-inpaint::no-intersection] idx={} id={:?} quad_bounds=[{:.1},{:.1},{:.1},{:.1}] -> skipped (no page intersects)",
+                    index, id, bx0, by0, bx1, by1,
+                );
+                continue;
+            }
+            for (page_idx, tquad) in parts {
+                let tpath = page_paths.get(page_idx).cloned().unwrap_or_default();
+                if page_idx != index {
+                    eprintln!(
+                        "[auto-inpaint::split] id={:?} owner_idx={} -> page_idx={} quad_bounds={:?} translated={:?}",
+                        id,
+                        index,
+                        page_idx,
+                        quad.bounds(),
+                        tquad.bounds(),
+                    );
+                }
+                let job = AutoInpaintJob { index: page_idx, id, path: tpath, quad: tquad };
+                match backend {
+                    InpaintBackend::Telea => telea_jobs.push(job),
+                    InpaintBackend::Harmonic => harmonic_jobs.push(job),
+                    InpaintBackend::Lama => lama_jobs.push(job),
+                    InpaintBackend::Aot => aot_jobs.push(job),
+                    // ShiftMap is manual-only and never arises from
+                    // AutoInpaintModel routing above; keep exhaustive with its
+                    // weight-class twin.
+                    InpaintBackend::ShiftMap => aot_jobs.push(job),
+                }
             }
         }
     }

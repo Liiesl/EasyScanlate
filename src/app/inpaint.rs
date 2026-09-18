@@ -114,6 +114,119 @@ fn auto_pad_for(backend: InpaintBackend, radius: i32) -> f32 {
     pool_pad_for(backend, radius)
 }
 
+/// Vertical global offsets for a page stack: `offsets[i]` is the global y of
+/// page `i`'s top edge (`sum(page_hs[..i])`). Same model as export's
+/// `ExportSnapshot::build` so inpaint ownership matches viewer/export.
+#[cfg(feature = "inpaint")]
+pub(crate) fn inpaint_global_offsets(page_hs: &[f32]) -> Vec<f32> {
+    let mut offsets = Vec::with_capacity(page_hs.len());
+    let mut cur = 0.0f32;
+    for h in page_hs {
+        offsets.push(cur);
+        cur += h.max(0.0);
+    }
+    offsets
+}
+
+/// Splits one entry quad owned by `owner_idx` across every page its global
+/// bounds intersect, translating points into each page's local pixel space.
+///
+/// Mirrors `export.rs` intersection: `gy = owner_g0 + vy`, `gx = vx*scale_x`
+/// with `scale_x = page_w/owner_w` when widths differ. Returns
+/// `[(page_idx, translated_quad)]` in page order; empty when the quad
+/// intersects no page (fully outside the chapter, e.g. stale OCR quad).
+/// Stitch logic in `engine-pool::exec` is unchanged — it still supplies
+/// cross-seam context for each resulting per-page job.
+#[cfg(feature = "inpaint")]
+pub(crate) fn split_quad_global(
+    quad: Quad,
+    owner_idx: usize,
+    page_ws: &[f32],
+    page_hs: &[f32],
+    offsets: &[f32],
+) -> Vec<(usize, Quad)> {
+    let n = page_ws.len().min(page_hs.len()).min(offsets.len());
+    if owner_idx >= n {
+        return Vec::new();
+    }
+    let [vx0, vy0, vx1, vy1] = quad.bounds();
+    if !(vx0.is_finite() && vy0.is_finite() && vx1.is_finite() && vy1.is_finite()) {
+        return Vec::new();
+    }
+    if vx1 <= vx0 || vy1 <= vy0 {
+        return vec![(owner_idx, quad)];
+    }
+    let owner_g0 = offsets[owner_idx];
+    let owner_w = page_ws[owner_idx];
+    if owner_w <= 1.0 {
+        return vec![(owner_idx, quad)];
+    }
+    let gy0 = owner_g0 + vy0;
+    let gy1 = owner_g0 + vy1;
+    let mut out = Vec::new();
+    for (i, ((w, h), g0)) in page_ws.iter().zip(page_hs.iter()).zip(offsets.iter()).enumerate() {
+        if i >= n {
+            break;
+        }
+        let page_g0 = *g0;
+        let page_g1 = page_g0 + h.max(0.0);
+        let scale_x = if (owner_w - *w).abs() > 0.5 && *w > 1.0 {
+            *w / owner_w
+        } else {
+            1.0
+        };
+        let gx0 = vx0 * scale_x;
+        let gx1 = vx1 * scale_x;
+        if gx1 <= 0.0 || gx0 >= *w || gy1 <= page_g0 || gy0 >= page_g1 {
+            continue;
+        }
+        let dy = owner_g0 - page_g0;
+        let mut q = quad;
+        for p in &mut q.points {
+            p[0] *= scale_x;
+            p[1] += dy;
+        }
+        out.push((i, q));
+    }
+    out
+}
+
+/// Single-job anchor variant of [`split_quad_global`]: returns the one page
+/// with the largest global `y` overlap (translated into that page's local
+/// space), or `None` when no page intersects. Used by the styling-panel
+/// single-background flow so one selection stays one job while still landing
+/// on the right page for beyond-quad / straddling entries.
+#[cfg(feature = "inpaint")]
+pub(crate) fn anchor_quad_global(
+    quad: Quad,
+    owner_idx: usize,
+    page_ws: &[f32],
+    page_hs: &[f32],
+    offsets: &[f32],
+) -> Option<(usize, Quad)> {
+    let parts = split_quad_global(quad, owner_idx, page_ws, page_hs, offsets);
+    if parts.is_empty() {
+        return None;
+    }
+    if parts.len() == 1 {
+        return Some(parts.into_iter().next().unwrap());
+    }
+    let [_, vy0, _, vy1] = quad.bounds();
+    let owner_g0 = offsets[owner_idx];
+    let gy0 = owner_g0 + vy0;
+    let gy1 = owner_g0 + vy1;
+    let mut best: Option<(usize, Quad, f32)> = None;
+    for (i, q) in parts {
+        let page_g0 = offsets[i];
+        let page_g1 = page_g0 + page_hs[i].max(0.0);
+        let overlap = gy1.min(page_g1) - gy0.max(page_g0);
+        if best.is_none_or(|(_, _, b)| overlap > b) {
+            best = Some((i, q, overlap));
+        }
+    }
+    best.map(|(i, q, _)| (i, q))
+}
+
 /// Commits one auto job's patches to `tabs[idx]`. Returns number of patches applied.
 #[cfg(feature = "inpaint")]
 fn commit_auto_patches(app: &mut App, idx: usize, patches: Vec<AutoPatch>) -> usize {
@@ -320,6 +433,53 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
             app.active_tab_mut().status = "Inpaint Background: selected box is degenerate.".to_string();
             return Task::none();
         }
+        // Single stays 1 job: reanchor beyond-quad / straddling entries to the
+        // max-overlap page (translated into that page's local space). The
+        // stitched exec run can then emit per-page patches from this 1 job.
+        let (index, path, quad) = {
+            let tab = app.active_tab();
+            let n = tab.images.len();
+            let mut page_ws = Vec::with_capacity(n);
+            let mut page_hs = Vec::with_capacity(n);
+            let mut page_paths = Vec::with_capacity(n);
+            for img in &tab.images {
+                if let Some(m) = tab.project.image(img.image_id) {
+                    page_ws.push(m.width);
+                    page_hs.push(m.height);
+                    page_paths.push(m.path.clone());
+                } else {
+                    page_ws.push(0.0);
+                    page_hs.push(0.0);
+                    page_paths.push(String::new());
+                }
+            }
+            let offsets = inpaint_global_offsets(&page_hs);
+            match anchor_quad_global(quad, index, &page_ws, &page_hs, &offsets) {
+                Some((page_idx, tquad)) => {
+                    if page_idx != index {
+                        eprintln!(
+                            "[auto-inpaint::reanchor] id={:?} owner_idx={} -> page_idx={} quad_bounds={:?} translated={:?}",
+                            id,
+                            index,
+                            page_idx,
+                            quad.bounds(),
+                            tquad.bounds(),
+                        );
+                    }
+                    let tpath = page_paths.get(page_idx).cloned().unwrap_or(path);
+                    (page_idx, tpath, tquad)
+                }
+                None => {
+                    eprintln!(
+                        "[auto-inpaint::no-intersection] idx={} id={:?} quad_bounds=[{:.1},{:.1},{:.1},{:.1}] -> skipped (no page intersects)",
+                        index, id, x0, y0, x1, y1,
+                    );
+                    app.active_tab_mut().status =
+                        "Inpaint Background: box is outside all pages.".to_string();
+                    return Task::none();
+                }
+            }
+        };
         let (backend, radius) = easyscanlate_settings::get(|s| (s.inpaint_backend, s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1)));
         // queue gate for background stitch (single inpaint)
         {
@@ -1897,11 +2057,63 @@ pub fn dispatch_auto_solo(app: &mut App, tab_id: crate::app::tab::TabId, effecti
     let mut jobs: Vec<AutoInpaintJob> = Vec::new();
     {
         let tab = &app.tabs[idx];
+        let n = tab.images.len();
+        let mut page_ws = Vec::with_capacity(n);
+        let mut page_hs = Vec::with_capacity(n);
+        let mut page_paths = Vec::with_capacity(n);
+        for img in &tab.images {
+            if let Some(m) = tab.project.image(img.image_id) {
+                page_ws.push(m.width);
+                page_hs.push(m.height);
+                page_paths.push(m.path.clone());
+            } else {
+                page_ws.push(0.0);
+                page_hs.push(0.0);
+                page_paths.push(String::new());
+            }
+        }
+        let offsets = inpaint_global_offsets(&page_hs);
         for (index, image) in tab.images.iter().enumerate() {
             let image_id = image.image_id;
-            let path = tab.project.image(image_id).map(|m| m.path.clone()).unwrap_or_default();
+            let ocr_quad_of = |id: easyscanlate_model::EntryId| {
+                tab.project
+                    .entry_including_deleted(id)
+                    .map(|e| e.quad)
+            };
             for entry in tab.project.visible_for(image_id).collect::<Vec<_>>() {
-                jobs.push(AutoInpaintJob { index, id: entry.id, path: path.clone(), quad: tab.project.view_quad(entry) });
+                let vquad = tab.project.view_quad(entry);
+                let oquad = ocr_quad_of(entry.id).unwrap_or(vquad);
+                let parts = split_quad_global(vquad, index, &page_ws, &page_hs, &offsets);
+                if parts.is_empty() {
+                    let [bx0, by0, bx1, by1] = vquad.bounds();
+                    let meta_h = page_hs.get(index).copied().unwrap_or(0.0);
+                    eprintln!(
+                        "[auto-inpaint::no-intersection] idx={} id={:?} quad_bounds=[{:.1},{:.1},{:.1},{:.1}] meta_h={:.1} ocr_bounds={:?} -> skipped (no page intersects)",
+                        index,
+                        entry.id,
+                        bx0,
+                        by0,
+                        bx1,
+                        by1,
+                        meta_h,
+                        oquad.bounds(),
+                    );
+                    continue;
+                }
+                for (page_idx, tquad) in parts {
+                    let path = page_paths.get(page_idx).cloned().unwrap_or_default();
+                    if page_idx != index {
+                        eprintln!(
+                            "[auto-inpaint::split] id={:?} owner_idx={} -> page_idx={} quad_bounds={:?} translated={:?}",
+                            entry.id,
+                            index,
+                            page_idx,
+                            vquad.bounds(),
+                            tquad.bounds(),
+                        );
+                    }
+                    jobs.push(AutoInpaintJob { index: page_idx, id: entry.id, path, quad: tquad });
+                }
             }
         }
     }
@@ -1958,4 +2170,80 @@ pub(crate) fn start_background_stitch(app: &mut App, tab_id: crate::app::tab::Ta
         },
         move |res| Message::Tab(tid, crate::app::TabMessage::ManualMultiInpaintFinished(res)),
     )
+}
+
+#[cfg(all(test, feature = "inpaint"))]
+mod split_tests {
+    use super::{anchor_quad_global, inpaint_global_offsets, split_quad_global};
+    use easyscanlate_model::Quad;
+
+    fn quad_xyxy(x0: f32, y0: f32, x1: f32, y1: f32) -> Quad {
+        Quad {
+            points: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+        }
+    }
+
+    #[test]
+    fn fully_inside_stays_on_owner() {
+        let ws = vec![800.0, 800.0];
+        let hs = vec![2600.0, 2600.0];
+        let offsets = inpaint_global_offsets(&hs);
+        let parts = split_quad_global(quad_xyxy(111.0, 216.0, 259.0, 316.0), 1, &ws, &hs, &offsets);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].0, 1);
+        assert_eq!(parts[0].1.bounds(), [111.0, 216.0, 259.0, 316.0]);
+    }
+
+    #[test]
+    fn fully_outside_owner_reassigns_to_neighbor() {
+        // idx=7 case: quad y=2816-2915 with h=2600 really lives at 216-315 in page 1.
+        let ws = vec![800.0, 800.0];
+        let hs = vec![2600.0, 2600.0];
+        let offsets = inpaint_global_offsets(&hs);
+        let parts = split_quad_global(quad_xyxy(111.6, 2816.7, 258.5, 2915.3), 0, &ws, &hs, &offsets);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].0, 1);
+        let [x0, y0, x1, y1] = parts[0].1.bounds();
+        assert!((y0 - 216.7).abs() < 1.0, "y0={y0}");
+        assert!((y1 - 315.3).abs() < 1.0, "y1={y1}");
+        assert!((x0 - 111.6).abs() < 0.01);
+        assert!((x1 - 258.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn straddling_quad_splits_into_two_pages() {
+        let ws = vec![800.0, 800.0];
+        let hs = vec![2600.0, 2600.0];
+        let offsets = inpaint_global_offsets(&hs);
+        let parts = split_quad_global(quad_xyxy(100.0, 2550.0, 200.0, 2650.0), 0, &ws, &hs, &offsets);
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].0, 0);
+        assert_eq!(parts[1].0, 1);
+        assert_eq!(parts[0].1.bounds(), [100.0, 2550.0, 200.0, 2650.0]);
+        assert_eq!(parts[1].1.bounds(), [100.0, -50.0, 200.0, 50.0]);
+    }
+
+    #[test]
+    fn outside_all_pages_returns_empty() {
+        let ws = vec![800.0];
+        let hs = vec![2600.0];
+        let offsets = inpaint_global_offsets(&hs);
+        let parts = split_quad_global(quad_xyxy(10.0, 5000.0, 50.0, 5100.0), 0, &ws, &hs, &offsets);
+        assert!(parts.is_empty());
+    }
+
+    #[test]
+    fn anchor_keeps_single_job_on_max_overlap_page() {
+        let ws = vec![800.0, 800.0];
+        let hs = vec![2600.0, 2600.0];
+        let offsets = inpaint_global_offsets(&hs);
+        // Fully-outside owner reanchors to neighbor as 1 job.
+        let anchored = anchor_quad_global(quad_xyxy(111.6, 2816.7, 258.5, 2915.3), 0, &ws, &hs, &offsets).unwrap();
+        assert_eq!(anchored.0, 1);
+        // Straddle anchors to the page holding more of the quad (page 0: 50px vs page 1: 50px tie -> first max wins).
+        let anchored = anchor_quad_global(quad_xyxy(100.0, 2550.0, 200.0, 2650.0), 0, &ws, &hs, &offsets).unwrap();
+        assert_eq!(anchored.0, 0);
+        // Outside everything anchors to nothing.
+        assert!(anchor_quad_global(quad_xyxy(10.0, 5000.0, 50.0, 5100.0), 0, &ws, &hs, &offsets).is_none());
+    }
 }

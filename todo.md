@@ -11,7 +11,7 @@
 #### fixes
 
 - bitmap font did not render properly
--
+- failed inpaint in some case
 
 #### modification
 
@@ -25,7 +25,7 @@
 
 #### fixes
 
-- failed inpaint in some case.
+- 
 
 ## not yet started
 

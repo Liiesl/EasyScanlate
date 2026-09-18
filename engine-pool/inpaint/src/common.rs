@@ -140,7 +140,7 @@ pub(crate) fn bbox_crops(patch: RgbaImage, origin: [f32; 2], quads: &[Quad]) -> 
     let max_x = ox + patch.width() as i64;
     let max_y = oy + patch.height() as i64;
     let mut crops = Vec::new();
-    for quad in quads {
+    for (qi, quad) in quads.iter().enumerate() {
         let [bx0, by0, bx1, by1] = quad.bounds();
         let [ax0, ay0, ax1, ay1] = [
             origin[0],
@@ -154,6 +154,26 @@ pub(crate) fn bbox_crops(patch: RgbaImage, origin: [f32; 2], quads: &[Quad]) -> 
         let iy0 = by0.max(ay0);
         let iy1 = by1.min(ay1);
         if ix0 >= ix1 || iy0 >= iy1 {
+            eprintln!(
+                "[inpaint::bbox-skip] quad#{} pts={:?} bounds=[{:.1},{:.1},{:.1},{:.1}] area=[{:.1},{:.1},{:.1},{:.1}] inter=[{:.1},{:.1},{:.1},{:.1}] origin={:?} patch={}x{} -> skipped (no overlap)",
+                qi,
+                quad.points,
+                bx0,
+                by0,
+                bx1,
+                by1,
+                ax0,
+                ay0,
+                ax1,
+                ay1,
+                ix0,
+                iy0,
+                ix1,
+                iy1,
+                origin,
+                patch.width(),
+                patch.height(),
+            );
             continue;
         }
         let cx0 = (ix0.floor() as i64).clamp(ox, max_x - 1);
@@ -199,7 +219,7 @@ pub(crate) fn diffusion_inpaint_crop(
     let exp_origin = [ex as f32, ey as f32];
     let mask = build_mask_expanded(exp_w, exp_h, quads, rect, exp_origin, image.width(), image.height());
     eprintln!(
-        "[inpaint::{log_tag}] rect={:?} quads={} pad={} image={}x{} exp=[{},{},{},{}] mask_sum={}",
+        "[inpaint::{log_tag}] rect={:?} quads={} pad={} image={}x{} exp=[{},{},{},{}] exp_origin={:?} mask_sum={} quad_bounds={:?} quad_pts={:?}",
         rect,
         quads.len(),
         pad,
@@ -209,7 +229,10 @@ pub(crate) fn diffusion_inpaint_crop(
         ey,
         exp_w,
         exp_h,
-        mask.pixels().map(|p| p[0] as u32).sum::<u32>()
+        exp_origin,
+        mask.pixels().map(|p| p[0] as u32).sum::<u32>(),
+        quads.iter().map(|q| q.bounds()).collect::<Vec<_>>(),
+        quads.iter().map(|q| q.points).collect::<Vec<_>>(),
     );
     let crop: RgbaImage = image::imageops::crop_imm(image, ex, ey, exp_w, exp_h).to_image();
     let rgb_crop = image::DynamicImage::ImageRgba8(crop.clone()).to_rgb8();
@@ -230,7 +253,13 @@ pub(crate) fn diffusion_inpaint_crop(
         return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32], None)]);
     }
     let out = bbox_crops(filled, exp_origin, quads);
-    eprintln!("[inpaint::{log_tag}] quads={} -> {} bbox crops", quads.len(), out.len());
+    eprintln!(
+        "[inpaint::{log_tag}] quads={} -> {} bbox crops bounds={:?} origin={:?}",
+        quads.len(),
+        out.len(),
+        out.iter().map(|(_, b, _)| *b).collect::<Vec<_>>(),
+        exp_origin,
+    );
     Ok(out)
 }
 
@@ -273,7 +302,7 @@ pub fn harmonic_inpaint_crop(
     let exp_origin = [ex as f32, ey as f32];
     let mask = build_mask_expanded(exp_w, exp_h, quads, rect, exp_origin, image.width(), image.height());
     eprintln!(
-        "[inpaint::harmonic] rect={:?} quads={} pad={} image={}x{} exp=[{},{},{},{}] mask_sum={}",
+        "[inpaint::harmonic] rect={:?} quads={} pad={} image={}x{} exp=[{},{},{},{}] exp_origin={:?} mask_sum={} quad_bounds={:?} quad_pts={:?}",
         rect,
         quads.len(),
         pad,
@@ -283,7 +312,10 @@ pub fn harmonic_inpaint_crop(
         ey,
         exp_w,
         exp_h,
-        mask.pixels().map(|p| p[0] as u32).sum::<u32>()
+        exp_origin,
+        mask.pixels().map(|p| p[0] as u32).sum::<u32>(),
+        quads.iter().map(|q| q.bounds()).collect::<Vec<_>>(),
+        quads.iter().map(|q| q.points).collect::<Vec<_>>(),
     );
     let crop: RgbaImage = image::imageops::crop_imm(image, ex, ey, exp_w, exp_h).to_image();
     let filled = crate::harmonic::harmonic_inpaint_rgba(&crop, &mask);
@@ -293,7 +325,13 @@ pub fn harmonic_inpaint_crop(
         return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32], None)]);
     }
     let out = bbox_crops(filled, exp_origin, quads);
-    eprintln!("[inpaint::harmonic] quads={} -> {} bbox crops", quads.len(), out.len());
+    eprintln!(
+        "[inpaint::harmonic] quads={} -> {} bbox crops bounds={:?} origin={:?}",
+        quads.len(),
+        out.len(),
+        out.iter().map(|(_, b, _)| *b).collect::<Vec<_>>(),
+        exp_origin,
+    );
     Ok(out)
 }
 

@@ -37,7 +37,7 @@ pub fn telea_inpaint_crop(
 
     let mask = build_mask_expanded(exp_w, exp_h, quads, rect, exp_origin, image.width(), image.height());
     eprintln!(
-        "[inpaint::telea] rect={:?} quads={} radius={} pad={} image={}x{} exp=[{},{},{},{}] mask_sum={}",
+        "[inpaint::telea] rect={:?} quads={} radius={} pad={} image={}x{} exp=[{},{},{},{}] exp_origin={:?} mask_sum={} quad_bounds={:?} quad_pts={:?}",
         rect,
         quads.len(),
         radius,
@@ -48,7 +48,10 @@ pub fn telea_inpaint_crop(
         ey,
         exp_w,
         exp_h,
-        mask.pixels().map(|p| p[0] as u32).sum::<u32>()
+        exp_origin,
+        mask.pixels().map(|p| p[0] as u32).sum::<u32>(),
+        quads.iter().map(|q| q.bounds()).collect::<Vec<_>>(),
+        quads.iter().map(|q| q.points).collect::<Vec<_>>(),
     );
     let mut crop = image::imageops::crop_imm(image, ex, ey, exp_w, exp_h).to_image();
     crop.telea_inpaint(&mask, radius)
@@ -71,7 +74,13 @@ pub fn telea_inpaint_crop(
         return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32], None)]);
     }
     let out = bbox_crops(crop, exp_origin, quads);
-    eprintln!("[inpaint::telea] quads={} -> {} bbox crops", quads.len(), out.len());
+    eprintln!(
+        "[inpaint::telea] quads={} -> {} bbox crops bounds={:?} origin={:?}",
+        quads.len(),
+        out.len(),
+        out.iter().map(|(_, b, _)| *b).collect::<Vec<_>>(),
+        exp_origin,
+    );
     Ok(out)
 }
 

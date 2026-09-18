@@ -64,11 +64,74 @@ pub fn run_auto_inpaint_job(
     let img_h_f = img_h as f32;
     let min_y = job.quad.points.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min);
     let max_y = job.quad.points.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max);
+    let min_x = job.quad.points.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min);
+    let max_x = job.quad.points.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max);
     let need_top = if min_y < pad && prev_path.is_some() { pad - min_y } else { 0.0 };
     let need_bottom = if max_y > img_h_f - pad && next_path.is_some() { max_y + pad - img_h_f } else { 0.0 };
+    eprintln!(
+        "[auto-inpaint::job] idx={} id={:?} path={} quad_pts={:?} quad_bounds=[{:.1},{:.1},{:.1},{:.1}] rect={:?} img={}x{} pad={} min/max_x=[{:.1},{:.1}] min/max_y=[{:.1},{:.1}] need_top={:.1} need_bottom={:.1} prev={} next={}",
+        job.index,
+        job.id,
+        job.path,
+        job.quad.points,
+        x0,
+        y0,
+        x1,
+        y1,
+        rect,
+        img_w,
+        img_h,
+        pad,
+        min_x,
+        max_x,
+        min_y,
+        max_y,
+        need_top,
+        need_bottom,
+        prev_path.is_some(),
+        next_path.is_some(),
+    );
     if need_top <= 0.0 && need_bottom <= 0.0 {
+        {
+            let ix0 = x0.max(0.0);
+            let iy0 = y0.max(0.0);
+            let ix1 = x1.min(img_w as f32);
+            let iy1 = y1.min(img_h_f);
+            if ix1 <= ix0 || iy1 <= iy0 {
+                eprintln!(
+                    "[auto-inpaint::quad-outside-image] idx={} id={:?} quad_bounds=[{:.1},{:.1},{:.1},{:.1}] img={}x{} inter=[{:.1},{:.1},{:.1},{:.1}] -> direct run will miss (expected global-split reassignment upstream)",
+                    job.index, job.id, x0, y0, x1, y1, img_w, img_h, ix0, iy0, ix1, iy1,
+                );
+            }
+        }
+        eprintln!(
+            "[auto-inpaint::direct] idx={} id={:?} path={} rect={:?} img={}x{} (no stitch)",
+            job.index, job.id, job.path, rect, img_w, img_h,
+        );
         let v = engine.run_blocking(&job.path, rect, &[job.quad])?;
+        eprintln!(
+            "[auto-inpaint::direct] idx={} id={:?} -> {} patch(es) bounds={:?}",
+            job.index,
+            job.id,
+            v.len(),
+            v.iter().map(|(_, b, _)| *b).collect::<Vec<_>>(),
+        );
         return Ok(v.into_iter().map(|(img, b, q)| (job.index, img, b, q)).collect());
+    }
+    {
+        // Explicit outside-image diagnosis: the global-split in the app layer
+        // should already have reassigned fully-outside quads, so reaching here
+        // with an inverted expanded crop means a stale job slipped through.
+        let ix0 = x0.max(0.0);
+        let iy0 = y0.max(0.0);
+        let ix1 = x1.min(img_w as f32);
+        let iy1 = y1.min(img_h_f);
+        if ix1 <= ix0 || iy1 <= iy0 {
+            eprintln!(
+                "[auto-inpaint::quad-outside-image] idx={} id={:?} quad_bounds=[{:.1},{:.1},{:.1},{:.1}] img={}x{} inter=[{:.1},{:.1},{:.1},{:.1}] -> stitch attempted but quad misses owning image (expected global-split reassignment upstream)",
+                job.index, job.id, x0, y0, x1, y1, img_w, img_h, ix0, iy0, ix1, iy1,
+            );
+        }
     }
     let exp_x0 = (rect[0] - pad).max(0.0);
     let exp_y0 = (rect[1] - pad).max(0.0);
@@ -161,8 +224,37 @@ pub fn run_auto_inpaint_job(
                 }
             }
     raws.sort_by_key(|r| r.idx);
+    eprintln!(
+        "[auto-inpaint::raws] idx={} id={:?} raws={} main_idx={} exp=[{:.1},{:.1},{:.1},{:.1}] exp_w={} exp_h_main={} details={:?}",
+        job.index,
+        job.id,
+        raws.len(),
+        main_idx,
+        exp_x0,
+        exp_y0,
+        exp_x1,
+        exp_y1,
+        exp_w,
+        exp_h_main,
+        raws
+            .iter()
+            .map(|r| (r.idx, r.img_w, r.img_h, r.orig, r.quads.len()))
+            .collect::<Vec<_>>(),
+    );
     if raws.is_empty() || raws.len() == 1 {
+        eprintln!(
+            "[auto-inpaint::raws-fallback] idx={} id={:?} raws={} -> direct run_blocking",
+            job.index,
+            job.id,
+            raws.len(),
+        );
         let v = engine.run_blocking(&job.path, rect, &[job.quad])?;
+        eprintln!(
+            "[auto-inpaint::raws-fallback] idx={} id={:?} -> {} patch(es)",
+            job.index,
+            job.id,
+            v.len(),
+        );
         return Ok(v.into_iter().map(|(img, b, q)| (job.index, img, b, q)).collect());
     }
 
@@ -284,8 +376,37 @@ pub fn run_auto_inpaint_job(
             quad_piece.push(p.idx);
         }
     }
+    eprintln!(
+        "[auto-inpaint::pieces] idx={} id={:?} pieces={} details={:?}",
+        job.index,
+        job.id,
+        pieces.len(),
+        pieces
+            .iter()
+            .map(|p| (p.idx, p.orig, p.x_src, p.y_src, p.w_src, p.h_src, p.off_y, p.quads.len()))
+            .collect::<Vec<_>>(),
+    );
+    eprintln!(
+        "[auto-inpaint::quads-stitched] idx={} id={:?} n={} pts={:?} bounds={:?} piece={:?}",
+        job.index,
+        job.id,
+        quads_stitched.len(),
+        quads_stitched.iter().map(|q| q.points).collect::<Vec<_>>(),
+        quads_stitched.iter().map(|q| q.bounds()).collect::<Vec<_>>(),
+        quad_piece,
+    );
     if quads_stitched.is_empty() {
+        eprintln!(
+            "[auto-inpaint::empty-stitched] idx={} id={:?} no quads on pieces -> direct run_blocking rect={:?}",
+            job.index, job.id, rect,
+        );
         let v = engine.run_blocking(&job.path, rect, &[job.quad])?;
+        eprintln!(
+            "[auto-inpaint::empty-stitched] idx={} id={:?} -> {} patch(es)",
+            job.index,
+            job.id,
+            v.len(),
+        );
         return Ok(v.into_iter().map(|(img, b, q)| (job.index, img, b, q)).collect());
     }
     let main_piece = pieces.iter().find(|p| p.idx == main_idx).unwrap();
@@ -295,54 +416,101 @@ pub fn run_auto_inpaint_job(
         rect[2],
         rect[3],
     ];
+    eprintln!(
+        "[auto-inpaint::stitched-run] idx={} id={:?} main_piece idx={} x_src={} y_src={} off_y={} rect={:?} -> rect_stitched={:?} stitched=512x512",
+        job.index, job.id, main_piece.idx, main_piece.x_src, main_piece.y_src, main_piece.off_y, rect, rect_stitched,
+    );
     let patches = engine.run_on_image(&stitched, rect_stitched, &quads_stitched)?;
+    eprintln!(
+        "[auto-inpaint::stitched-result] idx={} id={:?} -> {} raw patch(es) bounds={:?}",
+        job.index,
+        job.id,
+        patches.len(),
+        patches.iter().map(|(_, b, _)| *b).collect::<Vec<_>>(),
+    );
     let mut per_image: PatchMap = std::collections::HashMap::new();
     for (idx, (patch_img, bounds_stitched, quad_opt)) in patches.into_iter().enumerate() {
         let [bx, by, bw, bh] = bounds_stitched;
-        let p: &Piece = if idx < quad_piece.len() {
-            let wanted = quad_piece[idx];
-            pieces.iter().find(|x| x.idx == wanted).unwrap()
-        } else {
-            let cy = by + bh / 2.0;
-            let mut found: Option<&Piece> = None;
-            for pp in &pieces {
-                let py0 = pp.off_y as f32; let py1 = py0 + pp.h_src as f32;
-                if cy >= py0 && cy < py1 { found = Some(pp); break; }
+        let patch_y1 = by + bh;
+        // Geometric divide: one stitched bbox may span the seam, so intersect
+        // it with every piece's stitched interval and emit one per-page patch
+        // per intersected piece. Single jobs can therefore yield multi-target
+        // patches while stitch assembly above stays unchanged.
+        let mut emitted_any = false;
+        for p in &pieces {
+            let py0 = p.off_y as f32;
+            let py1 = py0 + p.h_src as f32;
+            let oy0 = by.max(py0);
+            let oy1 = patch_y1.min(py1);
+            if oy1 <= oy0 {
+                continue;
             }
-            match found {
-                Some(v) => v,
-                None => continue,
+            let sy0 = (oy0 - by).round().max(0.0) as u32;
+            let mut sh = (oy1 - oy0).round().max(0.0) as u32;
+            if sh == 0 || sy0 >= patch_img.height() {
+                continue;
             }
-        };
-        let local_y = by - p.off_y as f32;
-        let orig_x = bx + p.x_src as f32;
-        let orig_y = local_y + p.y_src as f32;
-        let (img_w_f, img_h_f) = {
-            let r = raws.iter().find(|r| r.idx == p.idx).unwrap();
-            (r.img_w as f32, r.img_h as f32)
-        };
-        let clip_x0 = orig_x.max(0.0);
-        let clip_y0 = orig_y.max(0.0);
-        let clip_x1 = (orig_x + bw).min(img_w_f);
-        let clip_y1 = (orig_y + bh).min(img_h_f);
-        if clip_x1 <= clip_x0 || clip_y1 <= clip_y0 { continue; }
-        let new_w = clip_x1 - clip_x0;
-        let new_h = clip_y1 - clip_y0;
-        let crop_x = (clip_x0 - orig_x).round().max(0.0) as u32;
-        let crop_y = (clip_y0 - orig_y).round().max(0.0) as u32;
-        let clipped_patch = if crop_x != 0 || crop_y != 0 || new_w as u32 != patch_img.width() || new_h as u32 != patch_img.height() {
-            let cw = (new_w as u32).min(patch_img.width().saturating_sub(crop_x));
-            let ch = (new_h as u32).min(patch_img.height().saturating_sub(crop_y));
-            if cw == 0 || ch == 0 { continue; }
-            image::imageops::crop_imm(&patch_img, crop_x, crop_y, cw, ch).to_image()
-        } else { patch_img };
-        let bounds = [clip_x0, clip_y0, new_w, new_h];
-        let orig_quad = quad_opt.map(|q| {
-            let mut nq = q;
-            for pt in &mut nq.points { pt[0] += p.x_src as f32; pt[1] += p.y_src as f32 - p.off_y as f32; }
-            nq
-        });
-        per_image.entry(p.idx).or_default().push((clipped_patch, bounds, orig_quad));
+            sh = sh.min(patch_img.height().saturating_sub(sy0));
+            if sh == 0 {
+                continue;
+            }
+            let slice_img = if sy0 != 0 || sh != patch_img.height() || patch_img.width() == 0 {
+                image::imageops::crop_imm(&patch_img, 0, sy0, patch_img.width(), sh).to_image()
+            } else {
+                patch_img.clone()
+            };
+            let orig_x = bx + p.x_src as f32;
+            let orig_y = (oy0 - p.off_y as f32) + p.y_src as f32;
+            let (img_w_f, img_h_f) = {
+                let r = raws.iter().find(|r| r.idx == p.idx).unwrap();
+                (r.img_w as f32, r.img_h as f32)
+            };
+            let clip_x0 = orig_x.max(0.0);
+            let clip_y0 = orig_y.max(0.0);
+            let clip_x1 = (orig_x + bw).min(img_w_f);
+            let clip_y1 = (orig_y + sh as f32).min(img_h_f);
+            eprintln!(
+                "[auto-inpaint::map] idx={} id={:?} patch#{} stitched_bounds=[{:.1},{:.1},{:.1},{:.1}] slice=[{:.1},{:.1}] -> piece idx={} x_src={} y_src={} off_y={} orig=[{:.1},{:.1},{:.1},{:.1}] clip=[{:.1},{:.1},{:.1},{:.1}] img={:.0}x{:.0}",
+                job.index, job.id, idx, bx, by, bw, bh, oy0, oy1, p.idx, p.x_src, p.y_src, p.off_y, orig_x, orig_y, bw, sh as f32, clip_x0, clip_y0, clip_x1, clip_y1, img_w_f, img_h_f,
+            );
+            if clip_x1 <= clip_x0 || clip_y1 <= clip_y0 {
+                eprintln!(
+                    "[auto-inpaint::map-skip] idx={} id={:?} patch#{} piece idx={} clipped empty -> skipped",
+                    job.index, job.id, idx, p.idx,
+                );
+                continue;
+            }
+            let new_w = clip_x1 - clip_x0;
+            let new_h = clip_y1 - clip_y0;
+            let crop_x = (clip_x0 - orig_x).round().max(0.0) as u32;
+            let crop_y = (clip_y0 - orig_y).round().max(0.0) as u32;
+            let clipped_patch = if crop_x != 0 || crop_y != 0 || new_w as u32 != slice_img.width() || new_h as u32 != slice_img.height() {
+                let cw = (new_w as u32).min(slice_img.width().saturating_sub(crop_x));
+                let ch = (new_h as u32).min(slice_img.height().saturating_sub(crop_y));
+                if cw == 0 || ch == 0 {
+                    eprintln!(
+                        "[auto-inpaint::map-skip] idx={} id={:?} patch#{} piece idx={} crop empty cw={} ch={} (crop_x={} crop_y={} patch={}x{}) -> skipped",
+                        job.index, job.id, idx, p.idx, cw, ch, crop_x, crop_y, slice_img.width(), slice_img.height(),
+                    );
+                    continue;
+                }
+                image::imageops::crop_imm(&slice_img, crop_x, crop_y, cw, ch).to_image()
+            } else { slice_img };
+            let bounds = [clip_x0, clip_y0, new_w, new_h];
+            let orig_quad = quad_opt.map(|q| {
+                let mut nq = q;
+                for pt in &mut nq.points { pt[0] += p.x_src as f32; pt[1] += p.y_src as f32 - p.off_y as f32; }
+                nq
+            });
+            per_image.entry(p.idx).or_default().push((clipped_patch, bounds, orig_quad));
+            emitted_any = true;
+        }
+        if !emitted_any {
+            eprintln!(
+                "[auto-inpaint::map-skip] idx={} id={:?} patch#{} stitched_bounds=[{:.1},{:.1},{:.1},{:.1}] no piece intersected -> skipped",
+                job.index, job.id, idx, bx, by, bw, bh,
+            );
+        }
     }
     let mut out: AutoInpaintPatches = Vec::new();
     for (target_idx, vec) in per_image {
@@ -351,8 +519,27 @@ pub fn run_auto_inpaint_job(
         }
     }
     out.sort_by_key(|(idx, _, _, _)| *idx);
+    eprintln!(
+        "[auto-inpaint::done] idx={} id={:?} stitched patches={} targets={:?} bounds={:?}",
+        job.index,
+        job.id,
+        out.len(),
+        out.iter().map(|(ti, _, _, _)| *ti).collect::<Vec<_>>(),
+        out.iter().map(|(_, _, b, _)| *b).collect::<Vec<_>>(),
+    );
     if out.is_empty() {
+        eprintln!(
+            "[auto-inpaint::fallback] idx={} id={:?} stitched empty -> direct run_blocking path={} rect={:?}",
+            job.index, job.id, job.path, rect,
+        );
         let v = engine.run_blocking(&job.path, rect, &[job.quad])?;
+        eprintln!(
+            "[auto-inpaint::fallback] idx={} id={:?} -> {} patch(es) bounds={:?}",
+            job.index,
+            job.id,
+            v.len(),
+            v.iter().map(|(_, b, _)| *b).collect::<Vec<_>>(),
+        );
         return Ok(v.into_iter().map(|(img, b, q)| (job.index, img, b, q)).collect());
     }
     Ok(out)
