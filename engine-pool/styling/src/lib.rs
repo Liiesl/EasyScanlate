@@ -329,7 +329,7 @@ impl StylePrediction {
     /// Maps the prediction onto an [`EntryStyle`] the app can store.
     ///
     /// - `bold`/`italic` map to the matching flags.
-    /// - A stroke turns on a default stroke width and uses the effect color.
+    /// - A stroke turns on a default stroke width of 5.0 and uses the effect color.
     /// - The text color is applied with full alpha.
     /// - A solid background's color is applied to `bg_color`. An artwork
     ///   background becomes fully transparent (alpha 0) so the original
@@ -349,7 +349,7 @@ impl StylePrediction {
                 self.effect_color[2],
                 255,
             ];
-            style.stroke_width = style.stroke_width.max(2.0);
+            style.stroke_width = style.stroke_width.max(5.0);
         }
         match self.bg_type {
             BgType::Solid => {

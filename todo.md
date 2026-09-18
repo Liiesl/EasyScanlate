@@ -22,13 +22,9 @@
 - choose inpaint backend instantly on styling panel
 - make bold and italic disabled if the font family dont have one
 - use word+glyph wrap for cosmic text editor on main area
-- 
+- change default stroke to be 5
 
 ## currently in progress
-
-#### modification
-
-- change default stroke to be 5
 
 #### fixes
 
