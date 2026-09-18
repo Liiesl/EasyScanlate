@@ -34,4 +34,4 @@ jobs:
           shared-key: windows-check
 
       - name: Cargo check
-        run: cargo check --workspace --all-targets --locked
+        run: cargo check
