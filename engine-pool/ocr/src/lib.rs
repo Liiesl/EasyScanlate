@@ -257,45 +257,80 @@ pub fn config_from_strings(text_score_str: &str, max_side_str: &str) -> RapidOcr
 
 /// Tuning for merging nearby OCR text boxes into one entry.
 ///
-/// Every margin is a ratio of the box's height, so the grouping is invariant
+/// Horizontal-only (vertical text out of scope): group formation uses
+/// direction-gated proximity plus alignment and spacing-rhythm checks, so one
+/// bubble's lines merge (left / center / right / justified / tapered) while
+/// neighbouring bubbles, `*` footnotes and side-by-side lobes stay split.
+///
+/// All distance thresholds are ratios of line height, so grouping is invariant
 /// under image resolution changes: doubling the pixel dimensions doubles the
 /// allowed gaps and the same lines still merge.
 #[derive(Debug, Clone, Copy)]
 pub struct MergeConfig {
-    /// Side margin added to each box, as a ratio of its height.
+    /// Max horizontal gap for side-by-side neighbours, as a ratio of `min_h`.
     pub expand_x: f32,
-    /// Top/bottom margin added to each box, as a ratio of its height.
+    /// Max vertical gap for stacked neighbours, as a ratio of `min_h`.
     pub expand_y: f32,
+    /// Min horizontal overlap (`overlap_x / min_w`) for stacked lines.
+    pub min_x_overlap: f32,
+    /// Min vertical overlap (`overlap_y / min_h`) for side-by-side lines.
+    pub min_y_overlap: f32,
+    /// Center-alignment tolerance (`|cx_a - cx_b| / min_h`) that still counts
+    /// as the same column (tapered / circular bubbles with varying widths).
+    pub center_tol: f32,
+    /// Adaptive pitch factor: a stacked gap up to `pitch_factor * median_gap`
+    /// of the group still merges (loose but regular leading stays together).
+    pub pitch_factor: f32,
+    /// Outlier cut: a stacked gap beyond `variance_cut * median_gap` splits
+    /// (tight bubble + distant footnote / next bubble).
+    pub variance_cut: f32,
+    /// Max allowed `max_h / min_h` for a merge (font-size consistency).
+    pub max_height_ratio: f32,
+    /// When true, any line starting with `*` never merges (footnote stays its
+    /// own entry).
+    pub footnote_veto: bool,
 }
 
 impl Default for MergeConfig {
     fn default() -> Self {
         Self {
-            expand_x: 0.5,
-            expand_y: 0.5,
+            expand_x: 0.4,
+            expand_y: 0.35,
+            min_x_overlap: 0.25,
+            min_y_overlap: 0.5,
+            center_tol: 0.4,
+            pitch_factor: 1.2,
+            variance_cut: 1.8,
+            max_height_ratio: 1.8,
+            footnote_veto: true,
         }
     }
 }
 
 impl MergeConfig {
     /// Builds a merge config from a single threshold ratio (0.0..2.0) applied
-    /// to both axes. Clamped to avoid degenerate or huge expansions.
+    /// to both gap axes. The structural gates (overlap, alignment, font-size,
+    /// footnote veto) stay at their defaults so the knob keeps its meaning
+    /// (max gap distance) while the grouping stays split-safe.
     pub fn from_threshold(threshold: f32) -> Self {
         let t = if threshold.is_finite() {
             threshold.clamp(0.0, 2.0)
         } else {
-            0.5
+            0.4
         };
         Self {
             expand_x: t,
             expand_y: t,
+            ..Self::default()
         }
     }
 
-    /// Parses threshold from a settings string, falling back to 0.5.
+    /// Parses threshold from a settings string, falling back to default gaps.
     pub fn from_threshold_str(s: &str) -> Self {
-        let t = s.trim().parse::<f32>().unwrap_or(0.5);
-        Self::from_threshold(t)
+        match s.trim().parse::<f32>() {
+            Ok(t) => Self::from_threshold(t),
+            Err(_) => Self::default(),
+        }
     }
 }
 
@@ -1123,6 +1158,8 @@ fn points_bounds(points: &[[f32; 2]; 4]) -> [f32; 4] {
 }
 
 /// One cluster of merged lines: the union AABB plus the member lines.
+/// Member bounds are cached alongside the lines so group-level rhythm and
+/// alignment checks don't recompute them on every candidate.
 #[derive(Default)]
 struct Group {
     min_x: f32,
@@ -1130,26 +1167,400 @@ struct Group {
     max_x: f32,
     max_y: f32,
     lines: Vec<OcrLine>,
+    bounds: Vec<[f32; 4]>,
 }
 
 impl Group {
-    fn intersect(&self, other: [f32; 4]) -> bool {
-        !(self.max_x < other[0]
-            || self.min_x > other[2]
-            || self.max_y < other[1]
-            || self.min_y > other[3])
+    fn push(&mut self, line: OcrLine, b: [f32; 4]) {
+        if self.lines.is_empty() {
+            self.min_x = b[0];
+            self.min_y = b[1];
+            self.max_x = b[2];
+            self.max_y = b[3];
+        } else {
+            self.min_x = self.min_x.min(b[0]);
+            self.min_y = self.min_y.min(b[1]);
+            self.max_x = self.max_x.max(b[2]);
+            self.max_y = self.max_y.max(b[3]);
+        }
+        self.lines.push(line);
+        self.bounds.push(b);
+    }
+
+    fn absorb(&mut self, other: Group) {
+        if other.lines.is_empty() {
+            return;
+        }
+        if self.lines.is_empty() {
+            self.min_x = other.min_x;
+            self.min_y = other.min_y;
+            self.max_x = other.max_x;
+            self.max_y = other.max_y;
+        } else {
+            self.min_x = self.min_x.min(other.min_x);
+            self.min_y = self.min_y.min(other.min_y);
+            self.max_x = self.max_x.max(other.max_x);
+            self.max_y = self.max_y.max(other.max_y);
+        }
+        self.lines.extend(other.lines);
+        self.bounds.extend(other.bounds);
+    }
+
+    fn mean_h(&self) -> f32 {
+        if self.bounds.is_empty() {
+            return 1.0;
+        }
+        let sum: f32 = self.bounds.iter().map(|b| (b[3] - b[1]).max(1.0)).sum();
+        (sum / self.bounds.len() as f32).max(1.0)
+    }
+
+    /// Median edge-to-edge vertical gap between consecutive members when
+    /// sorted by mid-y. `None` for groups with fewer than 2 rows.
+    fn median_y_gap(&self) -> Option<f32> {
+        stacked_gaps(&self.bounds).and_then(median)
+    }
+
+    /// Median edge-to-edge horizontal gap between consecutive members when
+    /// sorted by mid-x. `None` for groups with fewer than 2 columns.
+    fn median_x_gap(&self) -> Option<f32> {
+        side_gaps(&self.bounds).and_then(median)
+    }
+
+    fn median_edge(&self, pick: fn([f32; 4]) -> (f32, f32)) -> (f32, f32) {
+        if self.bounds.is_empty() {
+            return (0.0, 0.0);
+        }
+        let mut xs: Vec<f32> = self.bounds.iter().map(|b| pick(*b).0).collect();
+        let mut cs: Vec<f32> = self.bounds.iter().map(|b| pick(*b).1).collect();
+        xs.sort_by(|a, b| a.total_cmp(b));
+        cs.sort_by(|a, b| a.total_cmp(b));
+        (xs[xs.len() / 2], cs[cs.len() / 2])
     }
 }
 
-/// Groups nearby OCR lines into one merged line per cluster, in the canvas's
-/// coordinate space.
+/// Edge-to-edge gaps for a vertical stack (sorted by mid-y). Only consecutive
+/// pairs with positive x-overlap count as stack rows; side-by-side pairs are
+/// skipped so a double-lobe row doesn't pollute the pitch estimate.
+fn stacked_gaps(bounds: &[[f32; 4]]) -> Option<Vec<f32>> {
+    if bounds.len() < 2 {
+        return None;
+    }
+    let mut order: Vec<usize> = (0..bounds.len()).collect();
+    order.sort_by(|&a, &b| {
+        let ma = (bounds[a][1] + bounds[a][3]) / 2.0;
+        let mb = (bounds[b][1] + bounds[b][3]) / 2.0;
+        ma.total_cmp(&mb)
+    });
+    let mut gaps = Vec::new();
+    for w in order.windows(2) {
+        let (a, b) = (bounds[w[0]], bounds[w[1]]);
+        let overlap_x = (a[2].min(b[2]) - a[0].max(b[0])).max(0.0);
+        if overlap_x <= 0.0 {
+            continue;
+        }
+        gaps.push((b[1] - a[3]).max(0.0));
+    }
+    if gaps.is_empty() { None } else { Some(gaps) }
+}
+
+/// Edge-to-edge gaps for a horizontal row (sorted by mid-x). Only consecutive
+/// pairs with positive y-overlap count; stacked rows are skipped.
+fn side_gaps(bounds: &[[f32; 4]]) -> Option<Vec<f32>> {
+    if bounds.len() < 2 {
+        return None;
+    }
+    let mut order: Vec<usize> = (0..bounds.len()).collect();
+    order.sort_by(|&a, &b| {
+        let ma = (bounds[a][0] + bounds[a][2]) / 2.0;
+        let mb = (bounds[b][0] + bounds[b][2]) / 2.0;
+        ma.total_cmp(&mb)
+    });
+    let mut gaps = Vec::new();
+    for w in order.windows(2) {
+        let (a, b) = (bounds[w[0]], bounds[w[1]]);
+        let overlap_y = (a[3].min(b[3]) - a[1].max(b[1])).max(0.0);
+        if overlap_y <= 0.0 {
+            continue;
+        }
+        gaps.push((b[0] - a[2]).max(0.0));
+    }
+    if gaps.is_empty() { None } else { Some(gaps) }
+}
+
+fn median(mut xs: Vec<f32>) -> Option<f32> {
+    if xs.is_empty() {
+        return None;
+    }
+    xs.sort_by(|a, b| a.total_cmp(b));
+    Some(xs[xs.len() / 2])
+}
+
+/// Footnote / annotation line (`*개학 1주차`, `* 베스트하우스`, …). These stay
+/// their own entry even when tucked against a bubble.
+fn is_footnote(text: &str) -> bool {
+    let t = text.trim_start();
+    t.starts_with('*')
+        || t.starts_with('＊')
+        || t.starts_with("﹡")
+        || t.starts_with('※')
+}
+
+/// Pairwise gate: direction-gated proximity + overlap + font-size + footnote.
 ///
-/// Two boxes count as nearby when their AABBs intersect after each side is
-/// expanded by a configurable fraction of its own height. Overlaps, small
-/// gaps and near-distance boxes therefore all merge, and merging is
-/// transitive: A near B and B near C also pulls A and C together. Merged
-/// text is joined with single spaces in reading order (top-to-bottom, then
-/// left-to-right); the merged score is the mean of its lines.
+/// - Stacked (`gap_y > 0`, x overlaps): needs `gap_y <= expand_y * min_h`
+///   plus either enough x-overlap, full containment (short last line inside a
+///   longer line's span: left / right / center aligned), or tight center
+///   alignment (tapered circular bubble with varying widths).
+/// - Side-by-side (`gap_x > 0`, y overlaps): needs `gap_x <= expand_x * min_h`
+///   plus enough y-overlap. No taper allowance, so double-lobe necks split.
+/// - Diagonal (`gap_x > 0 && gap_y > 0`): never merges — kills corner-touch
+///   merges of neighbouring bubbles / outside SFX.
+/// - Overlapping (both gaps zero): merges (duplicate / touching detections).
+fn pairwise_should_merge(
+    a: [f32; 4],
+    b: [f32; 4],
+    a_text: &str,
+    b_text: &str,
+    cfg: MergeConfig,
+) -> bool {
+    let ha = (a[3] - a[1]).max(1.0);
+    let hb = (b[3] - b[1]).max(1.0);
+    let wa = (a[2] - a[0]).max(1.0);
+    let wb = (b[2] - b[0]).max(1.0);
+    let min_h = ha.min(hb);
+
+    if cfg.footnote_veto && (is_footnote(a_text) || is_footnote(b_text)) {
+        return false;
+    }
+    if ha.max(hb) / min_h > cfg.max_height_ratio {
+        return false;
+    }
+
+    let gap_x = (a[0].max(b[0]) - a[2].min(b[2])).max(0.0);
+    let gap_y = (a[1].max(b[1]) - a[3].min(b[3])).max(0.0);
+    let overlap_x = (a[2].min(b[2]) - a[0].max(b[0])).max(0.0);
+    let overlap_y = (a[3].min(b[3]) - a[1].max(b[1])).max(0.0);
+
+    if gap_x <= 0.0 && gap_y <= 0.0 {
+        return true;
+    }
+    // Diagonal: touches at most at a corner after expansion. Separate bubbles
+    // and outside text (`정신 차리자`) live here.
+    if gap_x > 0.0 && gap_y > 0.0 {
+        return false;
+    }
+    if gap_y > 0.0 {
+        if gap_y > cfg.expand_y * min_h {
+            // Adaptive pitch allowance is handled at group level (needs the
+            // group's median); pairwise stays strict so far bubbles never
+            // seed a merge. The group pass re-allows loose-but-regular stacks.
+            return false;
+        }
+        let min_w = wa.min(wb);
+        let x_overlap_ratio = overlap_x / min_w;
+        if x_overlap_ratio >= cfg.min_x_overlap {
+            return true;
+        }
+        // Short line fully inside the long line's span: valid for left, right
+        // and center aligned endings with wildly different lengths.
+        let contained = (b[0] >= a[0] - 1.0 && b[2] <= a[2] + 1.0)
+            || (a[0] >= b[0] - 1.0 && a[2] <= b[2] + 1.0);
+        if contained {
+            return true;
+        }
+        // Tapered circular bubble: widths differ but centers line up.
+        let cx_a = (a[0] + a[2]) / 2.0;
+        let cx_b = (b[0] + b[2]) / 2.0;
+        if (cx_a - cx_b).abs() <= cfg.center_tol * min_h {
+            return true;
+        }
+        return false;
+    }
+    // Side-by-side.
+    if gap_x > cfg.expand_x * min_h {
+        return false;
+    }
+    let y_overlap_ratio = overlap_y / min_h;
+    y_overlap_ratio >= cfg.min_y_overlap
+}
+
+/// Group-level validation on top of the pairwise gate.
+///
+/// - Stacked candidate: the insertion gap must not be an outlier vs the
+///   group's median pitch (`variance_cut`), unless it still fits the generous
+///   `pitch_factor` loose-leading allowance; and the candidate must share the
+///   group's column (near the median left, center, or right edge — covers
+///   left / right / center / justified modes).
+/// - Side-by-side candidate: the insertion x-gap must not be an outlier vs
+///   the group's median x-gap, and vertical centers must line up (same row).
+/// - Empty-area guard: merging must not inflate the union box with mostly
+///   empty space (crossing a bubble wall).
+fn group_accepts(group: &Group, b: [f32; 4], cfg: MergeConfig) -> bool {
+    if group.bounds.is_empty() {
+        return true;
+    }
+    let hb = (b[3] - b[1]).max(1.0);
+    let mean_h = group.mean_h().max(1.0);
+    let min_h = hb.min(mean_h);
+    let col_tol = (cfg.expand_x * min_h).max(cfg.center_tol * min_h * 1.5);
+
+    // Nearest member decides the direction (stacked vs side-by-side).
+    let mut best: Option<([f32; 4], f32, f32)> = None;
+    for &a in &group.bounds {
+        let gap_x = (a[0].max(b[0]) - a[2].min(b[2])).max(0.0);
+        let gap_y = (a[1].max(b[1]) - a[3].min(b[3])).max(0.0);
+        let d = gap_x + gap_y;
+        if best.map_or(true, |(_, _, bd)| d < bd) {
+            best = Some((a, gap_x, gap_y));
+        }
+    }
+    let Some((near, gap_x, gap_y)) = best else {
+        return true;
+    };
+
+    if gap_x <= 0.0 && gap_y <= 0.0 {
+        return true;
+    }
+    if gap_x > 0.0 && gap_y > 0.0 {
+        return false;
+    }
+
+    if gap_y > 0.0 {
+        // Pitch rhythm: loose-but-regular stacks (large median) accept large
+        // gaps; tight stacks reject a distant footnote / next bubble.
+        if let Some(med) = group.median_y_gap() {
+            let insertion = insertion_y_gap(&group.bounds, b);
+            let allowed = (med * cfg.pitch_factor).max(cfg.expand_y * min_h);
+            if insertion > allowed && insertion > med * cfg.variance_cut {
+                return false;
+            }
+        }
+        // Column check: near median left, center, or right (any mode passes).
+        let (med_l, med_lc) = group.median_edge(|q| (q[0], (q[0] + q[2]) / 2.0));
+        let (med_r, _) = group.median_edge(|q| (q[2], (q[0] + q[2]) / 2.0));
+        let cx = (b[0] + b[2]) / 2.0;
+        let col_ok = (b[0] - med_l).abs() <= col_tol
+            || (cx - med_lc).abs() <= col_tol
+            || (b[2] - med_r).abs() <= col_tol
+            || (group.bounds.len() < 2 && {
+                // Two-line group: fall back to pairwise column vs nearest.
+                let a = near;
+                let contained = (b[0] >= a[0] - 1.0 && b[2] <= a[2] + 1.0)
+                    || (a[0] >= b[0] - 1.0 && a[2] <= b[2] + 1.0);
+                contained || (cx - (a[0] + a[2]) / 2.0).abs() <= col_tol
+            });
+        if !col_ok {
+            return false;
+        }
+    } else {
+        if let Some(med) = group.median_x_gap() {
+            let insertion = insertion_x_gap(&group.bounds, b);
+            let allowed = (med * cfg.pitch_factor).max(cfg.expand_x * min_h);
+            if insertion > allowed && insertion > med * cfg.variance_cut {
+                return false;
+            }
+        }
+        // Same-row check: vertical centers line up.
+        let mut cys: Vec<f32> = group
+            .bounds
+            .iter()
+            .map(|q| (q[1] + q[3]) / 2.0)
+            .collect();
+        cys.sort_by(|a, c| a.total_cmp(c));
+        let med_cy = cys[cys.len() / 2];
+        let cy = (b[1] + b[3]) / 2.0;
+        if (cy - med_cy).abs() > col_tol.max(min_h * 0.75) {
+            return false;
+        }
+    }
+
+    // Empty-area guard: the union must stay mostly text.
+    let mut nx0 = group.min_x.min(b[0]);
+    let mut ny0 = group.min_y.min(b[1]);
+    let mut nx1 = group.max_x.max(b[2]);
+    let mut ny1 = group.max_y.max(b[3]);
+    // Recompute from members + candidate so a stale union never inflates.
+    nx0 = nx0.min(group.bounds.iter().map(|q| q[0]).fold(f32::INFINITY, f32::min));
+    ny0 = ny0.min(group.bounds.iter().map(|q| q[1]).fold(f32::INFINITY, f32::min));
+    nx1 = nx1.max(group.bounds.iter().map(|q| q[2]).fold(f32::NEG_INFINITY, f32::max));
+    ny1 = ny1.max(group.bounds.iter().map(|q| q[3]).fold(f32::NEG_INFINITY, f32::max));
+    let union_area = ((nx1 - nx0).max(0.0)) * ((ny1 - ny0).max(0.0));
+    if union_area > 0.0 {
+        let text_area: f32 = group
+            .bounds
+            .iter()
+            .map(|q| ((q[2] - q[0]).max(0.0)) * ((q[3] - q[1]).max(0.0)))
+            .sum::<f32>()
+            + ((b[2] - b[0]).max(0.0)) * ((b[3] - b[1]).max(0.0));
+        if text_area > 0.0 && union_area / text_area > 4.0 && group.bounds.len() >= 2 {
+            return false;
+        }
+    }
+    true
+}
+
+/// Edge gap from `b` to its nearest vertically-overlapping neighbour in the
+/// group (insertion pitch). Falls back to plain nearest gap when nothing
+/// stacks above/below.
+fn insertion_y_gap(bounds: &[[f32; 4]], b: [f32; 4]) -> f32 {
+    let mut best: Option<f32> = None;
+    for &a in bounds {
+        let overlap_x = (a[2].min(b[2]) - a[0].max(b[0])).max(0.0);
+        if overlap_x <= 0.0 {
+            continue;
+        }
+        let gap = if b[1] >= a[3] {
+            b[1] - a[3]
+        } else if a[1] >= b[3] {
+            a[1] - b[3]
+        } else {
+            0.0
+        };
+        best = Some(best.map_or(gap, |v: f32| v.min(gap)));
+    }
+    best.unwrap_or_else(|| {
+        bounds
+            .iter()
+            .map(|&a| (a[1].max(b[1]) - a[3].min(b[3])).max(0.0))
+            .fold(f32::INFINITY, f32::min)
+    })
+}
+
+fn insertion_x_gap(bounds: &[[f32; 4]], b: [f32; 4]) -> f32 {
+    let mut best: Option<f32> = None;
+    for &a in bounds {
+        let overlap_y = (a[3].min(b[3]) - a[1].max(b[1])).max(0.0);
+        if overlap_y <= 0.0 {
+            continue;
+        }
+        let gap = if b[0] >= a[2] {
+            b[0] - a[2]
+        } else if a[0] >= b[2] {
+            a[0] - b[2]
+        } else {
+            0.0
+        };
+        best = Some(best.map_or(gap, |v: f32| v.min(gap)));
+    }
+    best.unwrap_or_else(|| {
+        bounds
+            .iter()
+            .map(|&a| (a[0].max(b[0]) - a[2].min(b[2])).max(0.0))
+            .fold(f32::INFINITY, f32::min)
+    })
+}
+
+/// Groups nearby OCR lines into one merged line per cluster, in the canvas's
+/// coordinate space (horizontal text only).
+///
+/// A line joins a group only when it passes the pairwise gate against a member
+/// ([`pairwise_should_merge`]: directional gap + overlap + font-size + footnote
+/// veto) *and* the group-level check ([`group_accepts`]: spacing rhythm,
+/// column/row alignment for left / center / right / justified modes, and an
+/// empty-area guard). Merging is therefore not blindly transitive: a bridge
+/// line cannot pull two distant bubbles together. Merged text is joined with
+/// single spaces in reading order (top-to-bottom, then left-to-right); the
+/// merged score is the mean of its lines.
 pub fn merge(lines: Vec<OcrLine>, cfg: MergeConfig) -> Vec<OcrLine> {
     merge_lines(lines, cfg)
 }
@@ -1166,48 +1577,77 @@ fn merge_lines(lines: Vec<OcrLine>, cfg: MergeConfig) -> Vec<OcrLine> {
 
     let mut groups: Vec<Group> = Vec::new();
     for line in lines {
-        let [lx0, ly0, lx1, ly1] = box_bounds(&line.bbox);
-        let height = (ly1 - ly0).max(1.0);
-        let expanded = [
-            lx0 - cfg.expand_x * height,
-            ly0 - cfg.expand_y * height,
-            lx1 + cfg.expand_x * height,
-            ly1 + cfg.expand_y * height,
-        ];
+        let lb = box_bounds(&line.bbox);
 
-        let mut hits: Vec<usize> = groups
-            .iter()
-            .enumerate()
-            .filter(|(_, group)| group.intersect(expanded))
-            .map(|(index, _)| index)
-            .collect();
+        // Candidate groups: pairwise gate passes against at least one member
+        // and the group-level rhythm/alignment check accepts the insertion.
+        // The loose-leading allowance lives here: even when the raw pairwise
+        // gap exceeds `expand_y * min_h`, a regular stack (large median pitch)
+        // can still accept the line via `group_accepts`.
+        let mut hits: Vec<usize> = Vec::new();
+        for (index, group) in groups.iter().enumerate() {
+            let pairwise = group.bounds.iter().zip(group.lines.iter()).any(|(mb, ml)| {
+                if pairwise_should_merge(*mb, lb, &ml.text, &line.text, cfg) {
+                    return true;
+                }
+                // Loose-leading second chance: same column / row and gap fits
+                // the group's own rhythm even though it exceeds the fixed cap.
+                rhythm_second_chance(group, *mb, &ml.text, lb, &line.text, cfg)
+            });
+            if pairwise && group_accepts(group, lb, cfg) {
+                hits.push(index);
+            }
+        }
 
         if hits.is_empty() {
-            groups.push(Group {
-                min_x: lx0,
-                min_y: ly0,
-                max_x: lx1,
-                max_y: ly1,
-                lines: vec![line],
-            });
+            let mut group = Group::default();
+            group.push(line, lb);
+            groups.push(group);
         } else {
             let first = hits.remove(0);
             let mut target = std::mem::take(&mut groups[first]);
+            // Merge other hit groups only when the combined group still
+            // validates (prevents a bridge line from fusing two bubbles).
+            // Descending order + take (no remove) keeps indices stable; the
+            // `first` placeholder stays until restored below.
             hits.sort_by(|a, b| b.cmp(a));
             for index in hits {
-                let merged = groups.remove(index);
-                target.min_x = target.min_x.min(merged.min_x);
-                target.min_y = target.min_y.min(merged.min_y);
-                target.max_x = target.max_x.max(merged.max_x);
-                target.max_y = target.max_y.max(merged.max_y);
-                target.lines.extend(merged.lines);
+                if index == first {
+                    continue;
+                }
+                let merged = std::mem::take(&mut groups[index]);
+                if groups_combine_ok(&target, &merged, cfg) {
+                    target.absorb(merged);
+                } else {
+                    // Keep the rejected group: restore it so no entry is lost;
+                    // its members stay a separate bubble.
+                    groups[index] = merged;
+                }
             }
-            target.min_x = target.min_x.min(lx0);
-            target.min_y = target.min_y.min(ly0);
-            target.max_x = target.max_x.max(lx1);
-            target.max_y = target.max_y.max(ly1);
-            target.lines.push(line);
-            groups[first] = target;
+            // Drop emptied placeholders fused into the target (keep `first`).
+            let mut kept: Vec<Group> = Vec::with_capacity(groups.len());
+            for (i, g) in groups.into_iter().enumerate() {
+                if i != first && g.lines.is_empty() {
+                    continue;
+                }
+                kept.push(g);
+            }
+            // `first` may have shifted if empties before it were dropped.
+            // Locate the placeholder (the only empty group left) robustly:
+            // `target` is uncommitted, so every group in `kept` is non-empty
+            // except possibly the `first` slot. Re-find by emptiness.
+            if let Some(pos) = kept.iter().position(|g| g.lines.is_empty()) {
+                kept[pos] = {
+                    target.push(line, lb);
+                    target
+                };
+            } else {
+                // No empty slot (should not happen): push as its own group to
+                // avoid losing the line.
+                target.push(line, lb);
+                kept.push(target);
+            }
+            groups = kept;
         }
     }
 
@@ -1242,6 +1682,101 @@ fn merge_lines(lines: Vec<OcrLine>, cfg: MergeConfig) -> Vec<OcrLine> {
             }
         })
         .collect()
+}
+
+/// Second chance for loose-but-regular stacks: the fixed pairwise gap cap
+/// fails, but the line shares the member's column (stacked) or row
+/// (side-by-side) and its gap fits the member's group rhythm.
+fn rhythm_second_chance(
+    group: &Group,
+    mb: [f32; 4],
+    m_text: &str,
+    lb: [f32; 4],
+    l_text: &str,
+    cfg: MergeConfig,
+) -> bool {
+    if cfg.footnote_veto && (is_footnote(m_text) || is_footnote(l_text)) {
+        return false;
+    }
+    let ha = (mb[3] - mb[1]).max(1.0);
+    let hb = (lb[3] - lb[1]).max(1.0);
+    if ha.max(hb) / ha.min(hb) > cfg.max_height_ratio {
+        return false;
+    }
+    let gap_x = (mb[0].max(lb[0]) - mb[2].min(lb[2])).max(0.0);
+    let gap_y = (mb[1].max(lb[1]) - mb[3].min(lb[3])).max(0.0);
+    if gap_x > 0.0 && gap_y > 0.0 {
+        return false;
+    }
+    let min_h = ha.min(hb);
+    if gap_y > 0.0 {
+        let overlap_x = (mb[2].min(lb[2]) - mb[0].max(lb[0])).max(0.0);
+        let min_w = ((mb[2] - mb[0]).max(1.0)).min((lb[2] - lb[0]).max(1.0));
+        let col_ok = overlap_x / min_w >= cfg.min_x_overlap
+            || (lb[0] >= mb[0] - 1.0 && lb[2] <= mb[2] + 1.0)
+            || (mb[0] >= lb[0] - 1.0 && mb[2] <= lb[2] + 1.0)
+            || (((mb[0] + mb[2]) / 2.0 - (lb[0] + lb[2]) / 2.0).abs()
+                <= cfg.center_tol * min_h);
+        if !col_ok {
+            return false;
+        }
+        let med = group.median_y_gap().unwrap_or(cfg.expand_y * min_h);
+        let allowed = (med * cfg.pitch_factor).max(cfg.expand_y * min_h);
+        return gap_y <= allowed;
+    }
+    if gap_x > 0.0 {
+        let overlap_y = (mb[3].min(lb[3]) - mb[1].max(lb[1])).max(0.0);
+        if overlap_y / min_h < cfg.min_y_overlap {
+            return false;
+        }
+        let med = group.median_x_gap().unwrap_or(cfg.expand_x * min_h);
+        let allowed = (med * cfg.pitch_factor).max(cfg.expand_x * min_h);
+        return gap_x <= allowed;
+    }
+    true
+}
+
+/// Whether two hit groups may fuse through the current line: every member pair
+/// across the groups must be plausibly co-bubbled (no diagonal / footnote /
+/// font clash), and the combined pitch must stay regular.
+fn groups_combine_ok(a: &Group, b: &Group, cfg: MergeConfig) -> bool {
+    for (i, ab) in a.bounds.iter().enumerate() {
+        for (j, bb) in b.bounds.iter().enumerate() {
+            let at = &a.lines[i].text;
+            let bt = &b.lines[j].text;
+            if cfg.footnote_veto && (is_footnote(at) || is_footnote(bt)) {
+                return false;
+            }
+            let ha = (ab[3] - ab[1]).max(1.0);
+            let hb = (bb[3] - bb[1]).max(1.0);
+            if ha.max(hb) / ha.min(hb) > cfg.max_height_ratio {
+                return false;
+            }
+            let gap_x = (ab[0].max(bb[0]) - ab[2].min(bb[2])).max(0.0);
+            let gap_y = (ab[1].max(bb[1]) - ab[3].min(bb[3])).max(0.0);
+            if gap_x > 0.0 && gap_y > 0.0 {
+                return false;
+            }
+        }
+    }
+    // Combined vertical pitch must not contain an outlier jump.
+    let mut all: Vec<[f32; 4]> = Vec::with_capacity(a.bounds.len() + b.bounds.len());
+    all.extend_from_slice(&a.bounds);
+    all.extend_from_slice(&b.bounds);
+    if let Some(gaps) = stacked_gaps(&all) {
+        if let Some(med) = median(gaps.clone()) {
+            if med > 0.0 {
+                for g in gaps {
+                    if g > med * cfg.variance_cut
+                        && g > cfg.expand_y * a.mean_h().min(b.mean_h())
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -1362,6 +1897,7 @@ mod tests {
         let cfg = MergeConfig {
             expand_x: 0.0,
             expand_y: 0.0,
+            ..MergeConfig::default()
         };
         let touching = vec![
             line("a", 10.0, 10.0, 60.0, 30.0, 0.9),
@@ -1374,6 +1910,103 @@ mod tests {
             line("b", 65.0, 10.0, 120.0, 30.0, 0.7),
         ];
         assert_eq!(to_entries_with(gapped, cfg).len(), 2);
+    }
+
+    #[test]
+    fn footnote_lines_never_merge() {
+        let lines = vec![
+            line("main bubble", 10.0, 10.0, 110.0, 30.0, 0.9),
+            line("*footnote", 30.0, 36.0, 90.0, 48.0, 0.9),
+        ];
+        assert_eq!(to_entries(lines).len(), 2);
+    }
+
+    #[test]
+    fn different_font_sizes_stay_separate() {
+        // Main line h=20, small annotation h=10 (ratio 2.0 > 1.8).
+        let lines = vec![
+            line("main", 10.0, 10.0, 110.0, 30.0, 0.9),
+            line("small", 30.0, 34.0, 90.0, 44.0, 0.9),
+        ];
+        assert_eq!(to_entries(lines).len(), 2);
+    }
+
+    #[test]
+    fn diagonal_neighbours_stay_separate() {
+        // Outside text diagonally offset: no x- and no y-overlap.
+        let lines = vec![
+            line("outside", 0.0, 0.0, 40.0, 20.0, 0.9),
+            line("bubble", 50.0, 26.0, 150.0, 46.0, 0.9),
+        ];
+        assert_eq!(to_entries(lines).len(), 2);
+    }
+
+    #[test]
+    fn left_aligned_stack_merges() {
+        let lines = vec![
+            line("first long line", 10.0, 10.0, 110.0, 30.0, 0.9),
+            line("second", 10.0, 36.0, 70.0, 56.0, 0.9),
+            line("third", 10.0, 62.0, 60.0, 82.0, 0.9),
+        ];
+        let entries = to_entries(lines);
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn right_aligned_stack_merges() {
+        let lines = vec![
+            line("first", 50.0, 10.0, 110.0, 30.0, 0.9),
+            line("second long", 30.0, 36.0, 110.0, 56.0, 0.9),
+            line("third", 60.0, 62.0, 110.0, 82.0, 0.9),
+        ];
+        assert_eq!(to_entries(lines).len(), 1);
+    }
+
+    #[test]
+    fn center_tapered_stack_merges_despite_width_variance() {
+        // Circular bubble: wide middle, narrow centered ends.
+        let lines = vec![
+            line("short", 40.0, 10.0, 80.0, 30.0, 0.9),
+            line("a much longer middle line", 10.0, 36.0, 110.0, 56.0, 0.9),
+            line("end", 45.0, 62.0, 75.0, 82.0, 0.9),
+        ];
+        assert_eq!(to_entries(lines).len(), 1);
+    }
+
+    #[test]
+    fn side_by_side_lobes_stay_separate() {
+        // Two lobes: same row, wide empty neck between them.
+        let lines = vec![
+            line("left lobe text", 10.0, 10.0, 80.0, 30.0, 0.9),
+            line("right lobe text", 120.0, 10.0, 190.0, 30.0, 0.9),
+        ];
+        assert_eq!(to_entries(lines).len(), 2);
+    }
+
+    #[test]
+    fn tight_stack_rejects_distant_next_bubble() {
+        // Tight leading (gaps 6) + far next bubble (gap 40): outlier splits.
+        let lines = vec![
+            line("a", 10.0, 10.0, 110.0, 30.0, 0.9),
+            line("b", 10.0, 36.0, 110.0, 56.0, 0.9),
+            line("c", 10.0, 62.0, 110.0, 82.0, 0.9),
+            line("next bubble", 10.0, 122.0, 110.0, 142.0, 0.9),
+        ];
+        let entries = to_entries(lines);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].text, "a b c");
+        assert_eq!(entries[1].text, "next bubble");
+    }
+
+    #[test]
+    fn loose_regular_stack_stays_together() {
+        // Loose but regular leading (gaps ~25): all one bubble.
+        let lines = vec![
+            line("a", 10.0, 10.0, 110.0, 30.0, 0.9),
+            line("b", 10.0, 55.0, 110.0, 75.0, 0.9),
+            line("c", 10.0, 100.0, 110.0, 120.0, 0.9),
+        ];
+        assert_eq!(to_entries(lines).len(), 1);
     }
 
     #[test]
