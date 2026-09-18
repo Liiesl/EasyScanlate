@@ -371,7 +371,7 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
                     s.ocr_min_text_height
                         .trim()
                         .parse::<f32>()
-                        .unwrap_or(40.0),
+                        .unwrap_or(10.0),
                     s.ocr_max_text_height
                         .trim()
                         .parse::<f32>()

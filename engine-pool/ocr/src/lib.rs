@@ -320,7 +320,7 @@ pub fn filter_by_bbox_height(lines: Vec<OcrLine>, min_height: f32, max_height: f
 
 /// Parses bbox height thresholds from settings strings, falling back to
 /// permissive defaults (0 and 10000) for ocr crate.
-/// App side defaults (0.7/40/100) are in `easyscanlate_settings`.
+/// App side defaults (0.7/10/100) are in `easyscanlate_settings`.
 pub fn parse_bbox_heights(min_str: &str, max_str: &str) -> (f32, f32) {
     let min_h = min_str.trim().parse::<f32>().unwrap_or(0.0);
     let max_h = max_str.trim().parse::<f32>().unwrap_or(10000.0);

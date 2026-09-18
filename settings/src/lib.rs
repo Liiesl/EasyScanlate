@@ -47,7 +47,7 @@ fn default_ocr_text_score() -> String {
 }
 
 fn default_ocr_min_text_height() -> String {
-    "40".to_string()
+    "10".to_string()
 }
 
 fn default_ocr_max_text_height() -> String {
@@ -94,7 +94,6 @@ pub enum InpaintBackend {
     /// The pure-Rust Telea algorithm from the `inpaint` crate: fast, no
     /// model, no download. Recommended for thin/medium patches with
     /// semi-art bg. Works instantly on CPU.
-    #[default]
     Telea,
     /// The LaMa ONNX model: better on complex backgrounds, needs the
     /// `lama-manga.onnx` file next to the executable.
@@ -109,6 +108,7 @@ pub enum InpaintBackend {
     /// Harmonic (Laplace) diffusion, pure Rust/CPU: fast (same speed as
     /// Telea), no model. Recommended for thin/medium patches with
     /// gradient/non-textured bg.
+    #[default]
     Harmonic,
 }
 
@@ -384,7 +384,7 @@ pub struct Settings {
     #[serde(default = "default_ocr_text_score")]
     pub ocr_text_score: String,
     /// Minimum Text bbox height filter (px). Lines with bbox height < this are
-    /// dropped. Raw string; parsed (fallback 40).
+    /// dropped. Raw string; parsed (fallback 10).
     #[serde(default = "default_ocr_min_text_height")]
     pub ocr_min_text_height: String,
     /// Maximum Text bbox height filter (px). Lines with bbox height > this are
@@ -402,7 +402,7 @@ pub struct Settings {
     /// When enabled, the translation model picker only lists free models.
     #[serde(default)]
     pub free_models_only: bool,
-    /// Which inpainting implementation is used: the pure-Rust Telea
+    /// Which inpainting implementation is used: the pure-Rust Harmonic
     /// algorithm (default) or the LaMa ONNX model.
     #[serde(default)]
     pub inpaint_backend: InpaintBackend,
@@ -882,13 +882,13 @@ mod tests {
         assert!(back.auto_style_detect);
         assert_eq!(back.ocr_workers, "2");
         assert_eq!(back.ocr_text_score, "0.7");
-        assert_eq!(back.ocr_min_text_height, "40");
+        assert_eq!(back.ocr_min_text_height, "10");
         assert_eq!(back.ocr_max_text_height, "100");
         assert_eq!(back.ocr_max_side_len, "2000");
         assert_eq!(back.ocr_merge_threshold, "0.5");
         assert!(!back.free_models_only);
         assert!(back.hidden_models.is_empty());
-        assert_eq!(back.inpaint_backend, InpaintBackend::Telea);
+        assert_eq!(back.inpaint_backend, InpaintBackend::Harmonic);
         assert_eq!(back.inpaint_radius, "5");
         assert_eq!(back.aurora_color, "#3b0600");
         assert_eq!(back.aurora_blob_count, 2);

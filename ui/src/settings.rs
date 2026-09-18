@@ -992,7 +992,7 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
             }
             if matches_any(query_ref, &["ocr", "height", "bbox", "minimum", "min"]) || query_ref.trim().is_empty() {
                 col.push(field_row("Min text height",
-                    text_input("40", &min_bbox_h)
+                    text_input("10", &min_bbox_h)
                         .on_input(|input| set(move |s| s.ocr_min_text_height = input.clone()))
                         .padding(scale::s(4.0))
                         .size(scale::s(12.0))
@@ -1106,7 +1106,7 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             }
             if matches_any(query, &["ocr", "height", "bbox", "minimum", "min"]) || query.trim().is_empty() {
                 col.push(field_row("Min text height",
-                    text_input("40", &min_bbox_h)
+                    text_input("10", &min_bbox_h)
                         .on_input(|input| set(move |s| s.ocr_min_text_height = input.clone()))
                         .padding(scale::s(4.0))
                         .size(scale::s(12.0))
