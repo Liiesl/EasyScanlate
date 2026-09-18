@@ -26,9 +26,13 @@
 
 ## currently in progress
 
+#### modification
+
+- change default stroke to be 5
+
 #### fixes
 
-- 
+- fix recent on color picker cant be clicked.
 
 ## not yet started
 

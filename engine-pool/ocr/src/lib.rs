@@ -190,7 +190,8 @@ pub fn config() -> RapidOcrConfig {
 /// stay at defaults (30).
 pub fn config_with(text_score: f32, max_side_len: u32) -> RapidOcrConfig {
     // Prefer onboarding-downloaded models in settings models_dir(), fallback to legacy crate-relative ../models.
-    let det_path = easyscanlate_settings::resolve_model_path("PP-OCRv6_det_tiny.onnx");
+    // TEMP-TEST: switched to manga_det_v0.1.onnx for testing (revert to PP-OCRv6_det_tiny.onnx).
+    let det_path = easyscanlate_settings::resolve_model_path("manga_det_v0.1.onnx");
     let rec_path = easyscanlate_settings::resolve_model_path("korean_PP-OCRv5_rec_mobile.onnx");
     let dict_path = easyscanlate_settings::resolve_model_path("ppocrv5_korean_dict.txt");
     // Keep model_dir for error messages fallback, but use resolved paths.
@@ -367,6 +368,12 @@ pub fn parse_bbox_heights(min_str: &str, max_str: &str) -> (f32, f32) {
     }
 }
 
+/// Cover margin added around every auto-OCR quad, in image px per side.
+/// Detector boxes are glyph-tight, so without this the display bg and the
+/// inpaint mask leave a 1-2px source-text fringe. Applied after the upright
+/// snap so both display and inpaint inherit the same padded quad.
+pub const OCR_QUAD_PAD: f32 = 3.0;
+
 /// Convert raw engine output into model entries (auto-OCR source). Safe to
 /// call from a background task; the model is untouched until appended.
 ///
@@ -390,7 +397,8 @@ pub fn to_entries_with(lines: Vec<OcrLine>, cfg: MergeConfig) -> Vec<NewEntry> {
             quad: Quad {
                 points: line.bbox.points,
             }
-            .snap_if_near_upright(),
+            .snap_if_near_upright()
+            .inflate(OCR_QUAD_PAD),
         })
         .collect()
 }
@@ -893,7 +901,8 @@ pub fn distribute(
                     quad: Quad {
                         points: line.bbox.points.map(|[x, y]| [x * scale, y * scale + dy]),
                     }
-                    .snap_if_near_upright(),
+                    .snap_if_near_upright()
+                    .inflate(OCR_QUAD_PAD),
                 },
                 page: pages[t].0,
             });
@@ -914,7 +923,8 @@ pub fn distribute(
             quad: Quad {
                 points: line.bbox.points.map(|[x, y]| [x * scale, y * scale + dy]),
             }
-            .snap_if_near_upright(),
+            .snap_if_near_upright()
+            .inflate(OCR_QUAD_PAD),
         });
     }
 
@@ -1802,7 +1812,15 @@ mod tests {
         assert_eq!(entries[0].text, "first second");
         assert!((entries[0].score - 0.8).abs() < 1e-6);
         let [min_x, min_y, max_x, max_y] = entries[0].quad.bounds();
-        assert_eq!([min_x, min_y, max_x, max_y], [10.0, 10.0, 120.0, 30.0]);
+        assert_eq!(
+            [min_x, min_y, max_x, max_y],
+            [
+                10.0 - OCR_QUAD_PAD,
+                10.0 - OCR_QUAD_PAD,
+                120.0 + OCR_QUAD_PAD,
+                30.0 + OCR_QUAD_PAD
+            ]
+        );
     }
 
     #[test]
@@ -1820,7 +1838,8 @@ mod tests {
     #[test]
     fn single_lines_keep_their_rotated_quad() {
         // A lone tilted detection must not collapse to its AABB: the stored
-        // entry keeps the detector points for rotated rendering / inpaint.
+        // entry keeps the detector rotation (plus cover padding) for rotated
+        // rendering / inpaint.
         let tilted = OcrLine {
             bbox: rapidocr_core::types::Quad {
                 points: [[10.0, 12.0], [90.0, 0.0], [90.0, 30.0], [10.0, 42.0]],
@@ -1830,9 +1849,15 @@ mod tests {
         };
         let entries = to_entries(vec![tilted]);
         assert_eq!(entries.len(), 1);
-        assert_eq!(
-            entries[0].quad.points,
-            [[10.0, 12.0], [90.0, 0.0], [90.0, 30.0], [10.0, 42.0]]
+        let [x0, y0, x1, y1] = entries[0].quad.bounds();
+        // Original AABB is [10, 0, 90, 42]; padding must grow it on all sides.
+        assert!(x0 <= 10.0 - OCR_QUAD_PAD + 0.5, "x0={x0}");
+        assert!(y0 <= 0.0 - OCR_QUAD_PAD + 0.5, "y0={y0}");
+        assert!(x1 >= 90.0 + OCR_QUAD_PAD - 0.5, "x1={x1}");
+        assert!(y1 >= 42.0 + OCR_QUAD_PAD - 0.5, "y1={y1}");
+        assert!(
+            !entries[0].quad.is_near_upright(),
+            "padded tilted quad must stay rotated"
         );
     }
 
@@ -2071,15 +2096,41 @@ mod tests {
         let out = distribute(merge(lines, MergeConfig::default()), &[(0, 100, 400)], (0.0, 1.0), 200);
         let entries = &out.per_page[0].1;
         let bounds: Vec<[f32; 4]> = entries.iter().map(|e| e.quad.bounds()).collect();
-        assert_eq!(bounds[0], [10.0, -50.0, 90.0, -20.0], "top margin, out of page");
-        assert_eq!(bounds[1], [10.0, 50.0, 90.0, 80.0], "page body");
+        assert_eq!(
+            bounds[0],
+            [
+                10.0 - OCR_QUAD_PAD,
+                -50.0 - OCR_QUAD_PAD,
+                90.0 + OCR_QUAD_PAD,
+                -20.0 + OCR_QUAD_PAD
+            ],
+            "top margin, out of page"
+        );
+        assert_eq!(
+            bounds[1],
+            [
+                10.0 - OCR_QUAD_PAD,
+                50.0 - OCR_QUAD_PAD,
+                90.0 + OCR_QUAD_PAD,
+                80.0 + OCR_QUAD_PAD
+            ],
+            "page body"
+        );
         assert_eq!(out.held.len(), 1, "bottom margin must be held, not stored");
         assert_eq!(
             out.held[0].canvas_quad,
             [[10.0, 650.0], [90.0, 650.0], [90.0, 680.0], [10.0, 680.0]]
         );
         assert_eq!(out.held[0].page, 0);
-        assert_eq!(out.held[0].entry.quad.bounds(), [10.0, 450.0, 90.0, 480.0]);
+        assert_eq!(
+            out.held[0].entry.quad.bounds(),
+            [
+                10.0 - OCR_QUAD_PAD,
+                450.0 - OCR_QUAD_PAD,
+                90.0 + OCR_QUAD_PAD,
+                480.0 + OCR_QUAD_PAD
+            ]
+        );
         assert_eq!(out.boundary, 600, "seam at the page's bottom edge");
     }
 
@@ -2109,13 +2160,37 @@ mod tests {
         assert_eq!(out.per_page[0].1.len(), 1);
         assert_eq!(out.per_page[1].1.len(), 1);
         assert_eq!(out.per_page[0].1[0].text, "p0");
-        assert_eq!(out.per_page[0].1[0].quad.bounds(), [10.0, 10.0, 90.0, 40.0]);
+        assert_eq!(
+            out.per_page[0].1[0].quad.bounds(),
+            [
+                10.0 - OCR_QUAD_PAD,
+                10.0 - OCR_QUAD_PAD,
+                90.0 + OCR_QUAD_PAD,
+                40.0 + OCR_QUAD_PAD
+            ]
+        );
         assert_eq!(out.per_page[1].1[0].text, "p1");
-        assert_eq!(out.per_page[1].1[0].quad.bounds(), [10.0, 50.0, 90.0, 80.0]);
+        assert_eq!(
+            out.per_page[1].1[0].quad.bounds(),
+            [
+                10.0 - OCR_QUAD_PAD,
+                50.0 - OCR_QUAD_PAD,
+                90.0 + OCR_QUAD_PAD,
+                80.0 + OCR_QUAD_PAD
+            ]
+        );
         assert_eq!(out.held.len(), 1, "bottom margin entry held for the next run");
         assert_eq!(out.held[0].page, 1);
         assert_eq!(out.held[0].entry.text, "below");
-        assert_eq!(out.held[0].entry.quad.bounds(), [10.0, 310.0, 90.0, 330.0]);
+        assert_eq!(
+            out.held[0].entry.quad.bounds(),
+            [
+                10.0 - OCR_QUAD_PAD,
+                310.0 - OCR_QUAD_PAD,
+                90.0 + OCR_QUAD_PAD,
+                330.0 + OCR_QUAD_PAD
+            ]
+        );
         assert_eq!(
             out.held[0].canvas_quad,
             [[10.0, 710.0], [90.0, 710.0], [90.0, 730.0], [10.0, 730.0]]
@@ -2131,7 +2206,15 @@ mod tests {
         let per_page = distribute(lines, &[(0, 200, 200), (1, 100, 150)], (0.0, 1.0), 200).per_page;
         assert_eq!(per_page.len(), 1);
         assert_eq!(per_page[0].0, 1);
-        assert_eq!(per_page[0].1[0].quad.bounds(), [20.0, 5.0, 60.0, 15.0]);
+        assert_eq!(
+            per_page[0].1[0].quad.bounds(),
+            [
+                20.0 - OCR_QUAD_PAD,
+                5.0 - OCR_QUAD_PAD,
+                60.0 + OCR_QUAD_PAD,
+                15.0 + OCR_QUAD_PAD
+            ]
+        );
     }
 
     #[test]
@@ -2147,9 +2230,25 @@ mod tests {
         assert_eq!(per_page.len(), 1);
         let entries = &per_page[0].1;
         assert_eq!(entries[0].text, "chunk");
-        assert_eq!(entries[0].quad.bounds(), [10.0, 350.0, 90.0, 380.0]);
+        assert_eq!(
+            entries[0].quad.bounds(),
+            [
+                10.0 - OCR_QUAD_PAD,
+                350.0 - OCR_QUAD_PAD,
+                90.0 + OCR_QUAD_PAD,
+                380.0 + OCR_QUAD_PAD
+            ]
+        );
         assert_eq!(entries[1].text, "edge");
-        assert_eq!(entries[1].quad.bounds(), [10.0, 290.0, 90.0, 310.0]);
+        assert_eq!(
+            entries[1].quad.bounds(),
+            [
+                10.0 - OCR_QUAD_PAD,
+                290.0 - OCR_QUAD_PAD,
+                90.0 + OCR_QUAD_PAD,
+                310.0 + OCR_QUAD_PAD
+            ]
+        );
     }
 
     #[test]
@@ -2635,10 +2734,26 @@ mod tests {
         assert_eq!(result.per_page.len(), 2);
         assert_eq!(result.per_page[0].0, 0);
         assert_eq!(result.per_page[0].1[0].text, "p0");
-        assert_eq!(result.per_page[0].1[0].quad.bounds(), [10.0, 10.0, 90.0, 40.0]);
+        assert_eq!(
+            result.per_page[0].1[0].quad.bounds(),
+            [
+                10.0 - OCR_QUAD_PAD,
+                10.0 - OCR_QUAD_PAD,
+                90.0 + OCR_QUAD_PAD,
+                40.0 + OCR_QUAD_PAD
+            ]
+        );
         assert_eq!(result.per_page[1].0, 1);
         assert_eq!(result.per_page[1].1[0].text, "p1");
-        assert_eq!(result.per_page[1].1[0].quad.bounds(), [10.0, 50.0, 90.0, 80.0]);
+        assert_eq!(
+            result.per_page[1].1[0].quad.bounds(),
+            [
+                10.0 - OCR_QUAD_PAD,
+                50.0 - OCR_QUAD_PAD,
+                90.0 + OCR_QUAD_PAD,
+                80.0 + OCR_QUAD_PAD
+            ]
+        );
         assert!(result.held.is_none());
     }
 
@@ -2683,7 +2798,15 @@ mod tests {
         assert_eq!(second.per_page.len(), 1);
         assert_eq!(second.per_page[0].0, 1);
         assert_eq!(second.per_page[0].1[0].text, "redo", "re-detection wins the tie");
-        assert_eq!(second.per_page[0].1[0].quad.bounds(), [10.0, -10.0, 90.0, 40.0]);
+        assert_eq!(
+            second.per_page[0].1[0].quad.bounds(),
+            [
+                10.0 - OCR_QUAD_PAD,
+                -10.0 - OCR_QUAD_PAD,
+                90.0 + OCR_QUAD_PAD,
+                40.0 + OCR_QUAD_PAD
+            ]
+        );
         assert!(second.held.is_none());
     }
 
@@ -2712,7 +2835,15 @@ mod tests {
         assert_eq!(result.per_page[0].0, 1);
         assert_eq!(result.per_page[0].1.len(), 1);
         assert_eq!(result.per_page[0].1[0].text, "own");
-        assert_eq!(result.per_page[0].1[0].quad.bounds(), [20.0, 70.0, 80.0, 100.0]);
+        assert_eq!(
+            result.per_page[0].1[0].quad.bounds(),
+            [
+                20.0 - OCR_QUAD_PAD,
+                70.0 - OCR_QUAD_PAD,
+                80.0 + OCR_QUAD_PAD,
+                100.0 + OCR_QUAD_PAD
+            ]
+        );
         assert!(result.held.is_none());
     }
 
@@ -2738,9 +2869,25 @@ mod tests {
         assert_eq!(result.per_page.len(), 1);
         let entries = &result.per_page[0].1;
         assert_eq!(entries[0].text, "edge");
-        assert_eq!(entries[0].quad.bounds(), [10.0, 290.0, 90.0, 310.0]);
+        assert_eq!(
+            entries[0].quad.bounds(),
+            [
+                10.0 - OCR_QUAD_PAD,
+                290.0 - OCR_QUAD_PAD,
+                90.0 + OCR_QUAD_PAD,
+                310.0 + OCR_QUAD_PAD
+            ]
+        );
         assert_eq!(entries[1].text, "chunk");
-        assert_eq!(entries[1].quad.bounds(), [10.0, 350.0, 90.0, 380.0]);
+        assert_eq!(
+            entries[1].quad.bounds(),
+            [
+                10.0 - OCR_QUAD_PAD,
+                350.0 - OCR_QUAD_PAD,
+                90.0 + OCR_QUAD_PAD,
+                380.0 + OCR_QUAD_PAD
+            ]
+        );
         assert!(result.held.is_none());
     }
 

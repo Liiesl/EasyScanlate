@@ -123,6 +123,75 @@ impl Quad {
         [min_x, min_y, max_x, max_y]
     }
 
+    /// Expand the quad outward by `pad` px on every side.
+    ///
+    /// Upright quads grow their AABB; rotated quads offset each edge along
+    /// its outward normal so rotation is preserved.
+    pub fn inflate(self, pad: f32) -> Self {
+        if !pad.is_finite() || pad <= 0.0 {
+            return self;
+        }
+        if self.is_near_upright() {
+            let [min_x, min_y, max_x, max_y] = self.bounds();
+            return Self::from_xyxy(min_x - pad, min_y - pad, max_x + pad, max_y + pad);
+        }
+        let ordered = self.ordered();
+        let cx = (ordered[0][0] + ordered[1][0] + ordered[2][0] + ordered[3][0]) / 4.0;
+        let cy = (ordered[0][1] + ordered[1][1] + ordered[2][1] + ordered[3][1]) / 4.0;
+        if !cx.is_finite() || !cy.is_finite() {
+            return self;
+        }
+        // Outward-shifted edge lines: (base point, direction).
+        let mut lines = [([0.0, 0.0], [0.0, 0.0]); 4];
+        for i in 0..4 {
+            let p = ordered[i];
+            let q = ordered[(i + 1) % 4];
+            let dx = q[0] - p[0];
+            let dy = q[1] - p[1];
+            let len = dx.hypot(dy);
+            if !(len > 1e-6) {
+                return Self::from_xyxy(
+                    ordered.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min) - pad,
+                    ordered.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min) - pad,
+                    ordered.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max) + pad,
+                    ordered.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max) + pad,
+                );
+            }
+            let mut nx = dy / len;
+            let mut ny = -dx / len;
+            let mx = (p[0] + q[0]) / 2.0 - cx;
+            let my = (p[1] + q[1]) / 2.0 - cy;
+            if nx * mx + ny * my < 0.0 {
+                nx = -nx;
+                ny = -ny;
+            }
+            lines[i] = ([p[0] + nx * pad, p[1] + ny * pad], [dx, dy]);
+        }
+        let mut out = [[0.0; 2]; 4];
+        for i in 0..4 {
+            let prev = lines[(i + 3) % 4];
+            let curr = lines[i];
+            let denom = prev.1[0] * curr.1[1] - prev.1[1] * curr.1[0];
+            if denom.abs() < 1e-9 {
+                // Parallel edges: push the corner out along the averaged normal.
+                let (px, py) = (ordered[i][0] - cx, ordered[i][1] - cy);
+                let len = px.hypot(py);
+                if !(len > 1e-6) {
+                    return self;
+                }
+                out[i] = [ordered[i][0] + px / len * pad, ordered[i][1] + py / len * pad];
+                continue;
+            }
+            let t = ((curr.0[0] - prev.0[0]) * curr.1[1] - (curr.0[1] - prev.0[1]) * curr.1[0])
+                / denom;
+            out[i] = [prev.0[0] + prev.1[0] * t, prev.0[1] + prev.1[1] * t];
+            if !out[i][0].is_finite() || !out[i][1].is_finite() {
+                return self;
+            }
+        }
+        Self { points: out }
+    }
+
     /// Move every point by `(dx, dy)`.
     pub fn translate(mut self, dx: f32, dy: f32) -> Self {
         for point in &mut self.points {
@@ -331,6 +400,24 @@ mod tests {
         let q = quad(0.0, 0.0, 100.0, 50.0).rotate([50.0, 25.0], 0.5);
         assert!(!q.is_near_upright());
         assert_eq!(q.snap_if_near_upright().points, q.points);
+    }
+
+    #[test]
+    fn inflate_expands_upright_on_all_sides() {
+        let q = quad(10.0, 20.0, 90.0, 80.0);
+        let grown = q.inflate(3.0);
+        assert_eq!(grown.bounds(), [7.0, 17.0, 93.0, 83.0]);
+    }
+
+    #[test]
+    fn inflate_keeps_rotation_and_grows_bounds() {
+        let q = quad(0.0, 0.0, 100.0, 50.0).rotate([50.0, 25.0], 0.5);
+        assert!(!q.is_near_upright());
+        let grown = q.inflate(3.0);
+        assert!(!grown.is_near_upright(), "inflated quad must stay rotated");
+        let [ax0, ay0, ax1, ay1] = q.bounds();
+        let [bx0, by0, bx1, by1] = grown.bounds();
+        assert!(bx0 < ax0 && by0 < ay0 && bx1 > ax1 && by1 > ay1);
     }
 }
 
