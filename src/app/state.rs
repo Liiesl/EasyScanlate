@@ -265,6 +265,10 @@ impl UiState for ActiveTab<'_> {
         self.tab.style_picker
     }
 
+    fn dropper_buffer(&self) -> Option<neverliie_iced_widgets::color_picker::DropperBuffer> {
+        Some(self.app.dropper_buffer.clone())
+    }
+
     fn style_stroke_width(&self) -> &str {
         &self.tab.style_stroke_width
     }
@@ -636,6 +640,7 @@ impl UiState for App {
     fn style_stroke_color(&self) -> Color { rgba_to_color(self.tabs[self.active].style_working.stroke_color) }
     fn style_bg_color(&self) -> Color { rgba_to_color(self.tabs[self.active].style_working.bg_color) }
     fn style_picker_open(&self) -> Option<StyleField> { self.tabs[self.active].style_picker }
+    fn dropper_buffer(&self) -> Option<neverliie_iced_widgets::color_picker::DropperBuffer> { Some(self.dropper_buffer.clone()) }
     fn style_stroke_width(&self) -> &str { &self.tabs[self.active].style_stroke_width }
     fn style_bg_radius(&self) -> &str { &self.tabs[self.active].style_bg_radius }
     fn style_presets(&self) -> &[Option<EntryStyle>] { self.presets.as_slice() }

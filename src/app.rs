@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, mpsc};
 
 use iced::{Color, Element, Font, Subscription, Task, Theme};
+use neverliie_iced_widgets::color_picker::DropperBuffer;
 use neverliie_iced_widgets::title_bar::{FrameAction, NativeFrame};
 
 use easyscanlate_model::{EntryId, EntryStyle, ModelEvent, NewEntry};
@@ -247,6 +248,10 @@ pub struct App {
     pub(crate) installed_fonts: Vec<String>,
     pub(crate) loaded_fonts: HashSet<String>,
     pub(crate) presets: StylePresets,
+    /// Shared slot for the color picker eye dropper: the picker publishes
+    /// `StyleDropperCapture`, the app screenshots the window and stores the
+    /// frame here, and the widget consumes it on the next update pass.
+    pub(crate) dropper_buffer: DropperBuffer,
     pub(crate) tx: ui_translation::Session,
     pub(crate) connect_modal: Option<ConnectModal>,
     pub(crate) settings_open: bool,
@@ -337,6 +342,7 @@ impl App {
                 .map(|s| s.to_string())
                 .collect(),
             presets: easyscanlate_settings::get(|s| s.style_presets.clone()),
+            dropper_buffer: DropperBuffer::new(),
             tx: ui_translation::Session::default(),
             connect_modal: None,
             settings_open: false,
@@ -858,6 +864,8 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::StyleColorOpen(field)) => styling::handle_color_open(app, field),
         Message::Ui(UiEvent::StyleColorCancel(field)) => styling::handle_color_cancel(app, field),
         Message::Ui(UiEvent::StyleColorSubmit(field, color)) => styling::handle_color_submit(app, field, color),
+        Message::Ui(UiEvent::StyleDropperCapture) => styling::handle_dropper_capture(app),
+        Message::Ui(UiEvent::StyleDropperShot(shot)) => styling::handle_dropper_shot(app, shot),
         Message::Ui(UiEvent::StyleHexInput(field, text)) => styling::handle_hex_input(app, field, text),
         Message::Ui(UiEvent::StyleStrokeWidth(text)) => styling::handle_stroke_width(app, text),
         Message::Ui(UiEvent::StyleBgRadius(text)) => styling::handle_bg_radius(app, text),

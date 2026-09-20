@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use iced::Task;
+use iced::{Task, window};
 use easyscanlate_model::{EntryId, EntryStyle, Quad, TextAlign, TextGradientDir};
 #[cfg(feature = "styling")]
 use easyscanlate_styling::Engine as StylingEngine;
@@ -201,6 +201,27 @@ pub fn handle_color_open(app: &mut App, field: StyleField) -> Task<Message> {
 
 pub fn handle_color_cancel(app: &mut App, _field: StyleField) -> Task<Message> {
     app.active_tab_mut().style_picker = None;
+    Task::none()
+}
+
+/// The eye dropper requested a fresh window snapshot: capture the window
+/// and hand the frame to the shared [`DropperBuffer`](neverliie_iced_widgets::color_picker::DropperBuffer).
+/// The widget consumes it on its next update pass and enters picking mode.
+pub fn handle_dropper_capture(app: &mut App) -> Task<Message> {
+    let _ = app;
+    window::latest()
+        .and_then(window::screenshot)
+        .map(|shot| Message::Ui(UiEvent::StyleDropperShot(Box::new(shot))))
+}
+
+/// A window screenshot for the eye dropper arrived: deposit it in the shared
+/// buffer. Each frame is consumed exactly once when the widget enters
+/// picking mode.
+pub fn handle_dropper_shot(
+    app: &mut App,
+    shot: Box<iced::window::screenshot::Screenshot>,
+) -> Task<Message> {
+    app.dropper_buffer.store(&shot);
     Task::none()
 }
 

@@ -3,6 +3,7 @@ use std::ops::Range;
 use iced::widget::pane_grid;
 use iced::widget::text_editor;
 use iced::{Color, Rectangle};
+use iced::window::screenshot::Screenshot;
 
 use easyscanlate_model::{EntryId, ProfileId, Quad, TextAlign, TextGradientDir};
 use easyscanlate_settings::InpaintBackend;
@@ -269,6 +270,14 @@ pub enum UiEvent {
     StyleColorCancel(StyleField),
     /// The user confirmed a color for `field` in its color picker.
     StyleColorSubmit(StyleField, Color),
+    /// The eye dropper button requested a fresh window snapshot: the app
+    /// should screenshot the window and store it in the shared
+    /// `DropperBuffer` (see `UiState::dropper_buffer`).
+    StyleDropperCapture,
+    /// A window screenshot for the eye dropper, boxed to keep the event
+    /// small (mirrors `BackdropCaptured`). The app stores it in the shared
+    /// `DropperBuffer`; the widget consumes it on the next update pass.
+    StyleDropperShot(Box<Screenshot>),
     /// The user typed hex text for `field` in the styling panel; live-apply
     /// when the string parses as a valid hex (or "None").
     StyleHexInput(StyleField, String),

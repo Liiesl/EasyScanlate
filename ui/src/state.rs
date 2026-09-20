@@ -77,6 +77,14 @@ pub trait UiState {
     fn style_bg_color(&self) -> Color;
     /// The styling color picker currently open (if any).
     fn style_picker_open(&self) -> Option<StyleField>;
+    /// Shared slot for the color picker eye dropper. The picker enables its
+    /// eyedropper button only while this is `Some`; on activation it
+    /// publishes `UiEvent::StyleDropperCapture` and the app is expected to
+    /// screenshot the window into this buffer. Defaults to `None` (dropper
+    /// disabled) so test states need no changes.
+    fn dropper_buffer(&self) -> Option<neverliie_iced_widgets::color_picker::DropperBuffer> {
+        None
+    }
     fn style_stroke_width(&self) -> &str;
     fn style_bg_radius(&self) -> &str;
     /// The saved style presets shown in the styling panel, in memory only:

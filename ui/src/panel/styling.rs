@@ -883,13 +883,22 @@ pub fn overlay_host<'a, S: UiState + ?Sized>(
         Some(StyleField::GradientB) => (true, StyleField::GradientB, state.style_gradient_b()),
         None => (false, StyleField::Text, Color::BLACK),
     };
-    floating_color_picker(
+    let picker = floating_color_picker(
         show,
         color,
         base,
         UiEvent::StyleColorCancel(field),
         move |picked| UiEvent::StyleColorSubmit(field, picked),
     )
-    .position(Position::ViewportCenter)
-    .into()
+    .position(Position::ViewportCenter);
+    // The eye dropper stays disabled without a shared buffer + capture
+    // callback (see the widget docs): hand it the app's slot so the button
+    // enables and publishes `StyleDropperCapture` on activation.
+    match state.dropper_buffer() {
+        Some(buffer) => picker
+            .dropper_buffer(buffer)
+            .on_dropper_capture(|| UiEvent::StyleDropperCapture)
+            .into(),
+        None => picker.into(),
+    }
 }
