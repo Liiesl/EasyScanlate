@@ -169,13 +169,14 @@ fn main() -> iced::Result {
     .window(settings)
     .font(LUCIDE_FONT_BYTES)
     // Bundled text fonts: Anime Ace (regular + bold + italic) as default, Augie,
-    // Komika (Hand/Jam/Slick/Slim incl. bold/italic), Fuzzy Bubbles, Nanum Pen.
+    // Komika (Boo/Hand/Jam/Slick/Slim incl. bold/italic), Fuzzy Bubbles, Nanum Pen.
     // Embedded at compile time — no system install or `assets/fonts/` at runtime needed.
     // (Nanum Gothic/Myeongjo deliberately excluded: ~15.5MB saved, OS CJK fallback covers Korean.)
     .font(include_bytes!("../assets/fonts/animeace.ttf"))
     .font(include_bytes!("../assets/fonts/anime-ace.bold.ttf"))
     .font(include_bytes!("../assets/fonts/anime-ace.italic.ttf"))
     .font(include_bytes!("../assets/fonts/augie.ttf"))
+    .font(include_bytes!("../assets/fonts/komika-boo.regular.ttf"))
     .font(include_bytes!("../assets/fonts/KOMIKAH_.ttf"))
     .font(include_bytes!("../assets/fonts/KOMIKAHB.ttf"))
     .font(include_bytes!("../assets/fonts/KOMIKHI_.ttf"))

@@ -90,6 +90,7 @@ impl TextGradientDir {
 pub const ANIME_ACE_FAMILY: &str = "Anime Ace";
 pub const AUGIE_FAMILY: &str = "augie";
 pub const FUZZY_BUBBLES_FAMILY: &str = "Fuzzy Bubbles";
+pub const KOMIKA_BOO_FAMILY: &str = "Komika Boo";
 pub const KOMIKA_HAND_FAMILY: &str = "Komika Hand";
 pub const KOMIKA_JAM_FAMILY: &str = "Komika Jam";
 pub const KOMIKA_SLICK_FAMILY: &str = "Komika Slick";
@@ -103,6 +104,7 @@ pub const BUNDLED_FONTS: &[&str] = &[
     NANUM_PEN_FAMILY,
     AUGIE_FAMILY,
     FUZZY_BUBBLES_FAMILY,
+    KOMIKA_BOO_FAMILY,
     KOMIKA_HAND_FAMILY,
     KOMIKA_JAM_FAMILY,
     KOMIKA_SLICK_FAMILY,
@@ -221,6 +223,7 @@ mod tests {
         assert!(BUNDLED_FONTS.contains(&ANIME_ACE_FAMILY));
         assert!(BUNDLED_FONTS.contains(&AUGIE_FAMILY));
         assert!(BUNDLED_FONTS.contains(&FUZZY_BUBBLES_FAMILY));
+        assert!(BUNDLED_FONTS.contains(&KOMIKA_BOO_FAMILY));
         assert!(BUNDLED_FONTS.contains(&KOMIKA_HAND_FAMILY));
         assert!(BUNDLED_FONTS.contains(&KOMIKA_JAM_FAMILY));
         assert!(BUNDLED_FONTS.contains(&KOMIKA_SLICK_FAMILY));
