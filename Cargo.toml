@@ -47,7 +47,7 @@ confy = "2"
 toml = "1"
 tempfile = "3"
 push_relabel = "0.1"
-rand = "0.9"
+rand = "0.10"
 
 # Internal path dependencies
 easyscanlate-model = { path = "model" }
