@@ -28,6 +28,7 @@ use iced::{
 };
 
 use neverliie_iced_widgets::advanced_dropdown::{advanced_dropdown, Item, MenuItem};
+use neverliie_iced_widgets::number_input::{NumberInput, Status as NumberStatus, Style as NumberStyle};
 use neverliie_iced_widgets::split_button::split_button;
 use neverliie_iced_widgets::color_picker::floating_color_picker;
 use neverliie_iced_widgets::context_menu::{ContextMenu, Menu};
@@ -222,39 +223,67 @@ fn color_field<'a, S: UiState + ?Sized>(
     )
 }
 
-/// A number input with a muted icon prefix, wrapped in an input-style box.
-fn number_field<'a>(
+/// A number input with a muted icon prefix, matching the dark input-box
+/// look (`INPUT_BG` + `BORDER`). Built on the shared `NumberInput`
+/// `(-|icon input|+)` pill: stepping buttons, wheel/arrow keys and
+/// in-progress text (`"-"`, `"5."`) come from the widget, so the app holds
+/// only the numeric value. Disabled (no selection, or fixed size while
+/// auto-size fits) renders the inner field read-only with inert buttons.
+fn style_number<'a>(
     icon: Icon,
-    value: &'a str,
-    on_input: Option<fn(String) -> UiEvent>,
+    value: f32,
+    range: std::ops::RangeInclusive<f32>,
+    step: f32,
+    shift_step: f32,
+    on_change: fn(f32) -> UiEvent,
+    enabled: bool,
 ) -> Element<'a, UiEvent> {
-    field_wrap(
-        row![
-            crate::icon::lucide(icon).size(scale::s(12.0)).color(MUTED_FG),
-            text_input("0", value)
-                .on_input_maybe(on_input)
-                .padding(scale::s(0.0))
+    NumberInput::new(range, value, on_change)
+        .step(step)
+        .shift_step(shift_step)
+        .prefix(
+            crate::icon::lucide(icon)
                 .size(scale::s(12.0))
-                .width(FillLength)
-                .style(|_theme, _status| text_input::Style {
-                    background: Background::Color(Color::TRANSPARENT),
-                    border: Border::default(),
-                    icon: MUTED_FG,
-                    placeholder: MUTED_FG,
-                    value: TEXT_MAIN,
-                    selection: crate::accent::accent(),
-                }),
-        ]
-        .spacing(scale::s(6.0))
-        .align_y(iced::Alignment::Center)
-        .into(),
-        Padding {
-            top: scale::s(4.0),
-            right: scale::s(8.0),
-            bottom: scale::s(4.0),
-            left: scale::s(8.0),
-        },
-    )
+                .color(MUTED_FG),
+        )
+        .width(FillLength)
+        .padding(scale::s(2.0))
+        .text_size(scale::s(12.0))
+        .border_radius(scale::s(4.0))
+        .enabled(enabled)
+        .style(|_theme, _status: NumberStatus| NumberStyle {
+            background: INPUT_BG.into(),
+            border: Border {
+                radius: scale::s(4.0).into(),
+                width: scale::s(1.0),
+                color: BORDER,
+            },
+            shadow: Shadow::default(),
+        })
+        .button_style(|_theme, status: button::Status| button::Style {
+            background: Some(Background::Color(match status {
+                button::Status::Hovered => Color::from_rgba8(255, 255, 255, 0.10),
+                button::Status::Pressed => Color::from_rgba8(255, 255, 255, 0.16),
+                button::Status::Disabled | button::Status::Active => Color::TRANSPARENT,
+            })),
+            border: Border::default(),
+            shadow: Shadow::default(),
+            text_color: if matches!(status, button::Status::Disabled) {
+                MUTED_FG
+            } else {
+                TEXT_MAIN
+            },
+            ..button::Style::default()
+        })
+        .input_style(|_theme, _status| text_input::Style {
+            background: Background::Color(Color::TRANSPARENT),
+            border: Border::default(),
+            icon: MUTED_FG,
+            placeholder: MUTED_FG,
+            value: TEXT_MAIN,
+            selection: crate::accent::accent(),
+        })
+        .into()
 }
 
 fn tip(label: &str) -> container::Container<'_, UiEvent> {
@@ -455,7 +484,7 @@ fn caption<'a>(label: &'a str) -> Element<'a, UiEvent> {
 /// while auto-size is off, then one row of line-height, letter-spacing
 /// (image px) and the mutually exclusive All Caps / Small Caps toggle.
 fn typography_section<'a, S: UiState + ?Sized>(
-    state: &'a S,
+    _state: &'a S,
     style: &EntryStyle,
     selected: bool,
 ) -> Element<'a, UiEvent> {
@@ -465,15 +494,15 @@ fn typography_section<'a, S: UiState + ?Sized>(
         .on_toggle_maybe(selected.then_some(UiEvent::StyleAutoSize))
         .into();
     // Fixed size is inert while auto-size fits the box.
-    let fixed_input = if style.auto_size {
-        number_field(Icon::Type, state.style_font_size(), None)
-    } else {
-        number_field(
-            Icon::Type,
-            state.style_font_size(),
-            selected.then_some(UiEvent::StyleFontSize),
-        )
-    };
+    let fixed_input = style_number(
+        Icon::Type,
+        style.font_size,
+        1.0..=500.0,
+        1.0,
+        10.0,
+        UiEvent::StyleFontSize,
+        selected && !style.auto_size,
+    );
     let caps_aa = segment_compact(
         style.caps == CapsMode::AllCaps,
         "AA",
@@ -505,10 +534,14 @@ fn typography_section<'a, S: UiState + ?Sized>(
             container(
                 column![
                     caption("Line height"),
-                    number_field(
+                    style_number(
                         Icon::AlignCenter,
-                        state.style_line_height(),
-                        selected.then_some(UiEvent::StyleLineHeight),
+                        style.line_height,
+                        0.5..=3.0,
+                        0.1,
+                        0.5,
+                        UiEvent::StyleLineHeight,
+                        selected,
                     ),
                 ]
                 .spacing(scale::s(4.0))
@@ -517,10 +550,14 @@ fn typography_section<'a, S: UiState + ?Sized>(
             container(
                 column![
                     caption("Letter spacing"),
-                    number_field(
+                    style_number(
                         Icon::Minus,
-                        state.style_letter_spacing(),
-                        selected.then_some(UiEvent::StyleLetterSpacing),
+                        style.letter_spacing,
+                        0.0..=20.0,
+                        0.5,
+                        2.0,
+                        UiEvent::StyleLetterSpacing,
+                        selected,
                     ),
                 ]
                 .spacing(scale::s(4.0))
@@ -590,10 +627,14 @@ fn stroke_section<'a, S: UiState + ?Sized>(
                 state.style_stroke_color(),
             ))
             .width(Length::FillPortion(2)),
-            container(number_field(
+            container(style_number(
                 Icon::Minus,
                 state.style_stroke_width(),
-                selected.then_some(UiEvent::StyleStrokeWidth),
+                0.0..=50.0,
+                0.5,
+                2.0,
+                UiEvent::StyleStrokeWidth,
+                selected,
             ))
             .width(Length::FillPortion(1)),
         ]
@@ -743,10 +784,14 @@ fn background_section<'a, S: UiState + ?Sized>(
             container(
                 column![
                     caption("Corner"),
-                    number_field(
+                    style_number(
                         Icon::SquareRoundCorner,
                         state.style_bg_radius(),
-                        selected.then_some(UiEvent::StyleBgRadius),
+                        0.0..=100.0,
+                        1.0,
+                        10.0,
+                        UiEvent::StyleBgRadius,
+                        selected,
                     ),
                 ]
                 .spacing(scale::s(4.0))

@@ -13,7 +13,7 @@ fn applying_a_preset_seeds_working_style_and_entry() {
     let preset = app.presets.get(1).expect("preset 1 seeded").clone();
     assert_eq!(app.active_tab().style_working, preset);
     assert_eq!(app.active_tab().project.entry_style(id), preset);
-    assert_eq!(app.active_tab().style_bg_radius, preset.bg_radius.to_string());
+    assert_eq!(app.active_tab().style_working.bg_radius, preset.bg_radius);
 }
 
 #[test]

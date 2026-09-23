@@ -24,6 +24,9 @@ use crate::translation::{self, CUSTOM_ANTHROPIC, CUSTOM_OPENAI};
 use crate::background::AuroraWheel;
 use crate::event::{SettingEdit, SettingsTab, UiEvent};
 use crate::panel::PANEL_BG;
+use neverliie_iced_widgets::number_input::{
+    NumberInput, Status as NumberStatus, Style as NumberStyle,
+};
 use crate::scale;
 use crate::segmented::{segment, segmented_group};
 use crate::state::UiState;
@@ -383,6 +386,103 @@ fn helper_text<'a>(s: &'a str) -> Element<'a, UiEvent> {
     text(s).size(scale::s(11.0)).color(MUTED_FG).into()
 }
 
+/// Shared card-style `NumberInput` chrome for the settings numeric fields
+/// (UI font size, autosave interval): card-tinted pill, transparent inner
+/// buttons/field, white value text.
+fn settings_number_style(_theme: &iced::Theme, _status: NumberStatus) -> NumberStyle {
+    NumberStyle {
+        background: CARD_BG.into(),
+        border: iced::Border::default()
+            .rounded(scale::s(8.0))
+            .color(CARD_BORDER)
+            .width(scale::s(1.0)),
+        shadow: iced::Shadow::default(),
+    }
+}
+
+fn settings_number_button_style(
+    _theme: &iced::Theme,
+    status: iced::widget::button::Status,
+) -> iced::widget::button::Style {
+    iced::widget::button::Style {
+        background: Some(iced::Background::Color(match status {
+            iced::widget::button::Status::Hovered => {
+                Color::from_rgba8(255, 255, 255, 0.10)
+            }
+            iced::widget::button::Status::Pressed => {
+                Color::from_rgba8(255, 255, 255, 0.16)
+            }
+            iced::widget::button::Status::Disabled
+            | iced::widget::button::Status::Active => Color::TRANSPARENT,
+        })),
+        border: iced::Border::default(),
+        shadow: iced::Shadow::default(),
+        text_color: if matches!(status, iced::widget::button::Status::Disabled) {
+            MUTED_FG
+        } else {
+            Color::WHITE
+        },
+        ..Default::default()
+    }
+}
+
+fn settings_number_input_style(
+    _theme: &iced::Theme,
+    _status: iced::widget::text_input::Status,
+) -> iced::widget::text_input::Style {
+    iced::widget::text_input::Style {
+        background: iced::Background::Color(Color::TRANSPARENT),
+        border: iced::Border::default(),
+        icon: MUTED_FG,
+        placeholder: MUTED_FG,
+        value: Color::WHITE,
+        selection: crate::accent::accent(),
+    }
+}
+
+/// UI font-size control: the shared `NumberInput` over
+/// `MIN_FONT_SIZE..=MAX_FONT_SIZE`. One `SettingEdit` path for buttons,
+/// arrows, wheel and typing (previously steppers + a direct-store text
+/// input).
+fn font_size_number(value: u32) -> Element<'static, UiEvent> {
+    NumberInput::new(
+        scale::MIN_FONT_SIZE..=scale::MAX_FONT_SIZE,
+        value,
+        |v| UiEvent::SettingEdit(SettingEdit::UiFontSize(v)),
+    )
+    .step(1u32)
+    .shift_step(5u32)
+    .width(Length::Fixed(scale::s(150.0)))
+    .padding(scale::s(2.0))
+    .text_size(scale::s(12.0))
+    .border_radius(scale::s(8.0))
+    .style(settings_number_style)
+    .button_style(settings_number_button_style)
+    .input_style(settings_number_input_style)
+    .into()
+}
+
+/// Autosave-interval control: the shared `NumberInput` over `15..=600`
+/// seconds, stepping 15 (Shift: 60). One `SettingEdit` path like above.
+/// `NumberInput` has no `u64` support (`u64: Into<f64>` is missing), so the
+/// pill works in `u32` space — the clamped 15..=600 range fits — and widens
+/// back to `u64` on change.
+fn autosave_interval_number(value: u64) -> Element<'static, UiEvent> {
+    NumberInput::new(15u32..=600u32, value.clamp(15, 600) as u32, |v| {
+        UiEvent::SettingEdit(SettingEdit::AutosaveInterval(v as u64))
+    })
+    .step(15u32)
+    .shift_step(60u32)
+    .width(Length::Fixed(scale::s(150.0)))
+    .padding(scale::s(2.0))
+    .text_size(scale::s(12.0))
+    .border_radius(scale::s(8.0))
+    .style(settings_number_style)
+    .button_style(settings_number_button_style)
+    .input_style(settings_number_input_style)
+    .into()
+}
+
 // Used by the bg-aware inpaint cards; dead in translation-only builds.
 #[allow(dead_code)]
 fn warning_text<'a>(s: String) -> Element<'a, UiEvent> {
@@ -413,28 +513,8 @@ fn appearance_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     let mut outer: Vec<Element<'static, UiEvent>> = Vec::new();
     if show_font {
         let raw = easyscanlate_settings::get(|s| s.ui_font_size);
-        let font_str = raw.to_string();
         let clamped = scale::clamp_font_size(raw);
-        let dec = stepper_button(clamped > scale::MIN_FONT_SIZE, "−", Some(UiEvent::SettingEdit(SettingEdit::UiFontSize(clamped - 1))));
-        let inc = stepper_button(clamped < scale::MAX_FONT_SIZE, "+", Some(UiEvent::SettingEdit(SettingEdit::UiFontSize(clamped + 1))));
-        let control: Element<'static, UiEvent> = row![
-            dec,
-            text_input("12", &font_str)
-                .on_input(move |input| {
-                    if let Ok(v) = input.trim().parse::<u32>() {
-                        set(move |s| s.ui_font_size = v)
-                    } else {
-                        UiEvent::SettingsChanged
-                    }
-                })
-                .padding(scale::s(4.0))
-                .size(scale::s(12.0))
-                .width(Length::Fixed(scale::s(64.0))),
-            inc,
-        ]
-        .spacing(scale::s(6.0))
-        .align_y(iced::Alignment::Center)
-        .into();
+        let control: Element<'static, UiEvent> = font_size_number(clamped);
         let font_section = column![
             row![
                 crate::icon::lucide(Icon::Type).size(scale::s(14.0)).color(crate::accent::accent()),
@@ -743,23 +823,8 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
             let enabled = easyscanlate_settings::get(|s| s.autosave_enabled);
             let raw_secs = easyscanlate_settings::get(|s| s.autosave_interval_secs);
             let secs = raw_secs.clamp(15, 600);
-            let secs_str = secs.to_string();
-            let dec = stepper_button(secs > 15, "−", Some(UiEvent::SettingEdit(SettingEdit::AutosaveInterval(secs.saturating_sub(15).max(15)))));
-            let inc = stepper_button(secs < 600, "+", Some(UiEvent::SettingEdit(SettingEdit::AutosaveInterval((secs + 15).min(600)))));
             let interval_row: Element<'static, UiEvent> = row![
-                dec,
-                text_input("60", &secs_str)
-                    .on_input(move |input| {
-                        if let Ok(v) = input.trim().parse::<u64>() {
-                            set(move |s| s.autosave_interval_secs = v.clamp(15, 600))
-                        } else {
-                            UiEvent::SettingsChanged
-                        }
-                    })
-                    .padding(scale::s(4.0))
-                    .size(scale::s(12.0))
-                    .width(Length::Fixed(scale::s(64.0))),
-                inc,
+                autosave_interval_number(secs),
                 text("seconds").size(scale::s(11.0)).color(MUTED_FG),
             ]
             .spacing(scale::s(6.0))
@@ -893,23 +958,8 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         if show_autosave {
             let enabled = easyscanlate_settings::get(|s| s.autosave_enabled);
             let secs = easyscanlate_settings::get(|s| s.autosave_interval_secs).clamp(15, 600);
-            let secs_str = secs.to_string();
-            let dec = stepper_button(secs > 15, "−", Some(UiEvent::SettingEdit(SettingEdit::AutosaveInterval(secs.saturating_sub(15).max(15)))));
-            let inc = stepper_button(secs < 600, "+", Some(UiEvent::SettingEdit(SettingEdit::AutosaveInterval((secs + 15).min(600)))));
             let interval_row: Element<'static, UiEvent> = row![
-                dec,
-                text_input("60", &secs_str)
-                    .on_input(move |input| {
-                        if let Ok(v) = input.trim().parse::<u64>() {
-                            set(move |s| s.autosave_interval_secs = v.clamp(15, 600))
-                        } else {
-                            UiEvent::SettingsChanged
-                        }
-                    })
-                    .padding(scale::s(4.0))
-                    .size(scale::s(12.0))
-                    .width(Length::Fixed(scale::s(64.0))),
-                inc,
+                autosave_interval_number(secs),
                 text("seconds").size(scale::s(11.0)).color(MUTED_FG),
             ]
             .spacing(scale::s(6.0))

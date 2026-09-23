@@ -269,24 +269,24 @@ impl UiState for ActiveTab<'_> {
         Some(self.app.dropper_buffer.clone())
     }
 
-    fn style_stroke_width(&self) -> &str {
-        &self.tab.style_stroke_width
+    fn style_stroke_width(&self) -> f32 {
+        self.tab.style_working.stroke_width
     }
 
-    fn style_bg_radius(&self) -> &str {
-        &self.tab.style_bg_radius
+    fn style_bg_radius(&self) -> f32 {
+        self.tab.style_working.bg_radius
     }
 
-    fn style_font_size(&self) -> &str {
-        &self.tab.style_font_size
+    fn style_font_size(&self) -> f32 {
+        self.tab.style_working.font_size
     }
 
-    fn style_line_height(&self) -> &str {
-        &self.tab.style_line_height
+    fn style_line_height(&self) -> f32 {
+        self.tab.style_working.line_height
     }
 
-    fn style_letter_spacing(&self) -> &str {
-        &self.tab.style_letter_spacing
+    fn style_letter_spacing(&self) -> f32 {
+        self.tab.style_working.letter_spacing
     }
 
     fn style_presets(&self) -> &[Option<EntryStyle>] {
@@ -653,11 +653,11 @@ impl UiState for App {
     fn style_bg_color(&self) -> Color { rgba_to_color(self.tabs[self.active].style_working.bg_color) }
     fn style_picker_open(&self) -> Option<StyleField> { self.tabs[self.active].style_picker }
     fn dropper_buffer(&self) -> Option<neverliie_iced_widgets::color_picker::DropperBuffer> { Some(self.dropper_buffer.clone()) }
-    fn style_stroke_width(&self) -> &str { &self.tabs[self.active].style_stroke_width }
-    fn style_bg_radius(&self) -> &str { &self.tabs[self.active].style_bg_radius }
-    fn style_font_size(&self) -> &str { &self.tabs[self.active].style_font_size }
-    fn style_line_height(&self) -> &str { &self.tabs[self.active].style_line_height }
-    fn style_letter_spacing(&self) -> &str { &self.tabs[self.active].style_letter_spacing }
+    fn style_stroke_width(&self) -> f32 { self.tabs[self.active].style_working.stroke_width }
+    fn style_bg_radius(&self) -> f32 { self.tabs[self.active].style_working.bg_radius }
+    fn style_font_size(&self) -> f32 { self.tabs[self.active].style_working.font_size }
+    fn style_line_height(&self) -> f32 { self.tabs[self.active].style_working.line_height }
+    fn style_letter_spacing(&self) -> f32 { self.tabs[self.active].style_working.letter_spacing }
     fn style_presets(&self) -> &[Option<EntryStyle>] { self.presets.as_slice() }
     fn installed_fonts(&self) -> &[String] { &self.installed_fonts }
     fn style_font_family(&self) -> Option<&str> { self.tabs[self.active].style_working.font_family.as_deref() }

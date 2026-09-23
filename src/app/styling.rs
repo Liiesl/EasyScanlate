@@ -279,63 +279,48 @@ pub fn handle_hex_input(app: &mut App, field: StyleField, text: String) -> Task<
     Task::none()
 }
 
-pub fn handle_stroke_width(app: &mut App, text: String) -> Task<Message> {
+pub fn handle_stroke_width(app: &mut App, width: f32) -> Task<Message> {
     let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
-    app.active_tab_mut().style_stroke_width = text;
-    if let Ok(width) = app.active_tab_mut().style_stroke_width.parse::<f32>() {
-        app.active_tab_mut().style_working.stroke_width = width.max(0.0);
-        let style = app.active_tab().style_working.clone();
+    app.active_tab_mut().style_working.stroke_width = width.max(0.0);
+    let style = app.active_tab().style_working.clone();
     let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
-        crate::app::handle_model_event(app.active_tab_mut(), ev);
-    }
+    crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
-pub fn handle_bg_radius(app: &mut App, text: String) -> Task<Message> {
+pub fn handle_bg_radius(app: &mut App, radius: f32) -> Task<Message> {
     let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
-    app.active_tab_mut().style_bg_radius = text;
-    if let Ok(radius) = app.active_tab_mut().style_bg_radius.parse::<f32>() {
-        app.active_tab_mut().style_working.bg_radius = radius.max(0.0);
-        let style = app.active_tab().style_working.clone();
+    app.active_tab_mut().style_working.bg_radius = radius.max(0.0);
+    let style = app.active_tab().style_working.clone();
     let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
-        crate::app::handle_model_event(app.active_tab_mut(), ev);
-    }
+    crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
-pub fn handle_font_size(app: &mut App, text: String) -> Task<Message> {
+pub fn handle_font_size(app: &mut App, size: f32) -> Task<Message> {
     let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
-    app.active_tab_mut().style_font_size = text;
-    if let Ok(size) = app.active_tab_mut().style_font_size.parse::<f32>() {
-        app.active_tab_mut().style_working.font_size = size.max(1.0);
-        let style = app.active_tab().style_working.clone();
-        let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
-        crate::app::handle_model_event(app.active_tab_mut(), ev);
-    }
+    app.active_tab_mut().style_working.font_size = size.max(1.0);
+    let style = app.active_tab().style_working.clone();
+    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
-pub fn handle_line_height(app: &mut App, text: String) -> Task<Message> {
+pub fn handle_line_height(app: &mut App, height: f32) -> Task<Message> {
     let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
-    app.active_tab_mut().style_line_height = text;
-    if let Ok(height) = app.active_tab_mut().style_line_height.parse::<f32>() {
-        app.active_tab_mut().style_working.line_height = height.clamp(0.5, 3.0);
-        let style = app.active_tab().style_working.clone();
-        let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
-        crate::app::handle_model_event(app.active_tab_mut(), ev);
-    }
+    app.active_tab_mut().style_working.line_height = height.clamp(0.5, 3.0);
+    let style = app.active_tab().style_working.clone();
+    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
-pub fn handle_letter_spacing(app: &mut App, text: String) -> Task<Message> {
+pub fn handle_letter_spacing(app: &mut App, spacing: f32) -> Task<Message> {
     let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
-    app.active_tab_mut().style_letter_spacing = text;
-    if let Ok(spacing) = app.active_tab_mut().style_letter_spacing.parse::<f32>() {
-        app.active_tab_mut().style_working.letter_spacing = spacing.clamp(0.0, 20.0);
-        let style = app.active_tab().style_working.clone();
-        let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
-        crate::app::handle_model_event(app.active_tab_mut(), ev);
-    }
+    app.active_tab_mut().style_working.letter_spacing = spacing.clamp(0.0, 20.0);
+    let style = app.active_tab().style_working.clone();
+    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 

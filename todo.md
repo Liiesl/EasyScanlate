@@ -10,7 +10,7 @@
 
 #### fixes
 
-- 
+- cap free transform to prevent cowtie/flipped/collapsed quad
 
 #### modification
 

@@ -281,15 +281,15 @@ pub enum UiEvent {
     /// The user typed hex text for `field` in the styling panel; live-apply
     /// when the string parses as a valid hex (or "None").
     StyleHexInput(StyleField, String),
-    StyleStrokeWidth(String),
-    StyleBgRadius(String),
+    StyleStrokeWidth(f32),
+    StyleBgRadius(f32),
     /// The user typed a fixed font size (image px) for the selected entry;
     /// applied only when auto-size is off.
-    StyleFontSize(String),
+    StyleFontSize(f32),
     /// The user typed a relative line-height multiplier for the selected entry.
-    StyleLineHeight(String),
+    StyleLineHeight(f32),
     /// The user typed letter spacing (image px) for the selected entry.
-    StyleLetterSpacing(String),
+    StyleLetterSpacing(f32),
     /// The user toggled auto-size for the selected entry (default true).
     StyleAutoSize(bool),
     /// The user picked the caps transform for the selected entry.

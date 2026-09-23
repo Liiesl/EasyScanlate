@@ -85,11 +85,11 @@ pub trait UiState {
     fn dropper_buffer(&self) -> Option<neverliie_iced_widgets::color_picker::DropperBuffer> {
         None
     }
-    fn style_stroke_width(&self) -> &str;
-    fn style_bg_radius(&self) -> &str;
-    fn style_font_size(&self) -> &str;
-    fn style_line_height(&self) -> &str;
-    fn style_letter_spacing(&self) -> &str;
+    fn style_stroke_width(&self) -> f32;
+    fn style_bg_radius(&self) -> f32;
+    fn style_font_size(&self) -> f32;
+    fn style_line_height(&self) -> f32;
+    fn style_letter_spacing(&self) -> f32;
     /// The saved style presets shown in the styling panel, in memory only:
     /// a fixed set of slots, `None` for an empty slot.
     fn style_presets(&self) -> &[Option<EntryStyle>];
