@@ -361,9 +361,131 @@ pub fn distort_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize,
     if scale <= 0.0 {
         return None;
     }
+    if corner >= 4 {
+        return None;
+    }
     let img_x = local.x / scale;
     let img_y = (local.y + state.offset - y) / scale;
-    let mut points = quad.points;
-    points[corner] = [img_x, img_y];
-    Some(Quad { points })
+    if !img_x.is_finite() || !img_y.is_finite() {
+        return None;
+    }
+    // Free-transform cap: the dragged corner must never break planarity
+    // (bow-tie / concave flip / collapsed line). No image-bounds or stretch
+    // cap by design — only the topology guard below.
+    let reference = quad.points;
+    let reference_sign = quad_winding(reference);
+    let (min_len, min_area) = distort_floors(reference, MIN_BOX_EDGE / scale);
+    let start = reference[corner];
+    let target = [img_x, img_y];
+    let mut candidate = reference;
+    candidate[corner] = target;
+    if distort_valid(candidate, reference_sign, min_len, min_area) {
+        return Some(Quad { points: candidate });
+    }
+    // Press position is the known-good anchor. If even that fails (legacy
+    // degenerate save), only allow drags that heal back to a valid quad.
+    if !distort_valid(reference, reference_sign, min_len, min_area) {
+        return None;
+    }
+    // Clamp to the nearest valid point along the press -> cursor segment:
+    // largest `t` that keeps the quad convex, correctly wound, and non-flat.
+    let mut lo = 0.0f32;
+    let mut hi = 1.0f32;
+    for _ in 0..16 {
+        let mid = (lo + hi) * 0.5;
+        let mut probe = reference;
+        probe[corner] = [start[0] + (target[0] - start[0]) * mid, start[1] + (target[1] - start[1]) * mid];
+        if distort_valid(probe, reference_sign, min_len, min_area) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    if lo <= 0.0 {
+        return None;
+    }
+    let mut clamped = reference;
+    clamped[corner] = [
+        start[0] + (target[0] - start[0]) * lo,
+        start[1] + (target[1] - start[1]) * lo,
+    ];
+    if distort_valid(clamped, reference_sign, min_len, min_area) {
+        Some(Quad { points: clamped })
+    } else {
+        None
+    }
+}
+
+/// Signed double area (>0 for TL/TR/BR/BL order). Zero means flat.
+fn quad_area2(points: [[f32; 2]; 4]) -> f32 {
+    let mut sum = 0.0f32;
+    for i in 0..4 {
+        let [x0, y0] = points[i];
+        let [x1, y1] = points[(i + 1) % 4];
+        sum += x0 * y1 - x1 * y0;
+    }
+    sum
+}
+
+/// Winding of the press quad; defaults to +1 for a degenerate press so the
+/// convexity test still has a reference direction.
+fn quad_winding(points: [[f32; 2]; 4]) -> f32 {
+    let area2 = quad_area2(points);
+    if area2 > 1e-6 {
+        1.0
+    } else if area2 < -1e-6 {
+        -1.0
+    } else {
+        1.0
+    }
+}
+
+/// Collapse floors in image px. Adaptive so tiny OCR boxes (already smaller
+/// than `MIN_BOX_EDGE / scale`) stay distortable down to half their press
+/// size instead of freezing on grab.
+fn distort_floors(press: [[f32; 2]; 4], min_edge: f32) -> (f32, f32) {
+    let mut smallest = f32::INFINITY;
+    for i in 0..4 {
+        let [x0, y0] = press[i];
+        let [x1, y1] = press[(i + 1) % 4];
+        if x0.is_finite() && y0.is_finite() && x1.is_finite() && y1.is_finite() {
+            smallest = smallest.min((x1 - x0).hypot(y1 - y0));
+        }
+    }
+    let min_len = if smallest.is_finite() {
+        min_edge.min(smallest * 0.5).max(1.0)
+    } else {
+        min_edge.max(1.0)
+    };
+    (min_len, min_len * min_len)
+}
+
+/// Strictly convex, consistently wound, non-collapsed. One test rejects
+/// bow-ties (mixed cross signs), concave darts, flipped winding, and lines.
+fn distort_valid(points: [[f32; 2]; 4], reference_sign: f32, min_len: f32, min_area: f32) -> bool {
+    for p in points {
+        if !p[0].is_finite() || !p[1].is_finite() {
+            return false;
+        }
+    }
+    for i in 0..4 {
+        let [x0, y0] = points[i];
+        let [x1, y1] = points[(i + 1) % 4];
+        if ((x1 - x0).hypot(y1 - y0)) < min_len {
+            return false;
+        }
+    }
+    if quad_area2(points) * reference_sign <= min_area {
+        return false;
+    }
+    for i in 0..4 {
+        let [x0, y0] = points[i];
+        let [x1, y1] = points[(i + 1) % 4];
+        let [x2, y2] = points[(i + 2) % 4];
+        let cross = (x1 - x0) * (y2 - y1) - (y1 - y0) * (x2 - x1);
+        if cross * reference_sign <= 1e-6 {
+            return false;
+        }
+    }
+    true
 }
