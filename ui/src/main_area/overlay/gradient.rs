@@ -71,10 +71,11 @@ pub fn fill_gradient_text<F>(
     a: [u8; 4],
     b: [u8; 4],
     stroke: Option<(Color, f32)>,
+    letter_spacing: f32,
 ) where
     F: geometry::frame::Backend,
 {
-    fill_gradient_glyphs(frame, text, box_rect, dir, a, b, stroke)
+    fill_gradient_glyphs(frame, text, box_rect, dir, a, b, stroke, letter_spacing)
 }
 
 fn fill_gradient_glyphs<F>(
@@ -85,33 +86,35 @@ fn fill_gradient_glyphs<F>(
     a: [u8; 4],
     b: [u8; 4],
     stroke: Option<(Color, f32)>,
+    letter_spacing: f32,
 ) where
     F: geometry::frame::Backend,
 {
-    use iced::advanced::graphics::text::{self as gfx_text, cosmic_text, Paragraph as GfxParagraph};
-    use iced::advanced::text::{Paragraph as _, Wrapping};
-    use iced::advanced::text::Text as ParagraphText;
-    use iced::{alignment, Size};
+    use iced::advanced::graphics::text::{self as gfx_text, cosmic_text};
+    use iced::advanced::text::{LineHeight, Wrapping};
+    use iced::Size;
     use iced::advanced::text::Alignment as TextAlignment;
 
-    let paragraph = GfxParagraph::with_text(ParagraphText {
-        content: text.content.as_str(),
-        bounds: Size::new(text.max_width, f32::INFINITY),
-        size: text.size,
-        line_height: text.line_height,
-        font: text.font,
-        align_x: text.align_x,
-        align_y: alignment::Vertical::Top,
-        shaping: text.shaping,
-        wrapping: Wrapping::Word,
-    });
+    let line_factor = match text.line_height {
+        LineHeight::Relative(f) => f,
+        LineHeight::Absolute(px) => (f32::from(px) / text.size.0.max(1.0)).max(0.1),
+    };
+    let (buffer, corrected) = super::text::spaced_buffer(
+        text.content.as_str(),
+        text.font,
+        text.size.0,
+        text.max_width,
+        line_factor,
+        letter_spacing,
+        Wrapping::WordOrGlyph,
+        text.align_x,
+    );
     let translation_x = match text.align_x {
         TextAlignment::Default | TextAlignment::Left | TextAlignment::Justified => text.position.x,
-        TextAlignment::Center => text.position.x - paragraph.min_width() / 2.0,
-        TextAlignment::Right => text.position.x - paragraph.min_width(),
+        TextAlignment::Center => text.position.x - corrected.width / 2.0,
+        TextAlignment::Right => text.position.x - corrected.width,
     };
     let translation_y = text.position.y;
-    let buffer = paragraph.buffer();
     let mut swash_cache = cosmic_text::SwashCache::new();
     let mut font_system = gfx_text::font_system().write().expect("Write font system");
     let (grad_start, grad_end) = gradient_start_end(dir, box_rect);

@@ -3,7 +3,7 @@ use std::collections::{HashMap, VecDeque};
 
 use iced::{Font, Size};
 
-use super::cache::{fit_key, FitKey, FIT_CACHE_CAP};
+use super::cache::{fit_key_params, FitKey, FIT_CACHE_CAP};
 use super::text::measure_text;
 
 const MIN_FONT_SIZE: f32 = 1.0;
@@ -41,16 +41,28 @@ fn with_fit_cache<R>(f: impl FnOnce(&mut FitCache) -> R) -> R {
 
 /// Largest font size at which `text` fits inside `bounds` (word wrapping at box width).
 #[allow(dead_code)]
-pub(crate) fn fit_font_size(text: &str, font: Font, bounds: Size) -> f32 {
-    fit_font_metrics(text, font, bounds).0
+pub(crate) fn fit_font_size(
+    text: &str,
+    font: Font,
+    bounds: Size,
+    line_height: f32,
+    letter_spacing: f32,
+) -> f32 {
+    fit_font_metrics(text, font, bounds, line_height, letter_spacing).0
 }
 
 /// Like `fit_font_size`, also returning wrapped text height at fitted size.
-pub(crate) fn fit_font_metrics(text: &str, font: Font, bounds: Size) -> (f32, f32) {
+pub(crate) fn fit_font_metrics(
+    text: &str,
+    font: Font,
+    bounds: Size,
+    line_height: f32,
+    letter_spacing: f32,
+) -> (f32, f32) {
     if text.is_empty() || bounds.width <= 0.0 || bounds.height <= 0.0 {
         return (MIN_FONT_SIZE, 0.0);
     }
-    let key = fit_key(text, font, bounds);
+    let key = fit_key_params(text, font, bounds, line_height, letter_spacing);
     let cached = with_fit_cache(|cache| {
         cache
             .entries
@@ -66,7 +78,7 @@ pub(crate) fn fit_font_metrics(text: &str, font: Font, bounds: Size) -> (f32, f3
     let mut fitted_height = 0.0;
     for _ in 0..FIT_ITERATIONS {
         let mid = (low + high) / 2.0;
-        let measured = measure_text(text, font, mid, bounds.width);
+        let measured = measure_text(text, font, mid, bounds.width, line_height, letter_spacing);
         if measured.width <= bounds.width && measured.height <= bounds.height {
             low = mid;
             fitted_height = measured.height;

@@ -5,7 +5,7 @@ use iced::widget::text_editor;
 use iced::{Color, Rectangle};
 use iced::window::screenshot::Screenshot;
 
-use easyscanlate_model::{EntryId, ProfileId, Quad, TextAlign, TextGradientDir};
+use easyscanlate_model::{CapsMode, EntryId, ProfileId, Quad, TextAlign, TextGradientDir};
 use easyscanlate_settings::InpaintBackend;
 
 /// The actions offered by the floating inpaint toolbar under the selected patch.
@@ -283,6 +283,17 @@ pub enum UiEvent {
     StyleHexInput(StyleField, String),
     StyleStrokeWidth(String),
     StyleBgRadius(String),
+    /// The user typed a fixed font size (image px) for the selected entry;
+    /// applied only when auto-size is off.
+    StyleFontSize(String),
+    /// The user typed a relative line-height multiplier for the selected entry.
+    StyleLineHeight(String),
+    /// The user typed letter spacing (image px) for the selected entry.
+    StyleLetterSpacing(String),
+    /// The user toggled auto-size for the selected entry (default true).
+    StyleAutoSize(bool),
+    /// The user picked the caps transform for the selected entry.
+    StyleCaps(CapsMode),
     /// The user picked an installed font family name for the selected entry.
     StyleFont(String),
     /// The font dropdown was opened: load the first visible families so

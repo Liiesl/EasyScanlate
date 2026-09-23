@@ -20,7 +20,8 @@
 use iced::widget::button::Status;
 use iced::widget::image::{self, Handle};
 use iced::widget::{
-    button, column, container, pick_list, row, rule, scrollable, space::Space, text, text_input, tooltip,
+    button, checkbox, column, container, pick_list, row, rule, scrollable, space::Space, text,
+    text_input, tooltip,
 };
 use iced::{
     Background, Border, Color, Element, Fill as FillLength, Font, Length, Padding, Shadow,
@@ -32,12 +33,12 @@ use neverliie_iced_widgets::color_picker::floating_color_picker;
 use neverliie_iced_widgets::context_menu::{ContextMenu, Menu};
 use neverliie_iced_widgets::overlay::Position;
 
-use easyscanlate_model::{EntryStyle, TextAlign, TextGradientDir};
+use easyscanlate_model::{CapsMode, EntryStyle, TextAlign, TextGradientDir};
 use easyscanlate_settings::InpaintBackend;
 
 use crate::event::{StyleField, UiEvent};
 use crate::main_area::overlay::{font_support, preview_font, styled_font};
-use crate::segmented::{segment_icon, segmented_group, BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
+use crate::segmented::{segment_compact, segment_icon, segmented_group, BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
 use crate::scale;
 use crate::state::UiState;
 use lucide_icons::Icon;
@@ -444,6 +445,103 @@ fn format_align_row<'a>(
     .into()
 }
 
+/// A small muted caption above a paired number input ("Line height", ...).
+fn caption<'a>(label: &'a str) -> Element<'a, UiEvent> {
+    text(label).size(scale::s(10.0)).color(MUTED_FG).into()
+}
+
+/// The typography size/spacing controls: an `Auto size` checkbox (default on:
+/// the text is fitted to its box) plus a fixed font-size input used only
+/// while auto-size is off, then one row of line-height, letter-spacing
+/// (image px) and the mutually exclusive All Caps / Small Caps toggle.
+fn typography_section<'a, S: UiState + ?Sized>(
+    state: &'a S,
+    style: &EntryStyle,
+    selected: bool,
+) -> Element<'a, UiEvent> {
+    let auto: Element<'a, UiEvent> = checkbox(style.auto_size)
+        .label("Auto size")
+        .text_size(scale::s(12.0))
+        .on_toggle_maybe(selected.then_some(UiEvent::StyleAutoSize))
+        .into();
+    // Fixed size is inert while auto-size fits the box.
+    let fixed_input = if style.auto_size {
+        number_field(Icon::Type, state.style_font_size(), None)
+    } else {
+        number_field(
+            Icon::Type,
+            state.style_font_size(),
+            selected.then_some(UiEvent::StyleFontSize),
+        )
+    };
+    let caps_aa = segment_compact(
+        style.caps == CapsMode::AllCaps,
+        "AA",
+        selected.then_some(UiEvent::StyleCaps(if style.caps == CapsMode::AllCaps {
+            CapsMode::None
+        } else {
+            CapsMode::AllCaps
+        })),
+        Font::DEFAULT,
+    );
+    let caps_sc = segment_compact(
+        style.caps == CapsMode::SmallCaps,
+        "aA",
+        selected.then_some(UiEvent::StyleCaps(if style.caps == CapsMode::SmallCaps {
+            CapsMode::None
+        } else {
+            CapsMode::SmallCaps
+        })),
+        Font::DEFAULT,
+    );
+    column![
+        row![
+            container(auto).width(Length::FillPortion(1)),
+            container(fixed_input).width(Length::FillPortion(1)),
+        ]
+        .spacing(scale::s(8.0))
+        .align_y(iced::Alignment::Center),
+        row![
+            container(
+                column![
+                    caption("Line height"),
+                    number_field(
+                        Icon::AlignCenter,
+                        state.style_line_height(),
+                        selected.then_some(UiEvent::StyleLineHeight),
+                    ),
+                ]
+                .spacing(scale::s(4.0))
+            )
+            .width(Length::FillPortion(1)),
+            container(
+                column![
+                    caption("Letter spacing"),
+                    number_field(
+                        Icon::Minus,
+                        state.style_letter_spacing(),
+                        selected.then_some(UiEvent::StyleLetterSpacing),
+                    ),
+                ]
+                .spacing(scale::s(4.0))
+            )
+            .width(Length::FillPortion(1)),
+            container(
+                column![
+                    caption("Case"),
+                    segmented_group(vec![caps_aa, caps_sc]),
+                ]
+                .spacing(scale::s(4.0))
+            )
+            .width(Length::FillPortion(1)),
+        ]
+        .spacing(scale::s(8.0))
+        .align_y(iced::Alignment::End),
+    ]
+    .spacing(scale::s(8.0))
+    .into()
+}
+
 /// The "Fill" section: solid (text color) vs gradient (two colors plus
 /// direction) tabs.
 fn fill_section<'a, S: UiState + ?Sized>(
@@ -526,8 +624,8 @@ impl std::fmt::Display for PanelBackend {
     }
 }
 
-/// The "Background & Corner" section: background color plus corner radius,
-/// with an "Inpaint Background" split button. The main area makes the bg
+/// The background section: background color plus corner radius, each with
+/// its own caption, with an "Inpaint Background" split button. The main area makes the bg
 /// transparent and inpaints the *current* view quad (not the original OCR
 /// quad) — i.e. the box's present position/size after any
 /// move/resize/rotate/distort — with the default backend; the arrow zone
@@ -629,22 +727,34 @@ fn background_section<'a, S: UiState + ?Sized>(
         .into()
     };
     column![
-        section_title("Background & Corner"),
         row![
-            container(color_field(
-                state,
-                StyleField::Background,
-                state.style_bg_color(),
-            ))
+            container(
+                column![
+                    caption("Background"),
+                    color_field(
+                        state,
+                        StyleField::Background,
+                        state.style_bg_color(),
+                    ),
+                ]
+                .spacing(scale::s(4.0))
+            )
             .width(Length::FillPortion(2)),
-            container(number_field(
-                Icon::SquareRoundCorner,
-                state.style_bg_radius(),
-                selected.then_some(UiEvent::StyleBgRadius),
-            ))
+            container(
+                column![
+                    caption("Corner"),
+                    number_field(
+                        Icon::SquareRoundCorner,
+                        state.style_bg_radius(),
+                        selected.then_some(UiEvent::StyleBgRadius),
+                    ),
+                ]
+                .spacing(scale::s(4.0))
+            )
             .width(Length::FillPortion(1)),
         ]
-        .spacing(scale::s(8.0)),
+        .spacing(scale::s(8.0))
+        .align_y(iced::Alignment::End),
         crate::button::with_disabled_cursor(action),
     ]
     .spacing(scale::s(8.0))
@@ -848,6 +958,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         header_row(state, selected),
         font_field(state),
         format_align_row(style, selected),
+        typography_section(state, style, selected),
         fill_section(state, style, selected),
         stroke_section(state, selected),
         background_section(state, selected),

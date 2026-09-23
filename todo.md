@@ -1,34 +1,41 @@
 # what i need
 
-## done (milestone 0.4.2 release)
+## done (milestone 0.4.3 release)
 
 #### addition
 
-- display font preview
-- add more default fonts
--
+- font fixed size
+- font line height and letter spacing
+- case toggle
 
 #### fixes
 
-- bitmap font did not render properly
-- failed inpaint in some case
-- cursor cropped overflow while on edge
 - 
 
 #### modification
 
-- swap telea to harmonic for mixed backend
-- optimize harmonic inpaint backend
-- choose inpaint backend instantly on styling panel
-- make bold and italic disabled if the font family dont have one
-- use word+glyph wrap for cosmic text editor on main area
-- change default stroke to be 5
+- 
 
 ## currently in progress
 
+#### addition
+
+- proper error rfd
+- 
+
 #### fixes
 
-- fix recent on color picker cant be clicked.
+- duplicate inpaint introduced in 0.4.2
+- scroll reset on minimize/focus lost.
+- under heavy computation, switching tabs make ui froze, interaction seem to work but the ui graphics themself froze.
+- case not working as intended
+
+#### modification
+
+- cache model json as fallback and delta update only when starting up
+- retire status bar
+- add max on quad ftf
+- 
 
 ## not yet started
 

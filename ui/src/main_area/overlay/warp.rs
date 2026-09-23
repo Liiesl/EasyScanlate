@@ -2,14 +2,13 @@ use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 
 use iced::advanced::graphics::geometry::{self, Fill, Path, Stroke, Text};
-use iced::advanced::text::{LineHeight, Paragraph as _, Wrapping};
-use iced::advanced::text::Text as ParagraphText;
-use iced::{alignment, Color, Font, Pixels, Point, Rectangle, Size, Vector};
+use iced::advanced::text::{LineHeight, Wrapping};
+use iced::{Color, Font, Point, Rectangle, Vector};
 use iced::advanced::text::Alignment as TextAlignment;
 
 use easyscanlate_model::TextGradientDir;
 
-use super::cache::{FitKey, FIT_CACHE_CAP, font_hash, fnv1a};
+use super::cache::{FitKey, FIT_CACHE_CAP, font_hash, text_key};
 use super::gradient::{gradient_t, lerp_color};
 use crate::main_area::geometry::{fit_affine, quad_bounds, svd2};
 
@@ -56,7 +55,14 @@ fn with_warp_cache<R>(f: impl FnOnce(&mut WarpCache) -> R) -> R {
     })
 }
 
-pub(crate) fn shape_warp_layout(text: &str, font: Font, size: f32, wrap_width: f32) -> WarpLayout {
+pub(crate) fn shape_warp_layout(
+    text: &str,
+    font: Font,
+    size: f32,
+    wrap_width: f32,
+    line_height: f32,
+    letter_spacing: f32,
+) -> WarpLayout {
     if text.is_empty() || wrap_width <= 0.0 {
         return WarpLayout {
             glyphs: Vec::new(),
@@ -64,7 +70,7 @@ pub(crate) fn shape_warp_layout(text: &str, font: Font, size: f32, wrap_width: f
         };
     }
     let key = (
-        fnv1a(text),
+        text_key(text, line_height, letter_spacing),
         size.to_bits(),
         wrap_width.to_bits(),
         font_hash(font),
@@ -73,7 +79,7 @@ pub(crate) fn shape_warp_layout(text: &str, font: Font, size: f32, wrap_width: f
         if let Some(entry) = cache.entries.get(&key).filter(|entry| entry.content == text) {
             return entry.layout.clone();
         }
-        let layout = build_warp_layout(text, font, size, wrap_width);
+        let layout = build_warp_layout(text, font, size, wrap_width, line_height, letter_spacing);
         if !cache.entries.contains_key(&key) {
             if cache.entries.len() >= FIT_CACHE_CAP
                 && let Some(evicted) = cache.order.pop_front() {
@@ -92,22 +98,28 @@ pub(crate) fn shape_warp_layout(text: &str, font: Font, size: f32, wrap_width: f
     })
 }
 
-fn build_warp_layout(text: &str, font: Font, size: f32, wrap_width: f32) -> WarpLayout {
-    use iced::advanced::graphics::text::{self as gfx_text, cosmic_text, Paragraph as GfxParagraph};
+fn build_warp_layout(
+    text: &str,
+    font: Font,
+    size: f32,
+    wrap_width: f32,
+    line_height: f32,
+    letter_spacing: f32,
+) -> WarpLayout {
+    use iced::advanced::graphics::text::{self as gfx_text, cosmic_text};
+    use iced::advanced::text::Alignment as WarpAlign;
 
-    let paragraph = GfxParagraph::with_text(ParagraphText {
-        content: text,
-        bounds: Size::new(wrap_width, f32::INFINITY),
-        size: Pixels(size),
-        line_height: LineHeight::Relative(1.2),
+    let (buffer, corrected) = super::text::spaced_buffer(
+        text,
         font,
-        align_x: TextAlignment::Default,
-        align_y: alignment::Vertical::Top,
-        shaping: iced::advanced::text::Shaping::Auto,
-        wrapping: Wrapping::Word,
-    });
-    let min_width = paragraph.min_width();
-    let buffer = paragraph.buffer();
+        size,
+        wrap_width,
+        line_height,
+        letter_spacing,
+        Wrapping::WordOrGlyph,
+        WarpAlign::Default,
+    );
+    let min_width = corrected.width;
     let mut swash_cache = cosmic_text::SwashCache::new();
     let mut font_system = gfx_text::font_system().write().expect("Write font system");
     let mut glyphs = Vec::new();
@@ -255,10 +267,22 @@ pub fn draw_warped_text<F>(
     quad: [[f32; 2]; 4],
     stroke: Option<(Color, f32)>,
     gradient: Option<(TextGradientDir, [u8; 4], [u8; 4])>,
+    letter_spacing: f32,
 ) where
     F: geometry::frame::Backend,
 {
-    let layout = shape_warp_layout(&text.content, text.font, text.size.0, text.max_width);
+    let line_factor = match text.line_height {
+        LineHeight::Relative(f) => f,
+        LineHeight::Absolute(px) => (f32::from(px) / text.size.0.max(1.0)).max(0.1),
+    };
+    let layout = shape_warp_layout(
+        &text.content,
+        text.font,
+        text.size.0,
+        text.max_width,
+        line_factor,
+        letter_spacing,
+    );
     if layout.glyphs.is_empty() {
         return;
     }

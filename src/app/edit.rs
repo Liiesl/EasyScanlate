@@ -70,6 +70,9 @@ pub fn seed_style_inputs(app: &mut App, style: easyscanlate_model::EntryStyle) {
     let tab = app.active_tab_mut();
     tab.style_stroke_width = style.stroke_width.to_string();
     tab.style_bg_radius = style.bg_radius.to_string();
+    tab.style_font_size = style.font_size.to_string();
+    tab.style_line_height = style.line_height.to_string();
+    tab.style_letter_spacing = style.letter_spacing.to_string();
     tab.style_working = style;
     tab.style_picker = None;
     tab.style_hex_overrides.clear();
@@ -88,6 +91,9 @@ pub fn select_entry(app: &mut App, index: usize, id: EntryId) -> Task<Message> {
         // inline seed to avoid double borrow
         tab.style_stroke_width = style.stroke_width.to_string();
         tab.style_bg_radius = style.bg_radius.to_string();
+        tab.style_font_size = style.font_size.to_string();
+        tab.style_line_height = style.line_height.to_string();
+        tab.style_letter_spacing = style.letter_spacing.to_string();
         tab.style_working = style;
         tab.style_picker = None;
         tab.style_hex_overrides.clear();

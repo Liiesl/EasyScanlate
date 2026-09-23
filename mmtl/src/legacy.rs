@@ -206,6 +206,22 @@ fn legacy_style_to_entry_style(val: &serde_json::Value) -> Option<easyscanlate_m
         style.font_size = fs as f32;
         changed = true;
     }
+    if let Some(auto) = obj.get("auto_size").and_then(|v| v.as_bool()) {
+        style.auto_size = auto;
+        changed = true;
+    }
+    if let Some(lh) = obj.get("line_height").and_then(|v| v.as_f64()) {
+        style.line_height = lh as f32;
+        changed = true;
+    }
+    if let Some(ls) = obj.get("letter_spacing").and_then(|v| v.as_f64()) {
+        style.letter_spacing = ls as f32;
+        changed = true;
+    }
+    if let Some(caps) = obj.get("caps").and_then(|v| v.as_str()) {
+        style.caps = easyscanlate_model::CapsMode::from_label(caps);
+        changed = true;
+    }
     if let Some(bg) = obj.get("bg_color").and_then(|v| v.as_str())
         && let Some(rgba) = parse_hex_argb(bg) {
             style.bg_color = rgba;
@@ -280,6 +296,18 @@ fn entry_style_to_legacy_custom(val: &easyscanlate_model::EntryStyle) -> Option<
     let mut map = serde_json::Map::new();
     if val.font_size != def.font_size {
         map.insert("font_size".into(), serde_json::Value::Number(serde_json::Number::from_f64(val.font_size as f64).unwrap()));
+    }
+    if val.auto_size != def.auto_size {
+        map.insert("auto_size".into(), serde_json::Value::Bool(val.auto_size));
+    }
+    if val.line_height != def.line_height {
+        map.insert("line_height".into(), serde_json::Value::Number(serde_json::Number::from_f64(val.line_height as f64).unwrap()));
+    }
+    if val.letter_spacing != def.letter_spacing {
+        map.insert("letter_spacing".into(), serde_json::Value::Number(serde_json::Number::from_f64(val.letter_spacing as f64).unwrap()));
+    }
+    if val.caps != def.caps {
+        map.insert("caps".into(), serde_json::Value::String(val.caps.label().to_string()));
     }
     if val.bg_color != def.bg_color {
         map.insert("bg_color".into(), serde_json::Value::String(rgba_to_hex(val.bg_color)));

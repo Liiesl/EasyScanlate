@@ -12,7 +12,7 @@ use quick_xml::Writer;
 use easyscanlate_model::{
     EntryId, EntrySource, EntryStyle, Extras, ImageId, ImageMeta, InpaintId, InpaintPatch,
     OcrEntry, OcrResult, Profile, ProfileId, Project, Quad, Shape, ShapeKind, TextAlign,
-    TextGradientDir,
+    TextGradientDir, CapsMode,
 };
 
 const VERSION: u32 = 1;
@@ -285,6 +285,10 @@ pub fn to_xml_string(project: &Project) -> Result<String, String> {
             let mut s = BytesStart::new("style");
             s.push_attribute(("entry_id", eid.0.to_string().as_str()));
             s.push_attribute(("font_size", style.font_size.to_string().as_str()));
+            s.push_attribute(("auto_size", if style.auto_size { "true" } else { "false" }));
+            s.push_attribute(("line_height", style.line_height.to_string().as_str()));
+            s.push_attribute(("letter_spacing", style.letter_spacing.to_string().as_str()));
+            s.push_attribute(("caps", style.caps.label()));
             s.push_attribute(("bold", if style.bold { "true" } else { "false" }));
             s.push_attribute(("italic", if style.italic { "true" } else { "false" }));
             s.push_attribute(("stroke_width", style.stroke_width.to_string().as_str()));
@@ -728,6 +732,10 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                     "style" => {
                         let eid = attr(&e, b"entry_id").map(|v| EntryId(parse_u64(&v))).unwrap_or(EntryId(0));
                         let font_size = attr(&e, b"font_size").map(|v| parse_f32(&v)).unwrap_or(14.0);
+                        let auto_size = attr(&e, b"auto_size").map(|v| v=="true").unwrap_or(true);
+                        let line_height = attr(&e, b"line_height").map(|v| parse_f32(&v)).unwrap_or(1.2);
+                        let letter_spacing = attr(&e, b"letter_spacing").map(|v| parse_f32(&v)).unwrap_or(0.0);
+                        let caps = attr(&e, b"caps").map(|v| CapsMode::from_label(&v)).unwrap_or(CapsMode::None);
                         let bold = attr(&e, b"bold").map(|v| v=="true").unwrap_or(false);
                         let italic = attr(&e, b"italic").map(|v| v=="true").unwrap_or(false);
                         let stroke_width = attr(&e, b"stroke_width").map(|v| parse_f32(&v)).unwrap_or(0.0);
@@ -736,7 +744,7 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                         let text_gradient = attr(&e, b"text_gradient").map(|v| v=="true").unwrap_or(false);
                         let gradient_dir = attr(&e, b"gradient_dir").map(|v| TextGradientDir::from_label(&v)).unwrap_or(TextGradientDir::TopToBottom);
                         let font_family = attr(&e, b"font_family").map(|v| unesc(&v));
-                        cur_style = Some((eid, EntryStyle{ font_size, bold, italic, text_color:[0,0,0,255], stroke_color:[0,0,0,255], stroke_width, bg_color:[255,255,255,255], bg_radius, font_family, text_align, text_gradient, gradient_a:[0,0,0,255], gradient_b:[0,0,0,255], gradient_dir }));
+                        cur_style = Some((eid, EntryStyle{ font_size, auto_size, line_height, letter_spacing, caps, bold, italic, text_color:[0,0,0,255], stroke_color:[0,0,0,255], stroke_width, bg_color:[255,255,255,255], bg_radius, font_family, text_align, text_gradient, gradient_a:[0,0,0,255], gradient_b:[0,0,0,255], gradient_dir }));
                         cur_style_colors.clear();
                     }
                     "text_color" | "stroke_color" | "bg_color" | "gradient_a" | "gradient_b" => {

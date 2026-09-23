@@ -3,8 +3,8 @@ use std::collections::{HashMap, VecDeque};
 
 use iced::{Font, Size};
 
-use super::cache::{fit_key, FitKey, FIT_CACHE_CAP};
-use super::text::{line_fits, measure_text, LINE_HEIGHT};
+use super::cache::{fit_key_params, FitKey, FIT_CACHE_CAP};
+use super::text::{line_fits, measure_text};
 
 /// One laid-out line of a circular bubble.
 #[derive(Debug, Clone, PartialEq)]
@@ -60,10 +60,17 @@ fn chord_at_centered(rx: f32, ry: f32, yc: f32) -> f32 {
     chord_at(rx, ry, yc)
 }
 
-fn circle_tokens(text: &str, font: Font, size: f32, max_width: f32) -> Vec<String> {
+fn circle_tokens(
+    text: &str,
+    font: Font,
+    size: f32,
+    max_width: f32,
+    line_height: f32,
+    letter_spacing: f32,
+) -> Vec<String> {
     let mut tokens = Vec::new();
     for word in text.split_whitespace() {
-        if measure_text(word, font, size, f32::INFINITY).width <= max_width {
+        if measure_text(word, font, size, f32::INFINITY, line_height, letter_spacing).width <= max_width {
             tokens.push(word.to_string());
             continue;
         }
@@ -74,7 +81,8 @@ fn circle_tokens(text: &str, font: Font, size: f32, max_width: f32) -> Vec<Strin
                 c.push(ch);
                 c
             };
-            let cand_width = measure_text(&candidate, font, size, f32::INFINITY).width;
+            let cand_width =
+                measure_text(&candidate, font, size, f32::INFINITY, line_height, letter_spacing).width;
             if !sub.is_empty() && cand_width > max_width {
                 tokens.push(std::mem::take(&mut sub));
                 sub.push(ch);
@@ -89,11 +97,18 @@ fn circle_tokens(text: &str, font: Font, size: f32, max_width: f32) -> Vec<Strin
     tokens
 }
 
-fn layout_circle_lines(text: &str, font: Font, size: f32, bounds: Size) -> Option<Vec<CircleLine>> {
+pub(crate) fn layout_circle_lines(
+    text: &str,
+    font: Font,
+    size: f32,
+    bounds: Size,
+    line_height: f32,
+    letter_spacing: f32,
+) -> Option<Vec<CircleLine>> {
     let rx = bounds.width / 2.0;
     let ry = bounds.height / 2.0;
-    let line_height = size * LINE_HEIGHT;
-    if line_height <= 0.0 {
+    let lh = size * line_height;
+    if lh <= 0.0 {
         return None;
     }
     // Split hard breaks on '\n' first, keeping empty segments for blank gaps.
@@ -104,7 +119,7 @@ fn layout_circle_lines(text: &str, font: Font, size: f32, bounds: Size) -> Optio
             if seg.trim().is_empty() {
                 Vec::new()
             } else {
-                circle_tokens(seg, font, size, bounds.width)
+                circle_tokens(seg, font, size, bounds.width, line_height, letter_spacing)
             }
         })
         .collect();
@@ -114,14 +129,14 @@ fn layout_circle_lines(text: &str, font: Font, size: f32, bounds: Size) -> Optio
         return Some(Vec::new());
     }
 
-    let max_lines = (bounds.height / line_height).floor() as usize;
+    let max_lines = (bounds.height / lh).floor() as usize;
     if max_lines == 0 {
         return None;
     }
     for n in 1..=max_lines {
         let chords: Vec<f32> = (0..n)
             .map(|i| {
-                let yc = ry + (i as f32 - (n as f32 - 1.0) / 2.0) * line_height;
+                let yc = ry + (i as f32 - (n as f32 - 1.0) / 2.0) * lh;
                 chord_at_centered(rx, ry, yc)
             })
             .collect();
@@ -137,7 +152,7 @@ fn layout_circle_lines(text: &str, font: Font, size: f32, bounds: Size) -> Optio
             if paras[para_idx].is_empty() {
                 lines.push(CircleLine {
                     content: String::new(),
-                    y: i as f32 * line_height,
+                    y: i as f32 * lh,
                     chord,
                 });
                 para_idx += 1;
@@ -155,7 +170,7 @@ fn layout_circle_lines(text: &str, font: Font, size: f32, bounds: Size) -> Optio
                 } else {
                     format!("{} {}", content, paras[para_idx][tok_idx])
                 };
-                if line_fits(&candidate, font, size, chord) {
+                if line_fits(&candidate, font, size, chord, line_height, letter_spacing) {
                     content = candidate;
                     tok_idx += 1;
                 } else if content.is_empty() {
@@ -170,7 +185,7 @@ fn layout_circle_lines(text: &str, font: Font, size: f32, bounds: Size) -> Optio
             }
             lines.push(CircleLine {
                 content,
-                y: i as f32 * line_height,
+                y: i as f32 * lh,
                 chord,
             });
             // Hard break: if this paragraph is fully consumed, advance to next paragraph
@@ -196,11 +211,17 @@ fn layout_circle_lines(text: &str, font: Font, size: f32, bounds: Size) -> Optio
 }
 
 /// Largest font size at which `text` fits `bounds` as circular bubble.
-pub(crate) fn fit_circle_metrics(text: &str, font: Font, bounds: Size) -> (f32, Vec<CircleLine>) {
+pub(crate) fn fit_circle_metrics(
+    text: &str,
+    font: Font,
+    bounds: Size,
+    line_height: f32,
+    letter_spacing: f32,
+) -> (f32, Vec<CircleLine>) {
     if text.is_empty() || bounds.width <= 0.0 || bounds.height <= 0.0 {
         return (MIN_FONT_SIZE, Vec::new());
     }
-    let key = fit_key(text, font, bounds);
+    let key = fit_key_params(text, font, bounds, line_height, letter_spacing);
     let cached = with_circle_cache(|cache| {
         cache
             .entries
@@ -216,7 +237,7 @@ pub(crate) fn fit_circle_metrics(text: &str, font: Font, bounds: Size) -> (f32, 
     let mut best: Vec<CircleLine> = Vec::new();
     for _ in 0..FIT_ITERATIONS {
         let mid = (low + high) / 2.0;
-        match layout_circle_lines(text, font, mid, bounds) {
+        match layout_circle_lines(text, font, mid, bounds, line_height, letter_spacing) {
             Some(lines) => {
                 low = mid;
                 best = lines;
@@ -226,7 +247,8 @@ pub(crate) fn fit_circle_metrics(text: &str, font: Font, bounds: Size) -> (f32, 
     }
     let size = low;
     let lines = if best.is_empty() {
-        layout_circle_lines(text, font, MIN_FONT_SIZE, bounds).unwrap_or_default()
+        layout_circle_lines(text, font, MIN_FONT_SIZE, bounds, line_height, letter_spacing)
+            .unwrap_or_default()
     } else {
         best
     };

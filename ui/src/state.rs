@@ -87,6 +87,9 @@ pub trait UiState {
     }
     fn style_stroke_width(&self) -> &str;
     fn style_bg_radius(&self) -> &str;
+    fn style_font_size(&self) -> &str;
+    fn style_line_height(&self) -> &str;
+    fn style_letter_spacing(&self) -> &str;
     /// The saved style presets shown in the styling panel, in memory only:
     /// a fixed set of slots, `None` for an empty slot.
     fn style_presets(&self) -> &[Option<EntryStyle>];

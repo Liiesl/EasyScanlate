@@ -111,6 +111,56 @@ pub const BUNDLED_FONTS: &[&str] = &[
     KOMIKA_SLIM_FAMILY,
 ];
 
+/// All-caps / small-caps transform applied to the entry text before
+/// layout and rendering. `SmallCaps` currently renders as uppercase (same
+/// shaping as `AllCaps`); true scaled small-cap glyphs need per-span
+/// rendering and are a follow-up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum CapsMode {
+    #[default]
+    None,
+    AllCaps,
+    SmallCaps,
+}
+
+impl CapsMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            CapsMode::None => "None",
+            CapsMode::AllCaps => "AllCaps",
+            CapsMode::SmallCaps => "SmallCaps",
+        }
+    }
+
+    pub fn from_label(label: &str) -> Self {
+        match label {
+            "AllCaps" => CapsMode::AllCaps,
+            "SmallCaps" => CapsMode::SmallCaps,
+            _ => CapsMode::None,
+        }
+    }
+}
+
+/// Applies the caps transform to display/measure text.
+pub fn apply_caps(text: &str, caps: CapsMode) -> String {
+    match caps {
+        CapsMode::None => text.to_string(),
+        CapsMode::AllCaps | CapsMode::SmallCaps => text.to_uppercase(),
+    }
+}
+
+fn default_line_height() -> f32 {
+    1.2
+}
+
+fn default_letter_spacing() -> f32 {
+    0.0
+}
+
+fn default_auto_size() -> bool {
+    true
+}
+
 /// Section titles of the font-picker dropdown.
 pub const FEATURED_FONTS_LABEL: &str = "Featured";
 pub const ALL_FONTS_LABEL: &str = "All fonts";
@@ -150,7 +200,22 @@ pub fn partition_featured_fonts(installed: &[String]) -> (Vec<usize>, Vec<usize>
 /// [`Project`]: crate::Project
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EntryStyle {
+    /// Fixed text size in image pixels; used only when `auto_size` is false.
+    /// When `auto_size` is true the overlay fits the text to its box.
     pub font_size: f32,
+    /// Fit the text to its box automatically (default true). When false,
+    /// `font_size` is used verbatim.
+    #[serde(default = "default_auto_size")]
+    pub auto_size: bool,
+    /// Relative line-height multiplier (e.g. 1.2); default 1.2.
+    #[serde(default = "default_line_height")]
+    pub line_height: f32,
+    /// Extra space between glyphs in image pixels; default 0.0.
+    #[serde(default = "default_letter_spacing")]
+    pub letter_spacing: f32,
+    /// Caps transform applied before layout/rendering; default None.
+    #[serde(default)]
+    pub caps: CapsMode,
     pub bold: bool,
     pub italic: bool,
     /// RGBA.
@@ -183,6 +248,10 @@ impl Default for EntryStyle {
     fn default() -> Self {
         Self {
             font_size: 14.0,
+            auto_size: true,
+            line_height: 1.2,
+            letter_spacing: 0.0,
+            caps: CapsMode::None,
             bold: false,
             italic: false,
             text_color: [0, 0, 0, 255],
@@ -209,6 +278,11 @@ mod tests {
         let style = EntryStyle::default();
         assert_eq!(style.bold, false);
         assert_eq!(style.italic, false);
+        assert_eq!(style.font_size, 14.0);
+        assert!(style.auto_size);
+        assert_eq!(style.line_height, 1.2);
+        assert_eq!(style.letter_spacing, 0.0);
+        assert_eq!(style.caps, CapsMode::None);
         assert_eq!(style.stroke_color, [0, 0, 0, 255]);
         assert_eq!(style.stroke_width, 0.0);
         assert_eq!(style.bg_radius, 0.0);

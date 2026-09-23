@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use iced::{Task, window};
-use easyscanlate_model::{EntryId, EntryStyle, Quad, TextAlign, TextGradientDir};
+use easyscanlate_model::{CapsMode, EntryId, EntryStyle, Quad, TextAlign, TextGradientDir};
 #[cfg(feature = "styling")]
 use easyscanlate_styling::Engine as StylingEngine;
 use easyscanlate_ui::event::{StyleField, UiEvent};
@@ -300,6 +300,60 @@ pub fn handle_bg_radius(app: &mut App, text: String) -> Task<Message> {
     let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
         crate::app::handle_model_event(app.active_tab_mut(), ev);
     }
+    Task::none()
+}
+
+pub fn handle_font_size(app: &mut App, text: String) -> Task<Message> {
+    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    app.active_tab_mut().style_font_size = text;
+    if let Ok(size) = app.active_tab_mut().style_font_size.parse::<f32>() {
+        app.active_tab_mut().style_working.font_size = size.max(1.0);
+        let style = app.active_tab().style_working.clone();
+        let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+        crate::app::handle_model_event(app.active_tab_mut(), ev);
+    }
+    Task::none()
+}
+
+pub fn handle_line_height(app: &mut App, text: String) -> Task<Message> {
+    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    app.active_tab_mut().style_line_height = text;
+    if let Ok(height) = app.active_tab_mut().style_line_height.parse::<f32>() {
+        app.active_tab_mut().style_working.line_height = height.clamp(0.5, 3.0);
+        let style = app.active_tab().style_working.clone();
+        let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+        crate::app::handle_model_event(app.active_tab_mut(), ev);
+    }
+    Task::none()
+}
+
+pub fn handle_letter_spacing(app: &mut App, text: String) -> Task<Message> {
+    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    app.active_tab_mut().style_letter_spacing = text;
+    if let Ok(spacing) = app.active_tab_mut().style_letter_spacing.parse::<f32>() {
+        app.active_tab_mut().style_working.letter_spacing = spacing.clamp(0.0, 20.0);
+        let style = app.active_tab().style_working.clone();
+        let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+        crate::app::handle_model_event(app.active_tab_mut(), ev);
+    }
+    Task::none()
+}
+
+pub fn handle_auto_size(app: &mut App, enabled: bool) -> Task<Message> {
+    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    app.active_tab_mut().style_working.auto_size = enabled;
+    let style = app.active_tab().style_working.clone();
+    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    crate::app::handle_model_event(app.active_tab_mut(), ev);
+    Task::none()
+}
+
+pub fn handle_caps(app: &mut App, caps: CapsMode) -> Task<Message> {
+    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    app.active_tab_mut().style_working.caps = caps;
+    let style = app.active_tab().style_working.clone();
+    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 

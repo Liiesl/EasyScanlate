@@ -9,7 +9,7 @@ pub mod text;
 pub mod warp;
 
 pub use entry::OverlayEntry;
-pub(crate) use circle::fit_circle_metrics;
+pub(crate) use circle::{fit_circle_metrics, layout_circle_lines};
 #[allow(unused_imports)]
 pub(crate) use fit::{fit_font_metrics, fit_font_size};
 pub use style::{FontSupport, font_support, preview_font, styled_font, styled_font_for_text};
@@ -17,9 +17,10 @@ pub use crate::main_area::geometry::order_quad;
 
 use iced::advanced::graphics::geometry::{self, Fill, Path, Stroke, Text};
 use iced::advanced::text::Alignment as TextAlignment;
+use iced::advanced::text::LineHeight;
 use iced::{Color, Font, Pixels, Point, Rectangle, Size};
 
-use easyscanlate_model::TextAlign;
+use easyscanlate_model::{apply_caps, TextAlign};
 
 use crate::color::rgba_to_color;
 use crate::main_area::geometry::{
@@ -27,7 +28,7 @@ use crate::main_area::geometry::{
 };
 
 use self::gradient::fill_gradient_text;
-use self::text::LINE_HEIGHT;
+use self::text::{draw_spaced_text, measure_text};
 use self::warp::{affine_error, draw_warped_text};
 
 const SELECTED_WIDTH: f32 = 2.0;
@@ -181,18 +182,36 @@ pub fn draw_entries<'a, I, F>(
         if entry.hide_text {
             continue;
         }
-        let styled = styled_font_for_text(font, &entry.style, entry.text);
+        let display = apply_caps(entry.text, entry.style.caps);
+        let styled = styled_font_for_text(font, &entry.style, &display);
         let stroke = (entry.style.stroke_width > 0.0).then(|| {
             (rgba_to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
         });
         let gradient = entry.style.text_gradient.then_some({
             (entry.style.gradient_dir, entry.style.gradient_a, entry.style.gradient_b)
         });
+        // Per-entry typography: relative line-height multiplier and letter
+        // spacing in image px (scaled to frame px). Spacing is real
+        // tracking via cosmic-text `Attrs::letter_spacing` (EM) shared by
+        // measure and the glyph-outline draw loops.
+        let lh = entry.style.line_height.clamp(0.5, 3.0);
+        let ls = entry.style.letter_spacing.clamp(0.0, 20.0) * scale;
+        let line_height_style = LineHeight::Relative(lh);
 
         if entry.style.text_align == TextAlign::Circular {
-            let (size, lines) =
-                fit_circle_metrics(entry.text, styled, Size::new(wrap_width, layout_height));
-            let line_height = size * LINE_HEIGHT;
+            let bounds = Size::new(wrap_width, layout_height);
+            let (size, lines) = if entry.style.auto_size {
+                fit_circle_metrics(&display, styled, bounds, lh, ls)
+            } else {
+                let fixed = (entry.style.font_size.max(1.0) * scale).max(1.0);
+                match layout_circle_lines(&display, styled, fixed, bounds, lh, ls) {
+                    Some(lines) => (fixed, lines),
+                    // Fixed size overflows the bubble: shrink to fit rather
+                    // than drawing nothing.
+                    None => fit_circle_metrics(&display, styled, bounds, lh, ls),
+                }
+            };
+            let line_height = size * lh;
             let total_height = lines.last().map_or(0.0, |line| line.y + line_height);
             let y_offset = (layout_height - total_height).max(0.0) / 2.0;
             let block_rect = Rectangle::new(
@@ -209,12 +228,13 @@ pub fn draw_entries<'a, I, F>(
                         ),
                         max_width: line.chord,
                         size: Pixels(size),
+                        line_height: line_height_style,
                         color: rgba_to_color(entry.style.text_color),
                         font: styled,
                         align_x: TextAlignment::Center,
                         ..Text::default()
                     };
-                    draw_warped_text(frame, &text, box_rect, quad, stroke, gradient);
+                    draw_warped_text(frame, &text, box_rect, quad, stroke, gradient, ls);
                 }
             } else {
                 if let Some(transform) = &layout_transform {
@@ -236,6 +256,7 @@ pub fn draw_entries<'a, I, F>(
                         ),
                         max_width: line.chord,
                         size: Pixels(size),
+                        line_height: line_height_style,
                         color: rgba_to_color(entry.style.text_color),
                         font: styled,
                         align_x: TextAlignment::Center,
@@ -252,17 +273,17 @@ pub fn draw_entries<'a, I, F>(
                             (entry.style.stroke_width > 0.0).then(|| {
                                 (rgba_to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
                             }),
+                            ls,
                         );
                     } else {
-                        if entry.style.stroke_width > 0.0 {
-                            frame.stroke_text(
-                                text.clone(),
-                                Stroke::default()
-                                    .with_color(rgba_to_color(entry.style.stroke_color))
-                                    .with_width(entry.style.stroke_width * scale),
-                            );
-                        }
-                        frame.fill_text(text);
+                        draw_spaced_text(
+                            frame,
+                            &text,
+                            ls,
+                            (entry.style.stroke_width > 0.0).then(|| {
+                                (rgba_to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
+                            }),
+                        );
                     }
                 }
                 if layout_transform.is_some() {
@@ -272,11 +293,14 @@ pub fn draw_entries<'a, I, F>(
             continue;
         }
 
-        let (size, fitted_height) = fit_font_metrics(
-            entry.text,
-            styled,
-            Size::new(wrap_width, layout_height),
-        );
+        let bounds = Size::new(wrap_width, layout_height);
+        let (size, fitted_height) = if entry.style.auto_size {
+            fit_font_metrics(&display, styled, bounds, lh, ls)
+        } else {
+            let fixed = (entry.style.font_size.max(1.0) * scale).max(1.0);
+            let height = measure_text(&display, styled, fixed, wrap_width, lh, ls).height;
+            (fixed, height)
+        };
         let y_offset = (layout_height - fitted_height).max(0.0) / 2.0;
         let block_rect = Rectangle::new(
             Point::new(layout_position.x, layout_position.y + y_offset),
@@ -289,10 +313,11 @@ pub fn draw_entries<'a, I, F>(
             TextAlign::Right => (TextAlignment::Right, layout_position.x + wrap_width),
         };
         let text = Text {
-            content: entry.text.to_string(),
+            content: display.clone(),
             position: Point::new(text_x, layout_position.y + y_offset),
             max_width: wrap_width,
             size: Pixels(size),
+            line_height: line_height_style,
             color: rgba_to_color(entry.style.text_color),
             font: styled,
             align_x,
@@ -300,7 +325,7 @@ pub fn draw_entries<'a, I, F>(
         };
 
         if warp {
-            draw_warped_text(frame, &text, box_rect, quad, stroke, gradient);
+            draw_warped_text(frame, &text, box_rect, quad, stroke, gradient, ls);
         } else {
             if let Some(transform) = &layout_transform {
                 frame.push_transform();
@@ -323,17 +348,17 @@ pub fn draw_entries<'a, I, F>(
                     (entry.style.stroke_width > 0.0).then(|| {
                         (rgba_to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
                     }),
+                    ls,
                 );
             } else {
-                if entry.style.stroke_width > 0.0 {
-                    frame.stroke_text(
-                        text.clone(),
-                        Stroke::default()
-                            .with_color(rgba_to_color(entry.style.stroke_color))
-                            .with_width(entry.style.stroke_width * scale),
-                    );
-                }
-                frame.fill_text(text);
+                draw_spaced_text(
+                    frame,
+                    &text,
+                    ls,
+                    (entry.style.stroke_width > 0.0).then(|| {
+                        (rgba_to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
+                    }),
+                );
             }
             if layout_transform.is_some() {
                 frame.pop_transform();
@@ -352,9 +377,17 @@ mod tests {
     use crate::main_area::geometry::{quad_bounds, quad_transform, rotated_rect_geometry, svd2};
     use iced::{alignment, Color, Font, Point, Rectangle, Size};
 
+    fn lh() -> f32 {
+        LINE_HEIGHT
+    }
+
+    fn ls() -> f32 {
+        0.0
+    }
+
     #[test]
     fn measure_text_is_sane() {
-        let size = measure_text("hello world", Font::DEFAULT, 20.0, 400.0);
+        let size = measure_text("hello world", Font::DEFAULT, 20.0, 400.0, lh(), ls());
         assert!(size.width > 30.0, "width {} too small", size.width);
         assert!(size.width < 300.0, "width {} too large", size.width);
         assert!(size.height > 15.0, "height {} too small", size.height);
@@ -368,12 +401,15 @@ mod tests {
             "hello world this is a longer bubble line for manhwa",
             Font::DEFAULT,
             bounds,
+            lh(),
+            ls(),
         );
         assert!(lines.len() >= 2, "expected several lines, got {}", lines.len());
         assert!(size > 8.0, "size {size} too small for a big bubble");
-        let line_height = size * LINE_HEIGHT;
+        let line_height = size * lh();
         for line in &lines {
-            let measured = measure_text(&line.content, Font::DEFAULT, size, f32::INFINITY).width;
+            let measured =
+                measure_text(&line.content, Font::DEFAULT, size, f32::INFINITY, lh(), ls()).width;
             assert!(
                 measured <= line.chord + 0.5 || !line.content.contains(' '),
                 "line {:?} width {measured} exceeds chord {}",
@@ -387,8 +423,8 @@ mod tests {
     #[test]
     fn circle_fit_shrinks_to_fit_small_bubble() {
         let text = "hello world this is a longer bubble line for manhwa";
-        let big = fit_circle_metrics(text, Font::DEFAULT, Size::new(300.0, 150.0)).0;
-        let small = fit_circle_metrics(text, Font::DEFAULT, Size::new(120.0, 60.0)).0;
+        let big = fit_circle_metrics(text, Font::DEFAULT, Size::new(300.0, 150.0), lh(), ls()).0;
+        let small = fit_circle_metrics(text, Font::DEFAULT, Size::new(120.0, 60.0), lh(), ls()).0;
         assert!(small < big, "small bubble must fit smaller text: {small} >= {big}");
     }
 
@@ -396,8 +432,8 @@ mod tests {
     fn circle_fit_is_cached_and_consistent() {
         let bounds = Size::new(200.0, 100.0);
         let text = "cached circle text goes here";
-        let first = fit_circle_metrics(text, Font::DEFAULT, bounds);
-        let second = fit_circle_metrics(text, Font::DEFAULT, bounds);
+        let first = fit_circle_metrics(text, Font::DEFAULT, bounds, lh(), ls());
+        let second = fit_circle_metrics(text, Font::DEFAULT, bounds, lh(), ls());
         assert_eq!(first.0, second.0);
         assert_eq!(first.1, second.1);
     }
@@ -406,7 +442,7 @@ mod tests {
     fn circle_wraps_unspaced_runs() {
         let bounds = Size::new(120.0, 120.0);
         let long = "aaaaaaaaaa".repeat(6);
-        let (_, lines) = fit_circle_metrics(&long, Font::DEFAULT, bounds);
+        let (_, lines) = fit_circle_metrics(&long, Font::DEFAULT, bounds, lh(), ls());
         assert!(!lines.is_empty());
         assert!(lines.iter().all(|line| !line.content.is_empty()));
     }
@@ -414,9 +450,9 @@ mod tests {
     #[test]
     fn fit_grows_to_fill_big_box() {
         let bounds = Size::new(400.0, 200.0);
-        let size = fit_font_size("hello world", Font::DEFAULT, bounds);
+        let size = fit_font_size("hello world", Font::DEFAULT, bounds, lh(), ls());
         assert!(size > 40.0, "expected grown size, got {size}");
-        let measured = measure_text("hello world", Font::DEFAULT, size, bounds.width);
+        let measured = measure_text("hello world", Font::DEFAULT, size, bounds.width, lh(), ls());
         assert!(
             measured.width <= bounds.width && measured.height <= bounds.height,
             "size {size} does not fit: {measured:?}"
@@ -426,8 +462,8 @@ mod tests {
     #[test]
     fn fit_shrinks_to_fit_small_box() {
         let bounds = Size::new(60.0, 20.0);
-        let size = fit_font_size("hello world", Font::DEFAULT, bounds);
-        let measured = measure_text("hello world", Font::DEFAULT, size, bounds.width);
+        let size = fit_font_size("hello world", Font::DEFAULT, bounds, lh(), ls());
+        let measured = measure_text("hello world", Font::DEFAULT, size, bounds.width, lh(), ls());
         assert!(
             measured.width <= bounds.width && measured.height <= bounds.height,
             "size {size} does not fit: {measured:?}"
@@ -437,12 +473,12 @@ mod tests {
     #[test]
     fn cache_returns_consistent_results() {
         let bounds = Size::new(300.0, 100.0);
-        let first = fit_font_size("hello world", Font::DEFAULT, bounds);
-        let second = fit_font_size("hello world", Font::DEFAULT, bounds);
+        let first = fit_font_size("hello world", Font::DEFAULT, bounds, lh(), ls());
+        let second = fit_font_size("hello world", Font::DEFAULT, bounds, lh(), ls());
         assert_eq!(first, second);
 
         let wider = Size::new(600.0, 100.0);
-        let grown = fit_font_size("hello world", Font::DEFAULT, wider);
+        let grown = fit_font_size("hello world", Font::DEFAULT, wider, lh(), ls());
         assert!(grown > first, "wider box should fit larger text: {grown} <= {first}");
     }
 
@@ -665,14 +701,14 @@ mod tests {
 
     #[test]
     fn warp_layout_shapes_glyphs() {
-        let layout = shape_warp_layout("hello world", Font::DEFAULT, 20.0, 200.0);
+        let layout = shape_warp_layout("hello world", Font::DEFAULT, 20.0, 200.0, lh(), ls());
         assert!(
             layout.glyphs.len() >= 6,
             "expected glyphs, got {}",
             layout.glyphs.len()
         );
         assert!(layout.min_width > 50.0, "min_width {}", layout.min_width);
-        let empty = shape_warp_layout("", Font::DEFAULT, 20.0, 200.0);
+        let empty = shape_warp_layout("", Font::DEFAULT, 20.0, 200.0, lh(), ls());
         assert!(empty.glyphs.is_empty());
     }
 
@@ -681,8 +717,8 @@ mod tests {
         let text = "hello world this wraps into several lines";
         let size = 20.0;
         let wrap_width = 120.0;
-        let fitted = measure_text(text, Font::DEFAULT, size, wrap_width);
-        let layout = shape_warp_layout(text, Font::DEFAULT, size, wrap_width);
+        let fitted = measure_text(text, Font::DEFAULT, size, wrap_width, lh(), ls());
+        let layout = shape_warp_layout(text, Font::DEFAULT, size, wrap_width, lh(), ls());
         assert!(
             layout.glyphs.len() >= 2,
             "expected several lines of glyphs, got {}",

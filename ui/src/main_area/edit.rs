@@ -3,11 +3,11 @@ use iced::widget::{space, text_editor};
 use iced::widget::text::Wrapping;
 use iced::{Background, Border, Element, Font, Length, Padding, Size};
 
-use easyscanlate_model::EntryStyle;
+use easyscanlate_model::{apply_caps, EntryStyle};
 
 use crate::color::rgba_to_color;
 use crate::event::{EditOrigin, UiEvent};
-use crate::main_area::overlay::{fit::fit_font_metrics, style::styled_font_for_text};
+use crate::main_area::overlay::{fit::fit_font_metrics, style::styled_font_for_text, text::measure_text};
 use crate::state::UiState;
 
 /// Widget id of the floating inline editor; must match the app's focus id.
@@ -32,8 +32,17 @@ pub fn edit_overlay<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         _ => (String::new(), EntryStyle::default()),
     };
     let font = styled_font_for_text(state.font().unwrap_or(Font::DEFAULT), &style, &text);
+    let display = apply_caps(&text, style.caps);
+    let lh = style.line_height.clamp(0.5, 3.0);
+    let ls = style.letter_spacing.clamp(0.0, 20.0);
     let wrap_width = rect.width.max(8.0);
-    let (size, fitted_height) = fit_font_metrics(&text, font, Size::new(wrap_width, rect.height));
+    let (size, fitted_height) = if style.auto_size {
+        fit_font_metrics(&display, font, Size::new(wrap_width, rect.height), lh, ls)
+    } else {
+        let fixed = style.font_size.max(1.0).max(8.0);
+        let height = measure_text(&display, font, fixed, wrap_width, lh, ls).height;
+        (fixed, height)
+    };
     let size = size.max(8.0);
     // Breathing room so the caret/selection is never clipped at the text
     // bounds. Sizing is unchanged: the text still wraps at `rect.width` and
@@ -54,7 +63,7 @@ pub fn edit_overlay<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         .id(EDIT_INPUT_ID)
         .font(font)
         .size(size)
-        .line_height(1.2)
+        .line_height(lh)
         .wrapping(Wrapping::WordOrGlyph)
         .width(box_width)
         .height(Length::Fixed(box_height))

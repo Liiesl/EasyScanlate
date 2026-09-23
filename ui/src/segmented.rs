@@ -65,6 +65,46 @@ pub fn segment<'a>(
     )
 }
 
+/// A compact text cell for dense rows (e.g. the styling panel's Case toggle
+/// next to number inputs): same as [`segment`] but with the icon-cell
+/// vertical padding so its height matches [`segment_icon`] groups.
+pub fn segment_compact<'a>(
+    active: bool,
+    glyph: &'a str,
+    on_press: Option<UiEvent>,
+    font: Font,
+) -> Element<'a, UiEvent> {
+    crate::button::with_disabled_cursor(
+        button(text(glyph).size(scale::s(12.0)).font(font).width(FillLength).center())
+            .width(FillLength)
+            .padding([scale::s(4.0), scale::s(0.0)])
+            .on_press_maybe(on_press)
+            .style(move |_theme, status: Status| {
+                let bg = match status {
+                    Status::Disabled => Color::from_rgba8(34, 36, 44, 0.35),
+                    Status::Hovered => Color::from_rgba8(46, 48, 62, 0.82),
+                    Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
+                    Status::Active => crate::panel::PANEL_BG,
+                };
+                let txt = if active {
+                    crate::accent::accent()
+                } else if matches!(status, Status::Disabled) {
+                    MUTED_FG
+                } else {
+                    TEXT_MAIN
+                };
+                button::Style {
+                    background: Some(Background::Color(bg)),
+                    border: Border::default(),
+                    shadow: Shadow::default(),
+                    text_color: txt,
+                    ..button::Style::default()
+                }
+            })
+            .into(),
+    )
+}
+
 /// One cell of a segmented control with a Lucide icon. Like [`segment`],
 /// a disabled yet active cell keeps the accent so an unavailable but stored
 /// Bold/Italic (e.g. from Auto Detect) stays visually selected.
