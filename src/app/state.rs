@@ -1,7 +1,6 @@
-﻿use iced::{Color, Font, Rectangle};
+﻿use iced::{Font, Rectangle};
 use iced::widget::text_editor;
-use easyscanlate_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
-use easyscanlate_ui::color::rgba_to_color;
+use easyscanlate_model::{EntryId, EntryStyle, TextAlign};
 use easyscanlate_ui::event::{EditOrigin, MainAreaMode, ManualMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
 use easyscanlate_ui::layout::{PaneKind, SidePaneKind, StylingPaneKind};
 use easyscanlate_ui::{ConnectModal, LoadedImage, UiState};
@@ -249,16 +248,16 @@ impl UiState for ActiveTab<'_> {
         &self.tab.style_working
     }
 
-    fn style_text_color(&self) -> Color {
-        rgba_to_color(self.tab.style_working.text_color)
+    fn style_fill_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue {
+        easyscanlate_ui::color::fill_value(&self.tab.style_working)
     }
 
-    fn style_stroke_color(&self) -> Color {
-        rgba_to_color(self.tab.style_working.stroke_color)
+    fn style_stroke_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue {
+        easyscanlate_ui::color::stroke_value(&self.tab.style_working)
     }
 
-    fn style_bg_color(&self) -> Color {
-        rgba_to_color(self.tab.style_working.bg_color)
+    fn style_bg_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue {
+        easyscanlate_ui::color::bg_value(&self.tab.style_working)
     }
 
     fn style_picker_open(&self) -> Option<StyleField> {
@@ -303,22 +302,6 @@ impl UiState for ActiveTab<'_> {
 
     fn style_text_align(&self) -> TextAlign {
         self.tab.style_working.text_align
-    }
-
-    fn style_gradient_a(&self) -> Color {
-        rgba_to_color(self.tab.style_working.gradient_a)
-    }
-
-    fn style_gradient_b(&self) -> Color {
-        rgba_to_color(self.tab.style_working.gradient_b)
-    }
-
-    fn style_gradient_dir(&self) -> TextGradientDir {
-        self.tab.style_working.gradient_dir
-    }
-
-    fn style_hex_override(&self, field: StyleField) -> Option<&str> {
-        self.tab.style_hex_overrides.get(&field).map(|s| s.as_str())
     }
 
     fn editing(&self) -> Option<(usize, EntryId)> {
@@ -648,9 +631,9 @@ impl UiState for App {
     fn selected(&self) -> Option<(usize, EntryId)> { self.tabs[self.active].selected }
     fn selected_inpaint(&self) -> Option<(usize, usize)> { self.tabs[self.active].selected_inpaint }
     fn style_working(&self) -> &EntryStyle { &self.tabs[self.active].style_working }
-    fn style_text_color(&self) -> Color { rgba_to_color(self.tabs[self.active].style_working.text_color) }
-    fn style_stroke_color(&self) -> Color { rgba_to_color(self.tabs[self.active].style_working.stroke_color) }
-    fn style_bg_color(&self) -> Color { rgba_to_color(self.tabs[self.active].style_working.bg_color) }
+    fn style_fill_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue { easyscanlate_ui::color::fill_value(&self.tabs[self.active].style_working) }
+    fn style_stroke_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue { easyscanlate_ui::color::stroke_value(&self.tabs[self.active].style_working) }
+    fn style_bg_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue { easyscanlate_ui::color::bg_value(&self.tabs[self.active].style_working) }
     fn style_picker_open(&self) -> Option<StyleField> { self.tabs[self.active].style_picker }
     fn dropper_buffer(&self) -> Option<neverliie_iced_widgets::color_picker::DropperBuffer> { Some(self.dropper_buffer.clone()) }
     fn style_stroke_width(&self) -> f32 { self.tabs[self.active].style_working.stroke_width }
@@ -662,10 +645,6 @@ impl UiState for App {
     fn installed_fonts(&self) -> &[String] { &self.installed_fonts }
     fn style_font_family(&self) -> Option<&str> { self.tabs[self.active].style_working.font_family.as_deref() }
     fn style_text_align(&self) -> TextAlign { self.tabs[self.active].style_working.text_align }
-    fn style_gradient_a(&self) -> Color { rgba_to_color(self.tabs[self.active].style_working.gradient_a) }
-    fn style_gradient_b(&self) -> Color { rgba_to_color(self.tabs[self.active].style_working.gradient_b) }
-    fn style_gradient_dir(&self) -> TextGradientDir { self.tabs[self.active].style_working.gradient_dir }
-    fn style_hex_override(&self, field: StyleField) -> Option<&str> { self.tabs[self.active].style_hex_overrides.get(&field).map(|s| s.as_str()) }
     fn editing(&self) -> Option<(usize, EntryId)> { self.tabs[self.active].editing }
     fn editing_origin(&self) -> EditOrigin { self.tabs[self.active].editing_origin }
     fn editing_rect(&self) -> Option<Rectangle> { self.tabs[self.active].editing_rect }

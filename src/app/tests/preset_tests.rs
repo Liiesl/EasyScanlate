@@ -1,8 +1,8 @@
 use crate::app::tests::app_with_entry;
 use crate::app::{update, Message};
-use easyscanlate_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
+use easyscanlate_model::{EntryId, EntryStyle, TextAlign};
 use easyscanlate_settings::INITIAL_PRESET_SLOTS;
-use easyscanlate_ui::event::UiEvent;
+use easyscanlate_ui::event::{StyleField, UiEvent};
 
 #[test]
 fn applying_a_preset_seeds_working_style_and_entry() {
@@ -129,19 +129,24 @@ fn style_text_align_sets_alignment() {
 }
 
 #[test]
-fn style_gradient_dir_and_toggle_set_fields() {
+fn style_unified_fill_gradient_sets_fields() {
+    use neverliie_iced_widgets::color_picker::Gradient;
+    use neverliie_iced_widgets::hex_color_input::HexColorValue;
     let (mut app, id) = app_with_entry();
     app.active_tab_mut().selected = Some((0, id));
-    let _ = update(&mut app, Message::Ui(UiEvent::StyleGradientToggle(true)));
-    assert!(app.active_tab().style_working.text_gradient);
-    assert!(app.active_tab().project.entry_style(id).text_gradient);
+    let value = HexColorValue::Gradient {
+        gradient: Gradient::two(iced::Color::BLACK, iced::Color::WHITE),
+        angle: 90.0,
+    };
     let _ = update(
         &mut app,
-        Message::Ui(UiEvent::StyleGradientDir(TextGradientDir::LeftToRight)),
+        Message::Ui(UiEvent::StyleColorChanged(StyleField::Fill, value)),
     );
-    assert_eq!(app.active_tab().style_working.gradient_dir, TextGradientDir::LeftToRight);
+    assert!(app.active_tab().style_working.text_gradient);
+    assert!(app.active_tab().project.entry_style(id).text_gradient);
+    assert_eq!(app.active_tab().style_working.gradient_angle, 90.0);
     assert_eq!(
-        app.active_tab().project.entry_style(id).gradient_dir,
-        TextGradientDir::LeftToRight
+        app.active_tab().project.entry_style(id).gradient_angle,
+        90.0
     );
 }

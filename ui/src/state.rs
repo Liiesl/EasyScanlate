@@ -1,7 +1,7 @@
 use iced::widget::text_editor;
-use iced::{Color, Font, Rectangle};
+use iced::{Font, Rectangle};
 
-use easyscanlate_model::{EntryId, EntryStyle, TextAlign, TextGradientDir};
+use easyscanlate_model::{EntryId, EntryStyle, TextAlign};
 
 use crate::connect::ConnectModal;
 use crate::event::{EditOrigin, MainAreaMode, ManualMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
@@ -72,9 +72,12 @@ pub trait UiState {
     /// The currently selected inpaint patch as `(image index, patch index within that image)`; `None` when no inpaint is selected.
     fn selected_inpaint(&self) -> Option<(usize, usize)>;
     fn style_working(&self) -> &EntryStyle;
-    fn style_text_color(&self) -> Color;
-    fn style_stroke_color(&self) -> Color;
-    fn style_bg_color(&self) -> Color;
+    /// Unified fill value (solid or gradient) for the text-fill hex input.
+    fn style_fill_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue;
+    /// Unified stroke value (solid or gradient) for the stroke hex input.
+    fn style_stroke_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue;
+    /// Unified background value (solid or gradient) for the bg hex input.
+    fn style_bg_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue;
     /// The styling color picker currently open (if any).
     fn style_picker_open(&self) -> Option<StyleField>;
     /// Shared slot for the color picker eye dropper. The picker enables its
@@ -100,15 +103,6 @@ pub trait UiState {
     fn style_font_family(&self) -> Option<&str>;
     /// The working style's text alignment.
     fn style_text_align(&self) -> TextAlign;
-    /// The working style's gradient start color.
-    fn style_gradient_a(&self) -> Color;
-    /// The working style's gradient end color.
-    fn style_gradient_b(&self) -> Color;
-    /// The working style's gradient direction.
-    fn style_gradient_dir(&self) -> TextGradientDir;
-    /// The raw hex text buffer for `field`, if the user is currently typing
-    /// (valid or intermediate). `None` means show the canonical `hex_label`.
-    fn style_hex_override(&self, field: StyleField) -> Option<&str>;
     fn editing(&self) -> Option<(usize, EntryId)>;
     fn editing_origin(&self) -> EditOrigin;
     fn editing_rect(&self) -> Option<Rectangle>;

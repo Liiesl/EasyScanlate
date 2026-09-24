@@ -2,7 +2,7 @@ use iced::advanced::graphics::gradient::Linear;
 use iced::advanced::graphics::geometry::{self, Fill, Path, Stroke, Text};
 use iced::{Color, Point, Rectangle, Vector};
 
-use easyscanlate_model::TextGradientDir;
+use easyscanlate_model::{EntryStyle, TextGradientDir};
 
 pub fn lerp_color(a: [u8; 4], b: [u8; 4], t: f32) -> Color {
     let t = t.clamp(0.0, 1.0);
@@ -12,6 +12,120 @@ pub fn lerp_color(a: [u8; 4], b: [u8; 4], t: f32) -> Color {
         (a[2] as f32 + (b[2] as f32 - a[2] as f32) * t).round() as u8,
         (a[3] as f32 + (b[3] as f32 - a[3] as f32) * t) / 255.0,
     )
+}
+
+/// Paint of a text stroke: solid color, or a two-stop gradient sampled
+/// per glyph at the glyph's position (iced `Stroke` carries only a solid
+/// color, so a gradient stroke resolves to the local gradient color).
+#[derive(Debug, Clone, Copy)]
+pub enum StrokePaint {
+    Solid(Color),
+    Gradient { angle: f32, a: [u8; 4], b: [u8; 4] },
+}
+
+impl StrokePaint {
+    /// Builds the stroke paint for `style` at `width` (frame px): `None`
+    /// when `width <= 0`.
+    pub fn for_style(style: &EntryStyle, width: f32) -> Option<(Self, f32)> {
+        if width <= 0.0 {
+            return None;
+        }
+        if style.stroke_gradient {
+            Some((
+                Self::Gradient {
+                    angle: style.stroke_gradient_angle,
+                    a: style.stroke_gradient_a,
+                    b: style.stroke_gradient_b,
+                },
+                width,
+            ))
+        } else {
+            Some((
+                Self::Solid(crate::color::rgba_to_color(style.stroke_color)),
+                width,
+            ))
+        }
+    }
+
+    /// Resolves the solid stroke color at point `p` inside `box_rect`.
+    pub fn color_at(self, box_rect: Rectangle, p: Point) -> Color {
+        match self {
+            Self::Solid(c) => c,
+            Self::Gradient { angle, a, b } => {
+                lerp_color(a, b, gradient_t_angle(angle, box_rect, p))
+            }
+        }
+    }
+}
+
+/// Fill of an entry background: solid `bg_color`, or a two-stop linear
+/// gradient (`bg_gradient_a/b` + `bg_gradient_angle`) when `bg_gradient`.
+/// `rect` must be in the same coordinate space as the filled path (the
+/// gradient endpoints are absolute points, derived from the unified angle
+/// via the same `to_distance` math iced uses for angle gradients, so the
+/// bg agrees with the overlay text gradient).
+pub fn bg_fill_in_rect(style: &EntryStyle, rect: Rectangle) -> Fill {
+    if style.bg_gradient {
+        let (start, end) = gradient_start_end_angle(style.bg_gradient_angle, rect);
+        Fill::from(
+            Linear::new(start, end)
+                .add_stop(0.0, crate::color::rgba_to_color(style.bg_gradient_a))
+                .add_stop(1.0, crate::color::rgba_to_color(style.bg_gradient_b)),
+        )
+    } else {
+        Fill::from(crate::color::rgba_to_color(style.bg_color))
+    }
+}
+
+/// Text-fill gradient for `style`: `Some((angle, a, b))` when
+/// `text_gradient`, else `None` (solid `text_color`).
+pub fn text_fill(style: &EntryStyle) -> Option<(f32, [u8; 4], [u8; 4])> {
+    style
+        .text_gradient
+        .then_some((style.gradient_angle, style.gradient_a, style.gradient_b))
+}
+
+/// Flow vector `(rx, ry)` for an angle in degrees under the unified
+/// convention, mirroring `iced::Radians::to_distance` (`angle - 90°` gives
+/// the `(cos, sin)` vector from stop 0 to stop 1; y grows downward).
+fn gradient_flow(angle_deg: f32) -> (f32, f32) {
+    let internal = angle_deg.to_radians() - std::f32::consts::FRAC_PI_2;
+    (internal.cos(), internal.sin())
+}
+
+/// Gradient endpoints in layout coords for an angle, matching
+/// `iced::Radians::to_distance` so overlay text and `Background::Gradient`
+/// bgs agree.
+pub fn gradient_start_end_angle(angle_deg: f32, box_rect: Rectangle) -> (Point, Point) {
+    let (rx, ry) = gradient_flow(angle_deg);
+    let distance = f32::max(
+        f32::abs(rx * box_rect.width / 2.0),
+        f32::abs(ry * box_rect.height / 2.0),
+    );
+    let center = Point::new(
+        box_rect.x + box_rect.width / 2.0,
+        box_rect.y + box_rect.height / 2.0,
+    );
+    (
+        Point::new(center.x - rx * distance, center.y - ry * distance),
+        Point::new(center.x + rx * distance, center.y + ry * distance),
+    )
+}
+
+/// Normalized position `0..=1` of `p` along an angle gradient.
+pub fn gradient_t_angle(angle_deg: f32, box_rect: Rectangle, p: Point) -> f32 {
+    let (rx, ry) = gradient_flow(angle_deg);
+    let distance = f32::max(
+        f32::abs(rx * box_rect.width.max(1.0) / 2.0),
+        f32::abs(ry * box_rect.height.max(1.0) / 2.0),
+    )
+    .max(f32::EPSILON);
+    let center = Point::new(
+        box_rect.x + box_rect.width / 2.0,
+        box_rect.y + box_rect.height / 2.0,
+    );
+    let t = 0.5 + ((p.x - center.x) * rx + (p.y - center.y) * ry) / (2.0 * distance);
+    t.clamp(0.0, 1.0)
 }
 
 pub fn gradient_t(dir: TextGradientDir, box_rect: Rectangle, p: Point) -> f32 {
@@ -67,25 +181,25 @@ pub fn fill_gradient_text<F>(
     frame: &mut F,
     text: &Text,
     box_rect: Rectangle,
-    dir: TextGradientDir,
+    angle: f32,
     a: [u8; 4],
     b: [u8; 4],
-    stroke: Option<(Color, f32)>,
+    stroke: Option<(StrokePaint, f32)>,
     letter_spacing: f32,
 ) where
     F: geometry::frame::Backend,
 {
-    fill_gradient_glyphs(frame, text, box_rect, dir, a, b, stroke, letter_spacing)
+    fill_gradient_glyphs(frame, text, box_rect, angle, a, b, stroke, letter_spacing)
 }
 
 fn fill_gradient_glyphs<F>(
     frame: &mut F,
     text: &Text,
     box_rect: Rectangle,
-    dir: TextGradientDir,
+    angle: f32,
     a: [u8; 4],
     b: [u8; 4],
-    stroke: Option<(Color, f32)>,
+    stroke: Option<(StrokePaint, f32)>,
     letter_spacing: f32,
 ) where
     F: geometry::frame::Backend,
@@ -117,7 +231,7 @@ fn fill_gradient_glyphs<F>(
     let translation_y = text.position.y;
     let mut swash_cache = cosmic_text::SwashCache::new();
     let mut font_system = gfx_text::font_system().write().expect("Write font system");
-    let (grad_start, grad_end) = gradient_start_end(dir, box_rect);
+    let (grad_start, grad_end) = gradient_start_end_angle(angle, box_rect);
     let gradient_fill = Fill::from(
         Linear::new(grad_start, grad_end)
             .add_stop(0.0, rgba8(a))
@@ -155,10 +269,15 @@ fn fill_gradient_glyphs<F>(
                         }
                     }
                 });
-                if let Some((stroke_color, stroke_width)) = stroke {
+                if let Some((paint, stroke_width)) = stroke {
                     frame.stroke(
                         &glyph_path,
-                        Stroke::default().with_color(stroke_color).with_width(stroke_width),
+                        Stroke::default()
+                            .with_color(paint.color_at(
+                                box_rect,
+                                Point::new(start_x, start_y),
+                            ))
+                            .with_width(stroke_width),
                     );
                 }
                 frame.fill(&glyph_path, gradient_fill);
@@ -178,7 +297,7 @@ fn fill_gradient_glyphs<F>(
                         let base = lerp_color(
                             a,
                             b,
-                            gradient_t(dir, box_rect, Point::new(x as f32, y as f32) + offset),
+                            gradient_t_angle(angle, box_rect, Point::new(x as f32, y as f32) + offset),
                         );
                         let [r, g, bl, al] = base.into_rgba8();
                         frame.fill(

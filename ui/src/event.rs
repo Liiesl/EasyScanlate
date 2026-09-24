@@ -2,10 +2,10 @@ use std::ops::Range;
 
 use iced::widget::pane_grid;
 use iced::widget::text_editor;
-use iced::{Color, Rectangle};
+use iced::Rectangle;
 use iced::window::screenshot::Screenshot;
 
-use easyscanlate_model::{CapsMode, EntryId, ProfileId, Quad, TextAlign, TextGradientDir};
+use easyscanlate_model::{CapsMode, EntryId, ProfileId, Quad, TextAlign};
 use easyscanlate_settings::InpaintBackend;
 
 /// The actions offered by the floating inpaint toolbar under the selected patch.
@@ -96,20 +96,18 @@ pub enum TargetProfileSelection {
     AutoPlaceholder(String),
 }
 
-/// The color field a styling [`ColorPicker`] edits: the text color, the
-/// stroke (outline) color, or the background color of the selected entry.
+/// The color field a styling [`HexColorInput`](neverliie_iced_widgets::hex_color_input::HexColorInput)
+/// edits: the text fill, the stroke, or the background of the selected
+/// entry. Each field holds a unified solid-or-gradient value, so no
+/// per-stop sub-fields are needed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StyleField {
-    /// The entry's text color.
-    Text,
-    /// The entry's stroke (outline) color.
+    /// The entry's text fill (solid color or gradient).
+    Fill,
+    /// The entry's stroke (solid color or gradient).
     Stroke,
-    /// The entry's background color.
+    /// The entry's background (solid color or gradient).
     Background,
-    /// The gradient start color of the selected entry.
-    GradientA,
-    /// The gradient end color of the selected entry.
-    GradientB,
 }
 
 /// A deferred settings edit for widget builders that take a *message value*
@@ -268,8 +266,11 @@ pub enum UiEvent {
     StyleColorOpen(StyleField),
     /// The user cancelled the color picker for `field`; discard any change.
     StyleColorCancel(StyleField),
-    /// The user confirmed a color for `field` in its color picker.
-    StyleColorSubmit(StyleField, Color),
+    /// The unified hex input for `field` changed (live: hex typing,
+    /// alpha/angle edits, picker drags).
+    StyleColorChanged(StyleField, neverliie_iced_widgets::hex_color_input::HexColorValue),
+    /// The user confirmed the value for `field` in its picker (OK button).
+    StyleColorSubmit(StyleField, neverliie_iced_widgets::hex_color_input::HexColorValue),
     /// The eye dropper button requested a fresh window snapshot: the app
     /// should screenshot the window and store it in the shared
     /// `DropperBuffer` (see `UiState::dropper_buffer`).
@@ -278,9 +279,6 @@ pub enum UiEvent {
     /// small (mirrors `BackdropCaptured`). The app stores it in the shared
     /// `DropperBuffer`; the widget consumes it on the next update pass.
     StyleDropperShot(Box<Screenshot>),
-    /// The user typed hex text for `field` in the styling panel; live-apply
-    /// when the string parses as a valid hex (or "None").
-    StyleHexInput(StyleField, String),
     StyleStrokeWidth(f32),
     StyleBgRadius(f32),
     /// The user typed a fixed font size (image px) for the selected entry;
@@ -304,10 +302,6 @@ pub enum UiEvent {
     StyleFontPreviewHover(String),
     /// The user picked the text alignment mode for the selected entry.
     StyleTextAlign(TextAlign),
-    /// The user toggled the two-color text gradient for the selected entry.
-    StyleGradientToggle(bool),
-    /// The user picked the gradient direction for the selected entry.
-    StyleGradientDir(TextGradientDir),
     /// The user clicked preset swatch `usize`: apply that style to the
     /// selected entry.
     StylePresetApply(usize),

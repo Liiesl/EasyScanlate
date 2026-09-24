@@ -7,6 +7,63 @@ pub fn rgba_to_color(rgba: [u8; 4]) -> Color {
     Color::from_rgba8(rgba[0], rgba[1], rgba[2], rgba[3] as f32 / 255.0)
 }
 
+/// Unified fill value for the text-fill hex input: solid `text_color`, or
+/// a two-stop gradient (`gradient_a/b` + `gradient_angle`) when
+/// `text_gradient` is set.
+pub fn fill_value(
+    style: &easyscanlate_model::EntryStyle,
+) -> neverliie_iced_widgets::hex_color_input::HexColorValue {
+    use neverliie_iced_widgets::hex_color_input::HexColorValue;
+    if style.text_gradient {
+        HexColorValue::Gradient {
+            gradient: neverliie_iced_widgets::color_picker::Gradient::two(
+                rgba_to_color(style.gradient_a),
+                rgba_to_color(style.gradient_b),
+            ),
+            angle: style.gradient_angle,
+        }
+    } else {
+        HexColorValue::Solid(rgba_to_color(style.text_color))
+    }
+}
+
+/// Unified stroke value (solid or gradient) for the stroke hex input.
+pub fn stroke_value(
+    style: &easyscanlate_model::EntryStyle,
+) -> neverliie_iced_widgets::hex_color_input::HexColorValue {
+    use neverliie_iced_widgets::hex_color_input::HexColorValue;
+    if style.stroke_gradient {
+        HexColorValue::Gradient {
+            gradient: neverliie_iced_widgets::color_picker::Gradient::two(
+                rgba_to_color(style.stroke_gradient_a),
+                rgba_to_color(style.stroke_gradient_b),
+            ),
+            angle: style.stroke_gradient_angle,
+        }
+    } else {
+        HexColorValue::Solid(rgba_to_color(style.stroke_color))
+    }
+}
+
+/// Unified background value (solid or gradient) for the bg hex input.
+/// Transparent (`a == 0`, formerly `"None"`) is a solid with `0%` alpha.
+pub fn bg_value(
+    style: &easyscanlate_model::EntryStyle,
+) -> neverliie_iced_widgets::hex_color_input::HexColorValue {
+    use neverliie_iced_widgets::hex_color_input::HexColorValue;
+    if style.bg_gradient {
+        HexColorValue::Gradient {
+            gradient: neverliie_iced_widgets::color_picker::Gradient::two(
+                rgba_to_color(style.bg_gradient_a),
+                rgba_to_color(style.bg_gradient_b),
+            ),
+            angle: style.bg_gradient_angle,
+        }
+    } else {
+        HexColorValue::Solid(rgba_to_color(style.bg_color))
+    }
+}
+
 /// The uppercase hex value of `color`, or "None" for fully transparent
 /// colors (matching the mockup's background swatch). Used by the styling
 /// panel's hex inputs: `a==0` → `"None"`, `a==255` → `"#RRGGBB"`,

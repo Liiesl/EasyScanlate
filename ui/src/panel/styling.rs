@@ -1,13 +1,12 @@
 //! The styling panel, laid out like a compact typography inspector: a
 //! header with the panel title, an auto-detect action and a reset button
 //! (visual only), the font picker, a toolbar of bold/italic toggles next
-//! to the alignment segments, then labeled sections for the text fill
-//! (solid vs gradient tabs), the stroke and the background/corner radius.
+//! to the alignment segments, then labeled sections for the text fill,
+//! the stroke and the background/corner radius.
 //! All controls edit exactly one OCR entry: the one selected in the main
 //! area. When no entry is selected the controls stay visible but are inert.
-//! Colors are picked with the `neverliie_iced_widgets` `ColorPicker` hosted
-//! once at the shell root (`overlay_host`); each field shows a flat rectangle
-//! swatch button filled with the entry's current color next to its hex value.
+//! Each color section is a unified `HexColorInput` (solid hex + alpha `%`,
+//! or gradient + angle) with its own self-hosted floating picker.
 //!
 //! Below the sections a horizontally scrollable grid of style presets (in
 //! memory only): one square per preset slot — checkerboard underlay, the
@@ -20,8 +19,8 @@
 use iced::widget::button::Status;
 use iced::widget::image::{self, Handle};
 use iced::widget::{
-    button, checkbox, column, container, pick_list, row, rule, scrollable, space::Space, text,
-    text_input, tooltip,
+    button, checkbox, column, container, row, scrollable, space::Space, text, text_input,
+    tooltip,
 };
 use iced::{
     Background, Border, Color, Element, Fill as FillLength, Font, Length, Padding, Shadow,
@@ -30,11 +29,11 @@ use iced::{
 use neverliie_iced_widgets::advanced_dropdown::{advanced_dropdown, Item, MenuItem};
 use neverliie_iced_widgets::number_input::{NumberInput, Status as NumberStatus, Style as NumberStyle};
 use neverliie_iced_widgets::split_button::split_button;
-use neverliie_iced_widgets::color_picker::floating_color_picker;
+use neverliie_iced_widgets::hex_color_input::{HexColorInput, HexColorValue};
 use neverliie_iced_widgets::context_menu::{ContextMenu, Menu};
 use neverliie_iced_widgets::overlay::Position;
 
-use easyscanlate_model::{CapsMode, EntryStyle, TextAlign, TextGradientDir};
+use easyscanlate_model::{CapsMode, EntryStyle, TextAlign};
 use easyscanlate_settings::InpaintBackend;
 
 use crate::event::{StyleField, UiEvent};
@@ -44,7 +43,6 @@ use crate::scale;
 use crate::state::UiState;
 use lucide_icons::Icon;
 
-const SWATCH_SIDE: f32 = 16.0;
 const HINT: &str = "Select a text entry in the image to style it.";
 
 /// Side of a preset square, in points — reduced from 56 (absurd at base) to 36.
@@ -68,159 +66,38 @@ fn section_title<'a>(label: &'a str) -> Element<'a, UiEvent> {
     text(label).size(scale::s(11.0)).color(MUTED_FG).into()
 }
 
-/// A dark, bordered wrapper for inputs and swatch rows.
-fn field_wrap<'a>(content: Element<'a, UiEvent>, padding: Padding) -> Element<'a, UiEvent> {
-    container(content)
-        .padding(padding)
-        .width(FillLength)
-        .style(|_theme| container::Style {
-            background: Some(INPUT_BG.into()),
-            border: Border {
-                radius: scale::s(4.0).into(),
-                width: scale::s(1.0),
-                color: BORDER,
-            },
-            ..container::Style::default()
-        })
-        .into()
-}
-
-/// One tab of the fill tabs: an underline (accent when active) under the
-/// label, like the mockup's bottom-border tab bar.
-fn tab<'a>(label: &'a str, active: bool, on_press: Option<UiEvent>) -> Element<'a, UiEvent> {
-    let underline: Element<'a, UiEvent> = if active {
-        rule::horizontal(scale::s(2.0))
-            .style(|_theme: &iced::Theme| rule::Style {
-                color: crate::accent::accent(),
-                radius: scale::s(0.0).into(),
-                fill_mode: rule::FillMode::Full,
-                snap: true,
-            })
-            .into()
-    } else {
-        Space::new().height(scale::s(2.0)).into()
-    };
-    column![
-        crate::button::with_disabled_cursor(
-            button(text(label).size(scale::s(11.0)))
-                .width(FillLength)
-                .padding([scale::s(5.0), scale::s(0.0)])
-                .on_press_maybe(on_press)
-                .style(move |_theme, status: Status| {
-                    let bg = match status {
-                        Status::Disabled => Color::from_rgba8(34, 36, 44, 0.35),
-                        Status::Hovered => Color::from_rgba8(46, 48, 62, 0.82),
-                        Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
-                        Status::Active => crate::panel::PANEL_BG,
-                    };
-                    let txt = if active { TEXT_MAIN } else { MUTED_FG };
-                    button::Style {
-                        background: Some(Background::Color(bg)),
-                        border: Border::default(),
-                        shadow: Shadow::default(),
-                        text_color: txt,
-                        ..button::Style::default()
-                    }
-                })
-                .into(),
-        ),
-        underline,
-    ]
-    .width(FillLength)
-    .into()
-}
-
-/// The "Solid | Gradient" tab bar; the tabs mirror `style.text_gradient`.
-fn fill_tabs<'a>(gradient: bool, selected: bool) -> Element<'a, UiEvent> {
-    row![
-        tab("Solid", !gradient, selected.then_some(UiEvent::StyleGradientToggle(false))),
-        tab("Gradient", gradient, selected.then_some(UiEvent::StyleGradientToggle(true))),
-    ]
-    .spacing(scale::s(4.0))
-    .into()
-}
-
-/// A flat rectangle button filled with `color`; the underlay of the color
-/// picker for `field`. `on_open` is `None` (button disabled) while no entry
-/// is selected.
-fn swatch_button(color: Color, on_open: Option<UiEvent>) -> Element<'static, UiEvent> {
-    crate::button::with_disabled_cursor(
-        button(Space::new())
-            .width(scale::s(SWATCH_SIDE))
-            .height(scale::s(SWATCH_SIDE))
-            .padding(Padding::ZERO)
-            .style(crate::panel::button_style)
-            .on_press_maybe(on_open)
-            .style(move |_theme, status: Status| {
-                let border_color = if matches!(status, Status::Hovered | Status::Pressed) {
-                    Color::from_rgb8(230, 230, 230)
-                } else {
-                    Color::from_rgb8(90, 90, 90)
-                };
-                button::Style {
-                    background: Some(Background::Color(color)),
-                    border: Border {
-                        radius: scale::s(3.0).into(),
-                        width: scale::s(1.0),
-                        color: border_color,
-                    },
-                    shadow: Shadow::default(),
-                    ..button::Style::default()
-                }
-            })
-            .into(),
-    )
-}
-
-/// A color field for `field`: a swatch with an always-visible, editable hex
-/// input, wrapped in an input-style box. The swatch just requests the picker;
-/// the single floating picker is hosted at the shell root (outside the panel
-/// scrollable) so its header drag clamps against the full window viewport.
-/// The hex `text_input` is live-applying:
-/// every valid edit (`#RGB`/`#RGBA`/`#RRGGBB`/`#RRGGBBAA` or `None`) updates
-/// the working style immediately. Intermediate invalid text is kept in a per-
-/// field buffer (`UiState::style_hex_override`) so typing does not snap back.
-fn color_field<'a, S: UiState + ?Sized>(
+/// Unified hex input for `field`: solid hex + alpha `%`, or gradient +
+/// angle when the value is a gradient. The widget self-hosts its floating
+/// picker (swatch opens it); typing, alpha/angle edits and picker drags
+/// publish `StyleColorChanged` live, the picker OK button publishes
+/// `StyleColorSubmit`. `HexColorInput` keeps in-progress text internally,
+/// so no per-field string buffer lives in app state. Transparent
+/// (`a == 0`, formerly `"None"`) is a solid with `0%` alpha.
+fn unified_field<'a, S: UiState + ?Sized>(
     state: &'a S,
     field: StyleField,
-    color: Color,
+    value: HexColorValue,
 ) -> Element<'a, UiEvent> {
-    let on_open = state.selected().map(|_| UiEvent::StyleColorOpen(field));
     let selected = state.selected().is_some();
-    let canonical = crate::color::hex_label(color);
-    // When the user is typing, show the buffer; otherwise show the canonical hex.
-    let hex_value = state
-        .style_hex_override(field)
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| canonical.clone());
-    field_wrap(
-        row![
-            swatch_button(color, on_open),
-            text_input(&canonical, &hex_value)
-                .on_input_maybe(selected.then_some(move |s: String| UiEvent::StyleHexInput(field, s)))
-                .padding(scale::s(0.0))
-                .size(scale::s(11.0))
-                .font(Font::MONOSPACE)
-                .width(FillLength)
-                .style(|_theme, _status| text_input::Style {
-                    background: Background::Color(Color::TRANSPARENT),
-                    border: Border::default(),
-                    icon: MUTED_FG,
-                    placeholder: MUTED_FG,
-                    value: TEXT_MAIN,
-                    selection: crate::accent::accent(),
-                }),
-        ]
-        .spacing(scale::s(6.0))
-        .align_y(iced::Alignment::Center)
-        .into(),
-        Padding {
-            top: scale::s(3.0),
-            right: scale::s(8.0),
-            bottom: scale::s(3.0),
-            left: scale::s(4.0),
-        },
+    let show_picker = selected && state.style_picker_open() == Some(field);
+    let mut input = HexColorInput::new(
+        value,
+        move |v| UiEvent::StyleColorChanged(field, v),
+        show_picker,
+        UiEvent::StyleColorOpen(field),
+        UiEvent::StyleColorCancel(field),
     )
+    .on_submit(move |v| UiEvent::StyleColorSubmit(field, v))
+    .position(Position::BottomLeft)
+    .on_dropper_capture(|| UiEvent::StyleDropperCapture)
+    .width(FillLength)
+    .text_size(scale::s(12.0))
+    .padding(scale::s(2.0))
+    .border_radius(scale::s(4.0));
+    if let Some(buffer) = state.dropper_buffer() {
+        input = input.dropper_buffer(buffer);
+    }
+    input.into()
 }
 
 /// A number input with a muted icon prefix, matching the dark input-box
@@ -481,8 +358,9 @@ fn caption<'a>(label: &'a str) -> Element<'a, UiEvent> {
 
 /// The typography size/spacing controls: an `Auto size` checkbox (default on:
 /// the text is fitted to its box) plus a fixed font-size input used only
-/// while auto-size is off, then one row of line-height, letter-spacing
-/// (image px) and the mutually exclusive All Caps / Small Caps toggle.
+/// while auto-size is off with the mutually exclusive All Caps / Small Caps
+/// toggle on its right, then one row of line-height and letter-spacing
+/// (image px).
 fn typography_section<'a, S: UiState + ?Sized>(
     _state: &'a S,
     style: &EntryStyle,
@@ -526,10 +404,22 @@ fn typography_section<'a, S: UiState + ?Sized>(
     column![
         row![
             container(auto).width(Length::FillPortion(1)),
-            container(fixed_input).width(Length::FillPortion(1)),
+            container(
+                column![caption("Size"), fixed_input,]
+                    .spacing(scale::s(4.0))
+            )
+            .width(Length::FillPortion(1)),
+            container(
+                column![
+                    caption("Case"),
+                    segmented_group(vec![caps_aa, caps_sc]),
+                ]
+                .spacing(scale::s(4.0))
+            )
+            .width(Length::FillPortion(1)),
         ]
         .spacing(scale::s(8.0))
-        .align_y(iced::Alignment::Center),
+        .align_y(iced::Alignment::End),
         row![
             container(
                 column![
@@ -563,14 +453,6 @@ fn typography_section<'a, S: UiState + ?Sized>(
                 .spacing(scale::s(4.0))
             )
             .width(Length::FillPortion(1)),
-            container(
-                column![
-                    caption("Case"),
-                    segmented_group(vec![caps_aa, caps_sc]),
-                ]
-                .spacing(scale::s(4.0))
-            )
-            .width(Length::FillPortion(1)),
         ]
         .spacing(scale::s(8.0))
         .align_y(iced::Alignment::End),
@@ -579,41 +461,19 @@ fn typography_section<'a, S: UiState + ?Sized>(
     .into()
 }
 
-/// The "Fill" section: solid (text color) vs gradient (two colors plus
-/// direction) tabs.
-fn fill_section<'a, S: UiState + ?Sized>(
-    state: &'a S,
-    style: &EntryStyle,
-    selected: bool,
-) -> Element<'a, UiEvent> {
-    let gradient = style.text_gradient;
+/// The "Fill" section: a single unified hex input (solid or gradient with
+/// angle). No Solid|Gradient tabs: the widget switches modes itself via the
+/// picker / hex field.
+fn fill_section<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
     column![
         section_title("Fill"),
-        fill_tabs(gradient, selected),
-        if gradient {
-            column![
-                row![
-                    color_field(state, StyleField::GradientA, state.style_gradient_a()),
-                    color_field(state, StyleField::GradientB, state.style_gradient_b()),
-                ]
-                .spacing(scale::s(8.0)),
-                pick_list(TextGradientDir::LABELS, Some(style.gradient_dir.label()), |l| {
-                    UiEvent::StyleGradientDir(TextGradientDir::from_label(l))
-                })
-                .text_size(scale::s(12.0))
-                .width(FillLength),
-            ]
-            .spacing(scale::s(8.0))
-            .into()
-        } else {
-            color_field(state, StyleField::Text, state.style_text_color())
-        },
+        unified_field(state, StyleField::Fill, state.style_fill_value()),
     ]
     .spacing(scale::s(8.0))
     .into()
 }
 
-/// The "Stroke" section: color plus width.
+/// The "Stroke" section: unified solid-or-gradient input plus width.
 fn stroke_section<'a, S: UiState + ?Sized>(
     state: &'a S,
     selected: bool,
@@ -621,12 +481,12 @@ fn stroke_section<'a, S: UiState + ?Sized>(
     column![
         section_title("Stroke"),
         row![
-            container(color_field(
+            container(unified_field(
                 state,
                 StyleField::Stroke,
-                state.style_stroke_color(),
+                state.style_stroke_value(),
             ))
-            .width(Length::FillPortion(2)),
+            .width(Length::FillPortion(3)),
             container(style_number(
                 Icon::Minus,
                 state.style_stroke_width(),
@@ -636,7 +496,7 @@ fn stroke_section<'a, S: UiState + ?Sized>(
                 UiEvent::StyleStrokeWidth,
                 selected,
             ))
-            .width(Length::FillPortion(1)),
+            .width(Length::FillPortion(2)),
         ]
         .spacing(scale::s(8.0)),
     ]
@@ -772,15 +632,15 @@ fn background_section<'a, S: UiState + ?Sized>(
             container(
                 column![
                     caption("Background"),
-                    color_field(
+                    unified_field(
                         state,
                         StyleField::Background,
-                        state.style_bg_color(),
+                        state.style_bg_value(),
                     ),
                 ]
                 .spacing(scale::s(4.0))
             )
-            .width(Length::FillPortion(2)),
+            .width(Length::FillPortion(3)),
             container(
                 column![
                     caption("Corner"),
@@ -796,7 +656,7 @@ fn background_section<'a, S: UiState + ?Sized>(
                 ]
                 .spacing(scale::s(4.0))
             )
-            .width(Length::FillPortion(1)),
+            .width(Length::FillPortion(2)),
         ]
         .spacing(scale::s(8.0))
         .align_y(iced::Alignment::End),
@@ -1004,7 +864,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         font_field(state),
         format_align_row(style, selected),
         typography_section(state, style, selected),
-        fill_section(state, style, selected),
+        fill_section(state),
         stroke_section(state, selected),
         background_section(state, selected),
         presets_grid(state),
@@ -1017,44 +877,12 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     .into()
 }
 
-/// Single floating color picker for the whole editor, hosted at the shell
-/// root (outside the styling panel's scrollable) so the window's header drag
-/// clamps against the full window viewport and stays movable.
-///
-/// The panel swatches only emit `StyleColorOpen`; this host shows the window
-/// for `style_picker_open()`. It stays mounted while closed (hidden) so the
-/// dragged position survives close/reopen per the widget contract. Initial
-/// placement is viewport-relative so panel scroll never moves the window.
+/// Compatibility shim: each [`unified_field`] now self-hosts its own
+/// floating picker, so no shell-root host is needed. Kept so `shell`
+/// keeps compiling while callers migrate; just returns `base`.
 pub fn overlay_host<'a, S: UiState + ?Sized>(
-    state: &'a S,
+    _state: &'a S,
     base: Element<'a, UiEvent>,
 ) -> Element<'a, UiEvent> {
-    let (show, field, color) = match state.style_picker_open() {
-        Some(StyleField::Text) => (true, StyleField::Text, state.style_text_color()),
-        Some(StyleField::Stroke) => (true, StyleField::Stroke, state.style_stroke_color()),
-        Some(StyleField::Background) => {
-            (true, StyleField::Background, state.style_bg_color())
-        }
-        Some(StyleField::GradientA) => (true, StyleField::GradientA, state.style_gradient_a()),
-        Some(StyleField::GradientB) => (true, StyleField::GradientB, state.style_gradient_b()),
-        None => (false, StyleField::Text, Color::BLACK),
-    };
-    let picker = floating_color_picker(
-        show,
-        color,
-        base,
-        UiEvent::StyleColorCancel(field),
-        move |picked| UiEvent::StyleColorSubmit(field, picked),
-    )
-    .position(Position::ViewportCenter);
-    // The eye dropper stays disabled without a shared buffer + capture
-    // callback (see the widget docs): hand it the app's slot so the button
-    // enables and publishes `StyleDropperCapture` on activation.
-    match state.dropper_buffer() {
-        Some(buffer) => picker
-            .dropper_buffer(buffer)
-            .on_dropper_capture(|| UiEvent::StyleDropperCapture)
-            .into(),
-        None => picker.into(),
-    }
+    base
 }

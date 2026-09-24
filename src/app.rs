@@ -757,7 +757,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             return Task::none();
         }
     }
-    
+
     match message {
         Message::IpcPoll => {
             let pending = app.ipc_listener.as_mut().map(|l| l.poll()).unwrap_or_default();
@@ -859,14 +859,12 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::StyleFontPreviewOpen) => styling::handle_font_preview_open(app),
         Message::Ui(UiEvent::StyleFontPreviewHover(name)) => styling::handle_font_preview_hover(app, name),
         Message::Ui(UiEvent::StyleTextAlign(align)) => styling::handle_text_align(app, align),
-        Message::Ui(UiEvent::StyleGradientToggle(enabled)) => styling::handle_gradient_toggle(app, enabled),
-        Message::Ui(UiEvent::StyleGradientDir(dir)) => styling::handle_gradient_dir(app, dir),
         Message::Ui(UiEvent::StyleColorOpen(field)) => styling::handle_color_open(app, field),
         Message::Ui(UiEvent::StyleColorCancel(field)) => styling::handle_color_cancel(app, field),
-        Message::Ui(UiEvent::StyleColorSubmit(field, color)) => styling::handle_color_submit(app, field, color),
+        Message::Ui(UiEvent::StyleColorChanged(field, value)) => styling::handle_color_changed(app, field, value),
+        Message::Ui(UiEvent::StyleColorSubmit(field, value)) => styling::handle_color_submit(app, field, value),
         Message::Ui(UiEvent::StyleDropperCapture) => styling::handle_dropper_capture(app),
         Message::Ui(UiEvent::StyleDropperShot(shot)) => styling::handle_dropper_shot(app, shot),
-        Message::Ui(UiEvent::StyleHexInput(field, text)) => styling::handle_hex_input(app, field, text),
         Message::Ui(UiEvent::StyleStrokeWidth(value)) => styling::handle_stroke_width(app, value),
         Message::Ui(UiEvent::StyleBgRadius(value)) => styling::handle_bg_radius(app, value),
         Message::Ui(UiEvent::StyleFontSize(value)) => styling::handle_font_size(app, value),

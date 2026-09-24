@@ -161,6 +161,14 @@ fn default_auto_size() -> bool {
     true
 }
 
+fn default_gradient_angle() -> f32 {
+    180.0
+}
+
+fn default_opaque_black() -> [u8; 4] {
+    [0, 0, 0, 255]
+}
+
 /// Section titles of the font-picker dropdown.
 pub const FEATURED_FONTS_LABEL: &str = "Featured";
 pub const ALL_FONTS_LABEL: &str = "All fonts";
@@ -242,6 +250,40 @@ pub struct EntryStyle {
     pub gradient_b: [u8; 4],
     /// Gradient direction, used when `text_gradient`.
     pub gradient_dir: TextGradientDir,
+    /// Gradient angle in degrees (`0..360`, widget convention: `0` =
+    /// bottom→top, `90` = left→right, `180` = top→bottom). New code reads
+    /// this; `gradient_dir` stays for back-compat until the MMTL migration
+    /// is wired.
+    #[serde(default = "default_gradient_angle")]
+    pub gradient_angle: f32,
+    /// When true, the stroke is a two-color gradient instead of
+    /// `stroke_color`.
+    #[serde(default)]
+    pub stroke_gradient: bool,
+    /// RGBA; stroke gradient start color, used when `stroke_gradient`.
+    #[serde(default = "default_opaque_black")]
+    pub stroke_gradient_a: [u8; 4],
+    /// RGBA; stroke gradient end color, used when `stroke_gradient`.
+    #[serde(default = "default_opaque_black")]
+    pub stroke_gradient_b: [u8; 4],
+    /// Stroke gradient angle in degrees (same convention as
+    /// `gradient_angle`).
+    #[serde(default = "default_gradient_angle")]
+    pub stroke_gradient_angle: f32,
+    /// When true, the background is a two-color gradient instead of
+    /// `bg_color`.
+    #[serde(default)]
+    pub bg_gradient: bool,
+    /// RGBA; background gradient start color, used when `bg_gradient`.
+    #[serde(default = "default_opaque_black")]
+    pub bg_gradient_a: [u8; 4],
+    /// RGBA; background gradient end color, used when `bg_gradient`.
+    #[serde(default = "default_opaque_black")]
+    pub bg_gradient_b: [u8; 4],
+    /// Background gradient angle in degrees (same convention as
+    /// `gradient_angle`).
+    #[serde(default = "default_gradient_angle")]
+    pub bg_gradient_angle: f32,
 }
 
 impl Default for EntryStyle {
@@ -265,6 +307,15 @@ impl Default for EntryStyle {
             gradient_a: [0, 0, 0, 255],
             gradient_b: [0, 0, 0, 255],
             gradient_dir: TextGradientDir::TopToBottom,
+            gradient_angle: 180.0,
+            stroke_gradient: false,
+            stroke_gradient_a: [0, 0, 0, 255],
+            stroke_gradient_b: [0, 0, 0, 255],
+            stroke_gradient_angle: 180.0,
+            bg_gradient: false,
+            bg_gradient_a: [0, 0, 0, 255],
+            bg_gradient_b: [0, 0, 0, 255],
+            bg_gradient_angle: 180.0,
         }
     }
 }

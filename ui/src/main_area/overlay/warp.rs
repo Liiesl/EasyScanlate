@@ -3,13 +3,11 @@ use std::collections::{HashMap, VecDeque};
 
 use iced::advanced::graphics::geometry::{self, Fill, Path, Stroke, Text};
 use iced::advanced::text::{LineHeight, Wrapping};
-use iced::{Color, Font, Point, Rectangle, Vector};
+use iced::{Font, Point, Rectangle, Vector};
 use iced::advanced::text::Alignment as TextAlignment;
 
-use easyscanlate_model::TextGradientDir;
-
 use super::cache::{FitKey, FIT_CACHE_CAP, font_hash, text_key};
-use super::gradient::{gradient_t, lerp_color};
+use super::gradient::{gradient_t_angle, lerp_color, StrokePaint};
 use crate::main_area::geometry::{fit_affine, quad_bounds, svd2};
 
 const WARP_THRESHOLD_PX: f32 = 0.5;
@@ -265,8 +263,8 @@ pub fn draw_warped_text<F>(
     text: &Text,
     box_rect: Rectangle,
     quad: [[f32; 2]; 4],
-    stroke: Option<(Color, f32)>,
-    gradient: Option<(TextGradientDir, [u8; 4], [u8; 4])>,
+    stroke: Option<(StrokePaint, f32)>,
+    gradient: Option<(f32, [u8; 4], [u8; 4])>,
     letter_spacing: f32,
 ) where
     F: geometry::frame::Backend,
@@ -316,10 +314,10 @@ pub fn draw_warped_text<F>(
         let quad_center = Point::new((min_x + max_x) / 2.0, (min_y + max_y) / 2.0);
         let rect_center = Point::new(gx + gw / 2.0, gy + gh / 2.0);
         let color = match gradient {
-            Some((dir, a, b)) => lerp_color(
+            Some((angle, a, b)) => lerp_color(
                 a,
                 b,
-                gradient_t(dir, box_rect, Point::new(ax + gw / 2.0, ay + gh / 2.0)),
+                gradient_t_angle(angle, box_rect, Point::new(ax + gw / 2.0, ay + gh / 2.0)),
             ),
             None => text.color,
         };
@@ -329,10 +327,15 @@ pub fn draw_warped_text<F>(
         frame.scale_nonuniform(Vector::new(s1, s2));
         frame.rotate(-alpha);
         frame.translate(Vector::new(-rect_center.x, -rect_center.y));
-        if let Some((stroke_color, stroke_width)) = stroke {
+        if let Some((paint, stroke_width)) = stroke {
             frame.stroke(
                 &glyph.path,
-                Stroke::default().with_color(stroke_color).with_width(stroke_width),
+                Stroke::default()
+                    .with_color(paint.color_at(
+                        box_rect,
+                        Point::new(ax + gw / 2.0, ay + gh / 2.0),
+                    ))
+                    .with_width(stroke_width),
             );
         }
         frame.fill(&glyph.path, Fill::from(color));

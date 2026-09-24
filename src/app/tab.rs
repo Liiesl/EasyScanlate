@@ -5,7 +5,6 @@
 //! Heavy engines (`ocr::ParallelEngine`, `inpaint::Engine`, `styling::Engine`,
 //! `segment::Engine`) live **once** in `EnginePool` on `App` (Q3), not here.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use iced::widget::{pane_grid, text_editor};
@@ -204,7 +203,6 @@ pub struct Tab {
     pub scheduler: Scheduler,
     pub style_working: EntryStyle,
     pub style_picker: Option<StyleField>,
-    pub style_hex_overrides: HashMap<StyleField, String>,
 
     pub panes: pane_grid::State<PaneKind>,
     pub side_panes: pane_grid::State<SidePaneKind>,
@@ -368,7 +366,6 @@ impl Tab {
             scheduler: Scheduler::new(),
             style_working: style.clone(),
             style_picker: None,
-            style_hex_overrides: HashMap::new(),
             panes,
             side_panes,
             styling_panes,

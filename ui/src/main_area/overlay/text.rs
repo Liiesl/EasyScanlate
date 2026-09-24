@@ -162,7 +162,8 @@ pub fn draw_spaced_text<F>(
     frame: &mut F,
     text: &iced::advanced::graphics::geometry::Text,
     letter_spacing: f32,
-    stroke: Option<(iced::Color, f32)>,
+    stroke: Option<(super::gradient::StrokePaint, f32)>,
+    box_rect: iced::Rectangle,
 ) where
     F: iced::advanced::graphics::geometry::frame::Backend,
 {
@@ -230,10 +231,15 @@ pub fn draw_spaced_text<F>(
                         }
                     }
                 });
-                if let Some((stroke_color, stroke_width)) = stroke {
+                if let Some((paint, stroke_width)) = stroke {
                     frame.stroke(
                         &glyph_path,
-                        Stroke::default().with_color(stroke_color).with_width(stroke_width),
+                        Stroke::default()
+                            .with_color(paint.color_at(
+                                box_rect,
+                                Point::new(start_x, start_y),
+                            ))
+                            .with_width(stroke_width),
                     );
                 }
                 frame.fill(&glyph_path, Fill::from(text.color));

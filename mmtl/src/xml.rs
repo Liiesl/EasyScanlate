@@ -53,6 +53,37 @@ fn parse_u8(s: &str) -> u8 {
     s.parse::<u8>().unwrap_or(0)
 }
 
+/// Migrates a legacy [`TextGradientDir`] + box aspect (`w`, `h` in any
+/// consistent unit) to the closest unified gradient angle in degrees
+/// (`0..360`, widget convention: `0` = bottom→top, `90` = left→right,
+/// `180` = top→bottom, `270` = right→left).
+///
+/// Axis-aligned directions are aspect-independent. Diagonal directions are
+/// corner-to-corner, so the angle accounts for the ratio via
+/// `atan2(h, w)` — matching `iced::Radians::to_distance` (angle minus 90°
+/// gives the `(cos, sin)` flow vector from stop 0 to stop 1).
+///
+/// NOT WIRED YET: kept for the future backfill of `gradient_angle` /
+/// `stroke_gradient_angle` / `bg_gradient_angle` from old files.
+#[allow(dead_code)]
+pub fn gradient_dir_to_angle(dir: TextGradientDir, w: f32, h: f32) -> f32 {
+    let w = w.max(1.0);
+    let h = h.max(1.0);
+    // atan2(h, w) in degrees: diagonal slant for a box of this aspect.
+    let slant = h.atan2(w).to_degrees();
+    let angle = match dir {
+        TextGradientDir::BottomToTop => 0.0,
+        TextGradientDir::BottomLeftToTopRight => 90.0 - slant,
+        TextGradientDir::LeftToRight => 90.0,
+        TextGradientDir::TopLeftToBottomRight => 90.0 + slant,
+        TextGradientDir::TopToBottom => 180.0,
+        TextGradientDir::TopRightToBottomLeft => 270.0 - slant,
+        TextGradientDir::RightToLeft => 270.0,
+        TextGradientDir::BottomRightToTopLeft => 270.0 + slant,
+    };
+    angle.rem_euclid(360.0)
+}
+
 // ---------------------------------------------------------------------------
 // Serialization
 // ---------------------------------------------------------------------------
@@ -296,6 +327,11 @@ pub fn to_xml_string(project: &Project) -> Result<String, String> {
             s.push_attribute(("text_align", style.text_align.label()));
             s.push_attribute(("text_gradient", if style.text_gradient { "true" } else { "false" }));
             s.push_attribute(("gradient_dir", style.gradient_dir.label()));
+            s.push_attribute(("gradient_angle", style.gradient_angle.to_string().as_str()));
+            s.push_attribute(("stroke_gradient", if style.stroke_gradient { "true" } else { "false" }));
+            s.push_attribute(("stroke_gradient_angle", style.stroke_gradient_angle.to_string().as_str()));
+            s.push_attribute(("bg_gradient", if style.bg_gradient { "true" } else { "false" }));
+            s.push_attribute(("bg_gradient_angle", style.bg_gradient_angle.to_string().as_str()));
             if let Some(fam) = &style.font_family {
                 s.push_attribute(("font_family", esc(fam).as_str()));
             }
@@ -309,6 +345,10 @@ pub fn to_xml_string(project: &Project) -> Result<String, String> {
                 ("bg_color", style.bg_color),
                 ("gradient_a", style.gradient_a),
                 ("gradient_b", style.gradient_b),
+                ("stroke_gradient_a", style.stroke_gradient_a),
+                ("stroke_gradient_b", style.stroke_gradient_b),
+                ("bg_gradient_a", style.bg_gradient_a),
+                ("bg_gradient_b", style.bg_gradient_b),
             ] {
                 writer
                     .write_event(Event::Text(BytesText::from_escaped("\n      ")))
@@ -743,11 +783,16 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                         let text_align = attr(&e, b"text_align").map(|v| TextAlign::from_label(&v)).unwrap_or(TextAlign::Circular);
                         let text_gradient = attr(&e, b"text_gradient").map(|v| v=="true").unwrap_or(false);
                         let gradient_dir = attr(&e, b"gradient_dir").map(|v| TextGradientDir::from_label(&v)).unwrap_or(TextGradientDir::TopToBottom);
+                        let gradient_angle = attr(&e, b"gradient_angle").map(|v| parse_f32(&v)).unwrap_or(180.0);
+                        let stroke_gradient = attr(&e, b"stroke_gradient").map(|v| v=="true").unwrap_or(false);
+                        let stroke_gradient_angle = attr(&e, b"stroke_gradient_angle").map(|v| parse_f32(&v)).unwrap_or(180.0);
+                        let bg_gradient = attr(&e, b"bg_gradient").map(|v| v=="true").unwrap_or(false);
+                        let bg_gradient_angle = attr(&e, b"bg_gradient_angle").map(|v| parse_f32(&v)).unwrap_or(180.0);
                         let font_family = attr(&e, b"font_family").map(|v| unesc(&v));
-                        cur_style = Some((eid, EntryStyle{ font_size, auto_size, line_height, letter_spacing, caps, bold, italic, text_color:[0,0,0,255], stroke_color:[0,0,0,255], stroke_width, bg_color:[255,255,255,255], bg_radius, font_family, text_align, text_gradient, gradient_a:[0,0,0,255], gradient_b:[0,0,0,255], gradient_dir }));
+                        cur_style = Some((eid, EntryStyle{ font_size, auto_size, line_height, letter_spacing, caps, bold, italic, text_color:[0,0,0,255], stroke_color:[0,0,0,255], stroke_width, bg_color:[255,255,255,255], bg_radius, font_family, text_align, text_gradient, gradient_a:[0,0,0,255], gradient_b:[0,0,0,255], gradient_dir, gradient_angle, stroke_gradient, stroke_gradient_a:[0,0,0,255], stroke_gradient_b:[0,0,0,255], stroke_gradient_angle, bg_gradient, bg_gradient_a:[0,0,0,255], bg_gradient_b:[0,0,0,255], bg_gradient_angle }));
                         cur_style_colors.clear();
                     }
-                    "text_color" | "stroke_color" | "bg_color" | "gradient_a" | "gradient_b" => {
+                    "text_color" | "stroke_color" | "bg_color" | "gradient_a" | "gradient_b" | "stroke_gradient_a" | "stroke_gradient_b" | "bg_gradient_a" | "bg_gradient_b" => {
                         let r = attr(&e, b"r").map(|v| parse_u8(&v)).unwrap_or(0);
                         let g = attr(&e, b"g").map(|v| parse_u8(&v)).unwrap_or(0);
                         let b = attr(&e, b"b").map(|v| parse_u8(&v)).unwrap_or(0);
@@ -852,7 +897,7 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                             }
                         }
                     }
-                    "text_color" | "stroke_color" | "bg_color" | "gradient_a" | "gradient_b" => {
+                    "text_color" | "stroke_color" | "bg_color" | "gradient_a" | "gradient_b" | "stroke_gradient_a" | "stroke_gradient_b" | "bg_gradient_a" | "bg_gradient_b" => {
                         let r = attr(&e, b"r").map(|v| parse_u8(&v)).unwrap_or(0);
                         let g = attr(&e, b"g").map(|v| parse_u8(&v)).unwrap_or(0);
                         let b = attr(&e, b"b").map(|v| parse_u8(&v)).unwrap_or(0);
@@ -981,6 +1026,10 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                             if let Some(c) = cur_style_colors.get("bg_color") { style.bg_color = *c; }
                             if let Some(c) = cur_style_colors.get("gradient_a") { style.gradient_a = *c; }
                             if let Some(c) = cur_style_colors.get("gradient_b") { style.gradient_b = *c; }
+                            if let Some(c) = cur_style_colors.get("stroke_gradient_a") { style.stroke_gradient_a = *c; }
+                            if let Some(c) = cur_style_colors.get("stroke_gradient_b") { style.stroke_gradient_b = *c; }
+                            if let Some(c) = cur_style_colors.get("bg_gradient_a") { style.bg_gradient_a = *c; }
+                            if let Some(c) = cur_style_colors.get("bg_gradient_b") { style.bg_gradient_b = *c; }
                             ctx.styles.insert(eid, style);
                             cur_style_colors.clear();
                         }
@@ -1075,6 +1124,27 @@ mod tests {
         assert!(back.entry_style(entry).bold);
         assert!(back.view_quads().get(&entry).is_some());
         assert_eq!(back.extras.note(entry), Some("note"));
+    }
+
+    #[test]
+    fn gradient_dir_to_angle_axes_are_aspect_independent() {
+        assert!((gradient_dir_to_angle(TextGradientDir::BottomToTop, 200.0, 100.0) - 0.0).abs() < 0.01);
+        assert!((gradient_dir_to_angle(TextGradientDir::LeftToRight, 200.0, 100.0) - 90.0).abs() < 0.01);
+        assert!((gradient_dir_to_angle(TextGradientDir::TopToBottom, 200.0, 100.0) - 180.0).abs() < 0.01);
+        assert!((gradient_dir_to_angle(TextGradientDir::RightToLeft, 200.0, 100.0) - 270.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn gradient_dir_to_angle_diagonals_account_for_ratio() {
+        // Square: corner-to-corner at 45° offsets.
+        assert!((gradient_dir_to_angle(TextGradientDir::TopLeftToBottomRight, 100.0, 100.0) - 135.0).abs() < 0.01);
+        assert!((gradient_dir_to_angle(TextGradientDir::BottomRightToTopLeft, 100.0, 100.0) - 315.0).abs() < 0.01);
+        // Wide box: slant shallower than 45°.
+        let wide = gradient_dir_to_angle(TextGradientDir::TopLeftToBottomRight, 200.0, 100.0);
+        assert!((wide - (90.0 + 100.0f32.atan2(200.0).to_degrees())).abs() < 0.01);
+        // Tall box: slant steeper than 45°.
+        let tall = gradient_dir_to_angle(TextGradientDir::TopRightToBottomLeft, 100.0, 200.0);
+        assert!((tall - (270.0 - 200.0f32.atan2(100.0).to_degrees())).abs() < 0.01);
     }
 
     #[test]

@@ -15,7 +15,7 @@ pub(crate) use fit::{fit_font_metrics, fit_font_size};
 pub use style::{FontSupport, font_support, preview_font, styled_font, styled_font_for_text};
 pub use crate::main_area::geometry::order_quad;
 
-use iced::advanced::graphics::geometry::{self, Fill, Path, Stroke, Text};
+use iced::advanced::graphics::geometry::{self, Path, Stroke, Text};
 use iced::advanced::text::Alignment as TextAlignment;
 use iced::advanced::text::LineHeight;
 use iced::{Color, Font, Pixels, Point, Rectangle, Size};
@@ -27,7 +27,24 @@ use crate::main_area::geometry::{
     apply_quad_transform, quad_path, quad_transform, rotated_rect_geometry, QuadTransform,
 };
 
-use self::gradient::fill_gradient_text;
+use self::gradient::{bg_fill_in_rect, fill_gradient_text, text_fill, StrokePaint};
+
+/// Bounding rect of a frame-space quad, for gradient endpoints drawn in
+/// frame coordinates (untransformed quad paths).
+fn quad_bounds_rect(quad: [[f32; 2]; 4]) -> Rectangle {
+    let (mut min_x, mut min_y) = (quad[0][0], quad[0][1]);
+    let (mut max_x, mut max_y) = (quad[0][0], quad[0][1]);
+    for [x, y] in quad.iter().skip(1) {
+        min_x = min_x.min(*x);
+        min_y = min_y.min(*y);
+        max_x = max_x.max(*x);
+        max_y = max_y.max(*y);
+    }
+    Rectangle::new(
+        Point::new(min_x, min_y),
+        Size::new((max_x - min_x).max(1.0), (max_y - min_y).max(1.0)),
+    )
+}
 use self::text::{draw_spaced_text, measure_text};
 use self::warp::{affine_error, draw_warped_text};
 
@@ -110,7 +127,7 @@ pub fn draw_entries<'a, I, F>(
                 let bg = crate::main_area::geometry::perspective_rounded_rect_path(
                     quad, box_rect, bg_radius,
                 );
-                frame.fill(&bg, Fill::from(rgba_to_color(entry.style.bg_color)));
+                frame.fill(&bg, bg_fill_in_rect(&entry.style, quad_bounds_rect(quad)));
                 if entry.selected {
                     frame.stroke(
                         &bg,
@@ -133,7 +150,7 @@ pub fn draw_entries<'a, I, F>(
                     Size::new(layout_width, layout_height),
                     radius,
                 );
-                frame.fill(&bg, Fill::from(rgba_to_color(entry.style.bg_color)));
+                frame.fill(&bg, bg_fill_in_rect(&entry.style, box_rect));
                 if entry.selected {
                     frame.stroke(
                         &bg,
@@ -149,7 +166,7 @@ pub fn draw_entries<'a, I, F>(
                     Size::new(layout_width, layout_height),
                     radius,
                 );
-                frame.fill(&bg, Fill::from(rgba_to_color(entry.style.bg_color)));
+                frame.fill(&bg, bg_fill_in_rect(&entry.style, box_rect));
                 if entry.selected {
                     frame.stroke(
                         &bg,
@@ -160,6 +177,10 @@ pub fn draw_entries<'a, I, F>(
                 }
             }
         } else {
+            let bg_space = match layout_transform {
+                Some(_) => quad_bounds_rect(quad),
+                None => box_rect,
+            };
             let bg = match layout_transform {
                 Some(_) => quad_path(quad),
                 None => Path::rounded_rectangle(
@@ -168,7 +189,7 @@ pub fn draw_entries<'a, I, F>(
                     radius,
                 ),
             };
-            frame.fill(&bg, Fill::from(rgba_to_color(entry.style.bg_color)));
+            frame.fill(&bg, bg_fill_in_rect(&entry.style, bg_space));
             if entry.selected {
                 frame.stroke(
                     &bg,
@@ -184,12 +205,8 @@ pub fn draw_entries<'a, I, F>(
         }
         let display = apply_caps(entry.text, entry.style.caps);
         let styled = styled_font_for_text(font, &entry.style, &display);
-        let stroke = (entry.style.stroke_width > 0.0).then(|| {
-            (rgba_to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
-        });
-        let gradient = entry.style.text_gradient.then_some({
-            (entry.style.gradient_dir, entry.style.gradient_a, entry.style.gradient_b)
-        });
+        let stroke = StrokePaint::for_style(&entry.style, entry.style.stroke_width * scale);
+        let gradient = text_fill(&entry.style);
         // Per-entry typography: relative line-height multiplier and letter
         // spacing in image px (scaled to frame px). Spacing is real
         // tracking via cosmic-text `Attrs::letter_spacing` (EM) shared by
@@ -262,17 +279,15 @@ pub fn draw_entries<'a, I, F>(
                         align_x: TextAlignment::Center,
                         ..Text::default()
                     };
-                    if entry.style.text_gradient {
+                    if let Some((angle, a, b)) = text_fill(&entry.style) {
                         fill_gradient_text(
                             frame,
                             &text,
                             block_rect,
-                            entry.style.gradient_dir,
-                            entry.style.gradient_a,
-                            entry.style.gradient_b,
-                            (entry.style.stroke_width > 0.0).then(|| {
-                                (rgba_to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
-                            }),
+                            angle,
+                            a,
+                            b,
+                            StrokePaint::for_style(&entry.style, entry.style.stroke_width * scale),
                             ls,
                         );
                     } else {
@@ -280,9 +295,8 @@ pub fn draw_entries<'a, I, F>(
                             frame,
                             &text,
                             ls,
-                            (entry.style.stroke_width > 0.0).then(|| {
-                                (rgba_to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
-                            }),
+                            StrokePaint::for_style(&entry.style, entry.style.stroke_width * scale),
+                            block_rect,
                         );
                     }
                 }
@@ -337,17 +351,15 @@ pub fn draw_entries<'a, I, F>(
                     layout_height,
                 );
             }
-            if entry.style.text_gradient {
+            if let Some((angle, a, b)) = text_fill(&entry.style) {
                 fill_gradient_text(
                     frame,
                     &text,
                     block_rect,
-                    entry.style.gradient_dir,
-                    entry.style.gradient_a,
-                    entry.style.gradient_b,
-                    (entry.style.stroke_width > 0.0).then(|| {
-                        (rgba_to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
-                    }),
+                    angle,
+                    a,
+                    b,
+                    StrokePaint::for_style(&entry.style, entry.style.stroke_width * scale),
                     ls,
                 );
             } else {
@@ -355,9 +367,8 @@ pub fn draw_entries<'a, I, F>(
                     frame,
                     &text,
                     ls,
-                    (entry.style.stroke_width > 0.0).then(|| {
-                        (rgba_to_color(entry.style.stroke_color), entry.style.stroke_width * scale)
-                    }),
+                    StrokePaint::for_style(&entry.style, entry.style.stroke_width * scale),
+                    block_rect,
                 );
             }
             if layout_transform.is_some() {

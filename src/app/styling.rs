@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use iced::{Task, window};
-use easyscanlate_model::{CapsMode, EntryId, EntryStyle, Quad, TextAlign, TextGradientDir};
+use easyscanlate_model::{CapsMode, EntryId, EntryStyle, Quad, TextAlign};
 #[cfg(feature = "styling")]
 use easyscanlate_styling::Engine as StylingEngine;
 use easyscanlate_ui::event::{StyleField, UiEvent};
@@ -165,25 +165,10 @@ pub fn handle_text_align(app: &mut App, align: TextAlign) -> Task<Message> {
     Task::none()
 }
 
-pub fn handle_gradient_toggle(app: &mut App, enabled: bool) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
-    app.active_tab_mut().style_working.text_gradient = enabled;
-    let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
-    crate::app::handle_model_event(app.active_tab_mut(), ev);
-    Task::none()
-}
-
-pub fn handle_gradient_dir(app: &mut App, dir: TextGradientDir) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
-    app.active_tab_mut().style_working.gradient_dir = dir;
-    let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
-    crate::app::handle_model_event(app.active_tab_mut(), ev);
-    Task::none()
-}
-
 pub fn handle_color_open(app: &mut App, field: StyleField) -> Task<Message> {
+    if app.active_tab().selected.is_none() {
+        return Task::none();
+    }
     let current = app.active_tab_mut().style_picker;
     if current == Some(field) {
         return Task::none();
@@ -225,19 +210,64 @@ pub fn handle_dropper_shot(
     Task::none()
 }
 
-pub fn handle_color_submit(app: &mut App, field: StyleField, color: iced::Color) -> Task<Message> {
-    app.active_tab_mut().style_picker = None;
-    // Clear the hex text buffer for this field so the input shows the canonical
-    // hex from the picked color instead of stale typed text.
-    app.active_tab_mut().style_hex_overrides.remove(&field);
+/// Applies a unified hex-input value to the working style. Shared by the
+/// live `on_change` and the picker-OK `on_submit` paths; `close_picker`
+/// distinguishes them.
+fn apply_unified_value(
+    app: &mut App,
+    field: StyleField,
+    value: neverliie_iced_widgets::hex_color_input::HexColorValue,
+    close_picker: bool,
+) -> Task<Message> {
+    use neverliie_iced_widgets::hex_color_input::HexColorValue;
+    if close_picker {
+        app.active_tab_mut().style_picker = None;
+    }
     let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
-    let rgba = color.into_rgba8();
-    match field {
-        StyleField::Text => app.active_tab_mut().style_working.text_color = rgba,
-        StyleField::Stroke => app.active_tab_mut().style_working.stroke_color = rgba,
-        StyleField::Background => app.active_tab_mut().style_working.bg_color = rgba,
-        StyleField::GradientA => app.active_tab_mut().style_working.gradient_a = rgba,
-        StyleField::GradientB => app.active_tab_mut().style_working.gradient_b = rgba,
+    let working = &mut app.active_tab_mut().style_working;
+    match (field, value) {
+        (StyleField::Fill, HexColorValue::Solid(c)) => {
+            working.text_gradient = false;
+            working.text_color = c.into_rgba8();
+        }
+        (StyleField::Fill, HexColorValue::Gradient { gradient, angle }) => {
+            working.text_gradient = true;
+            if let Some(a) = gradient.stop(0) {
+                working.gradient_a = a.color.into_rgba8();
+            }
+            if let Some(b) = gradient.stop(1) {
+                working.gradient_b = b.color.into_rgba8();
+            }
+            working.gradient_angle = angle;
+        }
+        (StyleField::Stroke, HexColorValue::Solid(c)) => {
+            working.stroke_gradient = false;
+            working.stroke_color = c.into_rgba8();
+        }
+        (StyleField::Stroke, HexColorValue::Gradient { gradient, angle }) => {
+            working.stroke_gradient = true;
+            if let Some(a) = gradient.stop(0) {
+                working.stroke_gradient_a = a.color.into_rgba8();
+            }
+            if let Some(b) = gradient.stop(1) {
+                working.stroke_gradient_b = b.color.into_rgba8();
+            }
+            working.stroke_gradient_angle = angle;
+        }
+        (StyleField::Background, HexColorValue::Solid(c)) => {
+            working.bg_gradient = false;
+            working.bg_color = c.into_rgba8();
+        }
+        (StyleField::Background, HexColorValue::Gradient { gradient, angle }) => {
+            working.bg_gradient = true;
+            if let Some(a) = gradient.stop(0) {
+                working.bg_gradient_a = a.color.into_rgba8();
+            }
+            if let Some(b) = gradient.stop(1) {
+                working.bg_gradient_b = b.color.into_rgba8();
+            }
+            working.bg_gradient_angle = angle;
+        }
     }
     let style = app.active_tab().style_working.clone();
     let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
@@ -245,38 +275,20 @@ pub fn handle_color_submit(app: &mut App, field: StyleField, color: iced::Color)
     Task::none()
 }
 
-pub fn handle_hex_input(app: &mut App, field: StyleField, text: String) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
-    // Keep the raw buffer so intermediate invalid states don't snap back.
-    // Empty string clears the buffer to show the canonical value.
-    if text.is_empty() {
-        app.active_tab_mut().style_hex_overrides.remove(&field);
-        return Task::none();
-    }
-    app.active_tab_mut().style_hex_overrides.insert(field, text.clone());
+pub fn handle_color_changed(
+    app: &mut App,
+    field: StyleField,
+    value: neverliie_iced_widgets::hex_color_input::HexColorValue,
+) -> Task<Message> {
+    apply_unified_value(app, field, value, false)
+}
 
-    // Live-apply only when the text is a valid hex (or "None").
-    let Some(color) = easyscanlate_ui::color::parse_hex_color(&text) else {
-        // Invalid intermediate – keep buffer, don't update style.
-        return Task::none();
-    };
-    // Keep buffer to avoid snap-back while typing; cleared on selection
-    // change / picker / preset. `index`/`id` already validated above.
-    let rgba = color.into_rgba8();
-    match field {
-        StyleField::Text => app.active_tab_mut().style_working.text_color = rgba,
-        StyleField::Stroke => app.active_tab_mut().style_working.stroke_color = rgba,
-        StyleField::Background => app.active_tab_mut().style_working.bg_color = rgba,
-        StyleField::GradientA => app.active_tab_mut().style_working.gradient_a = rgba,
-        StyleField::GradientB => app.active_tab_mut().style_working.gradient_b = rgba,
-    }
-    let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
-    crate::app::handle_model_event(app.active_tab_mut(), ev);
-    // Update buffer to canonical? Keep original to avoid jump; but if the
-    // parsed color's canonical label differs only in case, keep typed text.
-    // (No extra work needed.)
-    Task::none()
+pub fn handle_color_submit(
+    app: &mut App,
+    field: StyleField,
+    value: neverliie_iced_widgets::hex_color_input::HexColorValue,
+) -> Task<Message> {
+    apply_unified_value(app, field, value, true)
 }
 
 pub fn handle_stroke_width(app: &mut App, width: f32) -> Task<Message> {
