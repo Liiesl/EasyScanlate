@@ -6,7 +6,9 @@ use super::tab::PipelineStyleItem;
 #[cfg(feature = "inpaint")]
 use easyscanlate_settings::InpaintBackend;
 
-use super::{App, AutoInpaintJob, Message};
+use super::{App, Message};
+#[cfg(feature = "inpaint")]
+use super::{AutoInpaintJob};
 
 #[cfg(all(feature = "styling", feature = "inpaint"))]
 pub fn dispatch_inpaint(

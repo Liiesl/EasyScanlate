@@ -61,8 +61,9 @@ pub struct AutosavePrompt {
     pub dir: std::path::PathBuf,
 }
 
-use tab::{AutoInpaintJob, EnginePool, Tab, TabId};
-
+use tab::{EnginePool, Tab, TabId};
+#[cfg(feature = "inpaint")]
+use tab::{AutoInpaintJob};
 // ---------------------------------------------------------------------------
 // Shared complex payload aliases (silences `clippy::type_complexity`).
 // ---------------------------------------------------------------------------
@@ -872,8 +873,14 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::StyleLetterSpacing(value)) => styling::handle_letter_spacing(app, value),
         Message::Ui(UiEvent::StyleAutoSize(enabled)) => styling::handle_auto_size(app, enabled),
         Message::Ui(UiEvent::StyleCaps(caps)) => styling::handle_caps(app, caps),
+        #[cfg(feature = "inpaint")]
         Message::Ui(UiEvent::StyleInpaintBackground) => inpaint::handle_style_inpaint_background(app),
+        #[cfg(not(feature = "inpaint"))]
+        Message::Ui(UiEvent::StyleInpaintBackground) => Task::none(),
+        #[cfg(feature = "inpaint")]
         Message::Ui(UiEvent::StyleInpaintBackendSelected(backend)) => inpaint::handle_style_inpaint_backend_selected(app, backend),
+        #[cfg(not(feature = "inpaint"))]
+        Message::Ui(UiEvent::StyleInpaintBackendSelected(_)) => Task::none(),        
         Message::Ui(UiEvent::StylePresetApply(preset)) => styling::handle_preset_apply(app, preset),
         Message::Ui(UiEvent::StylePresetAdd) => styling::handle_preset_add(app),
         Message::Ui(UiEvent::StylePresetReplace(preset)) => styling::handle_preset_replace(app, preset),

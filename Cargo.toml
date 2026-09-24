@@ -58,7 +58,7 @@ easyscanlate-ocr = { path = "engine-pool/ocr" }
 easyscanlate-styling = { path = "engine-pool/styling" }
 easyscanlate-translation = { path = "translation" }
 easyscanlate-segment = { path = "engine-pool/segment" }
-easyscanlate-engine-pool = { path = "engine-pool" }
+easyscanlate-engine-pool = { path = "engine-pool", default-features = false }
 easyscanlate-ui = { path = "ui", default-features = false }
 easyscanlate-mmtl = { path = "mmtl" }
 neverliie-iced-widgets = { path = "NeverLiieIcedWidgets" }

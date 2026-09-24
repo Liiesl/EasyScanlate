@@ -13,7 +13,9 @@ use image::RgbaImage;
 
 use easyscanlate_ui::UiState;
 
-use super::{App, AutoInpaintJob, Message};
+use super::{App, Message};
+#[cfg(feature = "inpaint")]
+use super::{AutoInpaintJob};
 use crate::app::queue::owner_of;
 #[cfg(feature = "inpaint")]
 use easyscanlate_engine_pool::{inpaint_pad_for as pool_pad_for, run_auto_inpaint_job};
