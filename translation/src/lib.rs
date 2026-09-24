@@ -18,8 +18,9 @@ use std::sync::LazyLock;
 use rig::completion::{AssistantContent, CompletionResponse};
 use rig::prelude::*;
 use rig::providers::openai;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
+pub mod cache;
 pub mod session;
 pub use session::Session;
 
@@ -43,7 +44,8 @@ const MODELS_MIRROR: &str = "https://models.pileofthings.top";
 /// flattening). Providers without a rig-native client, plus the two free-form
 /// custom slots, stay `OpenAI`/`Anthropic`. `Gemini` is Google AI Studio's
 /// native API. `Ollama` is the local Ollama daemon (`api/chat`, no `/v1`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum CompatKind {
     OpenAI,
     Anthropic,
@@ -113,7 +115,7 @@ pub const LANGUAGES: [&str; 13] = [
 /// hidden computation (latest per family) so resets can be recomputed from the
 /// fetched provider without the original listing. The request always uses `id`;
 /// the UI always shows `name`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Model {
     pub id: String,
     pub name: String,
@@ -139,7 +141,7 @@ impl Model {
 /// non-text filtered, sorted; family older members and `*-latest` are not
 /// filtered but hidden by default via `hidden_models`, or the fallback list
 /// when the mirror is unreachable).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Provider {
     /// models.dev provider id (or a custom-* id for free-form endpoints).
     pub id: String,

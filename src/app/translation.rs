@@ -10,6 +10,7 @@ pub use easyscanlate_ui::translation::{
     provider_name, usable_models, validate_connection_for, Connection, Model, Provider,
     Session, LANGUAGES,
 };
+pub use easyscanlate_ui::translation::cache;
 #[cfg(not(feature = "translation"))]
 pub use easyscanlate_ui::translation::FAKE_PROVIDER;
 
@@ -19,6 +20,8 @@ use super::{App, Message};
 /// settings store: connections, free-only filter and hidden models. The
 /// current selection is kept (`sync` falls back when it dropped out); used
 /// at boot and on the single [`UiEvent::SettingsChanged`] announcement.
+/// Cached listings are merged for ids without fresh data so newly added
+/// connections (e.g. onboarding) still paint instantly offline.
 pub fn sync_tx_from_store(app: &mut App) {
     easyscanlate_settings::get(|s| {
         app.tx.connections = s.connections.clone();
@@ -26,6 +29,16 @@ pub fn sync_tx_from_store(app: &mut App) {
         app.tx.hidden_models = s.hidden_models.clone();
     });
     app.tx.sync();
+    let cached = translation::cache::load_cached_providers(&app.tx.fetch_ids());
+    if !cached.is_empty() {
+        let fresh: HashMap<String, translation::Provider> = cached
+            .into_iter()
+            .filter(|(id, _)| !app.tx.fetched.contains_key(id))
+            .collect();
+        if !fresh.is_empty() {
+            app.tx.on_fetched(fresh);
+        }
+    }
 }
 
 pub fn handle_fetch_models(app: &mut App) -> Task<Message> {
@@ -38,6 +51,10 @@ pub fn handle_fetch_models(app: &mut App) -> Task<Message> {
 }
 
 pub fn handle_models_fetched(app: &mut App, providers: HashMap<String, translation::Provider>) -> Task<Message> {
+    // Delta-persist the fresh listings (per-provider files, only when
+    // changed) so the next boot can paint from disk when the mirror is
+    // unreachable or its DB is stale.
+    translation::cache::save_providers(&providers);
     app.tx.on_fetched(providers);
     // Seed default hidden (older family members) for newly fetched providers
     // where the user has no entry yet: hidden via Manage Models instead of
@@ -389,11 +406,18 @@ pub fn handle_connect_modal_submit(app: &mut App) -> Task<Message> {
         s.last_provider = Some(id.clone());
     });
     app.tx.connect(id.clone(), connection);
+    // Instant paint from the on-disk cache for newly connected cloud
+    // gateways; the fetch below is the delta that refreshes it.
+    if !is_custom && !is_local
+        && let Some(cached) = translation::cache::load_cached_provider(&id)
+    {
+        app.tx.on_fetched(HashMap::from([(id.clone(), cached)]));
+        app.tx.ensure_default_hidden_seeded();
+    }
     app.active_tab_mut().status = format!("Connected {}.", translation::provider_name(&id));
     if is_custom {
         Task::none()
-    } else if is_local {
-        let base = base_url.clone();
+    } else if is_local {        let base = base_url.clone();
         let fetch_id = id.clone();
         Task::perform(
             async move {

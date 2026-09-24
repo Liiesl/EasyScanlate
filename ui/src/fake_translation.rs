@@ -439,6 +439,33 @@ fn local_fallback_provider(id: &str, base_url: &str) -> Provider {
 pub async fn fetch_local_models(_base_url: &str, _id: &str) -> Result<Vec<Model>, String> {
     Err("fake discovery has no endpoint".to_string())
 }
+/// On-disk listing cache stub for UI-only builds: same surface as the real
+/// `translation::cache`, but a no-op (fake providers are already local).
+pub mod cache {
+    use std::collections::HashMap;
+    use super::Provider;
+
+    /// Whether two listings differ. Mirrors the real cache helper.
+    pub fn providers_equal(a: &Provider, b: &Provider) -> bool {
+        a.id == b.id && a.models == b.models && a.api == b.api
+    }
+
+    /// Loads one cached provider. Always `None` in fake builds.
+    pub fn load_cached_provider(_id: &str) -> Option<Provider> {
+        None
+    }
+
+    /// Loads every cached provider for `ids`. Always empty in fake builds.
+    pub fn load_cached_providers(_ids: &[String]) -> HashMap<String, Provider> {
+        HashMap::new()
+    }
+
+    /// Persists one provider listing. No-op in fake builds.
+    pub fn save_provider(_provider: &Provider) {}
+
+    /// Persists every provider in the map. No-op in fake builds.
+    pub fn save_providers(_providers: &HashMap<String, Provider>) {}
+}
 pub async fn fetch_local_provider(id: &str, base_url: &str) -> Provider {
     local_fallback_provider(id, base_url)
 }

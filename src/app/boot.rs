@@ -89,6 +89,15 @@ pub fn boot(
         app.tx.free_only = free_only;
         app.tx.hidden_models = hidden;
         app.tx.sync();
+        // Instant paint from the on-disk listing cache (connected cloud
+        // gateways only): the async mirror delta below overwrites it when
+        // the listing changed, so offline boots keep full model lists
+        // instead of the 2-model catalog fallbacks.
+        let cached = translation::cache::load_cached_providers(&app.tx.fetch_ids());
+        if !cached.is_empty() {
+            app.tx.on_fetched(cached);
+            app.tx.ensure_default_hidden_seeded();
+        }
     }
     #[cfg(all(not(feature = "translation"), feature = "test-ui"))]
     {
