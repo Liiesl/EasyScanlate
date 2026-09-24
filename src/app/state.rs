@@ -2,7 +2,7 @@
 use iced::widget::text_editor;
 use easyscanlate_model::{EntryId, EntryStyle, TextAlign};
 use easyscanlate_ui::event::{EditOrigin, MainAreaMode, ManualMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
-use easyscanlate_ui::layout::{PaneKind, SidePaneKind, StylingPaneKind};
+use easyscanlate_ui::layout::{PaneKind, ResultsPaneKind, EditorPaneKind};
 use easyscanlate_ui::{ConnectModal, LoadedImage, UiState};
 use easyscanlate_ui::state::TabMeta;
 
@@ -606,9 +606,9 @@ impl UiState for ActiveTab<'_> {
         })
     }
     fn titlebar_height(&self) -> f32 { self.app.frame.config().title_bar_height }
-    fn editor_panes(&self) -> Option<(&iced::widget::pane_grid::State<PaneKind>, &iced::widget::pane_grid::State<SidePaneKind>, &iced::widget::pane_grid::State<StylingPaneKind>)> {
+    fn editor_panes(&self) -> Option<(&iced::widget::pane_grid::State<PaneKind>, &iced::widget::pane_grid::State<ResultsPaneKind>, &iced::widget::pane_grid::State<EditorPaneKind>)> {
         if self.tab.is_home() { return None; }
-        Some((&self.tab.panes, &self.tab.side_panes, &self.tab.styling_panes))
+        Some((&self.tab.panes, &self.tab.results_panes, &self.tab.outer_panes))
     }
 }
 
@@ -835,10 +835,10 @@ impl UiState for App {
         })
     }
     fn titlebar_height(&self) -> f32 { self.frame.config().title_bar_height }
-    fn editor_panes(&self) -> Option<(&iced::widget::pane_grid::State<PaneKind>, &iced::widget::pane_grid::State<SidePaneKind>, &iced::widget::pane_grid::State<StylingPaneKind>)> {
+    fn editor_panes(&self) -> Option<(&iced::widget::pane_grid::State<PaneKind>, &iced::widget::pane_grid::State<ResultsPaneKind>, &iced::widget::pane_grid::State<EditorPaneKind>)> {
         let tab = self.tabs.get(self.active)?;
         if tab.is_home() { return None; }
-        Some((&tab.panes, &tab.side_panes, &tab.styling_panes))
+        Some((&tab.panes, &tab.results_panes, &tab.outer_panes))
     }
 }
 

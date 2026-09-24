@@ -47,18 +47,18 @@ pub fn handle_viewer_scroll(app: &mut App, anchor: f32) -> Task<Message> {
 }
 
 pub fn handle_panel_resized(app: &mut App, resized: iced::widget::pane_grid::ResizeEvent) -> Task<Message> {
-    let ratio = resized.ratio.clamp(0.15, 0.58);
+    let ratio = resized.ratio.clamp(0.20, 0.80);
     app.active_tab_mut().panes.resize(resized.split, ratio);
     Task::none()
 }
 
-pub fn handle_side_panel_resized(app: &mut App, resized: iced::widget::pane_grid::ResizeEvent) -> Task<Message> {
-    let ratio = resized.ratio.clamp(0.38, 0.55);
-    app.active_tab_mut().side_panes.resize(resized.split, ratio);
+pub fn handle_results_pane_resized(app: &mut App, resized: iced::widget::pane_grid::ResizeEvent) -> Task<Message> {
+    app.active_tab_mut().results_panes.resize(resized.split, resized.ratio);
     Task::none()
 }
 
-pub fn handle_styling_pane_resized(app: &mut App, resized: iced::widget::pane_grid::ResizeEvent) -> Task<Message> {
-    app.active_tab_mut().styling_panes.resize(resized.split, resized.ratio);
+pub fn handle_editor_resized(app: &mut App, resized: iced::widget::pane_grid::ResizeEvent) -> Task<Message> {
+    let ratio = resized.ratio.clamp(0.15, 0.55);
+    app.active_tab_mut().outer_panes.resize(resized.split, ratio);
     Task::none()
 }

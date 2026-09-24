@@ -144,6 +144,53 @@ pub fn segment_icon<'a>(
     )
 }
 
+/// One cell of a segmented control with a Lucide icon plus a text label
+/// (e.g. the Edit|Translate switcher). Same styling as [`segment_icon`].
+pub fn segment_icon_label<'a>(
+    active: bool,
+    icon: Icon,
+    label: &'a str,
+    on_press: Option<UiEvent>,
+) -> Element<'a, UiEvent> {
+    crate::button::with_disabled_cursor(
+        button(
+            row![
+                crate::icon::lucide(icon).size(scale::s(12.0)).center(),
+                text(label).size(scale::s(12.0)).font(Font::DEFAULT).center(),
+            ]
+            .spacing(scale::s(4.0))
+            .align_y(iced::Alignment::Center)
+            .width(FillLength),
+        )
+        .width(FillLength)
+        .padding([scale::s(4.0), scale::s(6.0)])
+        .on_press_maybe(on_press)
+        .style(move |_theme, status: Status| {
+            let bg = match status {
+                Status::Disabled => Color::from_rgba8(34, 36, 44, 0.35),
+                Status::Hovered => Color::from_rgba8(46, 48, 62, 0.82),
+                Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
+                Status::Active => crate::panel::PANEL_BG,
+            };
+            let txt = if active {
+                crate::accent::accent()
+            } else if matches!(status, Status::Disabled) {
+                MUTED_FG
+            } else {
+                TEXT_MAIN
+            };
+            button::Style {
+                background: Some(Background::Color(bg)),
+                border: Border::default(),
+                shadow: Shadow::default(),
+                text_color: txt,
+                ..button::Style::default()
+            }
+        })
+        .into(),
+    )
+}
+
 /// A bordered pill holding equally-sized [`segment`]s.
 pub fn segmented_group<'a>(segments: Vec<Element<'a, UiEvent>>) -> Element<'a, UiEvent> {
     container(row(segments).spacing(scale::s(2.0)))

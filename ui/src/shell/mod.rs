@@ -2,14 +2,14 @@ use iced::widget::pane_grid;
 use iced::{Element, Length};
 
 use crate::event::UiEvent;
-use crate::layout::{CARD_RADIUS, GAP, MAIN_AREA_MIN_WIDTH, OUTER_PADDING, STYLING_MIN_WIDTH, PaneKind, SidePaneKind, StylingPaneKind};
+use crate::layout::{CARD_RADIUS, GAP, MAIN_AREA_MIN_WIDTH, OUTER_PADDING, EditorPaneKind, PaneKind, ResultsPaneKind};
 use crate::state::UiState;
 use crate::{main_area, panel, scale, toolbar};
 use crate::settings as settings_modal;
 
 /// Canonical shell: the `inner: Element<UiEvent>` that `src/app/view.rs` used to build inline.
 /// Covers onboarding page vs Home (with new-project/settings/connect/manage_models overlays)
-/// vs Editor (toolbar + 3-level pane_grid + modals). The outer frame/aurora/loading/dimming
+/// vs Editor (left Translation/Inpaint column + toolbar + right Main/Styling + modals). The outer frame/aurora/loading/dimming
 /// stays in `src/app/view.rs` because it needs `NativeFrame` and `Message::Frame`.
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     if state.onboarding_open() {
@@ -42,93 +42,29 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             with_connect
         }
     } else {
-        // Editor: need pane states from UiState; fallback to empty if missing (e.g. tests)
-        let Some((panes, side_panes, styling_panes)) = state.editor_panes() else {
+        // Editor: resizable left column (Translation on top, Inpaint below)
+        // vs everything right of the toolbar (fixed-width toolbar + actions
+        // + Main/Styling). Need pane states from UiState; fallback to empty
+        // if missing (e.g. tests)
+        let Some((panes, results_panes, outer_panes)) = state.editor_panes() else {
             let fallback: Element<'_, UiEvent> = iced::widget::container(iced::widget::text("No editor panes").size(scale::s(12.0)))
                 .width(Length::Fill).height(Length::Fill).into();
             return fallback;
         };
 
-        let grid: Element<'_, UiEvent> = pane_grid::PaneGrid::new(panes, |_, kind, _| {
+        // Outer split: draggable divider resizes the left column; the
+        // toolbar itself stays a fixed 36px at the left edge of the right
+        // side. Default left share comes from `EDITOR_LEFT_DEFAULT_RATIO`.
+        // Each arm builds its content inline (from shared borrows) because
+        // the outer closure runs once per pane.
+        let content: Element<'_, UiEvent> = pane_grid::PaneGrid::new(outer_panes, |_, kind, _| {
             pane_grid::Content::new(match kind {
-                PaneKind::MainArea => {
-                    let el: Element<'_, UiEvent> = iced::widget::container(main_area::view(state))
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .style(|_theme| iced::widget::container::Style {
-                            background: Some(panel::PANEL_BG.into()),
-                            border: iced::Border::default().rounded(scale::s(CARD_RADIUS)),
-                            ..Default::default()
-                        })
-                        .into();
-                    el
-                }
-                PaneKind::Panel => {
-                    // side_panes needs to be cloned for inner closure? We capture via state reference
-                    // but PaneGrid::new borrows side_panes which is already a ref from state.
-                    // To avoid double borrow, we handle via helper that re-borrows from state inside closure.
-                    // For simplicity, we build side_grid with direct borrow of side_panes/styling_panes from state.
-                    // Since those refs are valid for '_, the inner closures can capture state.
-                    let side_grid: Element<'_, UiEvent> =
-                        pane_grid::PaneGrid::new(side_panes, |_, inner, _| {
-                            pane_grid::Content::new(match inner {
-                                SidePaneKind::Styling => {
-                                    let el: Element<'_, UiEvent> = pane_grid::PaneGrid::new(
-                                        styling_panes,
-                                        |_, kind, _| {
-                                            let body: Element<'_, UiEvent> = match kind {
-                                                StylingPaneKind::Inspector => {
-                                                    iced::widget::container(panel::styling::view(state))
-                                                        .padding(scale::s(10.0))
-                                                        .width(Length::Fill)
-                                                        .height(Length::Fill)
-                                                        .style(|_theme| {
-                                                            iced::widget::container::Style {
-                                                                background: Some(
-                                                                    panel::PANEL_BG.into(),
-                                                                ),
-                                                                border: iced::Border::default()
-                                                                    .rounded(scale::s(CARD_RADIUS)),
-                                                                ..Default::default()
-                                                            }
-                                                        })
-                                                        .into()
-                                                }
-                                                StylingPaneKind::Layers => {
-                                                    iced::widget::container(
-                                                        panel::inpaint::view(state),
-                                                    )
-                                                    .padding(scale::s(10.0))
-                                                    .width(Length::Fill)
-                                                    .height(Length::Fill)
-                                                    .style(|_theme| {
-                                                        iced::widget::container::Style {
-                                                            background: Some(
-                                                                panel::PANEL_BG.into(),
-                                                            ),
-                                                            border: iced::Border::default()
-                                                                .rounded(scale::s(CARD_RADIUS)),
-                                                            ..Default::default()
-                                                        }
-                                                    })
-                                                    .into()
-                                                }
-                                            };
-                                            pane_grid::Content::new(body)
-                                        },
-                                    )
-                                    .spacing(scale::s(GAP))
-                                    .min_size(scale::s(90.0))
-                                    .on_resize(scale::s(GAP), UiEvent::StylingPaneResized)
-                                    .width(Length::Fill)
-                                    .height(Length::Fill)
-                                    .into();
-                                    el
-                                }
-                                SidePaneKind::Results => {
-                                    let el: Element<'_, UiEvent> = iced::widget::container(
-                                        panel::results::view(state),
-                                    )
+                EditorPaneKind::Left => {
+                    let left: Element<'_, UiEvent> = pane_grid::PaneGrid::new(
+                        results_panes,
+                        |_, kind, _| {
+                            let body: Element<'_, UiEvent> = match kind {
+                                ResultsPaneKind::Translation => iced::widget::container(panel::results::view(state))
                                     .padding(scale::s(10.0))
                                     .width(Length::Fill)
                                     .height(Length::Fill)
@@ -137,38 +73,93 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                                         border: iced::Border::default().rounded(scale::s(CARD_RADIUS)),
                                         ..Default::default()
                                     })
-                                    .into();
+                                    .into(),
+                                ResultsPaneKind::Layers => iced::widget::container(panel::inpaint::view(state))
+                                    .padding(scale::s(10.0))
+                                    .width(Length::Fill)
+                                    .height(Length::Fill)
+                                    .style(|_theme| iced::widget::container::Style {
+                                        background: Some(panel::PANEL_BG.into()),
+                                        border: iced::Border::default().rounded(scale::s(CARD_RADIUS)),
+                                        ..Default::default()
+                                    })
+                                    .into(),
+                            };
+                            pane_grid::Content::new(body)
+                        },
+                    )
+                    .spacing(scale::s(GAP))
+                    .min_size(scale::s(90.0))
+                    .on_resize(scale::s(GAP), UiEvent::ResultsPaneResized)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into();
+                    left
+                }
+                EditorPaneKind::Right => {
+                    let right_grid: Element<'_, UiEvent> = pane_grid::PaneGrid::new(
+                        panes,
+                        |_, kind, _| {
+                            pane_grid::Content::new(match kind {
+                                PaneKind::MainArea => {
+                                    let el: Element<'_, UiEvent> = iced::widget::container(main_area::view(state))
+                                        .width(Length::Fill)
+                                        .height(Length::Fill)
+                                        .style(|_theme| iced::widget::container::Style {
+                                            background: Some(panel::PANEL_BG.into()),
+                                            border: iced::Border::default().rounded(scale::s(CARD_RADIUS)),
+                                            ..Default::default()
+                                        })
+                                        .into();
+                                    el
+                                }
+                                PaneKind::Styling => {
+                                    let el: Element<'_, UiEvent> = iced::widget::container(panel::styling::view(state))
+                                        .padding(scale::s(10.0))
+                                        .width(Length::Fill)
+                                        .height(Length::Fill)
+                                        .style(|_theme| iced::widget::container::Style {
+                                            background: Some(panel::PANEL_BG.into()),
+                                            border: iced::Border::default().rounded(scale::s(CARD_RADIUS)),
+                                            ..Default::default()
+                                        })
+                                        .into();
                                     el
                                 }
                             })
-                        })
-                        .spacing(scale::s(GAP))
-                        .min_size(STYLING_MIN_WIDTH)
-                        .on_resize(scale::s(GAP), UiEvent::SidePanelResized)
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .into();
-
-                    let el: Element<'_, UiEvent> =
-                        iced::widget::column![panel::actions::view(state), side_grid]
+                        },
+                    )
+                    .spacing(scale::s(GAP))
+                    .min_size(MAIN_AREA_MIN_WIDTH)
+                    .on_resize(scale::s(GAP), UiEvent::PanelResized)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into();
+                    let right: Element<'_, UiEvent> =
+                        iced::widget::column![panel::actions::view(state), right_grid]
                             .spacing(scale::s(GAP))
                             .width(Length::Fill)
                             .height(Length::Fill)
                             .into();
-                    el
+                    iced::widget::row![
+                        toolbar::view(state),
+                        iced::widget::container(right)
+                            .width(Length::Fill)
+                            .height(Length::Fill),
+                    ]
+                    .spacing(scale::s(GAP))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into()
                 }
             })
         })
         .spacing(scale::s(GAP))
-        .min_size(MAIN_AREA_MIN_WIDTH)
-        .on_resize(scale::s(GAP), UiEvent::PanelResized)
+        .min_size(scale::s(90.0))
+        .on_resize(scale::s(GAP), UiEvent::EditorResized)
         .width(Length::Fill)
         .height(Length::Fill)
         .into();
-        let content: Element<'_, UiEvent> = iced::widget::row![toolbar::view(state), grid]
-            .spacing(scale::s(GAP))
-            .height(Length::Fill)
-            .into();
         let padded_content: Element<'_, UiEvent> = iced::widget::container(content)
             .padding(scale::s(OUTER_PADDING))
             .width(Length::Fill)

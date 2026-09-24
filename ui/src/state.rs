@@ -5,7 +5,7 @@ use easyscanlate_model::{EntryId, EntryStyle, TextAlign};
 
 use crate::connect::ConnectModal;
 use crate::event::{EditOrigin, MainAreaMode, ManualMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
-use crate::layout::{PaneKind, SidePaneKind, StylingPaneKind};
+use crate::layout::{PaneKind, ResultsPaneKind, EditorPaneKind};
 use crate::loaded::LoadedImage;
 use easyscanlate_model::{ProfileId, Project};
 use iced::widget::pane_grid;
@@ -216,8 +216,8 @@ pub trait UiState {
         &self,
     ) -> Option<(
         &pane_grid::State<PaneKind>,
-        &pane_grid::State<SidePaneKind>,
-        &pane_grid::State<StylingPaneKind>,
+        &pane_grid::State<ResultsPaneKind>,
+        &pane_grid::State<EditorPaneKind>,
     )> {
         None
     }

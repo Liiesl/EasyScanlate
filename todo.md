@@ -7,20 +7,26 @@
 - font fixed size
 - font line height and letter spacing
 - case toggle
+- gradient support for stroke and bg
+- 
 
 #### fixes
 
 - cap free transform to prevent cowtie/flipped/collapsed quad
+- cache model json as fallback and delta update only when starting up
 
 #### modification
 
+- rework color picker ux
+- 
 - 
 
 ## currently in progress
 
 #### addition
 
-- proper error rfd
+- proper non panic error rfd
+- text entry alignment and auto align
 - 
 
 #### fixes
@@ -29,12 +35,12 @@
 - scroll reset on minimize/focus lost.
 - under heavy computation, switching tabs make ui froze, interaction seem to work but the ui graphics themself froze.
 - case not working as intended
+- app level presist of color picker swatch and recent
 
 #### modification
 
-- cache model json as fallback and delta update only when starting up
 - retire status bar
-- add max on quad ftf
+- rework gradient ux
 - 
 
 ## not yet started

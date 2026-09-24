@@ -19,7 +19,7 @@ use easyscanlate_ui::event::{EditOrigin, MainAreaMode, ManualMode, StyleField, T
 use easyscanlate_ui::main_area::decode::Scheduler;
 use easyscanlate_ui::LoadedImage;
 
-use easyscanlate_ui::layout::{PaneKind, SidePaneKind, StylingPaneKind, MAIN_AREA_DEFAULT_RATIO, STYLING_DEFAULT_RATIO, STYLING_TOP_RATIO};
+use easyscanlate_ui::layout::{PaneKind, ResultsPaneKind, EditorPaneKind, EDITOR_LEFT_DEFAULT_RATIO, MAIN_AREA_DEFAULT_RATIO, RESULTS_TOP_RATIO};
 
 // ---------------------------------------------------------------------------
 // Tab identity
@@ -205,8 +205,8 @@ pub struct Tab {
     pub style_picker: Option<StyleField>,
 
     pub panes: pane_grid::State<PaneKind>,
-    pub side_panes: pane_grid::State<SidePaneKind>,
-    pub styling_panes: pane_grid::State<StylingPaneKind>,
+    pub results_panes: pane_grid::State<ResultsPaneKind>,
+    pub outer_panes: pane_grid::State<EditorPaneKind>,
 
     // translation per-tab slice (Q5)
     pub translating: bool,
@@ -241,29 +241,31 @@ impl Tab {
     /// Permanent Home tab (pinned, non-closable). `id` is typically `TabId(0)`.
     pub fn home(id: TabId) -> Self {
         let style = EntryStyle::default();
-        // Replicate `App::new` pane defaults exactly so per-tab layout matches today's single doc.
+        // Right side (right of the toolbar): main canvas vs styling inspector.
         let panes = {
             let (mut panes, main) = pane_grid::State::new(PaneKind::MainArea);
             let (_, split) = panes
-                .split(pane_grid::Axis::Vertical, main, PaneKind::Panel)
+                .split(pane_grid::Axis::Vertical, main, PaneKind::Styling)
                 .expect("initial pane split must succeed");
             panes.resize(split, MAIN_AREA_DEFAULT_RATIO);
             panes
         };
-        let side_panes = {
-            let (mut panes, styling) = pane_grid::State::new(SidePaneKind::Styling);
+        // Left column (left of the toolbar): translation on top, inpaint below.
+        let results_panes = {
+            let (mut panes, translation) = pane_grid::State::new(ResultsPaneKind::Translation);
             let (_, split) = panes
-                .split(pane_grid::Axis::Vertical, styling, SidePaneKind::Results)
-                .expect("side pane split must succeed");
-            panes.resize(split, STYLING_DEFAULT_RATIO);
+                .split(pane_grid::Axis::Horizontal, translation, ResultsPaneKind::Layers)
+                .expect("results pane split must succeed");
+            panes.resize(split, RESULTS_TOP_RATIO);
             panes
         };
-        let styling_panes = {
-            let (mut panes, inspector) = pane_grid::State::new(StylingPaneKind::Inspector);
+        // Outer split: resizable left column vs everything right of the toolbar.
+        let outer_panes = {
+            let (mut panes, left) = pane_grid::State::new(EditorPaneKind::Left);
             let (_, split) = panes
-                .split(pane_grid::Axis::Horizontal, inspector, StylingPaneKind::Layers)
-                .expect("styling pane split must succeed");
-            panes.resize(split, STYLING_TOP_RATIO);
+                .split(pane_grid::Axis::Vertical, left, EditorPaneKind::Right)
+                .expect("outer pane split must succeed");
+            panes.resize(split, EDITOR_LEFT_DEFAULT_RATIO);
             panes
         };
         Self {
@@ -367,8 +369,8 @@ impl Tab {
             style_working: style.clone(),
             style_picker: None,
             panes,
-            side_panes,
-            styling_panes,
+            results_panes,
+            outer_panes,
             translating: false,
             translate_anim_phase: 0.0,
             translate_lang: easyscanlate_ui::translation::LANGUAGES[0].to_string(),

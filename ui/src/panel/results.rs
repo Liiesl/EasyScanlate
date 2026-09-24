@@ -17,7 +17,7 @@ use crate::event::{EditOrigin, SettingsTab, TargetProfileSelection, ToolbarActio
 use crate::loaded::LoadedImage;
 use crate::panel::{MUTED_FG, PANEL_BG};
 use crate::scale;
-use crate::segmented::{segment_icon, segmented_group};
+use crate::segmented::{segment_icon_label, segmented_group};
 use crate::state::UiState;
 use crate::translation;
 use lucide_icons::Icon;
@@ -338,27 +338,32 @@ impl Display for TargetPickOption {
     }
 }
 
-/// Segmented switcher for the translation panel (Edit | Translate), styled like main_area mode switcher.
+/// Segmented switcher for the translation panel (Edit | Translate) with
+/// icon+label segments, styled like the main-area mode switcher.
 fn translation_mode_switcher<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let mode = state.translation_panel_mode();
     let pill = segmented_group(vec![
-        segment_icon(
+        segment_icon_label(
             mode == TranslationPanelMode::Edit,
             Icon::Pencil,
+            "Edit",
             Some(UiEvent::TranslationPanelMode(TranslationPanelMode::Edit)),
         ),
-        segment_icon(
+        segment_icon_label(
             mode == TranslationPanelMode::Translate,
             Icon::Languages,
+            "Translate",
             Some(UiEvent::TranslationPanelMode(TranslationPanelMode::Translate)),
         ),
     ]);
     container(pill)
-        .width(Length::Fixed(scale::s(88.0)))
+        .width(Length::Fixed(scale::s(180.0)))
         .into()
 }
 
-/// The pinned header of the results column: "TRANSLATION" label, optional profile dropdown (edit only) and the mode switcher on the right.
+/// The pinned header of the results column: "TRANSLATION" label and the mode
+/// switcher on the first row; in Edit mode the profile dropdown moves to a
+/// full-width row below.
 fn profile_header<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
     let mode = state.translation_panel_mode();
     let switcher = translation_mode_switcher(state);
@@ -379,19 +384,28 @@ fn profile_header<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent>
                 entries.push(MenuItem::Item(Item::new(option, profile.name.clone())));
             }
         }
-        row![
-            text("TRANSLATION").size(scale::s(11.0)).color(MUTED_FG),
-            space::horizontal(),
-            text("profile").size(scale::s(11.0)).color(MUTED_FG),
-            advanced_dropdown(entries, selected, |option| UiEvent::ProfileSelect(option.id))
-                .placeholder("Profile…")
-                .text_size(scale::s(12.0))
-                .width(scale::s(150.0))
-                .footer(Footer::new("+ New Profile", UiEvent::ProfileCreate)),
-            switcher,
+        column![
+            row![
+                text("TRANSLATION").size(scale::s(11.0)).color(MUTED_FG),
+                space::horizontal(),
+                switcher,
+            ]
+            .spacing(scale::s(6.0))
+            .align_y(iced::Alignment::Center)
+            .width(FillLength),
+            row![
+                text("profile").size(scale::s(11.0)).color(MUTED_FG),
+                advanced_dropdown(entries, selected, |option| UiEvent::ProfileSelect(option.id))
+                    .placeholder("Profile…")
+                    .text_size(scale::s(12.0))
+                    .width(FillLength)
+                    .footer(Footer::new("+ New Profile", UiEvent::ProfileCreate)),
+            ]
+            .spacing(scale::s(6.0))
+            .align_y(iced::Alignment::Center)
+            .width(FillLength),
         ]
         .spacing(scale::s(6.0))
-        .align_y(iced::Alignment::Center)
         .width(FillLength)
         .into()
     } else {

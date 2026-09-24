@@ -329,12 +329,13 @@ pub enum UiEvent {
     /// does not start inpainting — the main area runs via
     /// `StyleInpaintBackground`).
     StyleInpaintBackendSelected(InpaintBackend),
-    /// The user dragged the divider between the main area and the side panel.
+    /// The user dragged the divider between the main area and the styling panel.
     PanelResized(pane_grid::ResizeEvent),
-    /// The user dragged the divider between the styling and the translation/results panels.
-    SidePanelResized(pane_grid::ResizeEvent),
-    /// The user dragged the divider between the styling inspector and the inpaint/layers panel.
-    StylingPaneResized(pane_grid::ResizeEvent),
+    /// The user dragged the divider between the translation list and the inpaint/layers panel.
+    ResultsPaneResized(pane_grid::ResizeEvent),
+    /// The user dragged the divider between the left Translation/Inpaint
+    /// column and everything right of the toolbar.
+    EditorResized(pane_grid::ResizeEvent),
     /// Open the settings modal from the toolbar.
     SettingsOpen,
     /// Open the settings modal directly on the given tab (used by the
