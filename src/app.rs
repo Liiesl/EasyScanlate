@@ -279,6 +279,22 @@ pub struct App {
     pub(crate) pending_export: Option<export::PendingExport>,
     pub(crate) recent_projects: Vec<easyscanlate_settings::RecentProject>,
     pub(crate) new_project: Option<new_project::NewProjectState>,
+    /// Cached series index (`series.toml`), most-recent first.
+    pub(crate) series_items: Vec<easyscanlate_settings::series::TrackedProject>,
+    /// Series chosen in New Project, stashed while the create task runs so
+    /// the created-but-unloadable fallback can still track it. `None` = no
+    /// create in flight; `Some(s)` = create with series `s` (`None` inside =
+    /// standalone).
+    pub(crate) pending_create_series: Option<Option<String>>,
+    /// Whether the "+ New series" input in Project settings is shown.
+    pub(crate) project_series_creating: bool,
+    /// Current "+ New series" input text in Project settings.
+    pub(crate) project_series_name: String,
+    /// Home sidebar filter: standalone recents vs one series.
+    pub(crate) home_selection: easyscanlate_ui::state::HomeSelection,
+    /// Whether the `Series` group as a whole is collapsed in the home
+    /// sidebar. Session-only (resets to expanded on launch).
+    pub(crate) home_series_collapsed: bool,
     pub frame: NativeFrame,
     pub(crate) ipc_listener: Option<crate::single_instance::Listener>,
     // ——— Updates (Velopack, per-user, GithubSource Liiesl/EasyScanlate) ———
@@ -374,6 +390,12 @@ impl App {
             pending_export: None,
             recent_projects: easyscanlate_settings::get(|s| s.recent_projects.clone()),
             new_project: None,
+            series_items: easyscanlate_settings::series::load_series().items,
+            pending_create_series: None,
+            project_series_creating: false,
+            project_series_name: String::new(),
+            home_selection: easyscanlate_ui::state::HomeSelection::Recent,
+            home_series_collapsed: false,
             frame,
             pending_close: None,
             ipc_listener: None,
@@ -551,6 +573,7 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
                     match res {
                         Ok(path_str) => match mmtl::load_created_project(path_str.clone()) {
                             Ok((project, images, display, temp_dir)) => {
+                                app.pending_create_series = None;
                                 debug_assert_eq!(project.image_count(), images.len());
                                 return mmtl::push_project_tab(app, tab_id, project, images, display, temp_dir);
                             }
@@ -567,12 +590,13 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
                                 } else {
                                     app.active_tab_mut().status = format!("Created {path_str} but load failed: {e}");
                                 }
-                                easyscanlate_settings::touch_recent(path_str.clone());
-                                app.recent_projects = easyscanlate_settings::get(|s| s.recent_projects.clone());
+                                let series = app.pending_create_series.take().flatten();
+                                mmtl::touch_opened(app, path_str.clone(), series);
                                 return Task::none();
                             }
                         },
                         Err(e) => {
+                            app.pending_create_series = None;
                             app.backdrop_frame = None;
                             if let Some(idx) = app.tabs.iter().position(|t| t.id == tab_id) {
                                 let tab = &mut app.tabs[idx];
@@ -803,11 +827,28 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             backdrop::begin_load(app, backdrop::PendingLoad::Recent(path))
         }
         Message::Ui(UiEvent::HomeSettings) => settings::handle_settings_open(app),
+        Message::Ui(UiEvent::HomeSelectRecent) => {
+            app.home_selection = easyscanlate_ui::state::HomeSelection::Recent;
+            Task::none()
+        }
+        Message::Ui(UiEvent::HomeSelectSeries(name)) => {
+            app.home_selection = easyscanlate_ui::state::HomeSelection::Series(name);
+            Task::none()
+        }
+        Message::Ui(UiEvent::HomeToggleSeriesGroup) => {
+            app.home_series_collapsed = !app.home_series_collapsed;
+            Task::none()
+        }
         Message::Ui(UiEvent::NewProjectClose) => new_project::handle_close(app),
         Message::Ui(UiEvent::NewProjectSourceImage) => new_project::handle_source_image(app),
         Message::Ui(UiEvent::NewProjectSourceFolder) => new_project::handle_source_folder(app),
         Message::Ui(UiEvent::NewProjectLocationBrowse) => new_project::handle_location_browse(app),
         Message::Ui(UiEvent::NewProjectOriginalLang(lang)) => new_project::handle_original_lang(app, lang),
+        Message::Ui(UiEvent::NewProjectSeriesSelect(series)) => new_project::handle_series_select(app, series),
+        Message::Ui(UiEvent::NewProjectSeriesCreateStart) => new_project::handle_series_create_start(app),
+        Message::Ui(UiEvent::NewProjectSeriesName(name)) => new_project::handle_series_name(app, name),
+        Message::Ui(UiEvent::NewProjectSeriesCreateConfirm) => new_project::handle_series_create_confirm(app),
+        Message::Ui(UiEvent::NewProjectSeriesCancel) => new_project::handle_series_cancel(app),
         Message::Ui(UiEvent::NewProjectCreate) => backdrop::begin_load(app, backdrop::PendingLoad::Create),
         Message::Ui(UiEvent::StartOcr) => ocr::handle_start_ocr(app),
         Message::Ui(UiEvent::StopOcr) => ocr::handle_stop_ocr(app),
@@ -915,6 +956,11 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::SettingsSearch(query)) => settings::handle_settings_search(app, query),
         Message::Ui(UiEvent::SettingsChanged) => settings::handle_settings_changed(app),
         Message::Ui(UiEvent::SettingEdit(edit)) => settings::handle_setting_edit(app, edit),
+        Message::Ui(UiEvent::ProjectSeriesSelect(series)) => settings::handle_project_series_select(app, series),
+        Message::Ui(UiEvent::ProjectSeriesCreateStart) => settings::handle_project_series_create_start(app),
+        Message::Ui(UiEvent::ProjectSeriesName(name)) => settings::handle_project_series_name(app, name),
+        Message::Ui(UiEvent::ProjectSeriesCreateConfirm) => settings::handle_project_series_create_confirm(app),
+        Message::Ui(UiEvent::ProjectSeriesCancel) => settings::handle_project_series_cancel(app),
         Message::Ui(UiEvent::OpenUrl(url)) => settings::handle_open_url(app, url),
         Message::Ui(UiEvent::SaveProject) => mmtl::handle_save(app),
         Message::Ui(UiEvent::ExportAll) => export::handle_export_all(app),

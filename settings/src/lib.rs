@@ -19,6 +19,7 @@ use easyscanlate_model::EntryStyle;
 use serde::{Deserialize, Serialize};
 
 pub mod color_library;
+pub mod series;
 
 /// The confy application name; decides the config directory name.
 const APP_NAME: &str = "easyscanlate";

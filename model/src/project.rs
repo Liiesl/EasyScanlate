@@ -20,6 +20,8 @@ pub struct Project {
     /// `None` only for legacy files loaded from before the ID existed;
     /// stamped on next save/autosave via `ensure_project_id()`.
     project_id: Option<String>,
+    /// Optional series this project belongs to. `None` = standalone.
+    series: Option<String>,
     /// Images in this chapter, insertion order. Immutable after add.
     images: Vec<ImageMeta>,
     next_image_id: u64,
@@ -54,6 +56,19 @@ impl Project {
         self.project_id = id;
     }
 
+    /// Series this project belongs to (`None` = standalone).
+    pub fn series(&self) -> Option<&str> {
+        self.series.as_deref()
+    }
+
+    /// Set the series (`None` = standalone). Trims; empty becomes `None`.
+    pub fn set_series(&mut self, series: Option<String>) {
+        self.series = series.and_then(|s| {
+            let t = s.trim().to_string();
+            if t.is_empty() { None } else { Some(t) }
+        });
+    }
+
     /// Ensure an id exists, generating one for legacy projects. Returns the id.
     pub fn ensure_project_id(&mut self) -> String {
         if self.project_id.is_none() {
@@ -72,6 +87,7 @@ impl Project {
     pub fn new() -> Self {
         Self {
             project_id: Some(Self::new_project_id()),
+            series: None,
             images: Vec::new(),
             next_image_id: 0,
             ocr: OcrResult::new(),
@@ -206,8 +222,10 @@ impl Project {
 
     /// Reconstruct from raw parts (for persistence).
     /// `project_id` is `None` only for legacy payloads predating the id.
+    /// `series` is `None` for standalone / legacy payloads predating series.
     pub fn from_raw(
         project_id: Option<String>,
+        series: Option<String>,
         images: Vec<ImageMeta>,
         next_image_id: u64,
         ocr: OcrResult,
@@ -222,7 +240,11 @@ impl Project {
             .map(|p| p.id.0 + 1)
             .max()
             .unwrap_or(0);
-        Self { project_id, images, next_image_id, ocr, profiles, styles, view_quads, extras, next_inpaint_id }
+        let series = series.and_then(|s| {
+            let t = s.trim().to_string();
+            if t.is_empty() { None } else { Some(t) }
+        });
+        Self { project_id, series, images, next_image_id, ocr, profiles, styles, view_quads, extras, next_inpaint_id }
     }
 
     /// Append entries for `image_id`. `EntryId` remains globally unique.

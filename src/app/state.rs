@@ -525,7 +525,45 @@ impl UiState for ActiveTab<'_> {
             source_paths: np.source_files.iter().map(|(p, _, _)| p.clone()).collect(),
             original_lang: np.original_lang.clone(),
             project_location: np.project_location.clone(),
+            series: np.series.clone(),
+            available_series: {
+                let mut seen = std::collections::BTreeSet::new();
+                let mut out = Vec::new();
+                for item in &self.app.series_items {
+                    if let Some(s) = item.series.as_deref()
+                        && seen.insert(s.to_string()) {
+                            out.push(s.to_string());
+                        }
+                }
+                out
+            },
+            creating_series: np.creating_series,
+            new_series_name: np.new_series_name.clone(),
         })
+    }
+
+    fn home_selection(&self) -> easyscanlate_ui::state::HomeSelection {
+        self.app.home_selection.clone()
+    }
+
+    fn series_items(&self) -> &[easyscanlate_settings::series::TrackedProject] {
+        &self.app.series_items
+    }
+
+    fn is_series_group_collapsed(&self) -> bool {
+        self.app.home_series_collapsed
+    }
+
+    fn has_project(&self) -> bool {
+        !self.tab.is_home()
+    }
+
+    fn project_series_creating(&self) -> bool {
+        self.app.project_series_creating
+    }
+
+    fn project_series_name(&self) -> &str {
+        &self.app.project_series_name
     }
 
     fn translation_anim_phase(&self) -> f32 {
@@ -783,11 +821,31 @@ impl UiState for App {
         }
     }
     fn recent_projects(&self) -> &[easyscanlate_settings::RecentProject] { &self.recent_projects }
+    fn home_selection(&self) -> easyscanlate_ui::state::HomeSelection { self.home_selection.clone() }
+    fn series_items(&self) -> &[easyscanlate_settings::series::TrackedProject] { &self.series_items }
+    fn is_series_group_collapsed(&self) -> bool { self.home_series_collapsed }
+    fn has_project(&self) -> bool { self.tabs.get(self.active).is_some_and(|t| !t.is_home()) }
+    fn project_series_creating(&self) -> bool { self.project_series_creating }
+    fn project_series_name(&self) -> &str { &self.project_series_name }
     fn new_project_overlay(&self) -> Option<easyscanlate_ui::state::NewProjectOverlay> {
         self.new_project.as_ref().map(|np| easyscanlate_ui::state::NewProjectOverlay {
             source_paths: np.source_files.iter().map(|(p, _, _)| p.clone()).collect(),
             original_lang: np.original_lang.clone(),
             project_location: np.project_location.clone(),
+            series: np.series.clone(),
+            available_series: {
+                let mut seen = std::collections::BTreeSet::new();
+                let mut out = Vec::new();
+                for item in &self.series_items {
+                    if let Some(s) = item.series.as_deref()
+                        && seen.insert(s.to_string()) {
+                            out.push(s.to_string());
+                        }
+                }
+                out
+            },
+            creating_series: np.creating_series,
+            new_series_name: np.new_series_name.clone(),
         })
     }
     fn translation_anim_phase(&self) -> f32 { self.tabs[self.active].translate_anim_phase }

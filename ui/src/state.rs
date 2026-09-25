@@ -22,6 +22,24 @@ pub struct NewProjectOverlay {
     pub source_paths: Vec<String>,
     pub original_lang: String,
     pub project_location: Option<String>,
+    /// Selected series (`None` = standalone). Defaults to `None`.
+    pub series: Option<String>,
+    /// Existing series names for the dropdown, sorted most-recent first.
+    pub available_series: Vec<String>,
+    /// Whether the "+ New series" inline input is shown.
+    pub creating_series: bool,
+    /// Current text of the "+ New series" input.
+    pub new_series_name: String,
+}
+
+/// Home sidebar selection: standalone recents or one tracked series.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum HomeSelection {
+    /// Standalone (`series = None`) recent projects.
+    #[default]
+    Recent,
+    /// Projects tracked under `series name`.
+    Series(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,6 +237,31 @@ pub trait UiState {
     fn app_view(&self) -> AppView;
     fn recent_projects(&self) -> &[easyscanlate_settings::RecentProject];
     fn new_project_overlay(&self) -> Option<NewProjectOverlay>;
+    /// Home sidebar selection (standalone recents vs one series).
+    fn home_selection(&self) -> HomeSelection {
+        HomeSelection::Recent
+    }
+    /// Series-tracked projects (`.mmtl` + series tag), most-recent first.
+    fn series_items(&self) -> &[easyscanlate_settings::series::TrackedProject] {
+        &[]
+    }
+    /// Whether the `Series` group as a whole is collapsed in the home
+    /// sidebar (session-only, defaults to expanded).
+    fn is_series_group_collapsed(&self) -> bool {
+        false
+    }
+    /// Whether the active tab is a real project (false on Home).
+    fn has_project(&self) -> bool {
+        false
+    }
+    /// Whether the "+ New series" input in Project settings is shown.
+    fn project_series_creating(&self) -> bool {
+        false
+    }
+    /// Current "+ New series" input text in Project settings.
+    fn project_series_name(&self) -> &str {
+        ""
+    }
     fn translation_anim_phase(&self) -> f32;
     fn is_loading(&self) -> bool { false }
     fn loading_phase(&self) -> f32 { 0.0 }

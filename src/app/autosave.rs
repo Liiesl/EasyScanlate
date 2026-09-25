@@ -590,9 +590,12 @@ fn load_autosave_into_tab(
     let pid = project.project_id().map(str::to_owned);
     // Keep the tab's live id when the autosave predates ids (legacy).
     let pid = pid.or_else(|| tab.project.project_id().map(str::to_owned));
+    let series = project.series().map(str::to_owned)
+        .or_else(|| tab.project.series().map(str::to_owned));
     let next_image_id = images.iter().map(|m| m.id.0 + 1).max().unwrap_or(0);
     project = easyscanlate_model::Project::from_raw(
         pid,
+        series,
         images,
         next_image_id,
         ocr,

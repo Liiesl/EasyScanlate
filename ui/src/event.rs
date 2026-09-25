@@ -35,6 +35,8 @@ pub enum ToolbarAction {
 pub enum SettingsTab {
     /// General tunables.
     General,
+    /// Current project: series assignment.
+    Project,
     /// Aurora background appearance (color, blobs, schema, light/dark) + font size.
     Appearance,
     /// OCR engine tuning.
@@ -146,12 +148,38 @@ pub enum UiEvent {
     HomeOpenProject,
     HomeRecentClicked(String),
     HomeSettings,
+    /// Show standalone recents in the home main panel.
+    HomeSelectRecent,
+    /// Show the projects of `series name` in the home main panel.
+    HomeSelectSeries(String),
+    /// Collapse/expand the `Series` group as a whole in the home sidebar.
+    HomeToggleSeriesGroup,
     NewProjectClose,
     NewProjectSourceImage,
     NewProjectSourceFolder,
     NewProjectLocationBrowse,
     NewProjectOriginalLang(String),
+    /// Pick the series for the new project (`None` = standalone).
+    NewProjectSeriesSelect(Option<String>),
+    /// Show the "+ New series" inline input.
+    NewProjectSeriesCreateStart,
+    /// The "+ New series" input text changed.
+    NewProjectSeriesName(String),
+    /// Confirm the "+ New series" input (adds + selects it).
+    NewProjectSeriesCreateConfirm,
+    /// Hide the "+ New series" input without changes.
+    NewProjectSeriesCancel,
     NewProjectCreate,
+    /// Assign the current project's series (`None` = standalone).
+    ProjectSeriesSelect(Option<String>),
+    /// Show the "+ New series" inline input in Project settings.
+    ProjectSeriesCreateStart,
+    /// The "+ New series" input text changed in Project settings.
+    ProjectSeriesName(String),
+    /// Confirm the "+ New series" input in Project settings.
+    ProjectSeriesCreateConfirm,
+    /// Hide the "+ New series" input in Project settings.
+    ProjectSeriesCancel,
     StartOcr,
     StopOcr,
     /// The user selected profile `id` in the results panel's profile

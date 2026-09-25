@@ -61,6 +61,18 @@ pub fn boot(
     easyscanlate_settings::init();
     // Sanitize Home recents: drop entries whose .mmtl path no longer exists.
     easyscanlate_settings::prune_missing_recents();
+    // Same for the series index (dedup when moved/deleted).
+    easyscanlate_settings::series::prune_missing_series();
+    // Backfill: recents predating the series index are tracked as standalone.
+    {
+        let store = easyscanlate_settings::series::load_series();
+        let recents = easyscanlate_settings::get(|s| s.recent_projects.clone());
+        for rp in recents.iter().rev() {
+            if !store.items.iter().any(|r| r.path == rp.path) {
+                easyscanlate_settings::series::touch_series(rp.path.clone(), None);
+            }
+        }
+    }
     let font_task = match std::fs::read(KOREAN_FONT_PATH) {
         Ok(bytes) => iced::font::load(bytes).map(|_| Message::FontLoaded),
         Err(_) => Task::none(),
@@ -247,6 +259,7 @@ pub fn boot(
         if !path.exists() {
             app.active_tab_mut().status =
                 format!("Missing: {}", path.display());
+            crate::app::mmtl::drop_missing(&mut app, &path.to_string_lossy());
             Task::none()
         } else if let Some(new_id) = crate::app::mmtl::create_loading_tab(&mut app, path.clone()) {
             let path_clone = path.clone();

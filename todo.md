@@ -8,6 +8,7 @@
 - font line height and letter spacing
 - case toggle
 - gradient support for stroke and bg
+- add series category to project
 - 
 
 #### fixes
@@ -15,14 +16,14 @@
 - cap free transform to prevent cowtie/flipped/collapsed quad
 - cache model json as fallback and delta update only when starting up
 - app level presist of color picker swatch and recent
-- erratic retaining scroll on resize pane close to top image
+- scroll reset on minimize/focus lost.
 - 
 
 #### modification
 
 - move layer and edit to the left of main area
 - rework color picker ux
-- rework gradient ux
+- relayout home page
 - 
 
 ## currently in progress
@@ -40,13 +41,14 @@
 #### fixes
 
 - duplicate inpaint introduced in 0.4.2
-- scroll reset on minimize/focus lost.
+- erratic retaining scroll on resize pane close to top image
 - under heavy computation, switching tabs make ui froze, interaction seem to work but the ui graphics themself froze.
 - case not working as intended
 - 
 
 #### modification
 
+- rework gradient ux
 - retire status bar
 - 
 

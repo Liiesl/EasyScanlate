@@ -23,7 +23,9 @@ use crate::translation::{self, CUSTOM_ANTHROPIC, CUSTOM_OPENAI};
 
 use crate::background::AuroraWheel;
 use crate::event::{SettingEdit, SettingsTab, UiEvent};
+use crate::new_project::SeriesOption;
 use crate::panel::PANEL_BG;
+use neverliie_iced_widgets::advanced_dropdown::{Footer, Item, MenuItem, advanced_dropdown};
 use neverliie_iced_widgets::number_input::{
     NumberInput, Status as NumberStatus, Style as NumberStyle,
 };
@@ -991,6 +993,124 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
 }
 
 // ---------------------------------------------------------------------------
+// Project tab — the current tab's project: series assignment
+// ---------------------------------------------------------------------------
+
+/// Distinct series names from the tracked index, most-recently-touched first.
+fn available_series_names(items: &[easyscanlate_settings::series::TrackedProject]) -> Vec<String> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for item in items {
+        if let Some(s) = item.series.as_deref()
+            && seen.insert(s.to_string())
+        {
+            out.push(s.to_string());
+        }
+    }
+    out
+}
+
+fn project_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'static, UiEvent>> {
+    let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
+    if !matches_any(query, &["project", "series", "group", "sidebar"]) {
+        return cards;
+    }
+    let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
+    col.push(card_header(
+        Icon::Folder,
+        "Series",
+        Some("Group the current project in the home sidebar"),
+    ));
+    if !state.has_project() {
+        col.push(helper_text("Open or create a project to assign its series.").into());
+    } else {
+        let current = state.project().series().map(str::to_owned);
+        let available = available_series_names(state.series_items());
+        let mut entries: Vec<MenuItem<SeriesOption, UiEvent, iced::Theme, iced::Renderer>> =
+            Vec::with_capacity(available.len() + 3);
+        entries.push(MenuItem::Item(Item::new(
+            SeriesOption { name: None },
+            "No series",
+        )));
+        if !available.is_empty() {
+            entries.push(MenuItem::Separator);
+            entries.push(MenuItem::Label("Series"));
+            for name in &available {
+                entries.push(MenuItem::Item(Item::new(
+                    SeriesOption { name: Some(name.clone()) },
+                    name.clone(),
+                )));
+            }
+        }
+        let dropdown: Element<'static, UiEvent> = advanced_dropdown(
+            entries,
+            Some(SeriesOption { name: current }),
+            |opt: SeriesOption| UiEvent::ProjectSeriesSelect(opt.name.clone()),
+        )
+        .placeholder("No series")
+        .searchable(true)
+        .text_size(scale::s(12.0))
+        .width(FillLength)
+        .menu_max_height(240.0)
+        .footer(Footer::new(
+            "+ New series",
+            UiEvent::ProjectSeriesCreateStart,
+        ))
+        .into();
+        col.push(field_row("Series", dropdown));
+        if state.project_series_creating() {
+            let name_value = state.project_series_name().to_string();
+            col.push(
+                row![
+                    text_input("New series name...", &name_value)
+                        .on_input(UiEvent::ProjectSeriesName)
+                        .on_submit(UiEvent::ProjectSeriesCreateConfirm)
+                        .padding(scale::s(6.0))
+                        .size(scale::s(12.0))
+                        .width(FillLength),
+                    button(text("Add").size(scale::s(12.0)).width(FillLength).center())
+                        .padding(scale::s(6.0))
+                        .width(Length::Fixed(scale::s(90.0)))
+                        .style(crate::panel::button_style)
+                        .on_press(UiEvent::ProjectSeriesCreateConfirm),
+                    button(text("Cancel").size(scale::s(12.0)).width(FillLength).center())
+                        .padding(scale::s(6.0))
+                        .width(Length::Fixed(scale::s(90.0)))
+                        .style(crate::panel::button_style)
+                        .on_press(UiEvent::ProjectSeriesCancel),
+                ]
+                .spacing(scale::s(8.0))
+                .align_y(iced::Alignment::Center)
+                .into(),
+            );
+        }
+        col.push(helper_text("Stored in the .mmtl on save; the home sidebar updates immediately.").into());
+    }
+    cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+    cards
+}
+
+fn project_tab_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Element<'static, UiEvent> {
+    let cards = project_cards(state, query.as_str());
+    if cards.is_empty() {
+        return container(column![
+            row![
+                crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG),
+                text(format!("No settings match “{query}”")).size(scale::s(12.0)).color(MUTED_FG),
+            ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
+            text("Try a different term — e.g. project, series.").size(scale::s(11.0)).color(MUTED_FG),
+        ].spacing(scale::s(6.0)))
+        .padding(scale::s(14.0))
+        .style(|_| card_style())
+        .into();
+    }
+    scrollable(column(cards).spacing(scale::s(10.0)))
+        .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
+        .height(Length::Fill)
+        .into()
+}
+
+// ---------------------------------------------------------------------------
 // OCR tab — dedicated OCR tuning
 // ---------------------------------------------------------------------------
 
@@ -1917,6 +2037,10 @@ fn global_search_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Elem
     if !t.is_empty() {
         all.extend(t);
     }
+    let p = project_cards(state, q);
+    if !p.is_empty() {
+        all.extend(p);
+    }
     let u = updates_cards(state, q);
     if !u.is_empty() {
         all.extend(u);
@@ -1929,7 +2053,7 @@ fn global_search_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Elem
                     crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG),
                     text(format!("No settings match “{query}”")).size(scale::s(12.0)).color(MUTED_FG),
                 ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
-                text("Try a different term — e.g. font, ocr, inpaint, translation, automation.").size(scale::s(11.0)).color(MUTED_FG),
+                text("Try a different term — e.g. font, ocr, inpaint, translation, automation, project.").size(scale::s(11.0)).color(MUTED_FG),
             ].spacing(scale::s(6.0)))
             .padding(scale::s(14.0))
             .style(|_| card_style())
@@ -1948,6 +2072,7 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent> {
     }
     match state.settings_tab() {
         SettingsTab::General => general_tab_filtered(query.clone()),
+        SettingsTab::Project => project_tab_filtered(state, query.clone()),
         SettingsTab::Appearance => appearance_tab_filtered(query.clone()),
         SettingsTab::Ocr => ocr_tab_filtered(query.clone()),
         SettingsTab::Inpaint => inpaint_tab_filtered(query.clone()),
@@ -1994,6 +2119,7 @@ pub fn view<'a, S: UiState + ?Sized>(
                 }),
             column![
                 tab_button(state, SettingsTab::General, Icon::Settings, "General"),
+                tab_button(state, SettingsTab::Project, Icon::Folder, "Project"),
                 tab_button(state, SettingsTab::Appearance, Icon::Palette, "Appearance"),
                 tab_button(state, SettingsTab::Ocr, Icon::ScanSearch, "OCR"),
                 tab_button(state, SettingsTab::Inpaint, Icon::Brush, "Inpaint"),

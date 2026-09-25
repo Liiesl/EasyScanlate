@@ -1,5 +1,6 @@
 use iced::widget::{button, center, column, container, mouse_area, opaque, row, stack, text, text_input};
 use iced::{Background, Border, Color, Element, Length, Fill as FillLength};
+use neverliie_iced_widgets::advanced_dropdown::{Footer, Item, MenuItem, advanced_dropdown};
 
 use crate::event::UiEvent;
 use crate::panel::PANEL_BG;
@@ -8,6 +9,21 @@ use crate::segmented::{BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
 use crate::state::UiState;
 
 const MODAL_WIDTH: f32 = 640.0;
+
+/// Dropdown option for Series pickers: `None` = standalone ("No series").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeriesOption {
+    pub name: Option<String>,
+}
+
+impl std::fmt::Display for SeriesOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.name {
+            Some(n) => f.write_str(n),
+            None => f.write_str("No series"),
+        }
+    }
+}
 
 fn input_style(_theme: &iced::Theme, _status: text_input::Status) -> text_input::Style {
     text_input::Style {
@@ -37,6 +53,83 @@ pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -
     };
     let location_value = np.project_location.clone().unwrap_or_default();
     let can_create = !np.source_paths.is_empty() && np.project_location.is_some();
+
+    // Series picker (advanced_dropdown): None = standalone, footer adds new.
+    let mut series_entries: Vec<MenuItem<SeriesOption, UiEvent, iced::Theme, iced::Renderer>> =
+        Vec::with_capacity(np.available_series.len() + 2);
+    series_entries.push(MenuItem::Item(Item::new(
+        SeriesOption { name: None },
+        "No series",
+    )));
+    if !np.available_series.is_empty() {
+        series_entries.push(MenuItem::Separator);
+        series_entries.push(MenuItem::Label("Series"));
+        for name in &np.available_series {
+            // Skip a duplicate of the selected-but-unknown series (e.g. just
+            // created this session): it is still selectable via `selected`.
+            series_entries.push(MenuItem::Item(Item::new(
+                SeriesOption { name: Some(name.clone()) },
+                name.clone(),
+            )));
+        }
+    }
+    let series_selected = Some(SeriesOption { name: np.series.clone() });
+    let series_dropdown: Element<'_, UiEvent> = advanced_dropdown(
+        series_entries,
+        series_selected,
+        |opt: SeriesOption| UiEvent::NewProjectSeriesSelect(opt.name.clone()),
+    )
+    .placeholder("No series")
+    .searchable(true)
+    .text_size(scale::s(12.0))
+    .width(FillLength)
+    .menu_max_height(240.0)
+    .footer(Footer::new(
+        "+ New series",
+        UiEvent::NewProjectSeriesCreateStart,
+    ))
+    .into();
+    let series_row: Element<'_, UiEvent> = if np.creating_series {
+        column![
+            row![
+                text("Series:").size(scale::s(12.0)).color(Color::WHITE).width(FillLength),
+                container(series_dropdown).width(Length::Fixed(scale::s(280.0))),
+            ]
+            .spacing(scale::s(8.0))
+            .align_y(iced::Alignment::Center),
+            row![
+                text_input("New series name...", &np.new_series_name)
+                    .on_input(UiEvent::NewProjectSeriesName)
+                    .on_submit(UiEvent::NewProjectSeriesCreateConfirm)
+                    .padding(scale::s(6.0))
+                    .size(scale::s(12.0))
+                    .width(FillLength)
+                    .style(input_style),
+                button(text("Add").size(scale::s(12.0)).width(FillLength).center())
+                    .padding(scale::s(6.0))
+                    .width(Length::Fixed(scale::s(90.0)))
+                    .style(crate::panel::button_style)
+                    .on_press(UiEvent::NewProjectSeriesCreateConfirm),
+                button(text("Cancel").size(scale::s(12.0)).width(FillLength).center())
+                    .padding(scale::s(6.0))
+                    .width(Length::Fixed(scale::s(90.0)))
+                    .style(crate::panel::button_style)
+                    .on_press(UiEvent::NewProjectSeriesCancel),
+            ]
+            .spacing(scale::s(8.0))
+            .align_y(iced::Alignment::Center),
+        ]
+        .spacing(scale::s(6.0))
+        .into()
+    } else {
+        row![
+            text("Series:").size(scale::s(12.0)).color(Color::WHITE).width(FillLength),
+            container(series_dropdown).width(Length::Fixed(scale::s(280.0))),
+        ]
+        .spacing(scale::s(8.0))
+        .align_y(iced::Alignment::Center)
+        .into()
+    };
 
     let content = column![
         text("New Project").size(scale::s(16.0)).color(Color::WHITE),
@@ -81,6 +174,7 @@ pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -
         ]
         .spacing(scale::s(8.0))
         .align_y(iced::Alignment::Center),
+        series_row,
         // Project location
         column![
             text("Project Location:").size(scale::s(12.0)).color(Color::WHITE),

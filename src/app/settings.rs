@@ -56,6 +56,68 @@ pub fn handle_settings_changed(app: &mut App) -> Task<Message> {
     Task::none()
 }
 
+fn normalize_series(series: Option<String>) -> Option<String> {
+    series.and_then(|s| {
+        let t = s.trim().to_string();
+        if t.is_empty() { None } else { Some(t) }
+    })
+}
+
+/// Assigns `series` to the active tab's project (`None` = standalone):
+/// updates the in-memory project, marks the tab dirty so the next save
+/// persists it, and retags the series index so the home sidebar refreshes.
+fn assign_project_series(app: &mut App, series: Option<String>) {
+    let series = normalize_series(series);
+    let path_opt = {
+        let tab = app.active_tab_mut();
+        if !tab.is_project() {
+            return;
+        }
+        tab.project.set_series(series.clone());
+        tab.dirty = true;
+        let label = match series.as_deref() {
+            Some(name) => format!("Series set to “{name}”. Save to persist."),
+            None => "Series cleared (standalone). Save to persist.".to_string(),
+        };
+        tab.status = label;
+        tab.mmtl_path.clone()
+    };
+    if let Some(path) = path_opt {
+        easyscanlate_settings::series::reassign(&path.to_string_lossy(), series);
+        app.series_items = easyscanlate_settings::series::load_series().items;
+    }
+    app.project_series_creating = false;
+    app.project_series_name.clear();
+}
+
+pub fn handle_project_series_select(app: &mut App, series: Option<String>) -> Task<Message> {
+    assign_project_series(app, series);
+    Task::none()
+}
+
+pub fn handle_project_series_create_start(app: &mut App) -> Task<Message> {
+    app.project_series_creating = true;
+    app.project_series_name.clear();
+    Task::none()
+}
+
+pub fn handle_project_series_name(app: &mut App, name: String) -> Task<Message> {
+    app.project_series_name = name;
+    Task::none()
+}
+
+pub fn handle_project_series_create_confirm(app: &mut App) -> Task<Message> {
+    let name = app.project_series_name.clone();
+    assign_project_series(app, Some(name));
+    Task::none()
+}
+
+pub fn handle_project_series_cancel(app: &mut App) -> Task<Message> {
+    app.project_series_creating = false;
+    app.project_series_name.clear();
+    Task::none()
+}
+
 pub fn handle_setting_edit(app: &mut App, edit: easyscanlate_ui::event::SettingEdit) -> Task<Message> {
     // Compute default hidden sets before mutating the store (needs app.tx models).
     let reset_defaults: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> = match &edit {

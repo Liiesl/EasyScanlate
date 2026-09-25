@@ -16,6 +16,39 @@ pub type LoadedProject = (
 /// Result of loading a `.mmtl` project.
 pub type LoadedProjectResult = Result<LoadedProject, String>;
 
+/// Records an opened/created/saved `.mmtl` in both the recent list and the
+/// series index (`series.toml`, `None` tracked as standalone), then refreshes
+/// the app's cached copies. `series` is the project's own series tag and
+/// overwrites any stale index entry (the `.mmtl` is the source of truth).
+pub(crate) fn touch_opened(app: &mut App, path: String, series: Option<String>) {
+    easyscanlate_settings::touch_recent(path.clone());
+    easyscanlate_settings::series::touch_series(path, series);
+    app.recent_projects = easyscanlate_settings::get(|s| s.recent_projects.clone());
+    app.series_items = easyscanlate_settings::series::load_series().items;
+}
+
+/// Re-bumps recency for a path without a loaded project (dedup-activate):
+/// keeps whatever series the index already has (`None` for untracked paths).
+pub(crate) fn bump_opened(app: &mut App, path: String) {
+    let series = app
+        .series_items
+        .iter()
+        .find(|r| r.path == path)
+        .and_then(|r| r.series.clone());
+    touch_opened(app, path, series);
+}
+
+/// Drops `path` from both indexes (moved/deleted) and refreshes caches.
+pub(crate) fn drop_missing(app: &mut App, path: &str) {
+    easyscanlate_settings::series::remove_series_path(path);
+    let owned = path.to_string();
+    let _ = easyscanlate_settings::modify(|s| {
+        s.recent_projects.retain(|r| r.path != owned);
+    });
+    app.recent_projects = easyscanlate_settings::get(|s| s.recent_projects.clone());
+    app.series_items = easyscanlate_settings::series::load_series().items;
+}
+
 fn extract_inpaint_data(tab: &Tab) -> Vec<easyscanlate_mmtl::InpaintImageData> {
     let mut out = Vec::new();
     for loaded in &tab.images {
@@ -229,20 +262,19 @@ pub(crate) fn push_project_tab(
                     // fallback: activate other_idx adjusted
                     let _ = other_idx;
                 }
-                easyscanlate_settings::touch_recent(display_path.clone());
-                app.recent_projects = easyscanlate_settings::get(|s| s.recent_projects.clone());
+                bump_opened(app, display_path.clone());
                 return Task::none();
             }
             // Normal hydration: fill placeholder in place.
             let len = images.len();
             let project_clone = project.clone();
+            let series = project.series().map(str::to_owned);
             {
                 let tab = &mut app.tabs[idx];
                 tab.hydrate_from_loaded(project, images, path.clone(), temp_dir);
             }
             app.active = idx;
-            easyscanlate_settings::touch_recent(display_path.clone());
-            app.recent_projects = easyscanlate_settings::get(|s| s.recent_projects.clone());
+            touch_opened(app, display_path.clone(), series);
             let tid = app.tabs[idx].id;
             let pid = app.tabs[idx].project.project_id().map(str::to_owned);
             let check = super::autosave::check_after_load(app, tid, path, pid);
@@ -285,8 +317,7 @@ pub(crate) fn push_project_tab(
                 }
             }
         }
-        easyscanlate_settings::touch_recent(display_path.clone());
-        app.recent_projects = easyscanlate_settings::get(|s| s.recent_projects.clone());
+        bump_opened(app, display_path.clone());
         return Task::none();
     }
     let title = path
@@ -307,8 +338,7 @@ pub(crate) fn push_project_tab(
     let tab = crate::app::tab::Tab::project_from_loaded(use_id, title, project, images, path.clone(), temp_dir);
     app.tabs.push(tab);
     app.active = app.tabs.len() - 1;
-    easyscanlate_settings::touch_recent(display_path.clone());
-    app.recent_projects = easyscanlate_settings::get(|s| s.recent_projects.clone());
+    touch_opened(app, display_path.clone(), project_clone.series().map(str::to_owned));
     // Update status on the newly created tab (project_from_loaded already sets Loaded, keep it)
     // but ensure recent already touched; no extra status override needed.
     let pid = project_clone.project_id().map(str::to_owned);
@@ -362,6 +392,7 @@ pub fn handle_recent_open(app: &mut App, path: String) -> Task<Message> {
     let p = PathBuf::from(path.clone());
     if !p.exists() {
         app.active_tab_mut().status = format!("Missing: {path}");
+        drop_missing(app, &path);
         return Task::none();
     }
     let Some(new_id) = create_loading_tab(app, p.clone()) else {
@@ -384,6 +415,7 @@ pub fn handle_saved(app: &mut App, tab_id: crate::app::tab::TabId, result: Resul
         Ok(path) => {
             // Capture the id before a pending-close removal shifts tabs.
             let pid = app.tabs.get(idx).and_then(|t| t.project.project_id().map(str::to_owned));
+            let series = app.tabs.get(idx).and_then(|t| t.project.series().map(str::to_owned));
             {
                 let tab = &mut app.tabs[idx];
                 tab.status = format!("Saved to {path}");
@@ -391,8 +423,7 @@ pub fn handle_saved(app: &mut App, tab_id: crate::app::tab::TabId, result: Resul
                 tab.dirty = false;
                 tab.title = PathBuf::from(&path).file_stem().and_then(|s| s.to_str()).unwrap_or("project").to_string();
             }
-            easyscanlate_settings::touch_recent(path.clone());
-            app.recent_projects = easyscanlate_settings::get(|s| s.recent_projects.clone());
+            touch_opened(app, path.clone(), series);
             // If there was a pending close for this tab, now close it
             if app.pending_close == Some(tab_id) {
                 if let Some(pos) = app.tabs.iter().position(|t| t.id == tab_id)
@@ -434,6 +465,7 @@ pub fn handle_external_opens(app: &mut App, paths: Vec<String>) -> Task<Message>
         let path = std::path::PathBuf::from(&trimmed);
         if !path.exists() {
             app.active_tab_mut().status = format!("Missing: {}", path.display());
+            drop_missing(app, &trimmed);
             continue;
         }
         let Some(new_id) = create_loading_tab(app, path.clone()) else {

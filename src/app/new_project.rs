@@ -12,6 +12,17 @@ pub struct NewProjectState {
     pub source_files: Vec<(String, u32, u32)>,
     pub original_lang: String,
     pub project_location: Option<String>,
+    /// Selected series (`None` = standalone). Defaults to `None`.
+    pub series: Option<String>,
+    /// Whether the "+ New series" inline input is shown.
+    pub creating_series: bool,
+    /// Current text of the "+ New series" input.
+    pub new_series_name: String,
+}
+
+fn normalize_series_name(name: &str) -> Option<String> {
+    let t = name.trim().to_string();
+    if t.is_empty() { None } else { Some(t) }
 }
 
 fn ensure_new_project_state(app: &mut App) {
@@ -19,6 +30,9 @@ fn ensure_new_project_state(app: &mut App) {
         source_files: Vec::new(),
         original_lang: "Korean".to_string(),
         project_location: None,
+        series: None,
+        creating_series: false,
+        new_series_name: String::new(),
     });
     app.active_tab_mut().status = "New Project...".to_string();
 }
@@ -125,6 +139,49 @@ pub fn handle_original_lang(app: &mut App, lang: String) -> Task<Message> {
     Task::none()
 }
 
+pub fn handle_series_select(app: &mut App, series: Option<String>) -> Task<Message> {
+    if let Some(np) = app.new_project.as_mut() {
+        np.series = normalize_series_name(series.as_deref().unwrap_or_default());
+        np.creating_series = false;
+        np.new_series_name.clear();
+    }
+    Task::none()
+}
+
+pub fn handle_series_create_start(app: &mut App) -> Task<Message> {
+    if let Some(np) = app.new_project.as_mut() {
+        np.creating_series = true;
+        np.new_series_name.clear();
+    }
+    Task::none()
+}
+
+pub fn handle_series_name(app: &mut App, name: String) -> Task<Message> {
+    if let Some(np) = app.new_project.as_mut() {
+        np.new_series_name = name;
+    }
+    Task::none()
+}
+
+pub fn handle_series_create_confirm(app: &mut App) -> Task<Message> {
+    if let Some(np) = app.new_project.as_mut() {
+        if let Some(name) = normalize_series_name(&np.new_series_name.clone()) {
+            np.series = Some(name);
+        }
+        np.creating_series = false;
+        np.new_series_name.clear();
+    }
+    Task::none()
+}
+
+pub fn handle_series_cancel(app: &mut App) -> Task<Message> {
+    if let Some(np) = app.new_project.as_mut() {
+        np.creating_series = false;
+        np.new_series_name.clear();
+    }
+    Task::none()
+}
+
 pub fn handle_create(app: &mut App) -> Task<Message> {
     let Some(np) = app.new_project.clone() else { return Task::none() };
     if np.source_files.is_empty() || np.project_location.is_none() {
@@ -160,6 +217,8 @@ pub fn handle_create(app: &mut App) -> Task<Message> {
         let _ = std::fs::create_dir_all(parent);
     }
     let files = np.source_files.clone();
+    let series = np.series.clone();
+    app.pending_create_series = Some(series.clone());
     let dest_for_task = unique_dest.clone();
     app.new_project = None;
     // Create instant loading placeholder tab so the user sees feedback right away.
@@ -174,6 +233,7 @@ pub fn handle_create(app: &mut App) -> Task<Message> {
         async move {
             let res: Result<String, String> = tokio::task::spawn_blocking(move || -> Result<String, String> {
                 let mut project = Project::new();
+                project.set_series(series);
                 let mut metas: Vec<(String, u32, u32)> = files;
                 metas.sort_by(|a, b| natural_cmp(&a.0, &b.0));
                 let mut loaded: Vec<LoadedImage> = Vec::new();
