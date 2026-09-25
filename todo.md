@@ -1,6 +1,6 @@
 # what i need
 
-## done (milestone 0.4.3 release)
+## done (milestone 0.5.0 release)
 
 #### addition
 
@@ -14,13 +14,13 @@
 
 - cap free transform to prevent cowtie/flipped/collapsed quad
 - cache model json as fallback and delta update only when starting up
+- app level presist of color picker swatch and recent
 - 
 
 #### modification
 
 - move layer and edit to the left of main area
 - rework color picker ux
-- rework gradient ux
 - 
 
 ## currently in progress
@@ -37,12 +37,12 @@
 - scroll reset on minimize/focus lost.
 - under heavy computation, switching tabs make ui froze, interaction seem to work but the ui graphics themself froze.
 - case not working as intended
-- app level presist of color picker swatch and recent
 - 
 
 #### modification
 
 - retire status bar
+- rework gradient ux
 - 
 
 ## not yet started

@@ -275,6 +275,14 @@ pub enum UiEvent {
     /// `field`. Used to show the gradient angle handle immediately when the
     /// Gradient tab is selected, even before any gradient value edit.
     StyleColorTabChanged(StyleField, neverliie_iced_widgets::color_picker::PickerTab),
+    /// The picker's Library mutated (swatch sets, recent colors or active
+    /// set). Payload is the full snapshot; the app persists it to disk and
+    /// re-seeds every styling picker so fill/stroke/bg stay in sync.
+    StyleLibraryChanged(
+        Vec<neverliie_iced_widgets::color_picker::SwatchSet>,
+        Vec<neverliie_iced_widgets::color_picker::PickedValue>,
+        usize,
+    ),
     /// The user dragged the Figma-like gradient angle handle on the selected
     /// entry in the main area: `(image index, entry id, field, angle degrees)`.
     /// Live-published per mouse move while the picker's gradient is open.

@@ -93,6 +93,19 @@ pub trait UiState {
     fn dropper_buffer(&self) -> Option<neverliie_iced_widgets::color_picker::DropperBuffer> {
         None
     }
+    /// Shared Library swatch sets seeding every styling picker. Defaults to
+    /// empty (widget keeps its internal sets) so test states need no changes.
+    fn color_swatches(&self) -> &[neverliie_iced_widgets::color_picker::SwatchSet] {
+        &[]
+    }
+    /// Shared Library recent colors seeding every styling picker.
+    fn color_recents(&self) -> &[neverliie_iced_widgets::color_picker::PickedValue] {
+        &[]
+    }
+    /// Shared Library active set index seeding every styling picker.
+    fn color_active_tab(&self) -> usize {
+        0
+    }
     fn style_stroke_width(&self) -> f32;
     fn style_bg_radius(&self) -> f32;
     fn style_font_size(&self) -> f32;

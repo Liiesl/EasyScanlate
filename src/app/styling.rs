@@ -259,6 +259,38 @@ pub fn handle_dropper_shot(
     Task::none()
 }
 
+/// The picker's Library mutated: store the shared snapshot and persist it
+/// to `<config_dir>/color_library.json`. Echoes (payload equal to stored)
+/// skip the disk write.
+pub fn handle_library_changed(
+    app: &mut App,
+    swatches: Vec<neverliie_iced_widgets::color_picker::SwatchSet>,
+    recents: Vec<neverliie_iced_widgets::color_picker::PickedValue>,
+    active_tab: usize,
+) -> Task<Message> {
+    let active = if swatches.is_empty() {
+        0
+    } else {
+        active_tab.min(swatches.len() - 1)
+    };
+    if app.color_swatches.as_slice() == swatches.as_slice()
+        && app.color_recents.as_slice() == recents.as_slice()
+        && app.color_active_tab == active
+    {
+        return Task::none();
+    }
+    app.color_swatches = swatches;
+    app.color_recents = recents;
+    app.color_active_tab = active;
+    let stored = easyscanlate_ui::color::library_from_widget(
+        &app.color_swatches,
+        &app.color_recents,
+        app.color_active_tab,
+    );
+    let _ = easyscanlate_settings::color_library::save(&stored);
+    Task::none()
+}
+
 /// Applies a unified hex-input value to the working style. Shared by the
 /// live `on_change` and the picker-OK `on_submit` paths; `close_picker`
 /// distinguishes them.

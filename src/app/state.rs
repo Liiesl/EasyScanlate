@@ -272,6 +272,18 @@ impl UiState for ActiveTab<'_> {
         Some(self.app.dropper_buffer.clone())
     }
 
+    fn color_swatches(&self) -> &[neverliie_iced_widgets::color_picker::SwatchSet] {
+        &self.app.color_swatches
+    }
+
+    fn color_recents(&self) -> &[neverliie_iced_widgets::color_picker::PickedValue] {
+        &self.app.color_recents
+    }
+
+    fn color_active_tab(&self) -> usize {
+        self.app.color_active_tab
+    }
+
     fn style_stroke_width(&self) -> f32 {
         self.tab.style_working.stroke_width
     }
@@ -641,6 +653,9 @@ impl UiState for App {
     fn style_picker_open(&self) -> Option<StyleField> { self.tabs[self.active].style_picker }
     fn style_picker_tab(&self) -> Option<neverliie_iced_widgets::color_picker::PickerTab> { self.tabs[self.active].style_picker_tab }
     fn dropper_buffer(&self) -> Option<neverliie_iced_widgets::color_picker::DropperBuffer> { Some(self.dropper_buffer.clone()) }
+    fn color_swatches(&self) -> &[neverliie_iced_widgets::color_picker::SwatchSet] { &self.color_swatches }
+    fn color_recents(&self) -> &[neverliie_iced_widgets::color_picker::PickedValue] { &self.color_recents }
+    fn color_active_tab(&self) -> usize { self.color_active_tab }
     fn style_stroke_width(&self) -> f32 { self.tabs[self.active].style_working.stroke_width }
     fn style_bg_radius(&self) -> f32 { self.tabs[self.active].style_working.bg_radius }
     fn style_font_size(&self) -> f32 { self.tabs[self.active].style_working.font_size }

@@ -18,6 +18,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use easyscanlate_model::EntryStyle;
 use serde::{Deserialize, Serialize};
 
+pub mod color_library;
+
 /// The confy application name; decides the config directory name.
 const APP_NAME: &str = "easyscanlate";
 

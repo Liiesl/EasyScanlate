@@ -7,6 +7,91 @@ pub fn rgba_to_color(rgba: [u8; 4]) -> Color {
     Color::from_rgba8(rgba[0], rgba[1], rgba[2], rgba[3] as f32 / 255.0)
 }
 
+/// Converts an iced [`Color`] to RGBA bytes.
+pub fn color_to_rgba(color: Color) -> [u8; 4] {
+    color.into_rgba8()
+}
+
+/// Converts a persisted [`easyscanlate_settings::color_library::StoredLibrary`]
+/// to widget types for seeding the picker. Malformed gradients (not exactly
+/// 2 stops) are skipped; an empty set list falls back to one `"Default"` set.
+pub fn library_to_widget(
+    lib: &easyscanlate_settings::color_library::StoredLibrary,
+) -> (
+    Vec<neverliie_iced_widgets::color_picker::SwatchSet>,
+    Vec<neverliie_iced_widgets::color_picker::PickedValue>,
+    usize,
+) {
+    use neverliie_iced_widgets::color_picker::{Gradient, GradientStop, PickedValue, SwatchSet};
+    fn to_picked(
+        p: &easyscanlate_settings::color_library::StoredPicked,
+    ) -> Option<PickedValue> {
+        use easyscanlate_settings::color_library::StoredPicked;
+        match p {
+            StoredPicked::Solid { rgba } => Some(PickedValue::Solid(rgba_to_color(*rgba))),
+            StoredPicked::Gradient { stops } => {
+                if stops.len() != 2 {
+                    return None;
+                }
+                let a = GradientStop::new(stops[0].offset, rgba_to_color(stops[0].rgba));
+                let b = GradientStop::new(stops[1].offset, rgba_to_color(stops[1].rgba));
+                Some(PickedValue::Gradient(Gradient::from_stops(a, b)))
+            }
+        }
+    }
+    let mut sets: Vec<SwatchSet> = lib
+        .sets
+        .iter()
+        .map(|s| {
+            let colors: Vec<PickedValue> = s.colors.iter().filter_map(to_picked).collect();
+            SwatchSet::with_colors(s.name.clone(), colors)
+        })
+        .collect();
+    if sets.is_empty() {
+        sets.push(SwatchSet::new("Default"));
+    }
+    let recents: Vec<PickedValue> = lib.recents.iter().filter_map(to_picked).collect();
+    let active = lib.active_tab.min(sets.len() - 1);
+    (sets, recents, active)
+}
+
+/// Converts widget library state to the persisted DTO for disk storage.
+pub fn library_from_widget(
+    sets: &[neverliie_iced_widgets::color_picker::SwatchSet],
+    recents: &[neverliie_iced_widgets::color_picker::PickedValue],
+    active_tab: usize,
+) -> easyscanlate_settings::color_library::StoredLibrary {
+    use easyscanlate_settings::color_library::{StoredLibrary, StoredPicked, StoredStop, StoredSwatchSet};
+    use neverliie_iced_widgets::color_picker::PickedValue;
+    fn from_picked(p: &PickedValue) -> StoredPicked {
+        match p {
+            PickedValue::Solid(c) => StoredPicked::Solid { rgba: color_to_rgba(*c) },
+            PickedValue::Gradient(g) => StoredPicked::Gradient {
+                stops: g
+                    .stops
+                    .iter()
+                    .map(|s| StoredStop {
+                        offset: s.offset,
+                        rgba: color_to_rgba(s.color),
+                    })
+                    .collect(),
+            },
+        }
+    }
+    StoredLibrary {
+        sets: sets
+            .iter()
+            .map(|s| StoredSwatchSet {
+                name: s.name().to_string(),
+                colors: s.colors().iter().map(from_picked).collect(),
+            })
+            .collect(),
+        recents: recents.iter().map(from_picked).collect(),
+        active_tab,
+    }
+    .sanitized()
+}
+
 /// Unified fill value for the text-fill hex input: solid `text_color`, or
 /// a two-stop gradient (`gradient_a/b` + `gradient_angle`) when
 /// `text_gradient` is set.

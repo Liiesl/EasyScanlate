@@ -249,6 +249,13 @@ pub struct App {
     pub(crate) installed_fonts: Vec<String>,
     pub(crate) loaded_fonts: HashSet<String>,
     pub(crate) presets: StylePresets,
+    /// Shared color-picker Library (swatch sets + recents + active set),
+    /// loaded from `<config_dir>/color_library.json` at boot and saved on
+    /// every `StyleLibraryChanged`. Seeded into all three styling pickers so
+    /// fill / stroke / bg stay in sync across restarts.
+    pub(crate) color_swatches: Vec<neverliie_iced_widgets::color_picker::SwatchSet>,
+    pub(crate) color_recents: Vec<neverliie_iced_widgets::color_picker::PickedValue>,
+    pub(crate) color_active_tab: usize,
     /// Shared slot for the color picker eye dropper: the picker publishes
     /// `StyleDropperCapture`, the app screenshots the window and stores the
     /// frame here, and the widget consumes it on the next update pass.
@@ -330,6 +337,10 @@ impl App {
     }
 
     pub(crate) fn new(frame: NativeFrame) -> Self {
+        let (color_swatches, color_recents, color_active_tab) =
+            easyscanlate_ui::color::library_to_widget(
+                &easyscanlate_settings::color_library::load(),
+            );
         Self {
             tabs: vec![Tab::home(TabId(0))],
             active: 0,
@@ -343,6 +354,9 @@ impl App {
                 .map(|s| s.to_string())
                 .collect(),
             presets: easyscanlate_settings::get(|s| s.style_presets.clone()),
+            color_swatches,
+            color_recents,
+            color_active_tab,
             dropper_buffer: DropperBuffer::new(),
             tx: ui_translation::Session::default(),
             connect_modal: None,
@@ -865,6 +879,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::StyleColorChanged(field, value)) => styling::handle_color_changed(app, field, value),
         Message::Ui(UiEvent::StyleColorSubmit(field, value)) => styling::handle_color_submit(app, field, value),
         Message::Ui(UiEvent::StyleColorTabChanged(field, tab)) => styling::handle_color_tab_changed(app, field, tab),
+        Message::Ui(UiEvent::StyleLibraryChanged(swatches, recents, active)) => styling::handle_library_changed(app, swatches, recents, active),
         Message::Ui(UiEvent::StyleGradientAngle((index, id, field, angle))) => styling::handle_gradient_angle(app, index, id, field, angle),
         Message::Ui(UiEvent::StyleDropperCapture) => styling::handle_dropper_capture(app),
         Message::Ui(UiEvent::StyleDropperShot(shot)) => styling::handle_dropper_shot(app, shot),
