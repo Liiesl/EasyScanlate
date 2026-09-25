@@ -36,6 +36,11 @@
   - add directional blur to typography
   - add drop shadow to both
   - add
+- full crtl and shift drag
+  - - mirror opposite side,
+  - - anchor
+  - - horizontal/vertical align preserve
+  - - preserve ratio
 - 
 
 #### fixes

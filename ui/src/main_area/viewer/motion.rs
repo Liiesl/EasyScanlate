@@ -50,7 +50,17 @@ pub fn drag_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, lo
     let size = quad.bounds();
     let min_x = img_x - offset[0];
     let min_y = img_y - offset[1];
-    Some(quad.translate(min_x - size[0], min_y - size[1]))
+    // Horizontal-only canvas auto-align: snap left/center/right to the
+    // canvas left/center/right. Y is never touched. Alt disables it.
+    let width = size[2] - size[0];
+    let (snapped_min_x, _) = super::align::snap_image_min_x(
+        min_x,
+        width,
+        scale,
+        state.width,
+        !state.keyboard_modifiers.alt(),
+    );
+    Some(quad.translate(snapped_min_x - size[0], min_y - size[1]))
 }
 
 pub fn handle_anchors(quad: [[f32; 2]; 4]) -> [(ResizeHandle, Point); 8] {

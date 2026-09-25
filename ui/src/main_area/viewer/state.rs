@@ -44,6 +44,9 @@ pub struct TileViewState {
     pub save_menu_open: bool,
     /// Cached resting radius of the free gradient handles (session-only).
     pub gradient_rest: Option<GradientRest>,
+    /// Canvas auto-align guide (view-space X in content coords) while
+    /// drag-moving an entry. Set on each `Dragging` move, cleared on release.
+    pub align_guide: Option<f32>,
 }
 
 impl TileViewState {
@@ -78,6 +81,7 @@ impl Default for TileViewState {
             last_published_anchor: None,
             save_menu_open: false,
             gradient_rest: None,
+            align_guide: None,
         }
     }
 }

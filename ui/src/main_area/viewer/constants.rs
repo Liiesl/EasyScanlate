@@ -21,6 +21,12 @@ pub const MIN_BOX_EDGE: f32 = 6.0;
 /// Smallest inpainting range edge, in image pixels.
 pub const MIN_INPAINT_EDGE: f32 = 4.0;
 
+/// Snap distance for canvas auto-align while dragging an entry, in view px
+/// (scaled through `scale::s` so it stays DPI-aware).
+pub const ALIGN_SNAP_THRESHOLD: f32 = 6.0;
+/// Figma-style smart-guide color for canvas alignment (vertical lines).
+pub const ALIGN_GUIDE: Color = Color::from_rgba8(255, 45, 120, 1.0);
+
 /// Selection toolbar geometry, in viewport/tile pixels.
 pub const TOOLBAR_HEIGHT: f32 = 22.0;
 pub const TOOLBAR_GAP: f32 = 5.0;

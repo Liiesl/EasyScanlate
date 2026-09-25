@@ -1,5 +1,6 @@
 pub mod tile;
 pub use tile::TileSpec;
+pub mod align;
 pub mod constants;
 pub mod draw;
 pub mod hit_test;
@@ -31,8 +32,8 @@ use self::constants::{
     DOUBLE_CLICK_DELAY, DRAG_THRESHOLD, MIN_INPAINT_EDGE, MIN_OCR_EDGE, SCROLL_LINE_HEIGHT,
 };
 use self::draw::{
-    draw_inpaint_decorations, draw_inpaint_marquee, draw_ocr_marquee, draw_overlay_buttons,
-    draw_placeholder, draw_scrollbar, draw_selection_decorations,
+    draw_align_guide, draw_inpaint_decorations, draw_inpaint_marquee, draw_ocr_marquee,
+    draw_overlay_buttons, draw_placeholder, draw_scrollbar, draw_selection_decorations,
 };
 use self::hit_test::{
     editing_rect, hit_entry, hit_gradient_handle, hit_handle, hit_inpaint_toolbar,
@@ -699,6 +700,13 @@ where
                                         draw_ocr_marquee(&mut overlay_frame, a, b, tile_bounds.size());
                                     }
                                 }
+                            // Horizontal-only canvas auto-align guide: one per-tile
+                            // segment at the same X so it reads as continuous.
+                            if matches!(state.interaction, Interaction::Dragging { .. })
+                                && let Some(guide_x) = state.align_guide
+                            {
+                                draw_align_guide(&mut overlay_frame, guide_x, tile_bounds.height);
+                            }
                             // Persistent manual multi-select rubber bands (kept after drag release)
                             if !self.manual_selections.is_empty() {
                                 let scale = self.tiles[index].source_width.max(1) as f32;
@@ -1386,6 +1394,7 @@ where
                         | Interaction::GradientDragging { .. }
                 ) {
                     state.interaction = Interaction::None;
+                    state.align_guide = None;
                     shell.capture_event();
                     shell.request_redraw();
                 }
@@ -1424,8 +1433,12 @@ where
                                 self.on_entry_moved.as_ref(),
                                 drag_quad(&self.tiles, state, index, local, offset, quad),
                             ) {
+                                state.align_guide =
+                                    align::guide_for_snapped_quad(&quad, &self.tiles, state, index);
                                 shell.publish(callback((index, id, quad)));
                                 shell.request_redraw();
+                            } else {
+                                state.align_guide = None;
                             }
                         }
                         shell.capture_event();
@@ -1436,7 +1449,12 @@ where
                             self.on_entry_moved.as_ref(),
                             drag_quad(&self.tiles, state, index, local, offset, quad),
                         ) {
+                            state.align_guide =
+                                align::guide_for_snapped_quad(&quad, &self.tiles, state, index);
                             shell.publish(callback((index, id, quad)));
+                            shell.request_redraw();
+                        } else {
+                            state.align_guide = None;
                             shell.request_redraw();
                         }
                         shell.capture_event();
@@ -1649,12 +1667,16 @@ where
                 if *key == keyboard::Key::Named(keyboard::key::Named::Escape) && state.save_menu_open {
                     state.save_menu_open = false;
                     state.interaction = Interaction::None;
+                    state.align_guide = None;
                     shell.request_redraw();
                     shell.capture_event();
                 }
             }
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                 state.keyboard_modifiers = *modifiers;
+                if modifiers.alt() && state.align_guide.take().is_some() {
+                    shell.request_redraw();
+                }
             }
             Event::Window(_) => {
                 publish_visible(shell, &self.tiles, state, &self.on_visible_range);

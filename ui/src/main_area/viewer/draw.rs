@@ -7,8 +7,9 @@ use crate::scale;
 use lucide_icons::Icon;
 
 use super::constants::{
-    FAILED_BG, FAILED_FG, HANDLE_FILL, HANDLE_SIZE, PLACEHOLDER_BG, PLACEHOLDER_FG,
-    SCROLLBAR_THUMB, SCROLLBAR_TRACK, TOOLBAR_BG, TOOLBAR_FG, TOOLBAR_HOVER_BG,
+    ALIGN_GUIDE, FAILED_BG, FAILED_FG, HANDLE_FILL, HANDLE_SIZE, PLACEHOLDER_BG,
+    PLACEHOLDER_FG, SCROLLBAR_THUMB, SCROLLBAR_TRACK, TOOLBAR_BG, TOOLBAR_FG,
+    TOOLBAR_HOVER_BG,
 };
 use super::hit_test::{hit_inpaint_toolbar_button, hit_toolbar_button};
 use super::interaction::Interaction;
@@ -509,6 +510,26 @@ pub fn draw_selection_decorations<'a, F>(
     for (action, _) in toolbar_buttons() {
         draw_toolbar_button(frame, toolbar, action, hover == Some(action));
     }
+}
+
+/// Figma-style vertical smart guide for horizontal-only canvas auto-align.
+/// `guide_x` is in tile-local view px (same as content coords since tiles span
+/// the full content width). Drawn as one per-tile segment so the guide looks
+/// continuous down the long strip.
+pub fn draw_align_guide<F>(frame: &mut F, guide_x: f32, tile_height: f32)
+where
+    F: geometry::frame::Backend,
+{
+    if !guide_x.is_finite() || !tile_height.is_finite() || tile_height <= 0.0 {
+        return;
+    }
+    let x = guide_x.clamp(0.0, frame.width());
+    frame.stroke(
+        &Path::line(Point::new(x, 0.0), Point::new(x, tile_height)),
+        Stroke::default()
+            .with_color(ALIGN_GUIDE)
+            .with_width(scale::s(1.0)),
+    );
 }
 
 /// Draws the static highlight around the selected inpaint patch on `tile_index`.
