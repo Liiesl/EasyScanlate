@@ -1291,7 +1291,7 @@ dependencies = [
  "ndarray 0.17.2",
  "ort",
  "push_relabel",
- "rand 0.9.5",
+ "rand 0.10.2",
  "rayon",
 ]
 
