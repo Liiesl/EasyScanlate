@@ -33,7 +33,15 @@ pub fn drag_grab(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, id
     Some([img_x - min_x, img_y - min_y])
 }
 
-pub fn drag_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, local: Point, offset: [f32; 2], quad: Quad) -> Option<Quad> {
+pub fn drag_quad(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    index: usize,
+    local: Point,
+    offset: [f32; 2],
+    quad: Quad,
+    press: Point,
+) -> Option<Quad> {
     let tile = tiles.get(index)?;
     let (layout, _) = tile_layout(tiles, state.width);
     let (y, _) = layout.get(index)?;
@@ -48,19 +56,74 @@ pub fn drag_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, lo
     let img_x = local.x / scale;
     let img_y = (local.y + state.offset - y) / scale;
     let size = quad.bounds();
-    let min_x = img_x - offset[0];
-    let min_y = img_y - offset[1];
+    let mut min_x = img_x - offset[0];
+    let mut min_y = img_y - offset[1];
+    // Figma-style Shift: lock to the dominant view-space axis measured from
+    // the press point. Horizontal lock keeps Y at its press value, vertical
+    // lock keeps X at its press value.
+    let shift = state.keyboard_modifiers.shift();
+    let mut vertical_locked = false;
+    if shift {
+        let img_px = press.x / scale;
+        let img_py = (press.y + state.offset - y) / scale;
+        let start_min_x = img_px - offset[0];
+        let start_min_y = img_py - offset[1];
+        let dx = local.x - press.x;
+        let dy = local.y - press.y;
+        if dx.abs() >= dy.abs() {
+            min_y = start_min_y;
+        } else {
+            min_x = start_min_x;
+            vertical_locked = true;
+        }
+    }
     // Horizontal-only canvas auto-align: snap left/center/right to the
-    // canvas left/center/right. Y is never touched. Alt disables it.
+    // canvas left/center/right. Y is never touched. Alt disables it, as does
+    // a Shift vertical lock (X is frozen, a guide would mislead).
     let width = size[2] - size[0];
     let (snapped_min_x, _) = super::align::snap_image_min_x(
         min_x,
         width,
         scale,
         state.width,
-        !state.keyboard_modifiers.alt(),
+        !state.keyboard_modifiers.alt() && !vertical_locked,
     );
     Some(quad.translate(snapped_min_x - size[0], min_y - size[1]))
+}
+
+/// Figma-style rubber-band adjustment: `Shift` forces a square, `Alt` draws
+/// from the center (`start` is the center). Order-independent: callers keep
+/// using `min/max` on the returned pair.
+pub fn adjust_selection_points(
+    start: Point,
+    current: Point,
+    square: bool,
+    centered: bool,
+) -> (Point, Point) {
+    let dx = current.x - start.x;
+    let dy = current.y - start.y;
+    if centered {
+        if square {
+            let h = dx.abs().max(dy.abs());
+            return (
+                Point::new(start.x - h, start.y - h),
+                Point::new(start.x + h, start.y + h),
+            );
+        }
+        let ax = dx.abs();
+        let ay = dy.abs();
+        return (
+            Point::new(start.x - ax, start.y - ay),
+            Point::new(start.x + ax, start.y + ay),
+        );
+    }
+    if square {
+        let side = dx.abs().max(dy.abs());
+        let sx = if dx < 0.0 { -1.0 } else { 1.0 };
+        let sy = if dy < 0.0 { -1.0 } else { 1.0 };
+        return (start, Point::new(start.x + side * sx, start.y + side * sy));
+    }
+    (start, current)
 }
 
 pub fn handle_anchors(quad: [[f32; 2]; 4]) -> [(ResizeHandle, Point); 8] {
@@ -538,6 +601,106 @@ pub fn resize_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, 
         new_local[3] = cursor_local.y.max(new_local[1] + min_edge);
     }
 
+    // Figma-style modifiers: Alt resizes from the center (mirrors the
+    // opposite side), Shift preserves the press aspect ratio.
+    let centered = state.keyboard_modifiers.alt();
+    let preserve = state.keyboard_modifiers.shift();
+    if centered {
+        let cx = (old_local[0] + old_local[2]) * 0.5;
+        let cy = (old_local[1] + old_local[3]) * 0.5;
+        if handle.left || handle.right {
+            let hw = (cursor_local.x - cx).abs().max(min_edge * 0.5);
+            new_local[0] = cx - hw;
+            new_local[2] = cx + hw;
+        }
+        if handle.top || handle.bottom {
+            let hh = (cursor_local.y - cy).abs().max(min_edge * 0.5);
+            new_local[1] = cy - hh;
+            new_local[3] = cy + hh;
+        }
+    }
+    if preserve {
+        let old_w = (old_local[2] - old_local[0]).max(f32::EPSILON);
+        let old_h = (old_local[3] - old_local[1]).max(f32::EPSILON);
+        let new_w = (new_local[2] - new_local[0]).max(f32::EPSILON);
+        let new_h = (new_local[3] - new_local[1]).max(f32::EPSILON);
+        let is_corner = (handle.left || handle.right) && (handle.top || handle.bottom);
+        let is_h = (handle.left || handle.right) && !(handle.top || handle.bottom);
+        let is_v = !(handle.left || handle.right) && (handle.top || handle.bottom);
+        // Dominant-axis scale so the box follows the cursor while keeping ratio.
+        let mut s = if is_corner {
+            let sx0 = new_w / old_w;
+            let sy0 = new_h / old_h;
+            if (sx0 - 1.0).abs() >= (sy0 - 1.0).abs() { sx0 } else { sy0 }
+        } else if is_h {
+            new_w / old_w
+        } else if is_v {
+            new_h / old_h
+        } else {
+            1.0
+        };
+        s = s.max(min_edge / old_w).max(min_edge / old_h).max(0.01);
+        let nw = old_w * s;
+        let nh = old_h * s;
+        if is_corner {
+            if centered {
+                let cx = (old_local[0] + old_local[2]) * 0.5;
+                let cy = (old_local[1] + old_local[3]) * 0.5;
+                new_local = [cx - nw * 0.5, cy - nh * 0.5, cx + nw * 0.5, cy + nh * 0.5];
+            } else {
+                // Keep the anchored (non-dragged) side fixed.
+                if handle.right {
+                    new_local[0] = old_local[0];
+                    new_local[2] = old_local[0] + nw;
+                } else {
+                    new_local[2] = old_local[2];
+                    new_local[0] = old_local[2] - nw;
+                }
+                if handle.bottom {
+                    new_local[1] = old_local[1];
+                    new_local[3] = old_local[1] + nh;
+                } else {
+                    new_local[3] = old_local[3];
+                    new_local[1] = old_local[3] - nh;
+                }
+            }
+        } else if is_h {
+            if centered {
+                let cx = (old_local[0] + old_local[2]) * 0.5;
+                let cy = (old_local[1] + old_local[3]) * 0.5;
+                new_local = [cx - nw * 0.5, cy - nh * 0.5, cx + nw * 0.5, cy + nh * 0.5];
+            } else {
+                if handle.right {
+                    new_local[0] = old_local[0];
+                    new_local[2] = old_local[0] + nw;
+                } else {
+                    new_local[2] = old_local[2];
+                    new_local[0] = old_local[2] - nw;
+                }
+                let cy = (old_local[1] + old_local[3]) * 0.5;
+                new_local[1] = cy - nh * 0.5;
+                new_local[3] = cy + nh * 0.5;
+            }
+        } else if is_v {
+            if centered {
+                let cx = (old_local[0] + old_local[2]) * 0.5;
+                let cy = (old_local[1] + old_local[3]) * 0.5;
+                new_local = [cx - nw * 0.5, cy - nh * 0.5, cx + nw * 0.5, cy + nh * 0.5];
+            } else {
+                if handle.bottom {
+                    new_local[1] = old_local[1];
+                    new_local[3] = old_local[1] + nh;
+                } else {
+                    new_local[3] = old_local[3];
+                    new_local[1] = old_local[3] - nh;
+                }
+                let cx = (old_local[0] + old_local[2]) * 0.5;
+                new_local[0] = cx - nw * 0.5;
+                new_local[2] = cx + nw * 0.5;
+            }
+        }
+    }
+
     let sx = (new_local[2] - new_local[0]) / (old_local[2] - old_local[0]).max(f32::EPSILON);
     let sy = (new_local[3] - new_local[1]) / (old_local[3] - old_local[1]).max(f32::EPSILON);
 
@@ -550,6 +713,45 @@ pub fn resize_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, 
     });
 
     Some(Quad { points: new_local_points })
+}
+
+/// Ctrl+Shift corner distort: lock the dragged corner's displacement
+/// (measured from its press position) to horizontal, vertical, or 45°
+/// diagonal. Zone boundaries at 22.5°/67.5° of `atan2(|dy|, |dx|)`;
+/// diagonal keeps both signs with magnitude `max(|dx|, |dy|)`.
+pub fn constrain_corner_delta(dx: f32, dy: f32) -> (f32, f32) {
+    if !dx.is_finite() || !dy.is_finite() {
+        return (dx, dy);
+    }
+    let ax = dx.abs();
+    let ay = dy.abs();
+    if ax < f32::EPSILON && ay < f32::EPSILON {
+        return (dx, dy);
+    }
+    let angle = ay.atan2(ax).to_degrees();
+    if angle < 22.5 {
+        (dx, 0.0)
+    } else if angle > 67.5 {
+        (0.0, dy)
+    } else {
+        let m = ax.max(ay);
+        let sx = if dx < 0.0 { -1.0 } else { 1.0 };
+        let sy = if dy < 0.0 { -1.0 } else { 1.0 };
+        (sx * m, sy * m)
+    }
+}
+
+/// Ctrl+Shift edge skew: keep only the dominant quad-local axis so shear
+/// follows quad rotation. Ties fall through to horizontal.
+pub fn constrain_skew_local(ldx: f32, ldy: f32) -> (f32, f32) {
+    if !ldx.is_finite() || !ldy.is_finite() {
+        return (ldx, ldy);
+    }
+    if ldx.abs() >= ldy.abs() {
+        (ldx, 0.0)
+    } else {
+        (0.0, ldy)
+    }
 }
 
 pub fn distort_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, corner: usize, quad: Quad, local: Point) -> Option<Quad> {
@@ -579,7 +781,13 @@ pub fn distort_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize,
     let reference_sign = quad_winding(reference);
     let (min_len, min_area) = distort_floors(reference, MIN_BOX_EDGE / scale);
     let start = reference[corner];
-    let target = [img_x, img_y];
+    let mut target = [img_x, img_y];
+    // Ctrl+Shift: axis-constrain the corner displacement from its press
+    // position (horizontal / vertical / 45° diagonal).
+    if state.keyboard_modifiers.shift() {
+        let (dx, dy) = constrain_corner_delta(target[0] - start[0], target[1] - start[1]);
+        target = [start[0] + dx, start[1] + dy];
+    }
     let mut candidate = reference;
     candidate[corner] = target;
     if distort_valid(candidate, reference_sign, min_len, min_area) {
@@ -612,6 +820,126 @@ pub fn distort_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize,
         start[0] + (target[0] - start[0]) * lo,
         start[1] + (target[1] - start[1]) * lo,
     ];
+    if distort_valid(clamped, reference_sign, min_len, min_area) {
+        Some(Quad { points: clamped })
+    } else {
+        None
+    }
+}
+
+/// Ctrl-drag on a side handle: free-move the whole edge (skew). Both edge
+/// corners translate by the press -> cursor delta so the opposite edge stays
+/// fixed, mirroring corner `distort_quad` but with two corners. Rotation-aware
+/// via the same local frame as `resize_quad`; the delta round-trips through
+/// that frame so shear follows quad rotation.
+pub fn skew_quad(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    index: usize,
+    handle: ResizeHandle,
+    quad: Quad,
+    press: Point,
+    local: Point,
+) -> Option<Quad> {
+    let edge = handle.edge()?;
+    let tile = tiles.get(index)?;
+    let (layout, _) = tile_layout(tiles, state.width);
+    let (y, _) = layout.get(index)?;
+    let scale = if tile.source_width > 0 {
+        state.width / tile.source_width as f32
+    } else {
+        0.0
+    };
+    if scale <= 0.0 {
+        return None;
+    }
+    let press_img_x = press.x / scale;
+    let press_img_y = (press.y + state.offset - y) / scale;
+    let img_x = local.x / scale;
+    let img_y = (local.y + state.offset - y) / scale;
+    if !press_img_x.is_finite()
+        || !press_img_y.is_finite()
+        || !img_x.is_finite()
+        || !img_y.is_finite()
+    {
+        return None;
+    }
+    let reference = quad.points;
+    let (a, b) = match edge {
+        0 => (0, 1),
+        1 => (1, 2),
+        2 => (2, 3),
+        3 => (3, 0),
+        _ => return None,
+    };
+    // Same local frame as `resize_quad` so shear follows quad rotation.
+    let ordered = order_quad(reference);
+    let angle = if let Some((_, _, _, a)) = crate::main_area::geometry::rotated_rect_geometry(ordered) {
+        a
+    } else {
+        let top_dx = ordered[1][0] - ordered[0][0];
+        let top_dy = ordered[1][1] - ordered[0][1];
+        let bot_dx = ordered[2][0] - ordered[3][0];
+        let bot_dy = ordered[2][1] - ordered[3][1];
+        let avg_dx = (top_dx + bot_dx) * 0.5;
+        let avg_dy = (top_dy + bot_dy) * 0.5;
+        if avg_dx.abs() < f32::EPSILON && avg_dy.abs() < f32::EPSILON {
+            top_dy.atan2(top_dx)
+        } else {
+            avg_dy.atan2(avg_dx)
+        }
+    };
+    let center = quad_centroid(ordered);
+    let (sin, cos) = angle.sin_cos();
+    // Image-space drag delta, rotated into the quad-local frame.
+    let dx = img_x - press_img_x;
+    let dy = img_y - press_img_y;
+    let (local_dx, local_dy) = {
+        let ldx = dx * cos + dy * sin;
+        let ldy = -dx * sin + dy * cos;
+        // Ctrl+Shift: axis-lock the shear to the dominant quad-local axis.
+        if state.keyboard_modifiers.shift() {
+            constrain_skew_local(ldx, ldy)
+        } else {
+            (ldx, ldy)
+        }
+    };
+    // Back to image space (round-trip is identity for a rigid translation,
+    // but keeps the math explicitly in the quad-local frame).
+    let eff_dx = local_dx * cos - local_dy * sin;
+    let eff_dy = local_dx * sin + local_dy * cos;
+    let _ = (center, sin, cos);
+    // Free-transform cap, same topology guard as `distort_quad`.
+    let reference_sign = quad_winding(reference);
+    let (min_len, min_area) = distort_floors(reference, MIN_BOX_EDGE / scale);
+    let apply = |points: [[f32; 2]; 4], t: f32| -> [[f32; 2]; 4] {
+        let mut out = points;
+        out[a] = [reference[a][0] + eff_dx * t, reference[a][1] + eff_dy * t];
+        out[b] = [reference[b][0] + eff_dx * t, reference[b][1] + eff_dy * t];
+        out
+    };
+    let candidate = apply(reference, 1.0);
+    if distort_valid(candidate, reference_sign, min_len, min_area) {
+        return Some(Quad { points: candidate });
+    }
+    if !distort_valid(reference, reference_sign, min_len, min_area) {
+        return None;
+    }
+    // Clamp to the largest valid `t` along the press -> cursor segment.
+    let mut lo = 0.0f32;
+    let mut hi = 1.0f32;
+    for _ in 0..16 {
+        let mid = (lo + hi) * 0.5;
+        if distort_valid(apply(reference, mid), reference_sign, min_len, min_area) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    if lo <= 0.0 {
+        return None;
+    }
+    let clamped = apply(reference, lo);
     if distort_valid(clamped, reference_sign, min_len, min_area) {
         Some(Quad { points: clamped })
     } else {
@@ -691,4 +1019,45 @@ fn distort_valid(points: [[f32; 2]; 4], reference_sign: f32, min_len: f32, min_a
         }
     }
     true
+}
+
+#[cfg(test)]
+mod constrain_tests {
+    use super::{constrain_corner_delta, constrain_skew_local};
+
+    #[test]
+    fn corner_horizontal_zone_zeroes_dy() {
+        assert_eq!(constrain_corner_delta(10.0, 1.0), (10.0, 0.0));
+        assert_eq!(constrain_corner_delta(-8.0, 2.0), (-8.0, 0.0));
+    }
+
+    #[test]
+    fn corner_vertical_zone_zeroes_dx() {
+        assert_eq!(constrain_corner_delta(1.0, 10.0), (0.0, 10.0));
+        assert_eq!(constrain_corner_delta(2.0, -8.0), (0.0, -8.0));
+    }
+
+    #[test]
+    fn corner_diagonal_zone_snaps_to_45_degrees() {
+        assert_eq!(constrain_corner_delta(10.0, 9.0), (10.0, 10.0));
+        assert_eq!(constrain_corner_delta(-6.0, 8.0), (-8.0, 8.0));
+        assert_eq!(constrain_corner_delta(5.0, -3.0), (5.0, -5.0));
+    }
+
+    #[test]
+    fn corner_zero_delta_passes_through() {
+        assert_eq!(constrain_corner_delta(0.0, 0.0), (0.0, 0.0));
+    }
+
+    #[test]
+    fn skew_keeps_dominant_axis_only() {
+        assert_eq!(constrain_skew_local(5.0, 2.0), (5.0, 0.0));
+        assert_eq!(constrain_skew_local(2.0, 5.0), (0.0, 5.0));
+        assert_eq!(constrain_skew_local(3.0, -7.0), (0.0, -7.0));
+    }
+
+    #[test]
+    fn skew_tie_falls_through_to_horizontal() {
+        assert_eq!(constrain_skew_local(4.0, 4.0), (4.0, 0.0));
+    }
 }

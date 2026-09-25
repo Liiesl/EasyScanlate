@@ -111,6 +111,7 @@ pub enum Interaction {
         id: EntryId,
         offset: [f32; 2],
         quad: Quad,
+        press: Point,
     },
     ResizePending {
         index: usize,
@@ -124,6 +125,7 @@ pub enum Interaction {
         id: EntryId,
         handle: ResizeHandle,
         quad: Quad,
+        press: Point,
     },
     DistortPending {
         index: usize,
@@ -137,6 +139,20 @@ pub enum Interaction {
         id: EntryId,
         corner: usize,
         quad: Quad,
+    },
+    SkewPending {
+        index: usize,
+        id: EntryId,
+        handle: ResizeHandle,
+        quad: Quad,
+        press: Point,
+    },
+    Skewing {
+        index: usize,
+        id: EntryId,
+        handle: ResizeHandle,
+        quad: Quad,
+        press: Point,
     },
     RotatePending {
         index: usize,
@@ -239,6 +255,18 @@ impl ResizeHandle {
             Self::NE => Some(1),
             Self::SE => Some(2),
             Self::SW => Some(3),
+            _ => None,
+        }
+    }
+
+    /// Side handle as an edge index (`N=0, E=1, S=2, W=3`), mirroring the
+    /// TL/TR/BR/BL corner ordering. Corners return `None`.
+    pub fn edge(self) -> Option<usize> {
+        match self {
+            Self::N => Some(0),
+            Self::E => Some(1),
+            Self::S => Some(2),
+            Self::W => Some(3),
             _ => None,
         }
     }

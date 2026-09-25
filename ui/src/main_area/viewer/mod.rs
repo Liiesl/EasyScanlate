@@ -32,8 +32,9 @@ use self::constants::{
     DOUBLE_CLICK_DELAY, DRAG_THRESHOLD, MIN_INPAINT_EDGE, MIN_OCR_EDGE, SCROLL_LINE_HEIGHT,
 };
 use self::draw::{
-    draw_align_guide, draw_inpaint_decorations, draw_inpaint_marquee, draw_ocr_marquee,
-    draw_overlay_buttons, draw_placeholder, draw_scrollbar, draw_selection_decorations,
+    draw_align_guide, draw_axis_h_guide, draw_inpaint_decorations, draw_inpaint_marquee,
+    draw_ocr_marquee, draw_overlay_buttons, draw_placeholder, draw_scrollbar,
+    draw_selection_decorations,
 };
 use self::hit_test::{
     editing_rect, hit_entry, hit_gradient_handle, hit_handle, hit_inpaint_toolbar,
@@ -45,8 +46,9 @@ pub use self::interaction::{
 };
 use self::layout::{content_width, tile_layout};
 use self::motion::{
-    distort_quad, drag_grab, drag_quad, gradient_handle_box, gradient_pointer_angle,
-    gradient_release_factor, resize_quad, rotate_quad, wrap_angle_delta,
+    adjust_selection_points, distort_quad, drag_grab, drag_quad, gradient_handle_box,
+    gradient_pointer_angle, gradient_release_factor, resize_quad, rotate_quad, skew_quad,
+    wrap_angle_delta,
 };
 use self::scroll::{
     anchor_from_state, offset_from_anchor, publish_anchor, publish_edit_rect, publish_visible,
@@ -670,11 +672,17 @@ where
                             }
                             if state.inpaint_mode()
                                 && let Interaction::InpaintSelecting { index: sel_idx, start, current } = state.interaction {
+                                    let (adj_start, adj_current) = adjust_selection_points(
+                                        start,
+                                        current,
+                                        state.keyboard_modifiers.shift(),
+                                        state.keyboard_modifiers.alt(),
+                                    );
                                     let (sel_y, _) = layout[sel_idx];
-                                    let global_y0 = sel_y + start.y.min(current.y);
-                                    let global_y1 = sel_y + start.y.max(current.y);
-                                    let x0 = start.x.min(current.x).clamp(0.0, state.width);
-                                    let x1 = start.x.max(current.x).clamp(0.0, state.width);
+                                    let global_y0 = sel_y + adj_start.y.min(adj_current.y);
+                                    let global_y1 = sel_y + adj_start.y.max(adj_current.y);
+                                    let x0 = adj_start.x.min(adj_current.x).clamp(0.0, state.width);
+                                    let x1 = adj_start.x.max(adj_current.x).clamp(0.0, state.width);
                                     let (y_tile, h_tile) = layout[index];
                                     if global_y1 > y_tile && global_y0 < y_tile + h_tile {
                                         let y0 = (global_y0.max(y_tile) - y_tile).max(0.0);
@@ -686,11 +694,17 @@ where
                                 }
                             if state.ocr_mode()
                                 && let Interaction::OcrSelecting { index: sel_idx, start, current } = state.interaction {
+                                    let (adj_start, adj_current) = adjust_selection_points(
+                                        start,
+                                        current,
+                                        state.keyboard_modifiers.shift(),
+                                        state.keyboard_modifiers.alt(),
+                                    );
                                     let (sel_y, _) = layout[sel_idx];
-                                    let global_y0 = sel_y + start.y.min(current.y);
-                                    let global_y1 = sel_y + start.y.max(current.y);
-                                    let x0 = start.x.min(current.x).clamp(0.0, state.width);
-                                    let x1 = start.x.max(current.x).clamp(0.0, state.width);
+                                    let global_y0 = sel_y + adj_start.y.min(adj_current.y);
+                                    let global_y1 = sel_y + adj_start.y.max(adj_current.y);
+                                    let x0 = adj_start.x.min(adj_current.x).clamp(0.0, state.width);
+                                    let x1 = adj_start.x.max(adj_current.x).clamp(0.0, state.width);
                                     let (y_tile, h_tile) = layout[index];
                                     if global_y1 > y_tile && global_y0 < y_tile + h_tile {
                                         let y0 = (global_y0.max(y_tile) - y_tile).max(0.0);
@@ -706,6 +720,34 @@ where
                                 && let Some(guide_x) = state.align_guide
                             {
                                 draw_align_guide(&mut overlay_frame, guide_x, tile_bounds.height);
+                            }
+                            // Shift axis-lock guide: same pink style as alignment.
+                            // Vertical reuses the align draw; horizontal draws
+                            // across this tile only when the locked Y crosses it.
+                            if matches!(state.interaction, Interaction::Dragging { .. })
+                                && let Some(axis) = state.axis_lock
+                            {
+                                match axis {
+                                    crate::main_area::viewer::state::AxisLockGuide::Vertical(
+                                        x,
+                                    ) => {
+                                        draw_align_guide(
+                                            &mut overlay_frame,
+                                            x,
+                                            tile_bounds.height,
+                                        );
+                                    }
+                                    crate::main_area::viewer::state::AxisLockGuide::Horizontal(
+                                        global_y,
+                                    ) => {
+                                        let local_y = global_y - tile_bounds.y;
+                                        draw_axis_h_guide(
+                                            &mut overlay_frame,
+                                            local_y,
+                                            tile_bounds.width,
+                                        );
+                                    }
+                                }
                             }
                             // Persistent manual multi-select rubber bands (kept after drag release)
                             if !self.manual_selections.is_empty() {
@@ -989,6 +1031,19 @@ where
                                         shell.capture_event();
                                         return;
                                     }
+                                if handle.edge().is_some() && state.keyboard_modifiers.command() {
+                                    state.interaction = Interaction::SkewPending {
+                                        index,
+                                        id,
+                                        handle,
+                                        quad: Quad {
+                                            points: crate::main_area::geometry::order_quad(quad.points),
+                                        },
+                                        press: local,
+                                    };
+                                    shell.capture_event();
+                                    return;
+                                }
                                 state.interaction = Interaction::ResizePending {
                                     index,
                                     id,
@@ -1073,12 +1128,18 @@ where
                     // In manual mode every drag is accumulated as persistent selections
                     if let Interaction::InpaintSelecting { index, start, current } = state.interaction {
                         let (layout, _) = tile_layout(&self.tiles, state.width);
-                        let x0 = start.x.min(current.x).clamp(0.0, state.width);
-                        let x1 = start.x.max(current.x).clamp(0.0, state.width);
+                        let (adj_start, adj_current) = adjust_selection_points(
+                            start,
+                            current,
+                            state.keyboard_modifiers.shift(),
+                            state.keyboard_modifiers.alt(),
+                        );
+                        let x0 = adj_start.x.min(adj_current.x).clamp(0.0, state.width);
+                        let x1 = adj_start.x.max(adj_current.x).clamp(0.0, state.width);
                         if x1 > x0 {
                             let sel_y = layout[index].0;
-                            let gy0_raw = sel_y + start.y.min(current.y);
-                            let gy1_raw = sel_y + start.y.max(current.y);
+                            let gy0_raw = sel_y + adj_start.y.min(adj_current.y);
+                            let gy1_raw = sel_y + adj_start.y.max(adj_current.y);
                             let (gy0, gy1) = (gy0_raw.min(gy1_raw), gy0_raw.max(gy1_raw));
                             let mut spans: Vec<(usize, Rectangle)> = Vec::new();
                             for (i, (y, h)) in layout.iter().enumerate() {
@@ -1123,12 +1184,18 @@ where
                     }
                     if let Interaction::OcrSelecting { index, start, current } = state.interaction {
                         let (layout, _) = tile_layout(&self.tiles, state.width);
-                        let x0 = start.x.min(current.x).clamp(0.0, state.width);
-                        let x1 = start.x.max(current.x).clamp(0.0, state.width);
+                        let (adj_start, adj_current) = adjust_selection_points(
+                            start,
+                            current,
+                            state.keyboard_modifiers.shift(),
+                            state.keyboard_modifiers.alt(),
+                        );
+                        let x0 = adj_start.x.min(adj_current.x).clamp(0.0, state.width);
+                        let x1 = adj_start.x.max(adj_current.x).clamp(0.0, state.width);
                         if x1 > x0 {
                             let sel_y = layout[index].0;
-                            let gy0_raw = sel_y + start.y.min(current.y);
-                            let gy1_raw = sel_y + start.y.max(current.y);
+                            let gy0_raw = sel_y + adj_start.y.min(adj_current.y);
+                            let gy1_raw = sel_y + adj_start.y.max(adj_current.y);
                             let (gy0, gy1) = (gy0_raw.min(gy1_raw), gy0_raw.max(gy1_raw));
                             let mut spans: Vec<(usize, Rectangle)> = Vec::new();
                             for (i, (y, h)) in layout.iter().enumerate() {
@@ -1173,12 +1240,18 @@ where
                 } else {
                     if let Interaction::InpaintSelecting { index, start, current } = state.interaction {
                         let (layout, _) = tile_layout(&self.tiles, state.width);
-                        let x0 = start.x.min(current.x).clamp(0.0, state.width);
-                        let x1 = start.x.max(current.x).clamp(0.0, state.width);
+                        let (adj_start, adj_current) = adjust_selection_points(
+                            start,
+                            current,
+                            state.keyboard_modifiers.shift(),
+                            state.keyboard_modifiers.alt(),
+                        );
+                        let x0 = adj_start.x.min(adj_current.x).clamp(0.0, state.width);
+                        let x1 = adj_start.x.max(adj_current.x).clamp(0.0, state.width);
                         if x1 > x0 {
                             let sel_y = layout[index].0;
-                            let gy0_raw = sel_y + start.y.min(current.y);
-                            let gy1_raw = sel_y + start.y.max(current.y);
+                            let gy0_raw = sel_y + adj_start.y.min(adj_current.y);
+                            let gy1_raw = sel_y + adj_start.y.max(adj_current.y);
                             let (gy0, gy1) = (gy0_raw.min(gy1_raw), gy0_raw.max(gy1_raw));
                             let mut spans: Vec<(usize, Rectangle)> = Vec::new();
                             for (i, (y, h)) in layout.iter().enumerate() {
@@ -1221,12 +1294,18 @@ where
                     }
                     if let Interaction::OcrSelecting { index, start, current } = state.interaction {
                         let (layout, _) = tile_layout(&self.tiles, state.width);
-                        let x0 = start.x.min(current.x).clamp(0.0, state.width);
-                        let x1 = start.x.max(current.x).clamp(0.0, state.width);
+                        let (adj_start, adj_current) = adjust_selection_points(
+                            start,
+                            current,
+                            state.keyboard_modifiers.shift(),
+                            state.keyboard_modifiers.alt(),
+                        );
+                        let x0 = adj_start.x.min(adj_current.x).clamp(0.0, state.width);
+                        let x1 = adj_start.x.max(adj_current.x).clamp(0.0, state.width);
                         if x1 > x0 {
                             let sel_y = layout[index].0;
-                            let gy0_raw = sel_y + start.y.min(current.y);
-                            let gy1_raw = sel_y + start.y.max(current.y);
+                            let gy0_raw = sel_y + adj_start.y.min(adj_current.y);
+                            let gy1_raw = sel_y + adj_start.y.max(adj_current.y);
                             let (gy0, gy1) = (gy0_raw.min(gy1_raw), gy0_raw.max(gy1_raw));
                             let mut spans: Vec<(usize, Rectangle)> = Vec::new();
                             for (i, (y, h)) in layout.iter().enumerate() {
@@ -1382,6 +1461,8 @@ where
                         | Interaction::Resizing { .. }
                         | Interaction::DistortPending { .. }
                         | Interaction::Distorting { .. }
+                        | Interaction::SkewPending { .. }
+                        | Interaction::Skewing { .. }
                         | Interaction::RotatePending { .. }
                         | Interaction::Rotating { .. }
                         | Interaction::ToolbarPressed { .. }
@@ -1395,6 +1476,7 @@ where
                 ) {
                     state.interaction = Interaction::None;
                     state.align_guide = None;
+                    state.axis_lock = None;
                     shell.capture_event();
                     shell.request_redraw();
                 }
@@ -1428,33 +1510,68 @@ where
                         let dx = local.x - press.x;
                         let dy = local.y - press.y;
                         if dx * dx + dy * dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
-                            state.interaction = Interaction::Dragging { index, id, offset, quad };
+                            state.interaction = Interaction::Dragging { index, id, offset, quad, press };
                             if let (Some(callback), Some(quad)) = (
                                 self.on_entry_moved.as_ref(),
-                                drag_quad(&self.tiles, state, index, local, offset, quad),
+                                drag_quad(&self.tiles, state, index, local, offset, quad, press),
                             ) {
-                                state.align_guide =
-                                    align::guide_for_snapped_quad(&quad, &self.tiles, state, index);
+                                let shift = state.keyboard_modifiers.shift();
+                                let vertical = shift && dx.abs() < dy.abs();
+                                state.align_guide = if vertical {
+                                    None
+                                } else {
+                                    align::guide_for_snapped_quad(&quad, &self.tiles, state, index)
+                                };
+                                state.axis_lock = if shift {
+                                    align::axis_lock_guide_for_quad(
+                                        &quad,
+                                        &self.tiles,
+                                        state,
+                                        index,
+                                        vertical,
+                                    )
+                                } else {
+                                    None
+                                };
                                 shell.publish(callback((index, id, quad)));
                                 shell.request_redraw();
                             } else {
                                 state.align_guide = None;
+                                state.axis_lock = None;
                             }
                         }
                         shell.capture_event();
                     }
-                    Interaction::Dragging { index, id, offset, quad } => {
+                    Interaction::Dragging { index, id, offset, quad, press } => {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         if let (Some(callback), Some(quad)) = (
                             self.on_entry_moved.as_ref(),
-                            drag_quad(&self.tiles, state, index, local, offset, quad),
+                            drag_quad(&self.tiles, state, index, local, offset, quad, press),
                         ) {
-                            state.align_guide =
-                                align::guide_for_snapped_quad(&quad, &self.tiles, state, index);
+                            let shift = state.keyboard_modifiers.shift();
+                            let vertical = shift
+                                && (local.x - press.x).abs() < (local.y - press.y).abs();
+                            state.align_guide = if vertical {
+                                None
+                            } else {
+                                align::guide_for_snapped_quad(&quad, &self.tiles, state, index)
+                            };
+                            state.axis_lock = if shift {
+                                align::axis_lock_guide_for_quad(
+                                    &quad,
+                                    &self.tiles,
+                                    state,
+                                    index,
+                                    vertical,
+                                )
+                            } else {
+                                None
+                            };
                             shell.publish(callback((index, id, quad)));
                             shell.request_redraw();
                         } else {
                             state.align_guide = None;
+                            state.axis_lock = None;
                             shell.request_redraw();
                         }
                         shell.capture_event();
@@ -1464,7 +1581,7 @@ where
                         let dx = local.x - press.x;
                         let dy = local.y - press.y;
                         if dx * dx + dy * dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
-                            state.interaction = Interaction::Resizing { index, id, handle, quad };
+                            state.interaction = Interaction::Resizing { index, id, handle, quad, press };
                             if let (Some(callback), Some(quad)) = (
                                 self.on_entry_moved.as_ref(),
                                 resize_quad(&self.tiles, state, index, handle, quad, local),
@@ -1475,7 +1592,7 @@ where
                         }
                         shell.capture_event();
                     }
-                    Interaction::Resizing { index, id, handle, quad } => {
+                    Interaction::Resizing { index, id, handle, quad, press: _ } => {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         if let (Some(callback), Some(quad)) = (
                             self.on_entry_moved.as_ref(),
@@ -1507,6 +1624,33 @@ where
                         if let (Some(callback), Some(quad)) = (
                             self.on_entry_moved.as_ref(),
                             distort_quad(&self.tiles, state, index, corner, quad, local),
+                        ) {
+                            shell.publish(callback((index, id, quad)));
+                            shell.request_redraw();
+                        }
+                        shell.capture_event();
+                    }
+                    Interaction::SkewPending { index, id, handle, quad, press } => {
+                        let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        let dx = local.x - press.x;
+                        let dy = local.y - press.y;
+                        if dx * dx + dy * dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
+                            state.interaction = Interaction::Skewing { index, id, handle, quad, press };
+                            if let (Some(callback), Some(quad)) = (
+                                self.on_entry_moved.as_ref(),
+                                skew_quad(&self.tiles, state, index, handle, quad, press, local),
+                            ) {
+                                shell.publish(callback((index, id, quad)));
+                                shell.request_redraw();
+                            }
+                        }
+                        shell.capture_event();
+                    }
+                    Interaction::Skewing { index, id, handle, quad, press } => {
+                        let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        if let (Some(callback), Some(quad)) = (
+                            self.on_entry_moved.as_ref(),
+                            skew_quad(&self.tiles, state, index, handle, quad, press, local),
                         ) {
                             shell.publish(callback((index, id, quad)));
                             shell.request_redraw();
@@ -1668,14 +1812,129 @@ where
                     state.save_menu_open = false;
                     state.interaction = Interaction::None;
                     state.align_guide = None;
+                    state.axis_lock = None;
                     shell.request_redraw();
                     shell.capture_event();
                 }
             }
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                 state.keyboard_modifiers = *modifiers;
-                if modifiers.alt() && state.align_guide.take().is_some() {
-                    shell.request_redraw();
+                // Figma-style live toggle: recompute the active drag from the
+                // press quad + current cursor so Shift/Alt take effect mid-drag.
+                let interaction = state.interaction;
+                match interaction {
+                    Interaction::Dragging { index, id, offset, quad, press } => {
+                        if let Some(position) = cursor.position_over(bounds) {
+                            let local =
+                                Point::new(position.x - bounds.x, position.y - bounds.y);
+                            if let (Some(callback), Some(next)) = (
+                                self.on_entry_moved.as_ref(),
+                                drag_quad(&self.tiles, state, index, local, offset, quad, press),
+                            ) {
+                                let shift = modifiers.shift();
+                                let vertical = shift
+                                    && (local.x - press.x).abs() < (local.y - press.y).abs();
+                                state.align_guide = if vertical {
+                                    None
+                                } else {
+                                    align::guide_for_snapped_quad(&next, &self.tiles, state, index)
+                                };
+                                state.axis_lock = if shift {
+                                    align::axis_lock_guide_for_quad(
+                                        &next,
+                                        &self.tiles,
+                                        state,
+                                        index,
+                                        vertical,
+                                    )
+                                } else {
+                                    None
+                                };
+                                shell.publish(callback((index, id, next)));
+                                shell.request_redraw();
+                            } else {
+                                let had_align = state.align_guide.take().is_some();
+                                let had_axis = state.axis_lock.take().is_some();
+                                if had_align || had_axis {
+                                    shell.request_redraw();
+                                }
+                            }
+                        } else {
+                            let had_align = modifiers.alt() && state.align_guide.take().is_some();
+                            let had_axis = !modifiers.shift() && state.axis_lock.take().is_some();
+                            if had_align || had_axis {
+                                shell.request_redraw();
+                            }
+                        }
+                    }
+                    Interaction::Resizing { index, id, handle, quad, press: _ } => {
+                        if let Some(position) = cursor.position_over(bounds) {
+                            let local =
+                                Point::new(position.x - bounds.x, position.y - bounds.y);
+                            if let (Some(callback), Some(next)) = (
+                                self.on_entry_moved.as_ref(),
+                                resize_quad(&self.tiles, state, index, handle, quad, local),
+                            ) {
+                                shell.publish(callback((index, id, next)));
+                                shell.request_redraw();
+                            }
+                        }
+                    }
+                    Interaction::Rotating { index, id, quad, center_img, center_view, press } => {
+                        if let Some(position) = cursor.position_over(bounds) {
+                            let local =
+                                Point::new(position.x - bounds.x, position.y - bounds.y);
+                            if let Some(callback) = self.on_entry_moved.as_ref() {
+                                let rotated = rotate_quad(
+                                    quad,
+                                    center_img,
+                                    center_view,
+                                    press,
+                                    local,
+                                    modifiers.shift(),
+                                );
+                                shell.publish(callback((index, id, rotated)));
+                                shell.request_redraw();
+                            }
+                        }
+                    }
+                    Interaction::Distorting { index, id, corner, quad } => {
+                        if let Some(position) = cursor.position_over(bounds) {
+                            let local =
+                                Point::new(position.x - bounds.x, position.y - bounds.y);
+                            if let (Some(callback), Some(next)) = (
+                                self.on_entry_moved.as_ref(),
+                                distort_quad(&self.tiles, state, index, corner, quad, local),
+                            ) {
+                                shell.publish(callback((index, id, next)));
+                                shell.request_redraw();
+                            }
+                        }
+                    }
+                    Interaction::Skewing { index, id, handle, quad, press } => {
+                        if let Some(position) = cursor.position_over(bounds) {
+                            let local =
+                                Point::new(position.x - bounds.x, position.y - bounds.y);
+                            if let (Some(callback), Some(next)) = (
+                                self.on_entry_moved.as_ref(),
+                                skew_quad(&self.tiles, state, index, handle, quad, press, local),
+                            ) {
+                                shell.publish(callback((index, id, next)));
+                                shell.request_redraw();
+                            }
+                        }
+                    }
+                    Interaction::InpaintSelecting { .. } | Interaction::OcrSelecting { .. } => {
+                        // Preview in `draw()` reads modifiers directly.
+                        shell.request_redraw();
+                    }
+                    _ => {
+                        let had_align = modifiers.alt() && state.align_guide.take().is_some();
+                        let had_axis = !modifiers.shift() && state.axis_lock.take().is_some();
+                        if had_align || had_axis {
+                            shell.request_redraw();
+                        }
+                    }
                 }
             }
             Event::Window(_) => {
@@ -1698,6 +1957,8 @@ where
             | Interaction::Resizing { .. }
             | Interaction::DistortPending { .. }
             | Interaction::Distorting { .. }
+            | Interaction::SkewPending { .. }
+            | Interaction::Skewing { .. }
             | Interaction::RotatePending { .. }
             | Interaction::Rotating { .. }
             | Interaction::ToolbarPressed { .. }

@@ -130,3 +130,49 @@ pub fn guide_for_snapped_quad(
     let width = b[2] - b[0];
     guide_for_image_box(b[0], width, scale, state.width, true)
 }
+
+/// Figma-style axis-lock guide for a `Shift`-dragged `Quad` on tile `index`.
+/// `vertical` is the dominant-axis decision (`true` = X frozen, moving
+/// vertically). Returns the locked axis in content coords, drawn with the
+/// same pink style as the canvas auto-align guide.
+pub fn axis_lock_guide_for_quad(
+    quad: &Quad,
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    index: usize,
+    vertical: bool,
+) -> Option<super::state::AxisLockGuide> {
+    use super::layout::tile_layout;
+    let tile = tiles.get(index)?;
+    if tile.source_width <= 0 {
+        return None;
+    }
+    let scale = state.width / tile.source_width as f32;
+    if !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    let (layout, _) = tile_layout(tiles, state.width);
+    let (tile_y, _) = *layout.get(index)?;
+    if !tile_y.is_finite() {
+        return None;
+    }
+    let b = quad.bounds();
+    if !b.iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let cx_img = (b[0] + b[2]) * 0.5;
+    let cy_img = (b[1] + b[3]) * 0.5;
+    if vertical {
+        let x = cx_img * scale;
+        if !x.is_finite() {
+            return None;
+        }
+        Some(super::state::AxisLockGuide::Vertical(x))
+    } else {
+        let y = tile_y + cy_img * scale;
+        if !y.is_finite() {
+            return None;
+        }
+        Some(super::state::AxisLockGuide::Horizontal(y))
+    }
+}

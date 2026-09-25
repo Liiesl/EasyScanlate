@@ -474,6 +474,7 @@ pub fn draw_selection_decorations<'a, F>(
         Interaction::Dragging { index, id, .. }
         | Interaction::Resizing { index, id, .. }
         | Interaction::Distorting { index, id, .. }
+        | Interaction::Skewing { index, id, .. }
         | Interaction::Rotating { index, id, .. } => index == tile_index && id == entry.id,
         _ => false,
     };
@@ -526,6 +527,27 @@ where
     let x = guide_x.clamp(0.0, frame.width());
     frame.stroke(
         &Path::line(Point::new(x, 0.0), Point::new(x, tile_height)),
+        Stroke::default()
+            .with_color(ALIGN_GUIDE)
+            .with_width(scale::s(1.0)),
+    );
+}
+
+/// Figma-style horizontal axis-lock guide for `Shift`-dragging.
+/// `guide_y` is tile-local (global content Y minus this tile's top).
+/// Drawn only when it crosses this tile, same pink style as [`draw_align_guide`].
+pub fn draw_axis_h_guide<F>(frame: &mut F, guide_y: f32, tile_width: f32)
+where
+    F: geometry::frame::Backend,
+{
+    if !guide_y.is_finite() || !tile_width.is_finite() || tile_width <= 0.0 {
+        return;
+    }
+    if guide_y < 0.0 || guide_y > frame.height() {
+        return;
+    }
+    frame.stroke(
+        &Path::line(Point::new(0.0, guide_y), Point::new(tile_width, guide_y)),
         Stroke::default()
             .with_color(ALIGN_GUIDE)
             .with_width(scale::s(1.0)),

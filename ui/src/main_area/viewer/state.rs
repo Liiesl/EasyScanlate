@@ -47,6 +47,21 @@ pub struct TileViewState {
     /// Canvas auto-align guide (view-space X in content coords) while
     /// drag-moving an entry. Set on each `Dragging` move, cleared on release.
     pub align_guide: Option<f32>,
+    /// Figma-style axis-lock guide while `Shift`-drag-moving an entry.
+    /// `Vertical(x)` при X frozen (moving vertically),
+    /// `Horizontal(y)` при Y frozen (moving horizontally, global content Y).
+    /// Same pink style as [`super::constants::ALIGN_GUIDE`].
+    pub axis_lock: Option<AxisLockGuide>,
+}
+
+/// Axis-lock guide line shown while `Shift`-dragging, same style as the
+/// canvas auto-align guide.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AxisLockGuide {
+    /// Vertical line at content X (X frozen, moving vertically).
+    Vertical(f32),
+    /// Horizontal line at global content Y (Y frozen, moving horizontally).
+    Horizontal(f32),
 }
 
 impl TileViewState {
@@ -82,6 +97,7 @@ impl Default for TileViewState {
             save_menu_open: false,
             gradient_rest: None,
             align_guide: None,
+            axis_lock: None,
         }
     }
 }
