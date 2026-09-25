@@ -55,24 +55,29 @@ pub fn handle_source_image(app: &mut App) -> Task<Message> {
                 .add_filter("Images", IMAGE_FILTERS)
                 .pick_files()
                 .await;
-            match files {
-                Some(files) => {
-                    let mut out = Vec::with_capacity(files.len());
-                    for file in files {
-                        let path = file.path().to_string_lossy().into_owned();
-                        let dims = image::ImageReader::open(&path)
-                            .map_err(|e| format!("Failed to open {path}: {e}"))?
-                            .into_dimensions()
-                            .map_err(|e| format!("Failed to decode {path}: {e}"));
-                        match dims {
-                            Ok((w, h)) => out.push((path, w, h)),
-                            Err(e) => return Err(e),
-                        }
+            let Some(files) = files else { return Ok(Vec::new()) };
+            let paths: Vec<String> = files
+                .iter()
+                .map(|f| f.path().to_string_lossy().into_owned())
+                .collect();
+            // `ImageReader::open` + header decode on the blocking pool so the
+            // async executor never stalls on image I/O.
+            tokio::task::spawn_blocking(move || {
+                let mut out = Vec::with_capacity(paths.len());
+                for path in paths {
+                    let dims = image::ImageReader::open(&path)
+                        .map_err(|e| format!("Failed to open {path}: {e}"))?
+                        .into_dimensions()
+                        .map_err(|e| format!("Failed to decode {path}: {e}"));
+                    match dims {
+                        Ok((w, h)) => out.push((path, w, h)),
+                        Err(e) => return Err(e),
                     }
-                    Ok(out)
                 }
-                None => Ok(Vec::new()),
-            }
+                Ok(out)
+            })
+            .await
+            .unwrap_or_else(|e| Err(format!("source scan task failed: {e}")))
         },
         move |res| Message::Tab(tid, TabMessage::NewProjectSourcePicked(res)),
     )
@@ -85,26 +90,31 @@ pub fn handle_source_folder(app: &mut App) -> Task<Message> {
             let folder = rfd::AsyncFileDialog::new().pick_folder().await;
             let Some(folder) = folder else { return Ok(Vec::new()) };
             let dir = folder.path().to_path_buf();
-            let entries = std::fs::read_dir(&dir).map_err(|e| e.to_string())?;
-            let mut out = Vec::new();
-            for entry in entries {
-                let entry = entry.map_err(|e| e.to_string())?;
-                let path = entry.path();
-                if !path.is_file() { continue; }
-                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-                if !IMAGE_FILTERS.contains(&ext.as_str()) { continue; }
-                let pstr = path.to_string_lossy().into_owned();
-                let dims = image::ImageReader::open(&path)
-                    .map_err(|e| format!("Failed to open {pstr}: {e}"))?
-                    .into_dimensions()
-                    .map_err(|e| format!("Failed to decode {pstr}: {e}"));
-                match dims {
-                    Ok((w, h)) => out.push((pstr, w, h)),
-                    Err(e) => return Err(e),
+            // `read_dir` + image header probes on the blocking pool.
+            tokio::task::spawn_blocking(move || {
+                let entries = std::fs::read_dir(&dir).map_err(|e| e.to_string())?;
+                let mut out = Vec::new();
+                for entry in entries {
+                    let entry = entry.map_err(|e| e.to_string())?;
+                    let path = entry.path();
+                    if !path.is_file() { continue; }
+                    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+                    if !IMAGE_FILTERS.contains(&ext.as_str()) { continue; }
+                    let pstr = path.to_string_lossy().into_owned();
+                    let dims = image::ImageReader::open(&path)
+                        .map_err(|e| format!("Failed to open {pstr}: {e}"))?
+                        .into_dimensions()
+                        .map_err(|e| format!("Failed to decode {pstr}: {e}"));
+                    match dims {
+                        Ok((w, h)) => out.push((pstr, w, h)),
+                        Err(e) => return Err(e),
+                    }
                 }
-            }
-            out.sort_by(|a, b| natural_cmp(&a.0, &b.0));
-            Ok(out)
+                out.sort_by(|a, b| natural_cmp(&a.0, &b.0));
+                Ok(out)
+            })
+            .await
+            .unwrap_or_else(|e| Err(format!("folder scan task failed: {e}")))
         },
         move |res| Message::Tab(tid, TabMessage::NewProjectFolderPicked(res)),
     )
@@ -213,9 +223,6 @@ pub fn handle_create(app: &mut App) -> Task<Message> {
             cand
         }
     };
-    if let Some(parent) = unique_dest.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
     let files = np.source_files.clone();
     let series = np.series.clone();
     app.pending_create_series = Some(series.clone());
@@ -232,6 +239,11 @@ pub fn handle_create(app: &mut App) -> Task<Message> {
     Task::perform(
         async move {
             let res: Result<String, String> = tokio::task::spawn_blocking(move || -> Result<String, String> {
+                // Directory creation off the UI thread (was sync `create_dir_all`).
+                if let Some(parent) = dest_for_task.parent()
+                    && !parent.as_os_str().is_empty() {
+                        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                    }
                 let mut project = Project::new();
                 project.set_series(series);
                 let mut metas: Vec<(String, u32, u32)> = files;

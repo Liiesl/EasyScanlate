@@ -544,7 +544,7 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
                     async move {
                         use crate::app::queue::engine_ready_msg;
                         use easyscanlate_engine_pool::BuiltEngine;
-                        match easyscanlate_inpaint::Engine::build(backend, radius) {
+                        match tokio::task::spawn_blocking(move || easyscanlate_inpaint::Engine::build(backend, radius)).await.unwrap_or_else(|e| Err(format!("inpaint build task failed: {e}"))) {
                             Ok(engine) => engine_ready_msg(
                                 tid,
                                 job_id,
@@ -832,7 +832,7 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
                     async move {
                         use crate::app::queue::engine_ready_msg;
                         use easyscanlate_engine_pool::BuiltEngine;
-                        match easyscanlate_inpaint::Engine::build(backend, radius) {
+                        match tokio::task::spawn_blocking(move || easyscanlate_inpaint::Engine::build(backend, radius)).await.unwrap_or_else(|e| Err(format!("inpaint build task failed: {e}"))) {
                             Ok(engine) => engine_ready_msg(
                                 tid,
                                 job_id,
@@ -2050,7 +2050,7 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
             async move {
                 use crate::app::queue::engine_ready_msg;
                 use easyscanlate_engine_pool::BuiltEngine;
-                match InpaintEngine::build(backend, radius) {
+                match tokio::task::spawn_blocking(move || InpaintEngine::build(backend, radius)).await.unwrap_or_else(|e| Err(format!("inpaint build task failed: {e}"))) {
                     Ok(engine) => engine_ready_msg(
                         tid,
                         job_id,

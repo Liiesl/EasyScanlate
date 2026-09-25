@@ -143,7 +143,12 @@ fn dispatch_ocr(
                 let tid = tab_id;
                 return Task::perform(
                     async move {
-                        match easyscanlate_ocr::Engine::build_with_config(cfg) {
+                        match tokio::task::spawn_blocking(move || {
+                            easyscanlate_ocr::Engine::build_with_config(cfg)
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(format!("ocr build task failed: {e}")))
+                        {
                             Ok(engine) => {
                                 engine_ready_msg(tid, job_id, kind, Ok(BuiltEngine::OcrManual(engine)))
                             }
@@ -171,7 +176,12 @@ fn dispatch_ocr(
     let tid = tab_id;
     Task::perform(
         async move {
-            match easyscanlate_ocr::ParallelEngine::build_with_config(cfg, workers) {
+            match tokio::task::spawn_blocking(move || {
+                easyscanlate_ocr::ParallelEngine::build_with_config(cfg, workers)
+            })
+            .await
+            .unwrap_or_else(|e| Err(format!("ocr build task failed: {e}")))
+            {
                 Ok(engine) => engine_ready_msg(tid, job_id, kind, Ok(BuiltEngine::OcrParallel(engine))),
                 Err(e) => engine_ready_msg(tid, job_id, kind, Err(e)),
             }
@@ -273,7 +283,12 @@ fn dispatch_inpaint(
                 let tid = tab_id;
                 return Task::perform(
                     async move {
-                        match easyscanlate_inpaint::Engine::build(backend, radius) {
+                        match tokio::task::spawn_blocking(move || {
+                            easyscanlate_inpaint::Engine::build(backend, radius)
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(format!("inpaint build task failed: {e}")))
+                        {
                             Ok(engine) => engine_ready_msg(
                                 tid,
                                 job_id,
@@ -308,7 +323,12 @@ fn dispatch_inpaint(
                 let tid = tab_id;
                 return Task::perform(
                     async move {
-                        match easyscanlate_inpaint::Engine::build(backend, radius) {
+                        match tokio::task::spawn_blocking(move || {
+                            easyscanlate_inpaint::Engine::build(backend, radius)
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(format!("inpaint build task failed: {e}")))
+                        {
                             Ok(engine) => engine_ready_msg(
                                 tid,
                                 job_id,

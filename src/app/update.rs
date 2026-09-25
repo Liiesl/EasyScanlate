@@ -29,10 +29,22 @@ pub fn handle_download(app: &mut App) -> Task<Message> {
 }
 
 pub fn handle_apply(app: &mut App) -> Task<Message> {
+    // `apply_updates` restarts the app; run off-thread so the button never
+    // freezes the UI while Velopack finalizes.
     if let Some(info) = app.update_info.clone() {
-        let _ = crate::updater::apply_updates(&info);
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    let _ = crate::updater::apply_updates(&info);
+                })
+                .await
+                .unwrap_or(())
+            },
+            |_| Message::AutosaveCleared,
+        )
+    } else {
+        Task::none()
     }
-    Task::none()
 }
 
 pub fn handle_dismiss(app: &mut App) -> Task<Message> {

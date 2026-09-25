@@ -67,48 +67,27 @@ impl OnboardingState {
 
     #[cfg(feature = "models")]
     pub fn overall_progress(&self) -> f32 {
+        // Render-thread safe: no `fs::metadata` per frame (was per-model disk
+        // stat on every `view`). Byte weights come from in-memory download
+        // totals; Done models weigh 1.0 each. Disk sizes are only observed
+        // on `refresh_from_disk`/poll events, never during layout.
         if self.models.is_empty() {
             return 1.0;
         }
-        // Byte-weighted progress: weighted by total bytes when known.
-        // Fallback to count-based when no totals are known yet.
         let mut known_totals: Vec<u64> = Vec::new();
-        for (id, _, status) in &self.models {
-            match status {
-                ModelDownloadStatus::Done => {
-                    if let Some(spec) = easyscanlate_models::get_model(id) {
-                        let path = easyscanlate_settings::model_path(spec.filename);
-                        if let Ok(meta) = std::fs::metadata(&path) {
-                            let len = meta.len();
-                            if len > 0 {
-                                known_totals.push(len);
-                            }
-                        }
-                    }
-                }
-                ModelDownloadStatus::Downloading { total, .. } if *total > 0 => {
+        for (_, _, status) in &self.models {
+            if let ModelDownloadStatus::Downloading { total, .. } = status
+                && *total > 0 {
                     known_totals.push(*total);
                 }
-                _ => {}
-            }
         }
-        let has_known = !known_totals.is_empty();
-        if has_known {
+        if !known_totals.is_empty() {
             let avg_known = known_totals.iter().sum::<u64>() as f64 / known_totals.len() as f64;
             let mut sum_w: f64 = 0.0;
             let mut sum_pw: f64 = 0.0;
-            for (id, _, status) in &self.models {
+            for (_, _, status) in &self.models {
                 let (w, p) = match status {
-                    ModelDownloadStatus::Done => {
-                        let w = if let Some(spec) = easyscanlate_models::get_model(id) {
-                            let path = easyscanlate_settings::model_path(spec.filename);
-                            std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) as f64
-                        } else {
-                            0.0
-                        };
-                        let w = if w > 0.0 { w } else { avg_known };
-                        (w, 1.0)
-                    }
+                    ModelDownloadStatus::Done => (avg_known, 1.0),
                     ModelDownloadStatus::Downloading { percent, total, .. } => {
                         let w = if *total > 0 { *total as f64 } else { avg_known };
                         let p = (*percent as f64 / 100.0).clamp(0.0, 1.0);
@@ -422,11 +401,14 @@ pub fn handle_finish(app: &mut App) -> Task<Message> {
     }
     easyscanlate_settings::mark_onboarding_completed();
     app.onboarding = None;
-    // Sync translation etc.
-    crate::app::translation::sync_tx_from_store(app);
+    // Sync translation etc. (listing cache merges async after the first frame).
+    let cache_task = crate::app::translation::sync_tx_from_store(app);
     app.active_tab_mut().status = "Setup complete — welcome!".to_string();
     // Deferred startup update check: show the popup now that the wizard is gone.
-    crate::app::update::show_pending_popup(app)
+    Task::batch(vec![
+        cache_task,
+        crate::app::update::show_pending_popup(app),
+    ])
 }
 
 pub fn handle_replay(app: &mut App) -> Task<Message> {

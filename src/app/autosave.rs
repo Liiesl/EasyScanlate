@@ -302,37 +302,83 @@ pub fn prune_old_autosaves(max_age_secs: i64) {
 // Handlers
 // ---------------------------------------------------------------------------
 
-/// Extract inpaint pixel payloads from a tab (mirrors `mmtl::extract`).
-fn extract_inpaint(tab: &Tab) -> Vec<easyscanlate_mmtl::InpaintImageData> {
+/// Raw inpaint payload cloned on the UI thread without decoding (mirrors
+/// `mmtl::RawInpaint`): `Bytes` layers decode in the `spawn_blocking` write.
+#[derive(Clone)]
+enum RawInpaint {
+    Rgba {
+        image_id: easyscanlate_model::ImageId,
+        bounds: [f32; 4],
+        width: u32,
+        height: u32,
+        pixels: Vec<u8>,
+    },
+    Bytes {
+        image_id: easyscanlate_model::ImageId,
+        bounds: [f32; 4],
+        bytes: bytes::Bytes,
+    },
+}
+
+/// Extract inpaint pixel payloads from a tab without decoding on the UI thread.
+fn extract_inpaint_raw(tab: &Tab) -> Vec<RawInpaint> {
     let mut out = Vec::new();
     for loaded in &tab.images {
         let image_id = loaded.image_id;
         for layer in &loaded.inpaint {
-            let (width, height, pixels) = match &layer.handle {
+            match &layer.handle {
                 iced::widget::image::Handle::Rgba {
                     width,
                     height,
                     pixels,
                     ..
-                } => (*width, *height, pixels.to_vec()),
+                } => out.push(RawInpaint::Rgba {
+                    image_id,
+                    bounds: layer.bounds,
+                    width: *width,
+                    height: *height,
+                    pixels: pixels.to_vec(),
+                }),
                 iced::widget::image::Handle::Bytes(_id, bytes) => {
-                    if let Ok(img) = image::load_from_memory(bytes) {
-                        let rgba = img.to_rgba8();
-                        let (w, h) = (rgba.width(), rgba.height());
-                        (w, h, rgba.into_raw())
-                    } else {
-                        continue;
-                    }
+                    out.push(RawInpaint::Bytes {
+                        image_id,
+                        bounds: layer.bounds,
+                        bytes: bytes.clone(),
+                    });
                 }
                 _ => continue,
-            };
-            out.push(easyscanlate_mmtl::InpaintImageData {
-                image_id,
-                bounds: layer.bounds,
-                width,
-                height,
-                rgba: pixels,
-            });
+            }
+        }
+    }
+    out
+}
+
+fn decode_raw_inpaint(raw: Vec<RawInpaint>) -> Vec<easyscanlate_mmtl::InpaintImageData> {
+    let mut out = Vec::with_capacity(raw.len());
+    for r in raw {
+        match r {
+            RawInpaint::Rgba { image_id, bounds, width, height, pixels } => {
+                out.push(easyscanlate_mmtl::InpaintImageData {
+                    image_id,
+                    bounds,
+                    width,
+                    height,
+                    rgba: pixels,
+                });
+            }
+            RawInpaint::Bytes { image_id, bounds, bytes } => {
+                if let Ok(img) = image::load_from_memory(&bytes) {
+                    let rgba = img.to_rgba8();
+                    let (w, h) = (rgba.width(), rgba.height());
+                    out.push(easyscanlate_mmtl::InpaintImageData {
+                        image_id,
+                        bounds,
+                        width: w,
+                        height: h,
+                        rgba: rgba.into_raw(),
+                    });
+                }
+            }
         }
     }
     out
@@ -368,10 +414,12 @@ pub fn handle_tick(app: &mut App) -> Task<Message> {
         // Stamp legacy projects so the backup carries a stable id.
         tab.project.ensure_project_id();
         let project = tab.project.clone();
-        let inpaint = extract_inpaint(tab);
+        let raw = extract_inpaint_raw(tab);
         tasks.push(Task::perform(
             async move {
                 tokio::task::spawn_blocking(move || {
+                    // Decode + XML + PNG + FS all off the UI thread.
+                    let inpaint = decode_raw_inpaint(raw);
                     write_autosave(&project, &inpaint, &path)
                         .map(|p| p.to_string_lossy().to_string())
                         .map_err(|e| e.to_string())
@@ -518,12 +566,20 @@ pub fn handle_discard(app: &mut App, raw: u64) -> Task<Message> {
         Some(p) if p.tab_id == id => p,
         _ => return Task::none(),
     };
-    clear_autosave_dir(&prompt.dir);
+    let dir = prompt.dir.clone();
     app.autosave_prompt = None;
     if let Some(idx) = app.tabs.iter().position(|t| t.id == id) {
         app.tabs[idx].status = "Autosave discarded.".to_string();
     }
-    Task::none()
+    // Directory removal off the UI thread (was sync `remove_dir_all`).
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || clear_autosave_dir(&dir))
+                .await
+                .unwrap_or(())
+        },
+        |_| Message::AutosaveCleared,
+    )
 }
 
 pub fn handle_later(app: &mut App) -> Task<Message> {

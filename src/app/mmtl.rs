@@ -49,33 +49,81 @@ pub(crate) fn drop_missing(app: &mut App, path: &str) {
     app.series_items = easyscanlate_settings::series::load_series().items;
 }
 
-fn extract_inpaint_data(tab: &Tab) -> Vec<easyscanlate_mmtl::InpaintImageData> {
+/// Raw inpaint payload cloned on the UI thread without decoding: `Rgba`
+/// handles clone pixels (memcpy), `Bytes` handles clone the compressed bytes
+/// (cheap `Arc`). The heavy `load_from_memory` decode runs in `do_save`'s
+/// `spawn_blocking` so saves never stall the UI.
+#[derive(Clone)]
+enum RawInpaint {
+    Rgba {
+        image_id: easyscanlate_model::ImageId,
+        bounds: [f32; 4],
+        width: u32,
+        height: u32,
+        pixels: Vec<u8>,
+    },
+    Bytes {
+        image_id: easyscanlate_model::ImageId,
+        bounds: [f32; 4],
+        bytes: bytes::Bytes,
+    },
+}
+
+fn extract_inpaint_raw(tab: &Tab) -> Vec<RawInpaint> {
     let mut out = Vec::new();
     for loaded in &tab.images {
         let image_id = loaded.image_id;
         for layer in &loaded.inpaint {
-            let (width, height, pixels) = match &layer.handle {
+            match &layer.handle {
                 iced::widget::image::Handle::Rgba { width, height, pixels, .. } => {
-                    (*width, *height, pixels.to_vec())
+                    out.push(RawInpaint::Rgba {
+                        image_id,
+                        bounds: layer.bounds,
+                        width: *width,
+                        height: *height,
+                        pixels: pixels.to_vec(),
+                    });
                 }
                 iced::widget::image::Handle::Bytes(_id, bytes) => {
-                    if let Ok(img) = image::load_from_memory(bytes) {
-                        let rgba = img.to_rgba8();
-                        let (w, h) = (rgba.width(), rgba.height());
-                        (w, h, rgba.into_raw())
-                    } else {
-                        continue;
-                    }
+                    out.push(RawInpaint::Bytes {
+                        image_id,
+                        bounds: layer.bounds,
+                        bytes: bytes.clone(),
+                    });
                 }
                 _ => continue,
-            };
-            out.push(easyscanlate_mmtl::InpaintImageData {
-                image_id,
-                bounds: layer.bounds,
-                width,
-                height,
-                rgba: pixels,
-            });
+            }
+        }
+    }
+    out
+}
+
+fn decode_raw_inpaint(raw: Vec<RawInpaint>) -> Vec<easyscanlate_mmtl::InpaintImageData> {
+    let mut out = Vec::with_capacity(raw.len());
+    for r in raw {
+        match r {
+            RawInpaint::Rgba { image_id, bounds, width, height, pixels } => {
+                out.push(easyscanlate_mmtl::InpaintImageData {
+                    image_id,
+                    bounds,
+                    width,
+                    height,
+                    rgba: pixels,
+                });
+            }
+            RawInpaint::Bytes { image_id, bounds, bytes } => {
+                if let Ok(img) = image::load_from_memory(&bytes) {
+                    let rgba = img.to_rgba8();
+                    let (w, h) = (rgba.width(), rgba.height());
+                    out.push(easyscanlate_mmtl::InpaintImageData {
+                        image_id,
+                        bounds,
+                        width: w,
+                        height: h,
+                        rgba: rgba.into_raw(),
+                    });
+                }
+            }
         }
     }
     out
@@ -87,7 +135,7 @@ pub fn handle_save(app: &mut App) -> Task<Message> {
     if let Some(path) = path_opt {
         let tab = app.active_tab_mut();
         tab.project.ensure_project_id();
-        return do_save(tab_id, tab.project.clone(), extract_inpaint_data(tab), path);
+        return do_save(tab_id, tab.project.clone(), extract_inpaint_raw(tab), path);
     }
     handle_save_as(app)
 }
@@ -140,7 +188,7 @@ pub fn handle_save_picked(app: &mut App, tab_id: crate::app::tab::TabId, picked:
         tab.mmtl_path = Some(path.clone());
     }
     let tab = &app.tabs[idx];
-    do_save(tab_id, tab.project.clone(), extract_inpaint_data(tab), path)
+    do_save(tab_id, tab.project.clone(), extract_inpaint_raw(tab), path)
 }
 
 fn build_loaded_images(res: easyscanlate_mmtl::LoadResult, display: String) -> LoadedProjectResult {
@@ -165,12 +213,14 @@ fn build_loaded_images(res: easyscanlate_mmtl::LoadResult, display: String) -> L
     Ok((project, out_images, display, Some(Arc::new(res.temp_dir))))
 }
 
-fn do_save(tab_id: crate::app::tab::TabId, project: easyscanlate_model::Project, inpaint: Vec<easyscanlate_mmtl::InpaintImageData>, path: PathBuf) -> Task<Message> {
+fn do_save(tab_id: crate::app::tab::TabId, project: easyscanlate_model::Project, raw: Vec<RawInpaint>, path: PathBuf) -> Task<Message> {
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
                 let mut project = project;
                 project.ensure_project_id();
+                // Image decode + zip + FS all off the UI thread.
+                let inpaint = decode_raw_inpaint(raw);
                 easyscanlate_mmtl::save_mmtl(&project, &inpaint, &path).map(|_| path.to_string_lossy().to_string()).map_err(|e| e.to_string())
             })
             .await

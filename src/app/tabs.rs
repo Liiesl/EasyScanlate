@@ -87,24 +87,23 @@ pub fn handle_close_confirmed(app: &mut App, raw: u64, save: bool) -> Task<Messa
             app.tabs[idx].project.ensure_project_id();
             let project = app.tabs[idx].project.clone();
             let tid = id;
-            let inpaint = {
+            // Raw clone on the UI thread (no decode); `load_from_memory`
+            // runs in the blocking task below so close-with-save never stalls.
+            let raw: Vec<(easyscanlate_model::ImageId, [f32; 4], Option<(u32, u32, Vec<u8>)>, Option<bytes::Bytes>)> = {
                 let tab = &app.tabs[idx];
                 let mut out = Vec::new();
                 for loaded in &tab.images {
                     let image_id = loaded.image_id;
                     for layer in &loaded.inpaint {
-                        let (width, height, pixels) = match &layer.handle {
-                            iced::widget::image::Handle::Rgba { width, height, pixels, .. } => (*width, *height, pixels.to_vec()),
+                        match &layer.handle {
+                            iced::widget::image::Handle::Rgba { width, height, pixels, .. } => {
+                                out.push((image_id, layer.bounds, Some((*width, *height, pixels.to_vec())), None));
+                            }
                             iced::widget::image::Handle::Bytes(_id, bytes) => {
-                                if let Ok(img) = image::load_from_memory(bytes) {
-                                    let rgba = img.to_rgba8();
-                                    let (w, h) = (rgba.width(), rgba.height());
-                                    (w, h, rgba.into_raw())
-                                } else { continue; }
+                                out.push((image_id, layer.bounds, None, Some(bytes.clone())));
                             }
                             _ => continue,
-                        };
-                        out.push(easyscanlate_mmtl::InpaintImageData { image_id, bounds: layer.bounds, width, height, rgba: pixels });
+                        }
                     }
                 }
                 out
@@ -114,6 +113,17 @@ pub fn handle_close_confirmed(app: &mut App, raw: u64, save: bool) -> Task<Messa
                     tokio::task::spawn_blocking(move || {
                         let mut project = project;
                         project.ensure_project_id();
+                        let mut inpaint = Vec::with_capacity(raw.len());
+                        for (image_id, bounds, rgba_opt, bytes_opt) in raw {
+                            if let Some((width, height, rgba)) = rgba_opt {
+                                inpaint.push(easyscanlate_mmtl::InpaintImageData { image_id, bounds, width, height, rgba });
+                            } else if let Some(b) = bytes_opt
+                                && let Ok(img) = image::load_from_memory(&b) {
+                                    let rgba = img.to_rgba8();
+                                    let (w, h) = (rgba.width(), rgba.height());
+                                    inpaint.push(easyscanlate_mmtl::InpaintImageData { image_id, bounds, width: w, height: h, rgba: rgba.into_raw() });
+                                }
+                        }
                         easyscanlate_mmtl::save_mmtl(&project, &inpaint, &path).map(|_| path.to_string_lossy().to_string()).map_err(|e| e.to_string())
                     }).await.unwrap_or_else(|e| Err(format!("save task failed: {e}")))
                 },

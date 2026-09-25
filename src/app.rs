@@ -202,15 +202,30 @@ pub enum Message {
     Model(ModelEvent),
     // Global-only async completions (not per-tab)
     FontLoaded,
+    /// Raw Korean font file bytes read off-thread; handler forwards to
+    /// `iced::font::load` so the 13MB disk read never blocks the first frame.
+    KoreanFontFileRead(Option<Vec<u8>>),
     SystemFonts(Vec<(String, String)>),
     StyleFontLoaded(String),
     /// A lazy font-preview file finished loading. Silent: unlike
     /// `StyleFontLoaded` it never touches the status bar (hover/open
     /// preloading would otherwise spam it on every row).
     StyleFontPreviewLoaded(String),
+    /// One font-preview file read off-thread; handler forwards to
+    /// `iced::font::load` (silent completion).
+    StyleFontFileRead(String, Option<Vec<u8>>),
     CjkFallbackLoaded(usize),
     FetchModels,
     ModelsFetched(std::collections::HashMap<String, ui_translation::Provider>),
+    /// Deferred boot maintenance (recents/series prune + backfill) finished
+    /// off-thread after the first frame; refreshes Home caches.
+    BootMaintenanceDone {
+        recents: Vec<easyscanlate_settings::RecentProject>,
+        series_items: Vec<easyscanlate_settings::series::TrackedProject>,
+    },
+    /// Deferred translation listing-cache load (per-provider JSON) finished
+    /// off-thread; merged like a fetched listing.
+    TranslationCacheLoaded(std::collections::HashMap<String, ui_translation::Provider>),
     /// Polled from `subscription`: drain the single-instance TCP listener.
     IpcPoll,
     /// External open requests (CLI forward, drag-drop, IPC). Each string is
@@ -795,10 +810,14 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             | Message::OnboardingModelPoll
             | Message::Frame(_)
             | Message::FontLoaded
+            | Message::KoreanFontFileRead(_)
             | Message::SystemFonts(_)
             | Message::StyleFontLoaded(_)
             | Message::StyleFontPreviewLoaded(_)
+            | Message::StyleFontFileRead(_, _)
             | Message::CjkFallbackLoaded(_)
+            | Message::BootMaintenanceDone { .. }
+            | Message::TranslationCacheLoaded(_)
             | Message::UpdateCheckResult(_)
             | Message::UpdatePoll
             | Message::IpcPoll
@@ -871,10 +890,14 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::StartOcr) => ocr::handle_start_ocr(app),
         Message::Ui(UiEvent::StopOcr) => ocr::handle_stop_ocr(app),
         Message::FontLoaded => boot::handle_font_loaded(app),
+        Message::KoreanFontFileRead(bytes) => boot::handle_korean_font_file_read(bytes),
         Message::SystemFonts(fonts) => boot::handle_system_fonts(app, fonts),
         Message::StyleFontLoaded(name) => boot::handle_style_font_loaded(app, name),
         Message::StyleFontPreviewLoaded(_) => Task::none(),
+        Message::StyleFontFileRead(name, bytes) => boot::handle_style_font_file_read(name, bytes),
         Message::CjkFallbackLoaded(count) => boot::handle_cjk_fallback_loaded(app, count),
+        Message::BootMaintenanceDone { recents, series_items } => boot::handle_maintenance_done(app, recents, series_items),
+        Message::TranslationCacheLoaded(providers) => translation::handle_cache_loaded(app, providers),
         Message::Ui(UiEvent::ProfileSelect(id)) => profile::handle_select(app, id),
         Message::Ui(UiEvent::ProfileCreate) => profile::handle_create(app),
         Message::Ui(UiEvent::TranslationPanelMode(mode)) => translation::handle_panel_mode(app, mode),

@@ -51,9 +51,9 @@ pub fn handle_settings_search(app: &mut App, query: String) -> Task<Message> {
 }
 
 pub fn handle_settings_changed(app: &mut App) -> Task<Message> {
-    translation::sync_tx_from_store(app);
+    let cache_task = translation::sync_tx_from_store(app);
     app.active_tab_mut().status = "Settings saved.".to_string();
-    Task::none()
+    cache_task
 }
 
 fn normalize_series(series: Option<String>) -> Option<String> {
@@ -170,9 +170,9 @@ pub fn handle_setting_edit(app: &mut App, edit: easyscanlate_ui::event::SettingE
             s.autosave_interval_secs = v.clamp(15, 600);
         }
     });
-    translation::sync_tx_from_store(app);
+    let cache_task = translation::sync_tx_from_store(app);
     app.active_tab_mut().status = "Settings saved.".to_string();
-    Task::none()
+    cache_task
 }
 
 pub fn handle_open_url(app: &mut App, url: String) -> Task<Message> {

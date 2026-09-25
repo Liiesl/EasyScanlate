@@ -89,10 +89,16 @@ pub fn handle_font(app: &mut App, name: String) -> Task<Message> {
         let Some(path) = app.system_fonts.get(&name).cloned() else {
             return Task::none();
         };
-        match std::fs::read(path) {
-            Ok(bytes) => iced::font::load(bytes).map(move |_| Message::StyleFontLoaded(name.clone())),
-            Err(_) => Task::none(),
-        }
+        // Disk read off-thread; `StyleFontFileRead` forwards to `font::load`.
+        Task::perform(
+            async move {
+                let bytes = tokio::task::spawn_blocking(move || std::fs::read(&path).ok())
+                    .await
+                    .unwrap_or(None);
+                (name, bytes)
+            },
+            |(name, bytes)| Message::StyleFontFileRead(name, bytes),
+        )
     } else {
         Task::none()
     }
@@ -113,8 +119,9 @@ fn is_bundled(name: &str) -> bool {
 
 /// Queue `iced::font::load` for `names` that are neither bundled (already
 /// embedded) nor loaded before. Marks families loaded optimistically and
-/// dedupes shared files within the batch; completion is the silent
-/// `StyleFontPreviewLoaded` (never touches the status bar or the style).
+/// dedupes shared files within the batch; disk reads run on the blocking
+/// pool and completion is the silent `StyleFontPreviewLoaded` (never touches
+/// the status bar or the style).
 fn preview_load_task(app: &mut App, names: &[String]) -> Task<Message> {
     let mut tasks = Vec::new();
     let mut seen_paths = HashSet::new();
@@ -130,13 +137,19 @@ fn preview_load_task(app: &mut App, names: &[String]) -> Task<Message> {
             continue;
         }
         app.loaded_fonts.insert(name.clone());
-        if let Ok(bytes) = std::fs::read(&path) {
-            let name = name.clone();
-            tasks.push(
-                iced::font::load(bytes)
-                    .map(move |_| Message::StyleFontPreviewLoaded(name.clone())),
-            );
-        }
+        let name = name.clone();
+        tasks.push(Task::perform(
+            async move {
+                let bytes = tokio::task::spawn_blocking(move || std::fs::read(&path).ok())
+                    .await
+                    .unwrap_or(None);
+                (name, bytes)
+            },
+            |(name, bytes)| match bytes {
+                Some(b) => Message::StyleFontFileRead(name.clone(), Some(b)),
+                None => Message::StyleFontPreviewLoaded(name.clone()),
+            },
+        ));
     }
     Task::batch(tasks)
 }
@@ -287,8 +300,17 @@ pub fn handle_library_changed(
         &app.color_recents,
         app.color_active_tab,
     );
-    let _ = easyscanlate_settings::color_library::save(&stored);
-    Task::none()
+    // Small JSON write off-thread so rapid picker edits never stall the UI.
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || {
+                let _ = easyscanlate_settings::color_library::save(&stored);
+            })
+            .await
+            .unwrap_or(())
+        },
+        |_| Message::AutosaveCleared,
+    )
 }
 
 /// Applies a unified hex-input value to the working style. Shared by the
@@ -600,7 +622,10 @@ pub fn handle_auto_detect(app: &mut App) -> Task<Message> {
                 use crate::app::queue::engine_ready_msg;
                 use easyscanlate_engine_pool::BuiltEngine;
                 let kind = crate::app::queue::JobKind::Styling;
-                match StylingEngine::build() {
+                match tokio::task::spawn_blocking(StylingEngine::build)
+                    .await
+                    .unwrap_or_else(|e| Err(format!("styling build task failed: {e}")))
+                {
                     Ok(engine) => engine_ready_msg(tid, job_id, kind, Ok(BuiltEngine::Styling(engine))),
                     Err(e) => engine_ready_msg(tid, job_id, kind, Err(e)),
                 }
@@ -686,7 +711,10 @@ pub fn classify(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Message> 
                     use crate::app::queue::engine_ready_msg;
                     use easyscanlate_engine_pool::BuiltEngine;
                     let kind = crate::app::queue::JobKind::Styling;
-                    match StylingEngine::build() {
+                    match tokio::task::spawn_blocking(StylingEngine::build)
+                        .await
+                        .unwrap_or_else(|e| Err(format!("styling build task failed: {e}")))
+                    {
                         Ok(engine) => engine_ready_msg(tid, job_id, kind, Ok(BuiltEngine::Styling(engine))),
                         Err(e) => engine_ready_msg(tid, job_id, kind, Err(e)),
                     }

@@ -94,7 +94,10 @@ pub fn start_segment_filter(app: &mut App, tab_id: crate::app::tab::TabId) -> Ta
                     async move {
                         use crate::app::queue::engine_ready_msg;
                         use easyscanlate_engine_pool::BuiltEngine;
-                        match SegmentEngine::build() {
+                        match tokio::task::spawn_blocking(SegmentEngine::build)
+                            .await
+                            .unwrap_or_else(|e| Err(format!("segment build task failed: {e}")))
+                        {
                             Ok(engine) => engine_ready_msg(
                                 tab_id,
                                 job_id,

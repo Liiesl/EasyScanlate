@@ -61,10 +61,26 @@ pub fn start_ocr_stream(app: &mut App, tab_id: super::tab::TabId) -> Task<Messag
         })
         .collect();
     let workers = easyscanlate_settings::get(|s| s.ocr_workers.parse::<usize>().unwrap_or(2)).max(1);
-    let mut session = ocr::RunSession::new(runs, dims, paths, above_paths, below_paths, workers);
+    let session = ocr::RunSession::new(runs, dims, paths, above_paths, below_paths, workers);
     Task::stream(
         iced::stream::try_channel(1, move |mut sender: iced::futures::channel::mpsc::Sender<Message>| async move {
-            while let Some(event) = session.step(&pipeline, &token)? {
+            // Heavy canvas build + `ort` inference runs on the blocking pool
+            // (one `spawn_blocking` per step, state round-tripped) so the
+            // iced async executor never stalls while streaming.
+            let mut session = session;
+            let mut pipeline = pipeline;
+            let mut token = token;
+            loop {
+                let (s, p, t, step) = tokio::task::spawn_blocking(move || {
+                    let r = session.step(&pipeline, &token);
+                    (session, pipeline, token, r)
+                })
+                .await
+                .map_err(|e| format!("ocr step task failed: {e}"))?;
+                session = s;
+                pipeline = p;
+                token = t;
+                let Some(event) = step? else { break };
                 if sender
                     .send(Message::Tab(tab_id, crate::app::TabMessage::OcrStreamRun(Ok::<ocr::RunEvent, String>(event))))
                     .await
@@ -233,7 +249,12 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
                     let tid = tab_id;
                     return Task::perform(
                         async move {
-                            match ParallelEngine::build_with_config(cfg, workers) {
+                            match tokio::task::spawn_blocking(move || {
+                                ParallelEngine::build_with_config(cfg, workers)
+                            })
+                            .await
+                            .unwrap_or_else(|e| Err(format!("ocr build task failed: {e}")))
+                            {
                                 Ok(engine) => engine_ready_msg(
                                     tid,
                                     job_id,
@@ -916,7 +937,12 @@ pub fn handle_manual_ocr_selection(app: &mut App, tab_id: super::tab::TabId, sel
             async move {
                 use crate::app::queue::engine_ready_msg;
                 use easyscanlate_engine_pool::BuiltEngine;
-                match ocr::Engine::build_with_config(cfg) {
+                match tokio::task::spawn_blocking(move || {
+                    ocr::Engine::build_with_config(cfg)
+                })
+                .await
+                .unwrap_or_else(|e| Err(format!("ocr build task failed: {e}")))
+                {
                     Ok(engine) => engine_ready_msg(
                         tab_id,
                         job_id.unwrap_or(0),

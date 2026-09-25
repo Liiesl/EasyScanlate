@@ -22,23 +22,36 @@ use super::{App, Message};
 /// at boot and on the single [`UiEvent::SettingsChanged`] announcement.
 /// Cached listings are merged for ids without fresh data so newly added
 /// connections (e.g. onboarding) still paint instantly offline.
-pub fn sync_tx_from_store(app: &mut App) {
+pub fn sync_tx_from_store(app: &mut App) -> Task<Message> {
     easyscanlate_settings::get(|s| {
         app.tx.connections = s.connections.clone();
         app.tx.free_only = s.free_models_only;
         app.tx.hidden_models = s.hidden_models.clone();
     });
     app.tx.sync();
-    let cached = translation::cache::load_cached_providers(&app.tx.fetch_ids());
-    if !cached.is_empty() {
-        let fresh: HashMap<String, translation::Provider> = cached
-            .into_iter()
-            .filter(|(id, _)| !app.tx.fetched.contains_key(id))
-            .collect();
-        if !fresh.is_empty() {
-            app.tx.on_fetched(fresh);
-        }
+    // Listing-cache JSON reads go to the blocking pool; merge on completion
+    // so `SettingsChanged`/onboarding never stalls the UI thread.
+    let fetch_ids = app.tx.fetch_ids();
+    let known: std::collections::HashSet<String> =
+        app.tx.fetched.keys().cloned().collect();
+    if fetch_ids.is_empty() {
+        return Task::none();
     }
+    Task::perform(
+        async move {
+            let cached: HashMap<String, translation::Provider> =
+                tokio::task::spawn_blocking(move || {
+                    translation::cache::load_cached_providers(&fetch_ids)
+                })
+                .await
+                .unwrap_or_default();
+            cached
+                .into_iter()
+                .filter(|(id, _)| !known.contains(id))
+                .collect::<HashMap<String, translation::Provider>>()
+        },
+        Message::TranslationCacheLoaded,
+    )
 }
 
 pub fn handle_fetch_models(app: &mut App) -> Task<Message> {
@@ -48,6 +61,18 @@ pub fn handle_fetch_models(app: &mut App) -> Task<Message> {
     } else {
         Task::perform(translation::fetch_providers(ids), Message::ModelsFetched)
     }
+}
+
+/// Deferred on-disk listing cache (loaded via `spawn_blocking` after the
+/// first frame). Merges without persisting back to disk — the network
+/// mirror delta (`handle_models_fetched`) owns persistence.
+pub fn handle_cache_loaded(app: &mut App, providers: HashMap<String, translation::Provider>) -> Task<Message> {
+    if providers.is_empty() {
+        return Task::none();
+    }
+    app.tx.on_fetched(providers);
+    app.tx.ensure_default_hidden_seeded();
+    Task::none()
 }
 
 pub fn handle_models_fetched(app: &mut App, providers: HashMap<String, translation::Provider>) -> Task<Message> {

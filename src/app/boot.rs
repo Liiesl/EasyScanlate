@@ -59,24 +59,51 @@ pub fn boot(
     ipc_listener: Option<crate::single_instance::Listener>,
 ) -> (App, Task<Message>) {
     easyscanlate_settings::init();
-    // Sanitize Home recents: drop entries whose .mmtl path no longer exists.
-    easyscanlate_settings::prune_missing_recents();
-    // Same for the series index (dedup when moved/deleted).
-    easyscanlate_settings::series::prune_missing_series();
-    // Backfill: recents predating the series index are tracked as standalone.
-    {
-        let store = easyscanlate_settings::series::load_series();
-        let recents = easyscanlate_settings::get(|s| s.recent_projects.clone());
-        for rp in recents.iter().rev() {
-            if !store.items.iter().any(|r| r.path == rp.path) {
-                easyscanlate_settings::series::touch_series(rp.path.clone(), None);
-            }
-        }
-    }
-    let font_task = match std::fs::read(KOREAN_FONT_PATH) {
-        Ok(bytes) => iced::font::load(bytes).map(|_| Message::FontLoaded),
-        Err(_) => Task::none(),
-    };
+    // Fast first frame: recents/series pruning, backfill, autosave GC, and
+    // the 13MB Korean font disk read all run in background tasks below.
+    // Home paints instantly from the on-disk values; maintenance posts
+    // `BootMaintenanceDone` to refresh the caches when finished.
+    let font_path = KOREAN_FONT_PATH.to_string();
+    let font_task = Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || std::fs::read(&font_path).ok())
+                .await
+                .unwrap_or(None)
+        },
+        Message::KoreanFontFileRead,
+    );
+    let maintenance_task = Task::perform(
+        async {
+            tokio::task::spawn_blocking(|| {
+                // Sanitize Home recents: drop entries whose .mmtl path no longer exists.
+                easyscanlate_settings::prune_missing_recents();
+                // Same for the series index (dedup when moved/deleted).
+                easyscanlate_settings::series::prune_missing_series();
+                // Backfill: recents predating the series index are tracked as standalone.
+                {
+                    let store = easyscanlate_settings::series::load_series();
+                    let recents = easyscanlate_settings::get(|s| s.recent_projects.clone());
+                    for rp in recents.iter().rev() {
+                        if !store.items.iter().any(|r| r.path == rp.path) {
+                            easyscanlate_settings::series::touch_series(rp.path.clone(), None);
+                        }
+                    }
+                }
+                // Best-effort prune of stale central autosaves (>30 days) so crash
+                // leftovers never grow unbounded next to default-config.toml.
+                super::autosave::prune_old_autosaves(30 * 86400);
+                let recents = easyscanlate_settings::get(|s| s.recent_projects.clone());
+                let series_items = easyscanlate_settings::series::load_series().items;
+                (recents, series_items)
+            })
+            .await
+            .unwrap_or_else(|_| (Vec::new(), Vec::new()))
+        },
+        |(recents, series_items)| Message::BootMaintenanceDone {
+            recents,
+            series_items,
+        },
+    );
     #[cfg_attr(
         not(any(
             feature = "translation",
@@ -88,7 +115,7 @@ pub fn boot(
     )]
     let mut app = App::new(frame);
     #[cfg(feature = "translation")]
-    {
+    let cache_task = {
         let (connections, last_provider, free_only, hidden) = easyscanlate_settings::get(|s| {
             (
                 s.connections.clone(),
@@ -101,20 +128,27 @@ pub fn boot(
         app.tx.free_only = free_only;
         app.tx.hidden_models = hidden;
         app.tx.sync();
-        // Instant paint from the on-disk listing cache (connected cloud
-        // gateways only): the async mirror delta below overwrites it when
-        // the listing changed, so offline boots keep full model lists
-        // instead of the 2-model catalog fallbacks.
-        let cached = translation::cache::load_cached_providers(&app.tx.fetch_ids());
-        if !cached.is_empty() {
-            app.tx.on_fetched(cached);
-            app.tx.ensure_default_hidden_seeded();
-        }
-    }
+        // On-disk listing cache loads off-thread after the first frame; the
+        // async mirror delta below overwrites it when changed, so offline
+        // boots keep full model lists instead of catalog fallbacks.
+        let fetch_ids = app.tx.fetch_ids();
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    translation::cache::load_cached_providers(&fetch_ids)
+                })
+                .await
+                .unwrap_or_default()
+            },
+            Message::TranslationCacheLoaded,
+        )
+    };
+    #[cfg(not(feature = "translation"))]
+    let cache_task: Task<Message> = Task::none();
     #[cfg(all(not(feature = "translation"), feature = "test-ui"))]
-    {
-        translation::sync_tx_from_store(&mut app);
-    }
+    let test_sync_task = translation::sync_tx_from_store(&mut app);
+    #[cfg(not(all(not(feature = "translation"), feature = "test-ui")))]
+    let test_sync_task: Task<Message> = Task::none();
     #[cfg(feature = "translation")]
     let models_task = {
         let fetch_ids = app.tx.fetch_ids();
@@ -218,16 +252,28 @@ pub fn boot(
         app.active_tab_mut().status = "TEST-UI build: fake white page with fake OCR entries and fake translation loaded."
             .to_string();
     }
-    let fonts_task =
-        Task::perform(async move { enumerate_system_fonts() }, Message::SystemFonts);
-    let cjk_task = Task::perform(async move { load_cjk_fallbacks() }, Message::CjkFallbackLoaded);
+    // Full system-font scan is ~100s of ms: keep the two tasks (enumerate +
+    // CJK allow-list) but run them on the blocking pool so the iced async
+    // executor never stalls. Results stream back as messages.
+    let fonts_task = Task::perform(
+        async move {
+            tokio::task::spawn_blocking(enumerate_system_fonts)
+                .await
+                .unwrap_or_default()
+        },
+        Message::SystemFonts,
+    );
+    let cjk_task = Task::perform(
+        async move {
+            tokio::task::spawn_blocking(load_cjk_fallbacks)
+                .await
+                .unwrap_or(0)
+        },
+        Message::CjkFallbackLoaded,
+    );
 
     // Store single-instance listener (so subscription can poll for forwarded .mmtl).
     app.ipc_listener = ipc_listener;
-
-    // Best-effort prune of stale central autosaves (>30 days) so crash
-    // leftovers never grow unbounded next to default-config.toml.
-    super::autosave::prune_old_autosaves(30 * 86400);
 
     // Velopack update check (GithubSource Liiesl/EasyScanlate,
     // per-user). Mirrors ManhwaOCR update.py 2s startup delay + settings
@@ -284,7 +330,17 @@ pub fn boot(
 
     (
         app,
-        Task::batch([font_task, models_task, fonts_task, cjk_task, cli_task, update_task]),
+        Task::batch([
+            font_task,
+            maintenance_task,
+            cache_task,
+            test_sync_task,
+            models_task,
+            fonts_task,
+            cjk_task,
+            cli_task,
+            update_task,
+        ]),
     )
 }
 
@@ -372,6 +428,32 @@ pub fn handle_system_fonts(app: &mut App, fonts: Vec<(String, String)>) -> Task<
     }
     names.sort();
     app.installed_fonts = names;
+    Task::none()
+}
+
+pub fn handle_korean_font_file_read(bytes: Option<Vec<u8>>) -> Task<Message> {
+    match bytes {
+        Some(b) => iced::font::load(b).map(|_| Message::FontLoaded),
+        None => Task::none(),
+    }
+}
+
+pub fn handle_style_font_file_read(name: String, bytes: Option<Vec<u8>>) -> Task<Message> {
+    // Silent like previews: hover/open preloading must never spam the
+    // status bar. Explicit picks already applied the family synchronously.
+    match bytes {
+        Some(b) => iced::font::load(b).map(move |_| Message::StyleFontPreviewLoaded(name.clone())),
+        None => Task::none(),
+    }
+}
+
+pub fn handle_maintenance_done(
+    app: &mut App,
+    recents: Vec<easyscanlate_settings::RecentProject>,
+    series_items: Vec<easyscanlate_settings::series::TrackedProject>,
+) -> Task<Message> {
+    app.recent_projects = recents;
+    app.series_items = series_items;
     Task::none()
 }
 
