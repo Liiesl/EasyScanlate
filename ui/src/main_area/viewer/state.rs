@@ -8,7 +8,7 @@ use easyscanlate_model::EntryId;
 
 use crate::event::ManualMode;
 
-use super::interaction::Interaction;
+use super::interaction::{GradientRest, Interaction};
 
 #[derive(Debug, Clone)]
 pub struct TileViewState {
@@ -42,6 +42,8 @@ pub struct TileViewState {
     pub last_published_anchor: Option<f32>,
     /// Whether the vertical save-menu (save / image) is expanded to the right of the Save button.
     pub save_menu_open: bool,
+    /// Cached resting radius of the free gradient handles (session-only).
+    pub gradient_rest: Option<GradientRest>,
 }
 
 impl TileViewState {
@@ -75,6 +77,7 @@ impl Default for TileViewState {
             last_published_offset: None,
             last_published_anchor: None,
             save_menu_open: false,
+            gradient_rest: None,
         }
     }
 }

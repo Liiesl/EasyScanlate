@@ -88,6 +88,7 @@ fn unified_field<'a, S: UiState + ?Sized>(
         UiEvent::StyleColorCancel(field),
     )
     .on_submit(move |v| UiEvent::StyleColorSubmit(field, v))
+    .on_tab_change(move |tab| UiEvent::StyleColorTabChanged(field, tab))
     .position(Position::BottomLeft)
     .on_dropper_capture(|| UiEvent::StyleDropperCapture)
     .width(FillLength)

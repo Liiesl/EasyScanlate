@@ -87,6 +87,199 @@ pub fn quad_centroid(quad: [[f32; 2]; 4]) -> Point {
     )
 }
 
+/// Side of a gradient stop square, in tile pixels.
+pub const GRADIENT_SQUARE: f32 = 14.0;
+/// Extra hit slop around a gradient square, in tile pixels.
+pub const GRADIENT_HIT_PAD: f32 = 4.0;
+
+/// Tile-local box rect of an entry's gradient (axis-aligned bounds scaled).
+pub fn gradient_handle_box(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    index: usize,
+    id: EntryId,
+) -> Option<Rectangle> {
+    let tile = tiles.get(index)?;
+    let scale = if tile.source_width > 0 {
+        state.width / tile.source_width as f32
+    } else {
+        0.0
+    };
+    if scale <= 0.0 {
+        return None;
+    }
+    let entry = tile.overlays.iter().find(|e| e.id == id)?;
+    let [min_x, min_y, max_x, max_y] = entry.bounds;
+    Some(Rectangle::new(
+        Point::new(min_x * scale, min_y * scale),
+        Size::new((max_x - min_x) * scale, (max_y - min_y) * scale),
+    ))
+}
+
+/// Gradient endpoints in tile-local coords, matching the overlay paint math.
+pub fn gradient_handle_points(box_rect: Rectangle, angle: f32) -> (Point, Point) {
+    crate::main_area::overlay::gradient::gradient_start_end_angle(angle, box_rect)
+}
+
+/// Center of the gradient box.
+pub fn gradient_box_center(box_rect: Rectangle) -> Point {
+    Point::new(
+        box_rect.x + box_rect.width / 2.0,
+        box_rect.y + box_rect.height / 2.0,
+    )
+}
+
+/// Edge distance: center to either clamped endpoint (`factor 1.0`).
+pub fn gradient_edge_distance(box_rect: Rectangle, angle: f32) -> f32 {
+    let (start, end) = gradient_handle_points(box_rect, angle);
+    ((end.x - start.x).hypot(end.y - start.y) / 2.0).max(f32::EPSILON)
+}
+
+/// Free handle endpoints: center ± direction × edge distance × `factor`.
+/// `1.0` rests the squares on the entry border; larger values float them
+/// outside like Figma.
+pub fn gradient_free_points(box_rect: Rectangle, angle: f32, factor: f32) -> (Point, Point) {
+    let (start, end) = gradient_handle_points(box_rect, angle);
+    let mut dx = end.x - start.x;
+    let mut dy = end.y - start.y;
+    let len = dx.hypot(dy).max(f32::EPSILON);
+    dx /= len;
+    dy /= len;
+    let center = gradient_box_center(box_rect);
+    let radius = gradient_edge_distance(box_rect, angle) * factor.max(0.2);
+    (
+        Point::new(center.x - dx * radius, center.y - dy * radius),
+        Point::new(center.x + dx * radius, center.y + dy * radius),
+    )
+}
+
+/// Resting radius factor cached in the widget state for this handle, or
+/// `1.0` (squares on the border) when nothing was dropped yet.
+pub fn gradient_rest_factor(
+    state: &TileViewState,
+    index: usize,
+    id: EntryId,
+    field: crate::event::StyleField,
+) -> f32 {
+    match state.gradient_rest {
+        Some(rest)
+            if rest.index == index && rest.id == id && rest.field == field =>
+        {
+            rest.factor
+        }
+        _ => 1.0,
+    }
+}
+
+/// Radius factor for a drop at distance `r` from the center, clamped so the
+/// squares stay reachable: at least `0.2` (no center collapse) and at most
+/// the tile frame (minus a square margin) so a dropped handle can be
+/// grabbed again afterwards.
+pub fn gradient_release_factor(
+    box_rect: Rectangle,
+    angle: f32,
+    r: f32,
+    frame: Size,
+) -> f32 {
+    let edge = gradient_edge_distance(box_rect, angle);
+    let (start, end) = gradient_handle_points(box_rect, angle);
+    let mut dx = end.x - start.x;
+    let mut dy = end.y - start.y;
+    let len = dx.hypot(dy).max(f32::EPSILON);
+    dx /= len;
+    dy /= len;
+    let center = gradient_box_center(box_rect);
+    let margin = scale::s(GRADIENT_SQUARE) / 2.0 + scale::s(2.0);
+    let mut reach = f32::INFINITY;
+    let eps = 1e-6;
+    if dx > eps {
+        reach = reach.min((frame.width - margin - center.x) / dx);
+    } else if dx < -eps {
+        reach = reach.min((margin - center.x) / dx);
+    }
+    if dy > eps {
+        reach = reach.min((frame.height - margin - center.y) / dy);
+    } else if dy < -eps {
+        reach = reach.min((margin - center.y) / dy);
+    }
+    let max_factor = (reach / edge).max(0.2);
+    (r / edge).clamp(0.2, max_factor)
+}
+
+/// Square centered at a handle point.
+pub fn gradient_square_rect(center: Point) -> Rectangle {
+    let side = scale::s(GRADIENT_SQUARE);
+    let half = side / 2.0;
+    Rectangle::new(
+        Point::new(center.x - half, center.y - half),
+        Size::new(side, side),
+    )
+}
+
+/// Squares centered at the free handle endpoints.
+pub fn gradient_handle_squares(
+    box_rect: Rectangle,
+    angle: f32,
+    factor: f32,
+) -> (Rectangle, Rectangle) {
+    let (start, end) = gradient_free_points(box_rect, angle, factor);
+    (gradient_square_rect(start), gradient_square_rect(end))
+}
+
+/// Hit-test squares with extra padding; returns endpoint `0`/`1`.
+pub fn gradient_handle_hit(
+    box_rect: Rectangle,
+    angle: f32,
+    factor: f32,
+    p: Point,
+) -> Option<usize> {
+    let (a, b) = gradient_handle_squares(box_rect, angle, factor);
+    let pad = scale::s(GRADIENT_HIT_PAD);
+    let expand = |r: Rectangle| {
+        Rectangle::new(
+            Point::new(r.x - pad, r.y - pad),
+            Size::new(r.width + pad * 2.0, r.height + pad * 2.0),
+        )
+    };
+    if expand(a).contains(p) {
+        return Some(0);
+    }
+    if expand(b).contains(p) {
+        return Some(1);
+    }
+    None
+}
+
+/// Raw pointer angle in degrees around the box center (`-180..180`).
+/// Unlike [`gradient_angle_from_point`], this has no gradient convention
+/// folded in, so differences between two calls are pure cursor deltas —
+/// independent of which stop square was grabbed.
+pub fn gradient_pointer_angle(box_rect: Rectangle, p: Point) -> f32 {
+    let center = Point::new(
+        box_rect.x + box_rect.width / 2.0,
+        box_rect.y + box_rect.height / 2.0,
+    );
+    f32::atan2(p.y - center.y, p.x - center.x).to_degrees()
+}
+
+/// Wraps an angle delta in degrees to `-180..180`.
+pub fn wrap_angle_delta(delta: f32) -> f32 {
+    (delta + 540.0).rem_euclid(360.0) - 180.0
+}
+
+/// Angle in degrees (`0..360`) of point `p` around the box center, inverting
+/// `gradient_flow` (`angle - 90°` gives the stop-0→stop-1 vector).
+pub fn gradient_angle_from_point(box_rect: Rectangle, p: Point) -> f32 {
+    let center = Point::new(
+        box_rect.x + box_rect.width / 2.0,
+        box_rect.y + box_rect.height / 2.0,
+    );
+    let internal = f32::atan2(p.y - center.y, p.x - center.x);
+    (internal + std::f32::consts::FRAC_PI_2)
+        .to_degrees()
+        .rem_euclid(360.0)
+}
+
 pub fn top_decor_geometry(rect: Rectangle, quad: [[f32; 2]; 4], width: f32, viewport_top: f32, viewport_bottom: f32) -> TopDecor {
     let center = quad_centroid(quad);
     let hs = scale::s(HANDLE_SIZE);

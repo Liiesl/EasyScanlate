@@ -317,7 +317,54 @@ where
     }
 }
 
-// 8 args mirror the overlay draw state; all call sites pass them through together.
+/// Figma-like gradient angle handle: white line between the free handle
+/// points, white dots at the ends, and two stop-color squares.
+pub fn draw_gradient_handle<F>(
+    frame: &mut F,
+    start: Point,
+    end: Point,
+    color_a: iced::Color,
+    color_b: iced::Color,
+    hover: Option<usize>,
+) where
+    F: geometry::frame::Backend,
+{
+    frame.stroke(
+        &Path::line(start, end),
+        Stroke::default()
+            .with_color(iced::Color::WHITE)
+            .with_width(scale::s(1.5)),
+    );
+    for point in [start, end] {
+        frame.fill(
+            &Path::circle(point, scale::s(3.0)),
+            Fill::from(iced::Color::WHITE),
+        );
+    }
+    let (square_a, square_b) = (
+        super::motion::gradient_square_rect(start),
+        super::motion::gradient_square_rect(end),
+    );
+    for (index, (rect, color)) in
+        [(square_a, color_a), (square_b, color_b)].into_iter().enumerate()
+    {
+        let path = Path::rectangle(rect.position(), rect.size());
+        frame.fill(&path, Fill::from(color));
+        let highlighted = hover == Some(index);
+        frame.stroke(
+            &path,
+            Stroke::default()
+                .with_color(if highlighted {
+                    crate::accent::accent()
+                } else {
+                    iced::Color::WHITE
+                })
+                .with_width(scale::s(2.0)),
+        );
+    }
+}
+
+// 9 args mirror the overlay draw state; all call sites pass them through together.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_selection_decorations<'a, F>(
     frame: &mut F,
@@ -328,12 +375,97 @@ pub fn draw_selection_decorations<'a, F>(
     flip_from: f32,
     flip_at: f32,
     show_overlay_text: bool,
+    gradient: Option<super::interaction::GradientHandleSpec>,
 ) where
     F: geometry::frame::Backend,
 {
     let Some(entry) = tiles[tile_index].overlays.iter().find(|e| e.selected) else {
         return;
     };
+    if let Some(spec) = gradient {
+        if spec.index == tile_index && spec.id == entry.id {
+            if entry.hide_text {
+                return;
+            }
+            let scale =
+                frame.width() / tiles[tile_index].source_width.max(1) as f32;
+            let box_rect = Rectangle::new(
+                Point::new(entry.bounds[0] * scale, entry.bounds[1] * scale),
+                Size::new(
+                    (entry.bounds[2] - entry.bounds[0]) * scale,
+                    (entry.bounds[3] - entry.bounds[1]) * scale,
+                ),
+            );
+            let factor = super::motion::gradient_rest_factor(
+                state,
+                spec.index,
+                spec.id,
+                spec.field,
+            );
+            // While dragging, the grabbed square sticks exactly to the
+            // cursor (no restriction) and the other mirrors across the
+            // center; otherwise both rest at the cached free radius.
+            let dragging_endpoint = match state.interaction {
+                Interaction::GradientPending { index, id, endpoint, .. }
+                | Interaction::GradientDragging { index, id, endpoint, .. }
+                    if index == tile_index && id == entry.id =>
+                {
+                    Some(endpoint)
+                }
+                _ => None,
+            };
+            let center = super::motion::gradient_box_center(box_rect);
+            let exact_cursor = match state.interaction {
+                Interaction::GradientDragging { index, id, .. }
+                    if index == tile_index && id == entry.id =>
+                {
+                    cursor_local.filter(|p| {
+                        (p.x - center.x).hypot(p.y - center.y) >= 1.0
+                    })
+                }
+                _ => None,
+            };
+            let (start, end, hover) = match (exact_cursor, dragging_endpoint) {
+                (Some(cursor), Some(endpoint)) => {
+                    let mirror = Point::new(
+                        2.0 * center.x - cursor.x,
+                        2.0 * center.y - cursor.y,
+                    );
+                    let (s, e) = if endpoint == 0 {
+                        (cursor, mirror)
+                    } else {
+                        (mirror, cursor)
+                    };
+                    (s, e, Some(endpoint))
+                }
+                _ => {
+                    let (s, e) = super::motion::gradient_free_points(
+                        box_rect,
+                        spec.angle,
+                        factor,
+                    );
+                    let hover = cursor_local.and_then(|local| {
+                        super::motion::gradient_handle_hit(
+                            box_rect,
+                            spec.angle,
+                            factor,
+                            local,
+                        )
+                    });
+                    (s, e, hover.or(dragging_endpoint))
+                }
+            };
+            draw_gradient_handle(
+                frame,
+                start,
+                end,
+                spec.color_a,
+                spec.color_b,
+                hover,
+            );
+            return;
+        }
+    }
     if entry.hide_text || !show_overlay_text {
         return;
     }

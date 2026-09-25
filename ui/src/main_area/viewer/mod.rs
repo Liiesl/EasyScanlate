@@ -24,7 +24,7 @@ use iced::keyboard;
 use iced::touch::Event as TouchEvent;
 use iced::{Element, Event, Font, Length, Point, Rectangle, Size, Vector};
 
-use crate::event::{InpaintToolbarAction, ManualMode, ToolbarAction};
+use crate::event::{InpaintToolbarAction, ManualMode, StyleField, ToolbarAction};
 use easyscanlate_model::{EntryId, Quad};
 
 use self::constants::{
@@ -35,13 +35,18 @@ use self::draw::{
     draw_placeholder, draw_scrollbar, draw_selection_decorations,
 };
 use self::hit_test::{
-    editing_rect, hit_entry, hit_handle, hit_inpaint_toolbar, hit_overlay_button,
-    hit_save_menu_button, hit_tile, hit_toolbar, hit_top_decor, inpaint_reveal_offset,
-    local_point, tile_local_point,
+    editing_rect, hit_entry, hit_gradient_handle, hit_handle, hit_inpaint_toolbar,
+    hit_overlay_button, hit_save_menu_button, hit_tile, hit_toolbar, hit_top_decor,
+    inpaint_reveal_offset, local_point, tile_local_point,
 };
-use self::interaction::{Interaction, OverlayButton, SaveMenuButton, TopDecorHit};
+pub use self::interaction::{
+    GradientHandleSpec, GradientRest, Interaction, OverlayButton, SaveMenuButton, TopDecorHit,
+};
 use self::layout::{content_width, tile_layout};
-use self::motion::{distort_quad, drag_grab, drag_quad, resize_quad, rotate_quad};
+use self::motion::{
+    distort_quad, drag_grab, drag_quad, gradient_handle_box, gradient_pointer_angle,
+    gradient_release_factor, resize_quad, rotate_quad, wrap_angle_delta,
+};
 use self::scroll::{
     anchor_from_state, offset_from_anchor, publish_anchor, publish_edit_rect, publish_visible,
     scroll_by, thumb_rect, track_rect,
@@ -68,6 +73,7 @@ pub struct TileView<
     W = fn(Vec<(usize, Rectangle)>) -> Message,
     X = fn((usize, Rectangle)) -> Message,
     Y = fn(Vec<(usize, Rectangle)>) -> Message,
+    Z = fn((usize, EntryId, StyleField, f32)) -> Message,
 > where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -85,6 +91,7 @@ pub struct TileView<
     W: Fn(Vec<(usize, Rectangle)>) -> Message,
     X: Fn((usize, Rectangle)) -> Message,
     Y: Fn(Vec<(usize, Rectangle)>) -> Message,
+    Z: Fn((usize, EntryId, StyleField, f32)) -> Message,
 {
     tiles: Vec<TileSpec<'a>>,
     font: Font,
@@ -121,9 +128,11 @@ pub struct TileView<
     manual_selections: Vec<(usize, Rectangle)>,
     on_manual_selection: Option<X>,
     on_manual_span: Option<Y>,
+    gradient_handle: Option<GradientHandleSpec>,
+    on_gradient_angle: Option<Z>,
 }
 
-impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y> TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Z> TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Z>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -141,6 +150,7 @@ where
     W: Fn(Vec<(usize, Rectangle)>) -> Message,
     X: Fn((usize, Rectangle)) -> Message,
     Y: Fn(Vec<(usize, Rectangle)>) -> Message,
+    Z: Fn((usize, EntryId, StyleField, f32)) -> Message,
 {
     pub fn new(tiles: Vec<TileSpec<'a>>, font: Font) -> Self {
         Self {
@@ -176,6 +186,8 @@ where
             manual_selections: Vec::new(),
             on_manual_selection: None,
             on_manual_span: None,
+            gradient_handle: None,
+            on_gradient_angle: None,
         }
     }
 
@@ -332,14 +344,24 @@ where
         self.on_save = Some(f);
         self
     }
+
+    pub fn gradient_handle(mut self, spec: Option<GradientHandleSpec>) -> Self {
+        self.gradient_handle = spec;
+        self
+    }
+
+    pub fn on_gradient_angle(mut self, f: Z) -> Self {
+        self.on_gradient_angle = Some(f);
+        self
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Widget impl - delegates geometry/hit-testing/drawing to submodules
 // ---------------------------------------------------------------------------
 
-impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Z, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Z>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -357,6 +379,7 @@ where
     W: Fn(Vec<(usize, Rectangle)>) -> Message,
     X: Fn((usize, Rectangle)) -> Message,
     Y: Fn(Vec<(usize, Rectangle)>) -> Message,
+    Z: Fn((usize, EntryId, StyleField, f32)) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
     fn size(&self) -> Size<Length> {
@@ -623,6 +646,7 @@ where
                                 flip_from,
                                 flip_at,
                                 self.show_overlay_text,
+                                self.gradient_handle,
                             );
                             // Inpaint static highlight + floating toolbar (no handles), like result border.
                             if self.show_inpaint {
@@ -852,6 +876,22 @@ where
                         // be interactive (no drag/resize/rotate/toolbar). Fall through to
                         // scrollbar / empty click handling only.
                     } else if self.editing.is_none() {
+                        if let Some(spec) = self.gradient_handle
+                            && self.selected_inpaint.is_none()
+                            && let Some((index, id, field, endpoint)) =
+                                hit_gradient_handle(&self.tiles, state, local, spec)
+                        {
+                            state.interaction = Interaction::GradientPending {
+                                index,
+                                id,
+                                field,
+                                endpoint,
+                                press: local,
+                                start_angle: spec.angle,
+                            };
+                            shell.capture_event();
+                            return;
+                        }
                         if let Some((index, id, action)) = hit_toolbar(&self.tiles, state, local) {
                             state.interaction = Interaction::ToolbarPressed { index, id, action };
                             shell.capture_event();
@@ -1268,6 +1308,54 @@ where
                     state.save_menu_open = false;
                     shell.request_redraw();
                 }
+                // Remember where a free gradient handle was dropped so it
+                // stays there instead of snapping back to the border.
+                if let Interaction::GradientDragging {
+                    index,
+                    id,
+                    field,
+                    press_angle,
+                    start_angle,
+                    ..
+                } = state.interaction
+                {
+                    if let Some(position) = cursor.position_over(bounds) {
+                        let local = local_point(position, bounds);
+                        if let Some(box_rect) =
+                            gradient_handle_box(&self.tiles, state, index, id)
+                        {
+                            let (layout, _) = tile_layout(&self.tiles, state.width);
+                            if let Some((y, h)) = layout.get(index).copied() {
+                                let tile_local =
+                                    Point::new(local.x, local.y + state.offset - y);
+                                let center =
+                                    self::motion::gradient_box_center(box_rect);
+                                let rx = tile_local.x - center.x;
+                                let ry = tile_local.y - center.y;
+                                if rx.hypot(ry) >= 1.0 {
+                                    let delta = wrap_angle_delta(
+                                        gradient_pointer_angle(box_rect, tile_local)
+                                            - press_angle,
+                                    );
+                                    let angle =
+                                        (start_angle + delta).rem_euclid(360.0);
+                                    let factor = gradient_release_factor(
+                                        box_rect,
+                                        angle,
+                                        rx.hypot(ry),
+                                        Size::new(state.width, h),
+                                    );
+                                    state.gradient_rest = Some(GradientRest {
+                                        index,
+                                        id,
+                                        field,
+                                        factor,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
                 let ended_scroll = matches!(state.interaction, Interaction::ScrollerGrabbed { .. });
                 if matches!(
                     state.interaction,
@@ -1286,6 +1374,8 @@ where
                         | Interaction::SaveMenuPressed { .. }
                         | Interaction::InpaintSelecting { .. }
                         | Interaction::OcrSelecting { .. }
+                        | Interaction::GradientPending { .. }
+                        | Interaction::GradientDragging { .. }
                 ) {
                     state.interaction = Interaction::None;
                     shell.capture_event();
@@ -1438,6 +1528,106 @@ where
                         shell.request_redraw();
                         shell.capture_event();
                     }
+                    Interaction::GradientPending {
+                        index,
+                        id,
+                        field,
+                        endpoint,
+                        press,
+                        start_angle,
+                    } => {
+                        let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        let dx = local.x - press.x;
+                        let dy = local.y - press.y;
+                        if dx * dx + dy * dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
+                            // Relative mapping: the handle starts exactly
+                            // under the cursor (delta 0), so there is no
+                            // jump — and no 180° flip when the start stop
+                            // was grabbed, since the press/cursor offset
+                            // cancels out of the delta.
+                            let mut press_angle = 0.0;
+                            if let Some(box_rect) =
+                                gradient_handle_box(&self.tiles, state, index, id)
+                            {
+                                let (layout, _) = tile_layout(&self.tiles, state.width);
+                                if let Some((y, _)) = layout.get(index).copied() {
+                                    let to_tile =
+                                        |p: Point| Point::new(p.x, p.y + state.offset - y);
+                                    press_angle =
+                                        gradient_pointer_angle(box_rect, to_tile(press));
+                                    let delta = wrap_angle_delta(
+                                        gradient_pointer_angle(box_rect, to_tile(local))
+                                            - press_angle,
+                                    );
+                                    let mut angle =
+                                        (start_angle + delta).rem_euclid(360.0);
+                                    if state.keyboard_modifiers.shift() {
+                                        angle = ((angle / 15.0).round() * 15.0)
+                                            .rem_euclid(360.0);
+                                    }
+                                    if let Some(callback) = self.on_gradient_angle.as_ref()
+                                    {
+                                        let changed =
+                                            self.gradient_handle.map_or(true, |spec| {
+                                                (angle - spec.angle).abs() > 0.1
+                                            });
+                                        if changed {
+                                            shell.publish(callback((
+                                                index, id, field, angle,
+                                            )));
+                                            shell.request_redraw();
+                                        }
+                                    }
+                                }
+                            }
+                            state.interaction = Interaction::GradientDragging {
+                                index,
+                                id,
+                                field,
+                                endpoint,
+                                press_angle,
+                                start_angle,
+                            };
+                        }
+                        shell.capture_event();
+                    }
+                    Interaction::GradientDragging {
+                        index,
+                        id,
+                        field,
+                        endpoint: _,
+                        press_angle,
+                        start_angle,
+                    } => {
+                        let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        if let (Some(callback), Some(box_rect)) = (
+                            self.on_gradient_angle.as_ref(),
+                            gradient_handle_box(&self.tiles, state, index, id),
+                        ) {
+                            let (layout, _) = tile_layout(&self.tiles, state.width);
+                            if let Some((y, _)) = layout.get(index).copied() {
+                                let tile_local =
+                                    Point::new(local.x, local.y + state.offset - y);
+                                let delta = wrap_angle_delta(
+                                    gradient_pointer_angle(box_rect, tile_local) - press_angle,
+                                );
+                                let mut angle =
+                                    (start_angle + delta).rem_euclid(360.0);
+                                if state.keyboard_modifiers.shift() {
+                                    angle =
+                                        ((angle / 15.0).round() * 15.0).rem_euclid(360.0);
+                                }
+                                let changed = self.gradient_handle.map_or(true, |spec| {
+                                    (angle - spec.angle).abs() > 0.1
+                                });
+                                if changed {
+                                    shell.publish(callback((index, id, field, angle)));
+                                    shell.request_redraw();
+                                }
+                            }
+                        }
+                        shell.capture_event();
+                    }
                     Interaction::ToolbarPressed { .. }
                     | Interaction::InpaintToolbarPressed { .. }
                     | Interaction::OverlayButtonPressed { .. }
@@ -1485,7 +1675,9 @@ where
             | Interaction::OverlayButtonPressed { .. }
             | Interaction::SaveMenuPressed { .. }
             | Interaction::InpaintSelecting { .. }
-            | Interaction::OcrSelecting { .. } => mouse::Interaction::Grabbing,
+            | Interaction::OcrSelecting { .. }
+            | Interaction::GradientPending { .. }
+            | Interaction::GradientDragging { .. } => mouse::Interaction::Grabbing,
             Interaction::None => {
                 let bounds = layout.bounds();
                 if let Some(position) = cursor.position_over(bounds) {
@@ -1510,17 +1702,28 @@ where
                         return mouse::Interaction::None;
                     }
                     if self.editing.is_none() {
-                        if hit_toolbar(&self.tiles, state, local).is_some() {
-                            return mouse::Interaction::Pointer;
-                        }
-                        if let Some((_, _, hit)) = hit_top_decor(&self.tiles, state, local) {
-                            return match hit {
-                                TopDecorHit::Rotate => mouse::Interaction::Grabbing,
-                                TopDecorHit::Revert => mouse::Interaction::Pointer,
-                            };
-                        }
-                        if let Some((_, _, handle)) = hit_handle(&self.tiles, state, local) {
-                            return handle.cursor();
+                        // Gradient-only mode: the normal toolbar/handles are
+                        // hidden while the angle handle is shown.
+                        if let Some(spec) = self.gradient_handle
+                            && self.selected_inpaint.is_none()
+                        {
+                            if hit_gradient_handle(&self.tiles, state, local, spec).is_some()
+                            {
+                                return mouse::Interaction::Grab;
+                            }
+                        } else {
+                            if hit_toolbar(&self.tiles, state, local).is_some() {
+                                return mouse::Interaction::Pointer;
+                            }
+                            if let Some((_, _, hit)) = hit_top_decor(&self.tiles, state, local) {
+                                return match hit {
+                                    TopDecorHit::Rotate => mouse::Interaction::Grabbing,
+                                    TopDecorHit::Revert => mouse::Interaction::Pointer,
+                                };
+                            }
+                            if let Some((_, _, handle)) = hit_handle(&self.tiles, state, local) {
+                                return handle.cursor();
+                            }
                         }
                         if (self.inpaint_mode || self.ocr_mode) && hit_tile(&self.tiles, state, local).is_some() {
                             return mouse::Interaction::Crosshair;
@@ -1536,8 +1739,8 @@ where
     }
 }
 
-impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Q: 'a, R: 'a, S: 'a, T: 'a, U: 'a, V: 'a, W: 'a, Theme, Renderer>
-    From<TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W>> for Element<'a, Message, Theme, Renderer>
+impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Q: 'a, R: 'a, S: 'a, T: 'a, U: 'a, V: 'a, W: 'a, X: 'a, Y: 'a, Z: 'a, Theme, Renderer>
+    From<TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Z>> for Element<'a, Message, Theme, Renderer>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -1553,9 +1756,12 @@ where
     U: Fn(Vec<(usize, Rectangle)>) -> Message,
     V: Fn() -> Message,
     W: Fn(Vec<(usize, Rectangle)>) -> Message,
+    X: Fn((usize, Rectangle)) -> Message,
+    Y: Fn(Vec<(usize, Rectangle)>) -> Message,
+    Z: Fn((usize, EntryId, StyleField, f32)) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
-    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W>) -> Self {
+    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Z>) -> Self {
         Self::new(view)
     }
 }

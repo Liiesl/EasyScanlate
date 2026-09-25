@@ -271,6 +271,14 @@ pub enum UiEvent {
     StyleColorChanged(StyleField, neverliie_iced_widgets::hex_color_input::HexColorValue),
     /// The user confirmed the value for `field` in its picker (OK button).
     StyleColorSubmit(StyleField, neverliie_iced_widgets::hex_color_input::HexColorValue),
+    /// The picker's top-level tab (`Color | Gradient | Library`) changed for
+    /// `field`. Used to show the gradient angle handle immediately when the
+    /// Gradient tab is selected, even before any gradient value edit.
+    StyleColorTabChanged(StyleField, neverliie_iced_widgets::color_picker::PickerTab),
+    /// The user dragged the Figma-like gradient angle handle on the selected
+    /// entry in the main area: `(image index, entry id, field, angle degrees)`.
+    /// Live-published per mouse move while the picker's gradient is open.
+    StyleGradientAngle((usize, EntryId, StyleField, f32)),
     /// The eye dropper button requested a fresh window snapshot: the app
     /// should screenshot the window and store it in the shared
     /// `DropperBuffer` (see `UiState::dropper_buffer`).

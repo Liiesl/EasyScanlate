@@ -1,10 +1,44 @@
 use iced::advanced::mouse;
-use iced::Point;
+use iced::{Color, Point};
 
 use easyscanlate_model::{EntryId, Quad};
 
-use crate::event::{InpaintToolbarAction, ToolbarAction};
+use crate::event::{InpaintToolbarAction, StyleField, ToolbarAction};
 use lucide_icons::Icon;
+
+/// Cached resting radius of the free-floating gradient handles, as a factor
+/// of the box edge distance at the release angle (`1.0` = squares centered on
+/// the entry border). Lets a handle dragged far outside stay where it was
+/// dropped instead of snapping back to the border on release.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GradientRest {
+    /// Image index of the selected entry.
+    pub index: usize,
+    /// Entry id of the selected entry.
+    pub id: EntryId,
+    /// Which style field's handle this belongs to.
+    pub field: StyleField,
+    /// Resting radius factor (`>= 0.2`).
+    pub factor: f32,
+}
+
+/// Figma-like gradient angle handle for the selected entry, shown while a
+/// gradient color picker is open for `field`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GradientHandleSpec {
+    /// Image index of the selected entry.
+    pub index: usize,
+    /// Entry id of the selected entry.
+    pub id: EntryId,
+    /// Which style field's angle this edits.
+    pub field: StyleField,
+    /// Current angle in degrees (`0..360`).
+    pub angle: f32,
+    /// First stop color (square at gradient start).
+    pub color_a: Color,
+    /// Second stop color (square at gradient end).
+    pub color_b: Color,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverlayButton {
@@ -145,6 +179,22 @@ pub enum Interaction {
         index: usize,
         start: Point,
         current: Point,
+    },
+    GradientPending {
+        index: usize,
+        id: EntryId,
+        field: StyleField,
+        endpoint: usize,
+        press: Point,
+        start_angle: f32,
+    },
+    GradientDragging {
+        index: usize,
+        id: EntryId,
+        field: StyleField,
+        endpoint: usize,
+        press_angle: f32,
+        start_angle: f32,
     },
 }
 

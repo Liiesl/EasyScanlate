@@ -13,7 +13,7 @@ pub mod viewer;
 // Compatibility shim: old `tile_view` path now re-exports `viewer`.
 #[allow(dead_code)]
 pub mod tile_view {
-    pub use crate::main_area::viewer::{TileSpec, TileView};
+    pub use crate::main_area::viewer::{GradientHandleSpec, TileSpec, TileView};
 }
 
 pub use view::view;

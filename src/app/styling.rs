@@ -178,14 +178,63 @@ pub fn handle_color_open(app: &mut App, field: StyleField) -> Task<Message> {
         // shown and only re-seeds on close->reopen, so close first and reopen
         // on the next update to pick up the new field's color.
         app.active_tab_mut().style_picker = None;
+        app.active_tab_mut().style_picker_tab = None;
         return Task::done(Message::Ui(UiEvent::StyleColorOpen(field)));
     }
     app.active_tab_mut().style_picker = Some(field);
+    app.active_tab_mut().style_picker_tab = None;
     Task::none()
 }
 
 pub fn handle_color_cancel(app: &mut App, _field: StyleField) -> Task<Message> {
     app.active_tab_mut().style_picker = None;
+    app.active_tab_mut().style_picker_tab = None;
+    Task::none()
+}
+
+pub fn handle_color_tab_changed(
+    app: &mut App,
+    field: StyleField,
+    tab: neverliie_iced_widgets::color_picker::PickerTab,
+) -> Task<Message> {
+    use neverliie_iced_widgets::color_picker::PickerTab;
+    if app.active_tab().style_picker != Some(field) {
+        return Task::none();
+    }
+    app.active_tab_mut().style_picker_tab = Some(tab);
+    if tab != PickerTab::Gradient {
+        return Task::none();
+    }
+    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let working = &mut app.active_tab_mut().style_working;
+    let already_gradient = match field {
+        StyleField::Fill => working.text_gradient,
+        StyleField::Stroke => working.stroke_gradient,
+        StyleField::Background => working.bg_gradient,
+    };
+    if already_gradient {
+        return Task::none();
+    }
+    match field {
+        StyleField::Fill => {
+            working.text_gradient = true;
+            working.gradient_a = working.text_color;
+            working.gradient_b = working.text_color;
+        }
+        StyleField::Stroke => {
+            working.stroke_gradient = true;
+            working.stroke_gradient_a = working.stroke_color;
+            working.stroke_gradient_b = working.stroke_color;
+        }
+        StyleField::Background => {
+            working.bg_gradient = true;
+            working.bg_gradient_a = working.bg_color;
+            working.bg_gradient_b = working.bg_color;
+        }
+    }
+    let style = app.active_tab().style_working.clone();
+    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
@@ -222,6 +271,7 @@ fn apply_unified_value(
     use neverliie_iced_widgets::hex_color_input::HexColorValue;
     if close_picker {
         app.active_tab_mut().style_picker = None;
+        app.active_tab_mut().style_picker_tab = None;
     }
     let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
     let working = &mut app.active_tab_mut().style_working;
@@ -289,6 +339,58 @@ pub fn handle_color_submit(
     value: neverliie_iced_widgets::hex_color_input::HexColorValue,
 ) -> Task<Message> {
     apply_unified_value(app, field, value, true)
+}
+
+/// Live angle update from the Figma-like gradient handle on the selected
+/// entry. Keeps the picker open and preserves both stop colors.
+pub fn handle_gradient_angle(
+    app: &mut App,
+    index: usize,
+    id: EntryId,
+    field: StyleField,
+    angle: f32,
+) -> Task<Message> {
+    if app.active_tab().selected != Some((index, id)) {
+        return Task::none();
+    }
+    if app.active_tab().style_picker != Some(field) {
+        return Task::none();
+    }
+    let angle = neverliie_iced_widgets::hex_color_input::normalize_angle(angle);
+    let working = &mut app.active_tab_mut().style_working;
+    match field {
+        StyleField::Fill => {
+            if !working.text_gradient {
+                return Task::none();
+            }
+            if (working.gradient_angle - angle).abs() < 0.05 {
+                return Task::none();
+            }
+            working.gradient_angle = angle;
+        }
+        StyleField::Stroke => {
+            if !working.stroke_gradient {
+                return Task::none();
+            }
+            if (working.stroke_gradient_angle - angle).abs() < 0.05 {
+                return Task::none();
+            }
+            working.stroke_gradient_angle = angle;
+        }
+        StyleField::Background => {
+            if !working.bg_gradient {
+                return Task::none();
+            }
+            if (working.bg_gradient_angle - angle).abs() < 0.05 {
+                return Task::none();
+            }
+            working.bg_gradient_angle = angle;
+        }
+    }
+    let style = app.active_tab().style_working.clone();
+    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    crate::app::handle_model_event(app.active_tab_mut(), ev);
+    Task::none()
 }
 
 pub fn handle_stroke_width(app: &mut App, width: f32) -> Task<Message> {

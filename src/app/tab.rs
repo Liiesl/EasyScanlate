@@ -203,6 +203,7 @@ pub struct Tab {
     pub scheduler: Scheduler,
     pub style_working: EntryStyle,
     pub style_picker: Option<StyleField>,
+    pub style_picker_tab: Option<neverliie_iced_widgets::color_picker::PickerTab>,
 
     pub panes: pane_grid::State<PaneKind>,
     pub results_panes: pane_grid::State<ResultsPaneKind>,
@@ -368,6 +369,7 @@ impl Tab {
             scheduler: Scheduler::new(),
             style_working: style.clone(),
             style_picker: None,
+            style_picker_tab: None,
             panes,
             results_panes,
             outer_panes,

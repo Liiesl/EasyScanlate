@@ -80,6 +80,11 @@ pub trait UiState {
     fn style_bg_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue;
     /// The styling color picker currently open (if any).
     fn style_picker_open(&self) -> Option<StyleField>;
+    /// The picker's top-level tab last reported for the open field, if any.
+    /// `None` until the first tab switch (or when no picker is open).
+    fn style_picker_tab(&self) -> Option<neverliie_iced_widgets::color_picker::PickerTab> {
+        None
+    }
     /// Shared slot for the color picker eye dropper. The picker enables its
     /// eyedropper button only while this is `Some`; on activation it
     /// publishes `UiEvent::StyleDropperCapture` and the app is expected to

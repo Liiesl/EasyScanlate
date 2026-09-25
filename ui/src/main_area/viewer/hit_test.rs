@@ -168,6 +168,24 @@ pub fn entry_quad(tiles: &[TileSpec<'_>], index: usize, id: EntryId) -> Option<e
     tile.overlays.iter().find(|e| e.id == id).map(|e| e.quad)
 }
 
+/// Figma-like gradient handle hit: viewport-`local` against the squares of
+/// `spec` (tile-local math via `gradient_handle_box`). Returns the endpoint.
+pub fn hit_gradient_handle(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    local: Point,
+    spec: super::interaction::GradientHandleSpec,
+) -> Option<(usize, EntryId, crate::event::StyleField, usize)> {
+    let (layout, _) = tile_layout(tiles, state.width);
+    let (y, _) = layout.get(spec.index)?;
+    let tile_local = Point::new(local.x, local.y + state.offset - y);
+    let box_rect = super::motion::gradient_handle_box(tiles, state, spec.index, spec.id)?;
+    let factor =
+        super::motion::gradient_rest_factor(state, spec.index, spec.id, spec.field);
+    super::motion::gradient_handle_hit(box_rect, spec.angle, factor, tile_local)
+        .map(|endpoint| (spec.index, spec.id, spec.field, endpoint))
+}
+
 pub fn hit_handle(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Option<(usize, EntryId, super::interaction::ResizeHandle)> {
     let (index, entry) = tiles.iter().enumerate().find_map(|(index, tile)| {
         tile.overlays.iter().find(|e| e.selected).map(|e| (index, e))

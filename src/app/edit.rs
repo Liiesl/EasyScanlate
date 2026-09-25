@@ -70,6 +70,7 @@ pub fn seed_style_inputs(app: &mut App, style: easyscanlate_model::EntryStyle) {
     let tab = app.active_tab_mut();
     tab.style_working = style;
     tab.style_picker = None;
+    tab.style_picker_tab = None;
 }
 
 /// Selects `(index, id)`: seeds the style inputs and, when the entry's page
@@ -85,6 +86,7 @@ pub fn select_entry(app: &mut App, index: usize, id: EntryId) -> Task<Message> {
         // inline seed to avoid double borrow
         tab.style_working = style;
         tab.style_picker = None;
+        tab.style_picker_tab = None;
         if tab.scheduler.needs_settle(index, tab.images.len()) {
             let tid = tab.id;
             return tab.scheduler

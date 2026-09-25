@@ -1,8 +1,8 @@
 use iced::widget::{container, row, text};
 use iced::{Element, Font, Length};
 
-use crate::event::UiEvent;
-use crate::main_area::viewer::{TileSpec, TileView};
+use crate::event::{StyleField, UiEvent};
+use crate::main_area::viewer::{GradientHandleSpec, TileSpec, TileView};
 use crate::state::UiState;
 
 use super::edit::edit_overlay;
@@ -89,7 +89,73 @@ fn build_viewer<'a, S: UiState + ?Sized>(state: &'a S, tiles: Vec<TileSpec<'a>>,
             .editing(state.editing())
             .reveal(state.selected())
             .selected_inpaint(state.selected_inpaint())
-            .inpaint_reveal(state.selected_inpaint());
+            .inpaint_reveal(state.selected_inpaint())
+            .gradient_handle(gradient_handle_spec(state))
+            .on_gradient_angle(UiEvent::StyleGradientAngle);
     }
     viewer
+}
+
+/// Figma-like angle handle for the selected entry, shown only while a
+/// gradient picker is open for a gradient field. `None` otherwise.
+fn gradient_handle_spec<S: UiState + ?Sized>(state: &S) -> Option<GradientHandleSpec> {
+    if state.manual_mode() != crate::event::ManualMode::None {
+        return None;
+    }
+    if state.selected_inpaint().is_some() {
+        return None;
+    }
+    let (index, id) = state.selected()?;
+    // Suppress while the inline overlay editor hides the entry text.
+    if state.editing() == Some((index, id)) {
+        return None;
+    }
+    let field = state.style_picker_open()?;
+    // Reactive tab gating: hide on the Color tab even if the working style
+    // is still gradient, show immediately on the Gradient tab even before
+    // the app's tab-changed conversion lands (provisional solid→gradient).
+    let picker_tab = state.style_picker_tab();
+    if picker_tab == Some(neverliie_iced_widgets::color_picker::PickerTab::Color) {
+        return None;
+    }
+    let on_gradient_tab =
+        picker_tab == Some(neverliie_iced_widgets::color_picker::PickerTab::Gradient);
+    let style = state.style_working();
+    let (angle, a, b) = match field {
+        StyleField::Fill if style.text_gradient => {
+            (style.gradient_angle, style.gradient_a, style.gradient_b)
+        }
+        StyleField::Fill if on_gradient_tab => {
+            (style.gradient_angle, style.text_color, style.text_color)
+        }
+        StyleField::Stroke if style.stroke_gradient => (
+            style.stroke_gradient_angle,
+            style.stroke_gradient_a,
+            style.stroke_gradient_b,
+        ),
+        StyleField::Stroke if on_gradient_tab => (
+            style.stroke_gradient_angle,
+            style.stroke_color,
+            style.stroke_color,
+        ),
+        StyleField::Background if style.bg_gradient => (
+            style.bg_gradient_angle,
+            style.bg_gradient_a,
+            style.bg_gradient_b,
+        ),
+        StyleField::Background if on_gradient_tab => (
+            style.bg_gradient_angle,
+            style.bg_color,
+            style.bg_color,
+        ),
+        _ => return None,
+    };
+    Some(GradientHandleSpec {
+        index,
+        id,
+        field,
+        angle,
+        color_a: crate::color::rgba_to_color(a),
+        color_b: crate::color::rgba_to_color(b),
+    })
 }

@@ -864,6 +864,8 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::StyleColorCancel(field)) => styling::handle_color_cancel(app, field),
         Message::Ui(UiEvent::StyleColorChanged(field, value)) => styling::handle_color_changed(app, field, value),
         Message::Ui(UiEvent::StyleColorSubmit(field, value)) => styling::handle_color_submit(app, field, value),
+        Message::Ui(UiEvent::StyleColorTabChanged(field, tab)) => styling::handle_color_tab_changed(app, field, tab),
+        Message::Ui(UiEvent::StyleGradientAngle((index, id, field, angle))) => styling::handle_gradient_angle(app, index, id, field, angle),
         Message::Ui(UiEvent::StyleDropperCapture) => styling::handle_dropper_capture(app),
         Message::Ui(UiEvent::StyleDropperShot(shot)) => styling::handle_dropper_shot(app, shot),
         Message::Ui(UiEvent::StyleStrokeWidth(value)) => styling::handle_stroke_width(app, value),
