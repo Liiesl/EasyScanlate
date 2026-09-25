@@ -329,7 +329,7 @@ fn recommended_row<'a>(
             .spacing(scale::s(6.0))
             .align_y(iced::Alignment::Center),
             text(info.description).size(scale::s(11.0)).color(MUTED_FG),
-            text("Not connected").size(scale::s(11.0)).color(MUTED_FG),
+            text("Not connected yet").size(scale::s(11.0)).color(MUTED_FG),
         ]
         .spacing(scale::s(2.0))
         .width(FillLength),
@@ -527,7 +527,7 @@ fn appearance_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                 container(text("Size").size(scale::s(11.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(90.0))),
                 control,
             ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
-            text(format!("{}–{} — scales padding, spacing and radii. Chrome stays fixed.", scale::MIN_FONT_SIZE, scale::MAX_FONT_SIZE)).size(scale::s(10.0)).color(MUTED_FG),
+            text(format!("Between {} and {}. Bigger text also scales spacing and corner rounding, so the layout stays balanced.", scale::MIN_FONT_SIZE, scale::MAX_FONT_SIZE)).size(scale::s(10.0)).color(MUTED_FG),
         ].spacing(scale::s(6.0));
         outer.push(
             container(font_section)
@@ -576,7 +576,7 @@ fn appearance_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             }
         }
         if show_density {
-            let count_label = if count == 1 { "Solid".to_string() } else { format!("{} | {}", count, schema.label()) };
+            let count_label = if count == 1 { "Solid".to_string() } else { format!("{} · {}", count, schema.label()) };
             let dec_btn = stepper_button(count > 1, "−", Some(UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(count - 1))));
             let inc_btn = stepper_button(count < 5, "+", Some(UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(count + 1))));
             let schema_btn: Element<'static, UiEvent> = crate::button::with_disabled_cursor(
@@ -596,7 +596,7 @@ fn appearance_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                 schema_btn
             ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center).into();
             inner.push(container(count_row).center_x(FillLength).into());
-            inner.push(container(text(if count == 1 { "Solid — single color, no blobs." } else { "Blobs blend with radial gradients; schema shifts hue." }).size(scale::s(10.0)).color(MUTED_FG).width(FillLength).center()).into());
+            inner.push(container(text(if count == 1 { "A single color — no moving blobs." } else { "Soft colored blobs blend into the background. Press ⟳ to shuffle their colors and layout." }).size(scale::s(10.0)).color(MUTED_FG).width(FillLength).center()).into());
         }
         let aurora_card = container(column(inner).spacing(scale::s(12.0)).align_x(iced::Alignment::Center))
             .width(Length::Fixed(scale::s(AURORA_WIDTH)))
@@ -607,7 +607,7 @@ fn appearance_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                 ..Default::default()
             });
         let section = column![
-            card_header(Icon::Palette, "Aurora Background", Some("Animated aurora — ManhwaOCR style")),
+            card_header(Icon::Palette, "Aurora Background", Some("The animated gradient behind the app")),
             container(aurora_card).width(FillLength).center_x(FillLength),
         ].spacing(scale::s(10.0));
         outer.push(container(section).width(FillLength).padding(scale::s(10.0)).style(|_| card_style()).into());
@@ -621,9 +621,15 @@ fn appearance_tab_filtered(query: String) -> Element<'static, UiEvent> {
     if outer.is_empty() {
         return scrollable(
             container(
-                text(format!("No appearance settings match “{query}”."))
-                    .size(scale::s(12.0))
-                    .color(MUTED_FG),
+                column![
+                    text(format!("No appearance settings match “{query}”."))
+                        .size(scale::s(12.0))
+                        .color(MUTED_FG),
+                    text("Try a different term — e.g. theme, color, font.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG),
+                ]
+                .spacing(scale::s(6.0)),
             )
             .padding(scale::s(14.0))
             .style(|_| card_style()),
@@ -655,7 +661,7 @@ fn help_support_card() -> Element<'static, UiEvent> {
         row![
             column![
                 text("First-project guide").size(scale::s(12.0)),
-                text("New here? Read the first-project guide.")
+                text("New to EasyScanlate? Start here.")
                     .size(scale::s(11.0))
                     .color(MUTED_FG),
             ]
@@ -673,7 +679,7 @@ fn help_support_card() -> Element<'static, UiEvent> {
         row![
             column![
                 text("Request a feature").size(scale::s(12.0)),
-                text("Have an idea? Request a feature.")
+                text("Got an idea that would make EasyScanlate better?")
                     .size(scale::s(11.0))
                     .color(MUTED_FG),
             ]
@@ -691,7 +697,7 @@ fn help_support_card() -> Element<'static, UiEvent> {
         row![
             column![
                 text("Report an issue").size(scale::s(12.0)),
-                text("Found a bug? Report the problem.")
+                text("Ran into something broken? Tell us about it.")
                     .size(scale::s(11.0))
                     .color(MUTED_FG),
             ]
@@ -762,7 +768,7 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
                             .label("Auto-detect entry styles")
                             .text_size(scale::s(12.0))
                             .on_toggle(|v| set(move |s| s.auto_style_detect = v)),
-                        helper_text("Classify newly OCR-detected entries with the ONNX styling model."),
+                        helper_text("Automatically identifies the style of each new text entry right after OCR."),
                     ].spacing(scale::s(4.0)).into()
                 );
                 if col.len() > 1 { col.push(item_separator()); }
@@ -776,7 +782,7 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
                             .label("Auto-filter SFX")
                             .text_size(scale::s(12.0))
                             .on_toggle(|v| set(move |s| s.auto_sfx_filter = v)),
-                        helper_text("Remove SFX outside balloons via segmentation (manga-mimic grid, 1:6 col). True SFX lives outside balloons."),
+                        helper_text("Hides sound effects that sit outside speech balloons so only dialogue gets translated. Sound effects drawn inside balloons are left alone."),
                     ].spacing(scale::s(4.0)).into()
                 );
                 if col.len() > 2 { col.push(item_separator()); }
@@ -787,7 +793,7 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
                 let auto = easyscanlate_settings::get(|s| s.auto_inpaint);
                 col.push(
                     checkbox(auto)
-                        .label("Auto inpaint (bg-aware)")
+                        .label("Auto-inpaint backgrounds")
                         .text_size(scale::s(12.0))
                         .on_toggle(|v| set(move |s| s.auto_inpaint = v))
                         .into()
@@ -806,10 +812,10 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
         let show_onboarding = matches_any(query_ref, &["onboarding", "setup", "wizard", "replay", "general"]);
         if show_onboarding {
             let col: Vec<Element<'static, UiEvent>> = vec![
-                card_header(Icon::Sparkles, "Onboarding", Some("First-run setup wizard")),
+                card_header(Icon::Sparkles, "Setup Wizard", Some("Replay the first-run walkthrough")),
                 column![
-                    text("Replay the first-run setup (models + preferences). The wizard is blocking until all mandatory models are downloaded.").size(scale::s(11.0)).color(MUTED_FG),
-                    button(text("Replay onboarding…").size(scale::s(11.0)))
+                    text("Walk through setup again to reinstall models or change your preferences. The wizard waits until every required model is downloaded before you continue.").size(scale::s(11.0)).color(MUTED_FG),
+                    button(text("Start setup again…").size(scale::s(11.0)))
                         .padding([scale::s(6.0), scale::s(10.0)])
                         .style(crate::panel::button_style)
                         .on_press(UiEvent::OnboardingReplay),
@@ -834,19 +840,19 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
             .align_y(iced::Alignment::Center)
             .into();
             let col: Vec<Element<'static, UiEvent>> = vec![
-                card_header(Icon::Download, "Autosave", Some("Crash recovery in config/autosave")),
+                card_header(Icon::Download, "Autosave", Some("Recover your work after a crash")),
                 column![
                     checkbox(enabled)
-                        .label("Autosave dirty projects")
+                        .label("Back up open projects automatically")
                         .text_size(scale::s(12.0))
                         .on_toggle(|v| set(move |s| s.autosave_enabled = v)),
-                    helper_text("Periodically saves project.xml + unsaved inpaint layers next to default-config.toml. Opening a project offers to restore the backup."),
+                    helper_text("Saves a backup of your project and any unsaved inpaint layers while you work. Reopen the project later and we'll offer to restore it."),
                 ].spacing(scale::s(4.0)).into(),
                 item_separator(),
                 column![
                     text("Interval").size(scale::s(12.0)).color(Color::WHITE),
                     interval_row,
-                    helper_text("15–600 seconds. Only dirty project tabs are written."),
+                    helper_text("How often we save, in seconds (15–600). Projects without changes are skipped."),
                 ].spacing(scale::s(4.0)).into(),
             ];
             cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
@@ -864,9 +870,9 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
             container(column![
                 row![
                     crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG),
-                    text(format!("No settings match “{query}”")).size(scale::s(12.0)).color(MUTED_FG),
+                    text(format!("No settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG),
                 ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
-                text("Try a different term — e.g. font, ocr, inpaint, sfx.").size(scale::s(11.0)).color(MUTED_FG),
+                text("Try a different term — e.g. font, OCR, inpaint, SFX.").size(scale::s(11.0)).color(MUTED_FG),
             ].spacing(scale::s(6.0)))
             .padding(scale::s(14.0))
             .style(|_| card_style())
@@ -903,7 +909,7 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                             .label("Auto-detect entry styles")
                             .text_size(scale::s(12.0))
                             .on_toggle(|v| set(move |s| s.auto_style_detect = v)),
-                        helper_text("Classify newly OCR-detected entries with the ONNX styling model."),
+                        helper_text("Automatically identifies the style of each new text entry right after OCR."),
                     ].spacing(scale::s(4.0)).into()
                 );
                 if col.len() > 1 { col.push(item_separator()); }
@@ -917,7 +923,7 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                             .label("Auto-filter SFX")
                             .text_size(scale::s(12.0))
                             .on_toggle(|v| set(move |s| s.auto_sfx_filter = v)),
-                        helper_text("Remove SFX outside balloons via segmentation (manga-mimic grid, 1:6 col). True SFX lives outside balloons."),
+                        helper_text("Hides sound effects that sit outside speech balloons so only dialogue gets translated. Sound effects drawn inside balloons are left alone."),
                     ].spacing(scale::s(4.0)).into()
                 );
                 if col.len() > 2 { col.push(item_separator()); }
@@ -928,7 +934,7 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                 let auto = easyscanlate_settings::get(|s| s.auto_inpaint);
                 col.push(
                     checkbox(auto)
-                        .label("Auto inpaint (bg-aware)")
+                        .label("Auto-inpaint backgrounds")
                         .text_size(scale::s(12.0))
                         .on_toggle(|v| set(move |s| s.auto_inpaint = v))
                         .into()
@@ -944,10 +950,10 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         let show_onboarding = matches_any(query, &["onboarding", "setup", "wizard", "replay", "general"]);
         if show_onboarding {
             let col: Vec<Element<'static, UiEvent>> = vec![
-                card_header(Icon::Sparkles, "Onboarding", Some("First-run setup wizard")),
+                card_header(Icon::Sparkles, "Setup Wizard", Some("Replay the first-run walkthrough")),
                 column![
-                    text("Replay the first-run setup (models + preferences). The wizard is blocking until all mandatory models are downloaded.").size(scale::s(11.0)).color(MUTED_FG),
-                    button(text("Replay onboarding…").size(scale::s(11.0)))
+                    text("Walk through setup again to reinstall models or change your preferences. The wizard waits until every required model is downloaded before you continue.").size(scale::s(11.0)).color(MUTED_FG),
+                    button(text("Start setup again…").size(scale::s(11.0)))
                         .padding([scale::s(6.0), scale::s(10.0)])
                         .style(crate::panel::button_style)
                         .on_press(UiEvent::OnboardingReplay),
@@ -969,19 +975,19 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             .align_y(iced::Alignment::Center)
             .into();
             let col: Vec<Element<'static, UiEvent>> = vec![
-                card_header(Icon::Download, "Autosave", Some("Crash recovery in config/autosave")),
+                card_header(Icon::Download, "Autosave", Some("Recover your work after a crash")),
                 column![
                     checkbox(enabled)
-                        .label("Autosave dirty projects")
+                        .label("Back up open projects automatically")
                         .text_size(scale::s(12.0))
                         .on_toggle(|v| set(move |s| s.autosave_enabled = v)),
-                    helper_text("Periodically saves project.xml + unsaved inpaint layers next to default-config.toml. Opening a project offers to restore the backup."),
+                    helper_text("Saves a backup of your project and any unsaved inpaint layers while you work. Reopen the project later and we'll offer to restore it."),
                 ].spacing(scale::s(4.0)).into(),
                 item_separator(),
                 column![
                     text("Interval").size(scale::s(12.0)).color(Color::WHITE),
                     interval_row,
-                    helper_text("15–600 seconds. Only dirty project tabs are written."),
+                    helper_text("How often we save, in seconds (15–600). Projects without changes are skipped."),
                 ].spacing(scale::s(4.0)).into(),
             ];
             cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
@@ -1020,10 +1026,10 @@ fn project_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
     col.push(card_header(
         Icon::Folder,
         "Series",
-        Some("Group the current project in the home sidebar"),
+        Some("Group this project with others on the home screen"),
     ));
     if !state.has_project() {
-        col.push(helper_text("Open or create a project to assign its series.").into());
+        col.push(helper_text("Open or create a project first, then you can assign it to a series.").into());
     } else {
         let current = state.project().series().map(str::to_owned);
         let available = available_series_names(state.series_items());
@@ -1063,7 +1069,7 @@ fn project_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
             let name_value = state.project_series_name().to_string();
             col.push(
                 row![
-                    text_input("New series name...", &name_value)
+                    text_input("New series name…", &name_value)
                         .on_input(UiEvent::ProjectSeriesName)
                         .on_submit(UiEvent::ProjectSeriesCreateConfirm)
                         .padding(scale::s(6.0))
@@ -1085,7 +1091,7 @@ fn project_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
                 .into(),
             );
         }
-        col.push(helper_text("Stored in the .mmtl on save; the home sidebar updates immediately.").into());
+        col.push(helper_text("Saved with your project when you save. The home sidebar updates right away.").into());
     }
     cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
     cards
@@ -1097,7 +1103,7 @@ fn project_tab_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Elemen
         return container(column![
             row![
                 crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG),
-                text(format!("No settings match “{query}”")).size(scale::s(12.0)).color(MUTED_FG),
+                text(format!("No settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG),
             ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
             text("Try a different term — e.g. project, series.").size(scale::s(11.0)).color(MUTED_FG),
         ].spacing(scale::s(6.0)))
@@ -1135,8 +1141,8 @@ fn advanced_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'s
     if !state.has_project() {
         return vec![
             container(column![
-                card_header(Icon::Wrench, "Translation transfer", Some("Export / import one profile as XML")),
-                helper_text("Open or create a project to export or import its translations."),
+                card_header(Icon::Wrench, "Translation transfer", Some("Save a translation profile to a file — or bring one back")),
+                helper_text("Open or create a project first, then you can export or import its translations."),
             ].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into(),
         ];
     }
@@ -1217,7 +1223,7 @@ fn advanced_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'s
         import_selected,
         |opt: AdvProfileOption| UiEvent::AdvImportTargetSelect(opt.id),
     )
-    .placeholder("Pick profile to overwrite…")
+    .placeholder("Choose a profile to overwrite…")
     .text_size(scale::s(12.0))
     .width(FillLength)
     .into();
@@ -1233,7 +1239,7 @@ fn advanced_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'s
     col.push(card_header(
         Icon::Wrench,
         "Translation transfer",
-        Some("One profile of the current project, same XML as project.xml"),
+        Some("Export one profile to a file, or import one back"),
     ));
     col.push(field_row("Export profile", export_dropdown));
     if export_name.is_empty() {
@@ -1241,7 +1247,8 @@ fn advanced_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'s
     } else if total_count == 0 {
         col.push(text("Run OCR first — there are no lines to export.".to_string()).size(scale::s(11.0)).color(MUTED_FG).into());
     } else {
-        col.push(text(format!("{total_count} line(s) in reading order with OCR source + “{export_name}” text ({translated_count} already translated).")).size(scale::s(11.0)).color(MUTED_FG).into());
+        let line_word = if total_count == 1 { "line" } else { "lines" };
+        col.push(text(format!("Exports {total_count} {line_word} in reading order — the original OCR text plus the “{export_name}” translation ({translated_count} already done).")).size(scale::s(11.0)).color(MUTED_FG).into());
     }
     col.push(row![space::horizontal().width(FillLength), export_btn].spacing(scale::s(8.0)).align_y(iced::Alignment::Center).into());
     col.push(item_separator());
@@ -1255,8 +1262,8 @@ fn advanced_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'s
             .width(FillLength)
             .into(),
     );
-    col.push(helper_text("Filled name wins: creates (or overwrites) that profile. Empty name overwrites the picked profile. Targeting Default forks a new profile, like panel edits.").into());
-    col.push(helper_text("Overwrite clears entries missing from the file; unknown entry ids are skipped. Save the project to persist.").into());
+    col.push(helper_text("Type a name to create a new profile — or overwrite an existing one with that name. Leave it empty to overwrite the profile chosen above. Overwriting Default creates a copy instead.").into());
+    col.push(helper_text("Lines missing from the file are removed, and lines the file doesn't recognize are skipped. Save the project afterwards to keep the changes.").into());
     col.push(row![space::horizontal().width(FillLength), import_btn].spacing(scale::s(8.0)).align_y(iced::Alignment::Center).into());
     vec![container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into()]
 }
@@ -1267,7 +1274,7 @@ fn advanced_tab_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Eleme
         return container(column![
             row![
                 crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG),
-                text(format!("No settings match “{query}”")).size(scale::s(12.0)).color(MUTED_FG),
+                text(format!("No settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG),
             ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
             text("Try a different term — e.g. advanced, export, import.").size(scale::s(11.0)).color(MUTED_FG),
         ].spacing(scale::s(6.0)))
@@ -1307,7 +1314,7 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
                     )
                 });
             let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-            col.push(card_header(Icon::ScanSearch, "OCR Engine", Some("Detection & recognition tuning — next run")));
+            col.push(card_header(Icon::ScanSearch, "OCR Engine", Some("Applies the next time you run OCR")));
             if matches_any(query_ref, &["ocr", "workers", "parallel", "detection", "engine"]) || query_ref.trim().is_empty() {
                 col.push(field_row("Detection workers",
                     text_input("2", &workers)
@@ -1317,7 +1324,7 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
                 ));
-                col.push(helper_text("Parallel detection sessions; 2 fits a potato-laptop CPU."));
+                col.push(helper_text("How many regions we detect at once. 2 works fine even on a slow laptop."));
                 col.push(item_separator());
             }
             if matches_any(query_ref, &["ocr", "tuning", "confidence"]) || query_ref.trim().is_empty() {
@@ -1329,7 +1336,7 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
                 ));
-                col.push(helper_text("Minimum recognition confidence 0.0–1.0. Lower keeps more lines."));
+                col.push(helper_text("How sure OCR must be to keep a line (0.0–1.0). Lower keeps more lines, including faint ones."));
             }
             if matches_any(query_ref, &["ocr", "height", "bbox", "minimum", "min"]) || query_ref.trim().is_empty() {
                 col.push(field_row("Min text height",
@@ -1340,7 +1347,7 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
                 ));
-                col.push(helper_text("Minimum bbox height (px). Drops boxes shorter than this."));
+                col.push(helper_text("Ignores text boxes shorter than this (in pixels)."));
             }
             if matches_any(query_ref, &["ocr", "height", "bbox", "maximum", "max"]) || query_ref.trim().is_empty() {
                 col.push(field_row("Max text height",
@@ -1351,7 +1358,7 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
                 ));
-                col.push(helper_text("Maximum bbox height (px). Drops boxes taller than this."));
+                col.push(helper_text("Ignores text boxes taller than this (in pixels)."));
             }
             if matches_any(query_ref, &["ocr", "merge", "distance", "threshold", "gap"]) || query_ref.trim().is_empty() {
                 col.push(field_row("Merge threshold",
@@ -1362,10 +1369,10 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
                 ));
-                col.push(helper_text("Gap as ratio of height 0.0–2.0 (0.5 = 50% of height)."));
+                col.push(helper_text("How big a gap still counts as the same line, as a fraction of its height (0.5 = 50%)."));
             }
             if matches_any(query_ref, &["ocr", "side", "len", "max", "resize"]) || query_ref.trim().is_empty() {
-                col.push(field_row("Max side len",
+                col.push(field_row("Max side length",
                     text_input("2000", &max_side)
                         .on_input(|input| set(move |s| s.ocr_max_side_len = input.clone()))
                         .padding(scale::s(4.0))
@@ -1373,7 +1380,7 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
                 ));
-                col.push(helper_text("Max longer side before resize (px). Larger keeps more detail but uses more RAM."));
+                col.push(helper_text("Images with a side longer than this (in pixels) are scaled down first. Larger values keep more detail but use more memory."));
             }
             let has_field = col.len() > 1;
             if has_field {
@@ -1385,16 +1392,16 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
     {
         cards.push(
             container(column![
-                card_header(Icon::ScanSearch, "OCR Engine", Some("OCR feature not enabled")),
-                helper_text("Rebuild with --features ocr to enable OCR tuning."),
+                card_header(Icon::ScanSearch, "OCR Engine", Some("Not available in this build")),
+                helper_text("This build was made without OCR support, so these settings are unavailable."),
             ].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into()
         );
     }
     if cards.is_empty() {
         cards.push(
             container(column![
-                row![crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG), text(format!("No OCR settings match “{query}”")).size(scale::s(12.0)).color(MUTED_FG)].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
-                helper_text("Try a different term."),
+                row![crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG), text(format!("No OCR settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG)].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
+                helper_text("Try a different term — e.g. workers, confidence, height."),
             ].spacing(scale::s(6.0))).padding(scale::s(14.0)).style(|_| card_style()).into()
         );
     }
@@ -1421,7 +1428,7 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                     )
                 });
             let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-            col.push(card_header(Icon::ScanSearch, "OCR Engine", Some("Detection & recognition tuning — next run")));
+            col.push(card_header(Icon::ScanSearch, "OCR Engine", Some("Applies the next time you run OCR")));
             if matches_any(query, &["ocr", "workers", "parallel", "detection", "engine"]) || query.trim().is_empty() {
                 col.push(field_row("Detection workers",
                     text_input("2", &workers)
@@ -1431,7 +1438,7 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
                 ));
-                col.push(helper_text("Parallel detection sessions; 2 fits a potato-laptop CPU."));
+                col.push(helper_text("How many regions we detect at once. 2 works fine even on a slow laptop."));
                 col.push(item_separator());
             }
             if matches_any(query, &["ocr", "tuning", "confidence"]) || query.trim().is_empty() {
@@ -1443,7 +1450,7 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
                 ));
-                col.push(helper_text("Minimum recognition confidence 0.0–1.0. Lower keeps more lines."));
+                col.push(helper_text("How sure OCR must be to keep a line (0.0–1.0). Lower keeps more lines, including faint ones."));
             }
             if matches_any(query, &["ocr", "height", "bbox", "minimum", "min"]) || query.trim().is_empty() {
                 col.push(field_row("Min text height",
@@ -1454,7 +1461,7 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
                 ));
-                col.push(helper_text("Minimum bbox height (px). Drops boxes shorter than this."));
+                col.push(helper_text("Ignores text boxes shorter than this (in pixels)."));
             }
             if matches_any(query, &["ocr", "height", "bbox", "maximum", "max"]) || query.trim().is_empty() {
                 col.push(field_row("Max text height",
@@ -1465,7 +1472,7 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
                 ));
-                col.push(helper_text("Maximum bbox height (px). Drops boxes taller than this."));
+                col.push(helper_text("Ignores text boxes taller than this (in pixels)."));
             }
             if matches_any(query, &["ocr", "merge", "distance", "threshold", "gap"]) || query.trim().is_empty() {
                 col.push(field_row("Merge threshold",
@@ -1476,10 +1483,10 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
                 ));
-                col.push(helper_text("Gap as ratio of height 0.0–2.0 (0.5 = 50% of height)."));
+                col.push(helper_text("How big a gap still counts as the same line, as a fraction of its height (0.5 = 50%)."));
             }
             if matches_any(query, &["ocr", "side", "len", "max", "resize"]) || query.trim().is_empty() {
-                col.push(field_row("Max side len",
+                col.push(field_row("Max side length",
                     text_input("2000", &max_side)
                         .on_input(|input| set(move |s| s.ocr_max_side_len = input.clone()))
                         .padding(scale::s(4.0))
@@ -1487,7 +1494,7 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                         .width(Length::Fixed(scale::s(80.0)))
                         .into()
                 ));
-                col.push(helper_text("Max longer side before resize (px). Larger keeps more detail but uses more RAM."));
+                col.push(helper_text("Images with a side longer than this (in pixels) are scaled down first. Larger values keep more detail but use more memory."));
             }
             let has_field = col.len() > 1;
             if has_field {
@@ -1499,8 +1506,8 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     {
         cards.push(
             container(column![
-                card_header(Icon::ScanSearch, "OCR Engine", Some("OCR feature not enabled")),
-                helper_text("Rebuild with --features ocr to enable OCR tuning."),
+                card_header(Icon::ScanSearch, "OCR Engine", Some("Not available in this build")),
+                helper_text("This build was made without OCR support, so these settings are unavailable."),
             ].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into()
         );
     }
@@ -1523,30 +1530,30 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
             {
                 let (auto_inpaint, auto_model, auto_style) = easyscanlate_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model, s.auto_style_detect));
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-                col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("After OCR: style-detect → per bg type")));
-                col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
-                col.push(helper_text("Solid keeps bg color, Gradient → Harmonic, Artwork → LaMa. Mixed needs Auto-detect style."));
+                col.push(card_header(Icon::Sparkles, "Auto-Inpaint", Some("Runs after OCR, choosing a method for each background")));
+                col.push(checkbox(auto_inpaint).label("Auto-inpaint backgrounds").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
+                col.push(helper_text("Solid backgrounds keep their color, gradients are filled with Harmonic, and artwork with LaMa. The Mixed option needs auto style detection switched on."));
                 let all_models = [AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot, AutoInpaintModel::Mixed];
                 let available: Vec<AutoInpaintModel> = if auto_style { all_models.to_vec() } else { vec![AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot] };
                 let pick_value = if auto_style || auto_model != AutoInpaintModel::Mixed { Some(auto_model) } else { Some(AutoInpaintModel::Telea) };
                 col.push(row![
                     container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
                     pick_list(available, pick_value, move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
-                    if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style { warning_text("Mixed disabled — falling back to Harmonic.".to_string()) } else { text("").size(scale::s(11.0)).color(MUTED_FG).into() },
+                    if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style { warning_text("Mixed isn't available yet — using Harmonic instead.".to_string()) } else { text("").size(scale::s(11.0)).color(MUTED_FG).into() },
                 ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center).into());
                 if !auto_style && auto_model == AutoInpaintModel::Mixed {
-                    col.push(warning_text("Pick Telea, Harmonic, Lama or AOT while Auto-detect style is off; Mixed will auto-fallback to Harmonic.".to_string()));
+                    col.push(warning_text("Choose Telea, Harmonic, LaMa or AOT while auto style detection is off — Mixed falls back to Harmonic on its own.".to_string()));
                 }
-                col.push(helper_text("Full pipeline runs once when OCR finishes if all toggles are on. Telea/Harmonic in parallel, LaMa/AOT sequentially."));
+                col.push(helper_text("Runs once after OCR finishes, as long as the toggles above are on."));
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
             #[cfg(all(feature = "inpaint", not(all(feature = "styling", feature = "segment"))))]
             {
                 let (auto_inpaint, auto_model) = easyscanlate_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model));
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-                col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("Bg-aware pipeline")).into());
-                col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
-                col.push(helper_text("Needs Styling + Segmentation for full bg-aware pipeline; fallback is Harmonic.").into());
+                col.push(card_header(Icon::Sparkles, "Auto-Inpaint", Some("Picks the right method for each background")).into());
+                col.push(checkbox(auto_inpaint).label("Auto-inpaint backgrounds").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
+                col.push(helper_text("The full background-aware pipeline needs styling and segmentation; without them, Harmonic is used instead.").into());
                 col.push(row![
                     container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
                     pick_list([AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot], Some(if auto_model == AutoInpaintModel::Mixed { AutoInpaintModel::Telea } else { auto_model }), move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
@@ -1555,7 +1562,7 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
             }
             #[cfg(not(feature = "inpaint"))]
             {
-                cards.push(container(column![card_header(Icon::Sparkles, "Auto Inpaint", Some("Inpaint feature not enabled")), helper_text("Rebuild with --features inpaint.")].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+                cards.push(container(column![card_header(Icon::Sparkles, "Auto-Inpaint", Some("Not available in this build")), helper_text("This build was made without inpainting support, so these settings are unavailable.")].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
         }
     }
@@ -1569,12 +1576,16 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
                 let backend = easyscanlate_settings::get(|s| s.inpaint_backend);
                 let radius = easyscanlate_settings::get(|s| s.inpaint_radius.clone());
                 let col: Vec<Element<'static, UiEvent>> = vec![
-                    card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Harmonic vs Telea vs ONNX vs patch/diffusion")),
+                    card_header(Icon::Brush, "Inpaint (Manual)", Some("The method behind the manual touch-up brush")),
                     field_row("Backend", pick_list([InpaintBackend::Harmonic, InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot, InpaintBackend::ShiftMap], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()),
-                    helper_text("Harmonic is fast (no model), recommended for thin/medium patches with gradient/non-textured bg; Telea is fast, recommended for thin/medium patches with semi-art bg; LaMa is high-quality ONNX; AOT-GAN is 2-4× faster than LaMa (pad 8, max 1024); ShiftMap rebuilds textures (slower, CPU)."),
+                    helper_text("Harmonic — fast and model-free; best for smooth or gradient backgrounds."),
+                    helper_text("Telea — fast; best for thin to medium patches on semi-detailed art."),
+                    helper_text("LaMa — highest quality; runs a neural model."),
+                    helper_text("AOT-GAN — similar quality to LaMa, 2–4× faster."),
+                    helper_text("ShiftMap — rebuilds textures; slower and runs on your CPU."),
                     item_separator(),
-                    field_row("Telea radius", text_input("5", &radius).on_input(|input| set(move |s| s.inpaint_radius = input.clone())).padding(scale::s(4.0)).size(scale::s(12.0)).width(Length::Fixed(scale::s(80.0))).into()),
-                    helper_text("Pixels around mask Telea/Harmonic sample; larger smooths more but blurs. Ignored by LaMa/AOT/ShiftMap."),
+                    field_row("Sample radius", text_input("5", &radius).on_input(|input| set(move |s| s.inpaint_radius = input.clone())).padding(scale::s(4.0)).size(scale::s(12.0)).width(Length::Fixed(scale::s(80.0))).into()),
+                    helper_text("How many pixels around the mask Telea and Harmonic sample. Larger values smooth more but soften the image. Ignored by LaMa, AOT and ShiftMap."),
                 ];
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
@@ -1586,7 +1597,7 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
     }
 
     if cards.is_empty() {
-        cards.push(container(column![row![crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG), text(format!("No inpaint settings match “{query}”")).size(scale::s(12.0)).color(MUTED_FG)].spacing(scale::s(6.0)).align_y(iced::Alignment::Center)].spacing(scale::s(6.0))).padding(scale::s(14.0)).style(|_| card_style()).into());
+        cards.push(container(column![row![crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG), text(format!("No inpaint settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG)].spacing(scale::s(6.0)).align_y(iced::Alignment::Center), helper_text("Try a different term — e.g. brush, backend, radius.")].spacing(scale::s(6.0))).padding(scale::s(14.0)).style(|_| card_style()).into());
     }
     scrollable(column(cards).spacing(scale::s(10.0))).spacing(scale::s(crate::scroll::EMBEDDED_SPACING)).height(Length::Fill).into()
 }
@@ -1600,30 +1611,30 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             {
                 let (auto_inpaint, auto_model, auto_style) = easyscanlate_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model, s.auto_style_detect));
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-                col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("After OCR: style-detect → per bg type")));
-                col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
-                col.push(helper_text("Solid keeps bg color, Gradient → Harmonic, Artwork → LaMa. Mixed needs Auto-detect style."));
+                col.push(card_header(Icon::Sparkles, "Auto-Inpaint", Some("Runs after OCR, choosing a method for each background")));
+                col.push(checkbox(auto_inpaint).label("Auto-inpaint backgrounds").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
+                col.push(helper_text("Solid backgrounds keep their color, gradients are filled with Harmonic, and artwork with LaMa. The Mixed option needs auto style detection switched on."));
                 let all_models = [AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot, AutoInpaintModel::Mixed];
                 let available: Vec<AutoInpaintModel> = if auto_style { all_models.to_vec() } else { vec![AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot] };
                 let pick_value = if auto_style || auto_model != AutoInpaintModel::Mixed { Some(auto_model) } else { Some(AutoInpaintModel::Telea) };
                 col.push(row![
                     container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
                     pick_list(available, pick_value, move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
-                    if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style { warning_text("Mixed disabled — falling back to Harmonic.".to_string()) } else { text("").size(scale::s(11.0)).color(MUTED_FG).into() },
+                    if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style { warning_text("Mixed isn't available yet — using Harmonic instead.".to_string()) } else { text("").size(scale::s(11.0)).color(MUTED_FG).into() },
                 ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center).into());
                 if !auto_style && auto_model == AutoInpaintModel::Mixed {
-                    col.push(warning_text("Pick Telea, Harmonic, Lama or AOT while Auto-detect style is off; Mixed will auto-fallback to Harmonic.".to_string()));
+                    col.push(warning_text("Choose Telea, Harmonic, LaMa or AOT while auto style detection is off — Mixed falls back to Harmonic on its own.".to_string()));
                 }
-                col.push(helper_text("Full pipeline runs once when OCR finishes if all toggles are on. Telea/Harmonic in parallel, LaMa/AOT sequentially."));
+                col.push(helper_text("Runs once after OCR finishes, as long as the toggles above are on."));
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
             #[cfg(all(feature = "inpaint", not(all(feature = "styling", feature = "segment"))))]
             {
                 let (auto_inpaint, auto_model) = easyscanlate_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model));
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-                col.push(card_header(Icon::Sparkles, "Auto Inpaint (bg-aware)", Some("Bg-aware pipeline")).into());
-                col.push(checkbox(auto_inpaint).label("Auto inpaint (bg-aware)").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
-                col.push(helper_text("Needs Styling + Segmentation for full bg-aware pipeline; fallback is Harmonic.").into());
+                col.push(card_header(Icon::Sparkles, "Auto-Inpaint", Some("Picks the right method for each background")).into());
+                col.push(checkbox(auto_inpaint).label("Auto-inpaint backgrounds").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
+                col.push(helper_text("The full background-aware pipeline needs styling and segmentation; without them, Harmonic is used instead.").into());
                 col.push(row![
                     container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
                     pick_list([AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot], Some(if auto_model == AutoInpaintModel::Mixed { AutoInpaintModel::Telea } else { auto_model }), move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
@@ -1632,7 +1643,7 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             }
             #[cfg(not(feature = "inpaint"))]
             {
-                cards.push(container(column![card_header(Icon::Sparkles, "Auto Inpaint", Some("Inpaint feature not enabled")), helper_text("Rebuild with --features inpaint.")].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+                cards.push(container(column![card_header(Icon::Sparkles, "Auto-Inpaint", Some("Not available in this build")), helper_text("This build was made without inpainting support, so these settings are unavailable.")].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
         }
     }
@@ -1644,12 +1655,16 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                 let backend = easyscanlate_settings::get(|s| s.inpaint_backend);
                 let radius = easyscanlate_settings::get(|s| s.inpaint_radius.clone());
                 let col: Vec<Element<'static, UiEvent>> = vec![
-                    card_header(Icon::Brush, "Inpaint (Manual)", Some("Brush tool — Harmonic vs Telea vs ONNX vs patch/diffusion")),
+                    card_header(Icon::Brush, "Inpaint (Manual)", Some("The method behind the manual touch-up brush")),
                     field_row("Backend", pick_list([InpaintBackend::Harmonic, InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot, InpaintBackend::ShiftMap], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()),
-                    helper_text("Harmonic is fast (no model), recommended for thin/medium patches with gradient/non-textured bg; Telea is fast, recommended for thin/medium patches with semi-art bg; LaMa is high-quality ONNX; AOT-GAN is 2-4× faster than LaMa (pad 8, max 1024); ShiftMap rebuilds textures (slower, CPU)."),
+                    helper_text("Harmonic — fast and model-free; best for smooth or gradient backgrounds."),
+                    helper_text("Telea — fast; best for thin to medium patches on semi-detailed art."),
+                    helper_text("LaMa — highest quality; runs a neural model."),
+                    helper_text("AOT-GAN — similar quality to LaMa, 2–4× faster."),
+                    helper_text("ShiftMap — rebuilds textures; slower and runs on your CPU."),
                     item_separator(),
-                    field_row("Telea radius", text_input("5", &radius).on_input(|input| set(move |s| s.inpaint_radius = input.clone())).padding(scale::s(4.0)).size(scale::s(12.0)).width(Length::Fixed(scale::s(80.0))).into()),
-                    helper_text("Pixels around mask Telea/Harmonic sample; larger smooths more but blurs. Ignored by LaMa/AOT/ShiftMap."),
+                    field_row("Sample radius", text_input("5", &radius).on_input(|input| set(move |s| s.inpaint_radius = input.clone())).padding(scale::s(4.0)).size(scale::s(12.0)).width(Length::Fixed(scale::s(80.0))).into()),
+                    helper_text("How many pixels around the mask Telea and Harmonic sample. Larger values smooth more but soften the image. Ignored by LaMa, AOT and ShiftMap."),
                 ];
                 cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
             }
@@ -1740,7 +1755,7 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
         cards.push(
             container(column![
                 text("Translation Service").size(scale::s(14.0)).color(Color::WHITE),
-                text("Connect the gateway used by the machine translator. Disconnect removes its API key.")
+                text("Connect a translation service to machine-translate your text. Disconnecting removes its API key.")
                     .size(scale::s(11.0))
                     .color(MUTED_FG),
             ].spacing(scale::s(4.0)))
@@ -1764,7 +1779,7 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
         content.push(item_separator());
         if connected_rows.is_empty() {
             content.push(
-                text(if query_active { format!("No connected providers match “{query}”.") } else { "No connected providers — connect one below.".to_string() })
+                text(if query_active { format!("No connected providers match “{query}”.") } else { "Nothing connected yet — pick a provider below.".to_string() })
                     .size(scale::s(11.0)).color(MUTED_FG).into()
             );
         } else {
@@ -1791,7 +1806,7 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
         content.push(text("Not sure where to start? Try one of these.").size(scale::s(11.0)).color(MUTED_FG).into());
         content.push(item_separator());
         if recommended_rows.is_empty() {
-            content.push(text(if query_active { format!("No recommendations match “{query}”.") } else { "All recommended providers connected.".to_string() }).size(scale::s(11.0)).color(MUTED_FG).into());
+            content.push(text(if query_active { format!("No recommendations match “{query}”.") } else { "You've connected every recommended provider.".to_string() }).size(scale::s(11.0)).color(MUTED_FG).into());
         } else {
             let len = recommended_rows.len();
             for (idx, el) in recommended_rows.into_iter().enumerate() {
@@ -1816,7 +1831,7 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
         content.push(item_separator());
         if available_rows.is_empty() {
             content.push(
-                text(if query_active { format!("No available providers match “{query}”.") } else { "All providers connected.".to_string() }).size(scale::s(11.0)).color(MUTED_FG).into()
+                text(if query_active { format!("No available providers match “{query}”.") } else { "You've connected every available provider.".to_string() }).size(scale::s(11.0)).color(MUTED_FG).into()
             );
         } else {
             let len = available_rows.len();
@@ -1831,12 +1846,12 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
     // Options card — only when query matches its keywords or empty
     if matches_any(&q, &["free", "paid", "filter", "models", "manage", "dropdown", "only show free"]) || !query_active {
         let content: Vec<Element<'static, UiEvent>> = vec![
-            card_header(Icon::SlidersHorizontal, "Options", None),
+            card_header(Icon::SlidersHorizontal, "Options", Some("Model list and saved connections")),
             item_separator(),
             row![
                 column![
                     text("Only show free models").size(scale::s(12.0)),
-                    text("Hide paid models from the translation picker.")
+                    text("Hide paid models from the model picker.")
                         .size(scale::s(11.0))
                         .color(MUTED_FG),
                 ]
@@ -1854,10 +1869,7 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
             item_separator(),
             row![
                 column![
-                    text("Filter unused models from the translation dropdown.")
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG),
-                    text("Hide models you never use; deprecated are always hidden.")
+                    text("Hide models you never use from the model picker. Deprecated models are always hidden.")
                         .size(scale::s(11.0))
                         .color(MUTED_FG),
                 ]
@@ -1873,7 +1885,7 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
             .padding([scale::s(4.0), 0.0])
             .into(),
             item_separator(),
-            text("Connections are saved to the app's settings file in the system configuration directory.")
+            text("Your connections are saved locally, in the app's own settings file.")
                 .size(scale::s(11.0))
                 .color(MUTED_FG)
                 .into(),
@@ -1886,8 +1898,9 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
             container(column![
                 row![
                     crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG),
-                    text(format!("No translation settings match “{query}”")).size(scale::s(12.0)).color(MUTED_FG),
+                    text(format!("No translation settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG),
                 ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
+                text("Try a different term — e.g. provider, connect, models.").size(scale::s(11.0)).color(MUTED_FG),
             ].spacing(scale::s(6.0)))
             .padding(scale::s(14.0))
             .style(|_| card_style())
@@ -1960,7 +1973,7 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         cards.push(
             container(column![
                 text("Translation Service").size(scale::s(14.0)).color(Color::WHITE),
-                text("Connect the gateway used by the machine translator. Disconnect removes its API key.")
+                text("Connect a translation service to machine-translate your text. Disconnecting removes its API key.")
                     .size(scale::s(11.0))
                     .color(MUTED_FG),
             ].spacing(scale::s(4.0)))
@@ -1982,7 +1995,7 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         content.push(item_separator());
         if connected_rows.is_empty() {
             content.push(
-                text(if query_active { format!("No connected providers match “{query}”.") } else { "No connected providers — connect one below.".to_string() })
+                text(if query_active { format!("No connected providers match “{query}”.") } else { "Nothing connected yet — pick a provider below.".to_string() })
                     .size(scale::s(11.0)).color(MUTED_FG).into()
             );
         } else {
@@ -2007,7 +2020,7 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         content.push(text("Not sure where to start? Try one of these.").size(scale::s(11.0)).color(MUTED_FG).into());
         content.push(item_separator());
         if recommended_rows.is_empty() {
-            content.push(text(if query_active { format!("No recommendations match “{query}”.") } else { "All recommended providers connected.".to_string() }).size(scale::s(11.0)).color(MUTED_FG).into());
+            content.push(text(if query_active { format!("No recommendations match “{query}”.") } else { "You've connected every recommended provider.".to_string() }).size(scale::s(11.0)).color(MUTED_FG).into());
         } else {
             let len = recommended_rows.len();
             for (idx, el) in recommended_rows.into_iter().enumerate() {
@@ -2030,7 +2043,7 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         content.push(item_separator());
         if available_rows.is_empty() {
             content.push(
-                text(if query_active { format!("No available providers match “{query}”.") } else { "All providers connected.".to_string() }).size(scale::s(11.0)).color(MUTED_FG).into()
+                text(if query_active { format!("No available providers match “{query}”.") } else { "You've connected every available provider.".to_string() }).size(scale::s(11.0)).color(MUTED_FG).into()
             );
         } else {
             let len = available_rows.len();
@@ -2043,12 +2056,12 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     }
     if matches_any(&q, &["free", "paid", "filter", "models", "manage", "dropdown", "only show free"]) || !query_active {
         let content: Vec<Element<'static, UiEvent>> = vec![
-            card_header(Icon::SlidersHorizontal, "Options", None),
+            card_header(Icon::SlidersHorizontal, "Options", Some("Model list and saved connections")),
             item_separator(),
             row![
                 column![
                     text("Only show free models").size(scale::s(12.0)),
-                    text("Hide paid models from the translation picker.")
+                    text("Hide paid models from the model picker.")
                         .size(scale::s(11.0))
                         .color(MUTED_FG),
                 ]
@@ -2066,10 +2079,7 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             item_separator(),
             row![
                 column![
-                    text("Filter unused models from the translation dropdown.")
-                        .size(scale::s(11.0))
-                        .color(MUTED_FG),
-                    text("Hide models you never use; deprecated are always hidden.")
+                    text("Hide models you never use from the model picker. Deprecated models are always hidden.")
                         .size(scale::s(11.0))
                         .color(MUTED_FG),
                 ]
@@ -2085,7 +2095,7 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
             .padding([scale::s(4.0), 0.0])
             .into(),
             item_separator(),
-            text("Connections are saved to the app's settings file in the system configuration directory.")
+            text("Your connections are saved locally, in the app's own settings file.")
                 .size(scale::s(11.0))
                 .color(MUTED_FG)
                 .into(),
@@ -2107,7 +2117,7 @@ fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
     let notes = state.update_notes();
 
     let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-    col.push(card_header(Icon::Download, "Updates", Some("Velopack — GitHub releases Liiesl/EasyScanlate")));
+    col.push(card_header(Icon::Download, "Updates", Some("Get the latest version of EasyScanlate")));
     let auto_check = easyscanlate_settings::get(|s| s.auto_check_updates);
     col.push(
         column![
@@ -2115,7 +2125,7 @@ fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
                 .label("Check for updates on startup")
                 .text_size(scale::s(12.0))
                 .on_toggle(|v| UiEvent::SettingEdit(SettingEdit::AutoCheckUpdates(v))),
-            helper_text("When on, the app checks GitHub releases at startup and shows a popup when an update is found."),
+            helper_text("When this is on, we check for a new version when the app starts and let you know when one is ready."),
         ].spacing(scale::s(4.0)).into()
     );
     col.push(item_separator());
@@ -2134,10 +2144,10 @@ fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
             button(text("Restart & Update").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateApply),
             button(text("Later").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateDismiss),
         ].spacing(scale::s(8.0)).into());
-        col.push(helper_text("The app will restart and install the update (Velopack — per-user, no admin)."));
+        col.push(helper_text("The app will restart and install the update — no admin rights needed."));
     } else if downloading {
         let pct = progress.clamp(0, 100);
-        col.push(text(format!("Downloading update {}% — please don't close", pct)).size(scale::s(12.0)).color(crate::accent::accent()).into());
+        col.push(text(format!("Downloading update — {}%. Please keep the app open.", pct)).size(scale::s(12.0)).color(crate::accent::accent()).into());
         col.push(
             progress_bar(0.0..=100.0, pct as f32)
                 .girth(Length::Fixed(scale::s(6.0)))
@@ -2148,7 +2158,7 @@ fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
                 })
                 .into(),
         );
-        col.push(text(format!("{}% — Velopack will restart when done", pct)).size(scale::s(11.0)).color(MUTED_FG).into());
+        col.push(text(format!("{}% — the app will restart when it's finished.", pct)).size(scale::s(11.0)).color(MUTED_FG).into());
     } else if let Some(v) = available.clone() {
         col.push(text(format!("Update available: v{} → v{}", current, v)).size(scale::s(12.0)).color(crate::accent::accent()).into());
         if let Some(n) = notes.clone() {
@@ -2158,12 +2168,12 @@ fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
             button(text("Download").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateDownload),
             button(text("Dismiss").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateDismiss),
         ].spacing(scale::s(8.0)).into());
-        col.push(helper_text("Downloaded via Velopack (delta if available) from GitHub releases."));
+        col.push(helper_text("We only download what's changed when we can, so it's quick."));
     } else {
         col.push(text("You're up to date.").size(scale::s(12.0)).color(Color::WHITE).into());
         col.push(text(format!("Current: v{}", current)).size(scale::s(11.0)).color(MUTED_FG).into());
         col.push(button(text("Check again").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateCheck).into());
-        col.push(helper_text("Checks GitHub Liiesl/EasyScanlate — same endpoint old app used (update.py)."));
+        col.push(helper_text("Checks GitHub for new releases."));
     }
 
     if available.is_none() && !ready && !downloading {
@@ -2226,9 +2236,9 @@ fn global_search_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Elem
             container(column![
                 row![
                     crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG),
-                    text(format!("No settings match “{query}”")).size(scale::s(12.0)).color(MUTED_FG),
+                    text(format!("No settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG),
                 ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
-                text("Try a different term — e.g. font, ocr, inpaint, translation, automation, project, advanced, export.").size(scale::s(11.0)).color(MUTED_FG),
+                text("Try a different term — e.g. font, OCR, inpaint, translation, project.").size(scale::s(11.0)).color(MUTED_FG),
             ].spacing(scale::s(6.0)))
             .padding(scale::s(14.0))
             .style(|_| card_style())

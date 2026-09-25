@@ -3,7 +3,7 @@
 //!
 //! All 5 `available` models are mandatory (q1), the wizard is blocking (q2),
 //! and preferences from q3 (appearance + automation) are collected here.
-//! The wizard can be re-opened via Settings → General → Replay onboarding (q4).
+//! The wizard can be re-opened via Settings → General → Start setup again (q4).
 
 use iced::widget::{button, column, container, progress_bar, row, rule, scrollable, space, stack, text, text_input};
 use iced::{Color, Element, Length, Fill as FillLength};
@@ -155,7 +155,7 @@ fn inline_form(modal: &crate::connect::ConnectModal) -> Element<'static, UiEvent
         );
         if is_local {
             fields.push(
-                text("Models are discovered automatically from the endpoint.")
+                text("Models are loaded automatically from this address.")
                     .size(scale::s(11.0))
                     .color(MUTED_FG)
                     .into(),
@@ -408,7 +408,7 @@ fn onboarding_recommended_row(
             ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
             row![
                 crate::icon::lucide(Icon::Info).size(scale::s(12.0)).color(MUTED_FG),
-                text("Not connected").size(scale::s(11.0)).color(MUTED_FG),
+                text("Not connected yet").size(scale::s(11.0)).color(MUTED_FG),
             ].spacing(scale::s(4.0)).align_y(iced::Alignment::Center),
         ].spacing(scale::s(6.0)).padding([scale::s(5.0), 0.0]).into()
     } else {
@@ -427,7 +427,7 @@ fn onboarding_recommended_row(
                     badge,
                 ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
                 text(info.description).size(scale::s(11.0)).color(MUTED_FG),
-                text("Not connected").size(scale::s(11.0)).color(MUTED_FG),
+                text("Not connected yet").size(scale::s(11.0)).color(MUTED_FG),
             ].spacing(scale::s(2.0)).width(FillLength),
             docs_button,
             connect_button,
@@ -475,14 +475,14 @@ fn welcome_step() -> Element<'static, UiEvent> {
                 ].spacing(scale::s(8.0)).align_y(iced::Alignment::Center),
                 row![
                     crate::icon::lucide(Icon::Languages).size(scale::s(14.0)).color(crate::accent::accent()),
-                    text("Connect a translation service (optional, can skip)").size(scale::s(12.0)).color(Color::WHITE),
+                    text("Connect a translation service (optional — you can skip this)").size(scale::s(12.0)).color(Color::WHITE),
                 ].spacing(scale::s(8.0)).align_y(iced::Alignment::Center),
             ].spacing(scale::s(8.0))
         )
         .padding(scale::s(12.0))
         .style(|_| card_style())
         .width(FillLength),
-        text("All 5 models are mandatory for full features. The wizard is blocking until downloads finish.")
+        text("All 5 models are needed for full features — we'll stay on this step until every download finishes.")
             .size(scale::s(11.0))
             .color(MUTED_FG),
     ]
@@ -500,7 +500,7 @@ fn models_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent> {
 
     let header = column![
         text("Download models").size(scale::s(16.0)).color(Color::WHITE),
-        text("All models are mandatory. Downloads are resumable (fast-down, 16 threads).")
+        text("All models are required. Interrupted downloads pick up where they left off.")
             .size(scale::s(11.0))
             .color(MUTED_FG),
         row![
@@ -585,13 +585,13 @@ fn models_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent> {
         row![
             crate::icon::lucide(Icon::RefreshCw).size(scale::s(14.0)).color(crate::accent::accent()),
             text("Downloading…").size(scale::s(12.0)).color(MUTED_FG),
-            text("(you can keep the app open; progress is resumable)").size(scale::s(11.0)).color(MUTED_FG),
+            text("(you can keep using the app — progress is saved if a download stops)").size(scale::s(11.0)).color(MUTED_FG),
         ].spacing(scale::s(8.0)).align_y(iced::Alignment::Center).into()
     } else {
         button(
             row![
                 crate::icon::lucide(Icon::Download).size(scale::s(14.0)).color(Color::WHITE),
-                text(if has_error { "Retry failed" } else { "Download all models" }).size(scale::s(13.0)).color(Color::WHITE),
+                text(if has_error { "Retry failed downloads" } else { "Download all models" }).size(scale::s(13.0)).color(Color::WHITE),
             ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center)
         )
         .padding([scale::s(8.0), scale::s(16.0)])
@@ -635,7 +635,7 @@ fn preferences_step() -> Element<'static, UiEvent> {
                 text(font_size.to_string()).size(scale::s(12.0)).color(Color::WHITE).width(Length::Fixed(scale::s(30.0))),
                 button(text("+").size(scale::s(14.0))).padding(scale::s(4.0)).style(crate::panel::button_style).on_press(UiEvent::OnboardingFontSize(true)),
             ].spacing(scale::s(8.0)).align_y(iced::Alignment::Center),
-            text("Changes apply instantly; you can fine-tune in Settings → Appearance.").size(scale::s(11.0)).color(MUTED_FG),
+            text("Changes apply instantly — you can fine-tune everything later in Settings → Appearance.").size(scale::s(11.0)).color(MUTED_FG),
         ].spacing(scale::s(8.0))
     ).padding(scale::s(10.0)).style(|_| card_style()).into();
 
@@ -656,10 +656,10 @@ fn preferences_step() -> Element<'static, UiEvent> {
         };
         let col: Element<'static, UiEvent> = column![
             row![crate::icon::lucide(Icon::Sparkles).size(scale::s(14.0)).color(crate::accent::accent()), text("Automation").size(scale::s(13.0)).color(Color::WHITE)].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
-            mk_row("Auto-detect entry styles", "Classify OCR entries via ONNX styling model", auto_style, UiEvent::OnboardingToggleAutoStyle),
-            mk_row("Auto-filter SFX", "Remove SFX outside balloons via segmentation", auto_sfx, UiEvent::OnboardingToggleAutoSfx),
-            mk_row("Auto inpaint (bg-aware)", "Gradient/artwork bubbles → transparent + inpaint", auto_inpaint, UiEvent::OnboardingToggleAutoInpaint),
-            text("You can change these anytime in Settings → General / Inpaint.").size(scale::s(11.0)).color(MUTED_FG),
+            mk_row("Auto-detect entry styles", "Automatically identifies the style of each new entry right after OCR.", auto_style, UiEvent::OnboardingToggleAutoStyle),
+            mk_row("Auto-filter SFX", "Hides sound effects outside speech balloons so only dialogue is translated.", auto_sfx, UiEvent::OnboardingToggleAutoSfx),
+            mk_row("Auto-inpaint backgrounds", "Automatically inpaints gradient and artwork backgrounds after OCR.", auto_inpaint, UiEvent::OnboardingToggleAutoInpaint),
+            text("You can change these anytime in Settings → General and Inpaint.").size(scale::s(11.0)).color(MUTED_FG),
         ].spacing(scale::s(6.0)).into();
         let automation: Element<'static, UiEvent> = container(col).padding(scale::s(10.0)).style(|_| card_style()).into();
         automation
@@ -679,8 +679,8 @@ fn translation_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent>
 
     // Intro
     let intro: Element<'static, UiEvent> = column![
-        text("Translation service").size(scale::s(14.0)).color(Color::WHITE),
-        text("Connect an LLM gateway for machine translation (optional). Inline setup — no Settings popup. You can Skip for now and connect later in Settings → Translation.")
+        text("Translation Service").size(scale::s(14.0)).color(Color::WHITE),
+        text("Connect a translation service to machine-translate your text — optional, and you can skip it. You can also connect later from Settings → Translation.")
             .size(scale::s(11.0)).color(MUTED_FG),
     ].spacing(scale::s(4.0)).into();
 
@@ -735,7 +735,7 @@ fn translation_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent>
         );
         col.push(item_separator());
         if connected_rows.is_empty() {
-            col.push(text("No connected providers — connect one below.").size(scale::s(11.0)).color(MUTED_FG).into());
+            col.push(text("Nothing connected yet — pick a provider below.").size(scale::s(11.0)).color(MUTED_FG).into());
         } else {
             for el in connected_rows {
                 col.push(el);
@@ -783,7 +783,7 @@ fn translation_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent>
         );
         col.push(item_separator());
         if available_rows.is_empty() {
-            col.push(text("All providers connected.").size(scale::s(11.0)).color(MUTED_FG).into());
+            col.push(text("You've connected every available provider.").size(scale::s(11.0)).color(MUTED_FG).into());
         } else {
             for el in available_rows {
                 col.push(el);
@@ -795,7 +795,7 @@ fn translation_step<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent>
     let tip: Element<'static, UiEvent> = container(
         column![
             text("Tip").size(scale::s(12.0)).color(Color::WHITE),
-            text("You need an API key for cloud providers, or a local endpoint (Ollama / vLLM) running at http://localhost:11434. Local providers need only a Base URL, no API key.").size(scale::s(11.0)).color(MUTED_FG),
+            text("Cloud providers need an API key. Local providers (Ollama, vLLM) only need a Base URL — for example http://localhost:11434 — and no key at all.").size(scale::s(11.0)).color(MUTED_FG),
         ].spacing(scale::s(4.0))
     ).padding(scale::s(10.0)).style(|_| card_style()).into();
 
@@ -815,12 +815,12 @@ fn done_step() -> Element<'static, UiEvent> {
     column![
         crate::icon::lucide(Icon::Sparkles).size(scale::s(28.0)).color(crate::accent::accent()),
         text("You're all set!").size(scale::s(20.0)).color(Color::WHITE),
-        text("Models are ready, preferences saved. You can replay this wizard from Settings → General.").size(scale::s(12.0)).color(MUTED_FG),
+        text("Your models are ready and your preferences are saved. You can run this setup again anytime from Settings → General.").size(scale::s(12.0)).color(MUTED_FG),
         container(
             column![
                 text("Next steps").size(scale::s(12.0)).color(Color::WHITE),
-                text("• Create a new project or open a .mmtl").size(scale::s(11.0)).color(MUTED_FG),
-                text("• Fine-tune in Settings (appearance, OCR, inpaint)").size(scale::s(11.0)).color(MUTED_FG),
+                text("• Create a new project or open an existing one").size(scale::s(11.0)).color(MUTED_FG),
+                text("• Fine-tune anything in Settings — appearance, OCR, inpaint").size(scale::s(11.0)).color(MUTED_FG),
             ].spacing(scale::s(4.0))
         ).padding(scale::s(10.0)).style(|_| card_style()).width(FillLength),
     ].spacing(scale::s(12.0)).align_x(iced::Alignment::Center).into()

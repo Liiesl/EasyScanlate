@@ -88,7 +88,7 @@ pub fn view<'a, S: UiState + ?Sized>(
         );
         if is_local {
             fields.push(
-                text("Models are discovered automatically from the endpoint.")
+                text("Models are loaded automatically from this address.")
                     .size(scale::s(11.0))
                     .color(MUTED_FG)
                     .into(),

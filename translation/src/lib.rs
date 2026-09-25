@@ -259,27 +259,27 @@ pub static RECOMMENDED: &[RecommendedInfo] = &[
     RecommendedInfo {
         id: "kilo",
         docs_url: "https://kilo.ai/docs/getting-started/setup-authentication#kilo-gateway-api-key",
-        description: "A gateway that aggregates many different models behind a single API. It offers free models that you can try without providing any credit card information, which makes it the easiest option for first-time testing.",
+        description: "A gateway that brings many different models together behind one API. It offers free models you can try without a credit card, which makes it the easiest option for first-time testing.",
     },
     RecommendedInfo {
         id: "google",
         docs_url: "https://ai.google.dev/gemini-api/docs/api-key#getting-started",
-        description: "Delivers the best translation quality in testing and offers a free tier with no credit card required. The free tier has strict rate limits and models are frequently busy or temporarily unavailable on the free tier, so expect occasional retries.",
+        description: "Delivered the best translation quality in our testing, and its free tier doesn't require a credit card. The free tier does have strict rate limits, and models are often busy or briefly unavailable, so expect the occasional retry.",
     },
     RecommendedInfo {
         id: "mistral",
         docs_url: "https://docs.mistral.ai/studio#getting-started-api",
-        description: "Offers a free tier, although you do need to provide a credit card to activate it. Its models are widely regarded as the least censored available — they were not heavily trained to refuse instructions — so they follow translation prompts reliably and are particularly well suited for scanlation.",
+        description: "Offers a free tier, though you do need a credit card to activate it. Its models are widely regarded as the least censored available — they weren't heavily trained to refuse instructions — so they follow translation prompts reliably and suit scanlations particularly well.",
     },
     RecommendedInfo {
         id: "opencode-go",
         docs_url: "https://docs.mistral.ai/studio#getting-started-api",
-        description: "A subscription-based provider that offers the lowest cost per credit among the available options. It provides the best value if you translate frequently or work with larger projects.",
+        description: "A subscription-based provider with the lowest cost per credit of the options here. It's the best value if you translate frequently or work on larger projects.",
     },
     RecommendedInfo {
         id: "openrouter",
         docs_url: "https://developer.puter.com/tutorials/how-to-get-openrouter-api-key/",
-        description: "Provides access to the largest repository of models in one place. It does offer some free models, but you must add an initial balance to your account first before those free models become available.",
+        description: "Gives you access to the largest selection of models in one place. It does offer free models, but you'll need to add a balance to your account before they unlock.",
     },
 ];
 

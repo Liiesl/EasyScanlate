@@ -76,8 +76,8 @@ fn assign_project_series(app: &mut App, series: Option<String>) {
         tab.project.set_series(series.clone());
         tab.dirty = true;
         let label = match series.as_deref() {
-            Some(name) => format!("Series set to “{name}”. Save to persist."),
-            None => "Series cleared (standalone). Save to persist.".to_string(),
+            Some(name) => format!("Series set to “{name}” — save the project to keep it."),
+            None => "Series removed — save the project to keep the change.".to_string(),
         };
         tab.status = label;
         tab.mmtl_path.clone()

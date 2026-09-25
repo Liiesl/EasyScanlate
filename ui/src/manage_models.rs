@@ -87,10 +87,10 @@ pub fn view<'a, S: UiState + ?Sized>(
     ];
 
     let description = column![
-        text("Toggle models per provider. Hidden models disappear from the translation dropdown.")
+        text("Turn individual models on or off for each provider. Hidden models won't show up in the model picker.")
             .size(scale::s(11.0))
             .color(MUTED_FG),
-        text("Deprecated models are always hidden and never shown here.")
+        text("Deprecated models are hidden automatically, so you won't see them here.")
             .size(scale::s(11.0))
             .color(MUTED_FG),
     ]
@@ -110,7 +110,7 @@ pub fn view<'a, S: UiState + ?Sized>(
 
     let body: Element<'_, UiEvent> = if groups.is_empty() {
         container(
-            text("No connected providers – connect a translation service first.")
+            text("No connected providers yet — connect a translation service first.")
                 .size(scale::s(12.0))
                 .color(MUTED_FG),
         )
@@ -278,7 +278,7 @@ pub fn view<'a, S: UiState + ?Sized>(
                 .padding(scale::s(6.0))
                 .style(crate::panel::button_style)
             .on_press(UiEvent::SettingEdit(SettingEdit::HiddenModelsResetAll)),
-            container(text("Reset hidden models").size(scale::s(11.0))).padding(scale::s(6.0)).style(container::rounded_box),
+            container(text("Reset to defaults").size(scale::s(11.0))).padding(scale::s(6.0)).style(container::rounded_box),
             tooltip::Position::Top
         ).gap(scale::s(4.0)),
         space::horizontal(),
