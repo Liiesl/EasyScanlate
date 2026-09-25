@@ -6,10 +6,11 @@ use iced::advanced::widget::{operate, Id as WidgetId};
 use iced::widget::operation::AbsoluteOffset;
 use iced::widget::text_editor;
 use iced::widget::{
-    button, column, container, mouse_area, pick_list, row, scrollable, space, text, tooltip, Column, Id,
+    button, column, container, mouse_area, pick_list, responsive, row, scrollable, space, text,
+    tooltip, Column, Id,
 };
 use iced::{keyboard, Background, Border, Color, Element, Fill as FillLength, Font, Length, Padding,
-    Rectangle, Vector};
+    Rectangle, Size, Vector};
 use neverliie_iced_widgets::advanced_dropdown::{advanced_dropdown, Footer, Item, MenuItem};
 use std::fmt::{Display, Formatter};
 
@@ -482,9 +483,16 @@ fn translate_profile_pickers<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'
     .into()
 }
 
-/// The bottom translation bar: one row with the merged provider/model
-/// dropdown, the target-language picker and the translate button. When no
-/// connection is configured the bar collapses to a status row with a
+/// Width of the translation bar below which the model dropdown moves to its
+/// own full-width row on top, leaving `To:` + language + button in a second
+/// row. Compared against the responsive size scaled with the UI font size.
+const TRANSLATE_BAR_BREAKPOINT: f32 = 360.0;
+
+/// The bottom translation bar: the merged provider/model dropdown, the
+/// target-language picker and the translate button. Wide bars keep everything
+/// in one row; below `TRANSLATE_BAR_BREAKPOINT` the dropdown moves to its own
+/// full-width row on top with `To:` + language + button in a second row.
+/// When no connection is configured the bar collapses to a status row with a
 /// "Configure…" button that opens the settings modal on the Translation tab;
 /// the configure button is never shown otherwise.
 fn translate_bar<'a, S: UiState + ?Sized>(
@@ -493,59 +501,96 @@ fn translate_bar<'a, S: UiState + ?Sized>(
 ) -> Element<'a, UiEvent> {
     let connected = easyscanlate_settings::get(|s| !s.connections.is_empty());
     let body: Element<'_, UiEvent> = if connected {
-        let (sel_provider, sel_model) = state.translate_model_selection();
-        let mut entries: Vec<MenuItem<'a, ModelOption, UiEvent, iced::Theme, iced::Renderer>> =
-            Vec::new();
-        let mut selected = None;
-        for (provider_id, provider_name, models) in state.translate_model_groups() {
-            entries.push(MenuItem::Label(provider_name.as_str()));
-            for (model_id, model_name) in models {
-                let option = ModelOption {
-                    provider_id: provider_id.clone(),
-                    provider_name: provider_name.clone(),
-                    model_id: model_id.clone(),
-                    model_name: model_name.clone(),
-                };
-                if provider_id.as_str() == sel_provider && model_id.as_str() == sel_model {
-                    selected = Some(option.clone());
+        responsive(move |size: Size| {
+            let (sel_provider, sel_model) = state.translate_model_selection();
+            let mut entries: Vec<
+                MenuItem<'a, ModelOption, UiEvent, iced::Theme, iced::Renderer>,
+            > = Vec::new();
+            let mut selected = None;
+            for (provider_id, provider_name, models) in state.translate_model_groups() {
+                entries.push(MenuItem::Label(provider_name.as_str()));
+                for (model_id, model_name) in models {
+                    let option = ModelOption {
+                        provider_id: provider_id.clone(),
+                        provider_name: provider_name.clone(),
+                        model_id: model_id.clone(),
+                        model_name: model_name.clone(),
+                    };
+                    if provider_id.as_str() == sel_provider && model_id.as_str() == sel_model {
+                        selected = Some(option.clone());
+                    }
+                    entries.push(MenuItem::Item(Item::new(option, model_name.as_str())));
                 }
-                entries.push(MenuItem::Item(Item::new(option, model_name.as_str())));
             }
-        }
 
-        let translate_btn = button(crate::icon::lucide(Icon::Send).size(scale::s(14.0)).center())
-            .padding(scale::s(6.0))
-            .style(crate::panel::button_style)
-            .on_press_maybe(
-                (has_entries && !state.is_bulk_busy())
-                    .then_some(UiEvent::Translate)
-            );
-        let translate: Element<'_, UiEvent> =
-            tooltip(crate::button::with_disabled_cursor(translate_btn.into()), tip_label("Translate"), tooltip::Position::Top)
-                .gap(scale::s(4.0))
-                .into();
-        row![
-            advanced_dropdown(entries, selected, |option| UiEvent::TranslateModelSelect {
-                provider: option.provider_id.clone(),
-                model: option.model_id.clone(),
+            let dropdown = advanced_dropdown(entries, selected, |option| {
+                UiEvent::TranslateModelSelect {
+                    provider: option.provider_id.clone(),
+                    model: option.model_id.clone(),
+                }
             })
             .placeholder("Select a model…")
             .searchable(true)
             .text_size(scale::s(12.0))
             .width(FillLength)
             .menu_max_height(280.0)
-            .footer(Footer::new("Manage models…", UiEvent::ManageModelsOpen)),
-            text("To:").size(scale::s(12.0)),
-            pick_list(
-                translation::LANGUAGES,
-                Some(state.translate_lang()),
-                |l| UiEvent::TranslateLang(l.to_string()),
+            .footer(Footer::new("Manage models…", UiEvent::ManageModelsOpen));
+
+            let translate_btn =
+                button(crate::icon::lucide(Icon::Send).size(scale::s(14.0)).center())
+                    .padding(scale::s(6.0))
+                    .style(crate::panel::button_style)
+                    .on_press_maybe(
+                        (has_entries && !state.is_bulk_busy()).then_some(UiEvent::Translate),
+                    );
+            let translate: Element<'a, UiEvent> = tooltip(
+                crate::button::with_disabled_cursor(translate_btn.into()),
+                tip_label("Translate"),
+                tooltip::Position::Top,
             )
-            .text_size(scale::s(12.0)),
-            translate,
-        ]
-        .spacing(scale::s(6.0))
-        .align_y(iced::Alignment::Center)
+            .gap(scale::s(4.0))
+            .into();
+
+            if size.width < scale::s(TRANSLATE_BAR_BREAKPOINT) {
+                column![
+                    dropdown,
+                    row![
+                        text("To:").size(scale::s(12.0)),
+                        pick_list(
+                            translation::LANGUAGES,
+                            Some(state.translate_lang()),
+                            |l| UiEvent::TranslateLang(l.to_string()),
+                        )
+                        .text_size(scale::s(12.0))
+                        .width(FillLength),
+                        translate,
+                    ]
+                    .spacing(scale::s(6.0))
+                    .align_y(iced::Alignment::Center)
+                    .width(FillLength),
+                ]
+                .spacing(scale::s(6.0))
+                .width(FillLength)
+                .into()
+            } else {
+                row![
+                    dropdown,
+                    text("To:").size(scale::s(12.0)),
+                    pick_list(
+                        translation::LANGUAGES,
+                        Some(state.translate_lang()),
+                        |l| UiEvent::TranslateLang(l.to_string()),
+                    )
+                    .text_size(scale::s(12.0)),
+                    translate,
+                ]
+                .spacing(scale::s(6.0))
+                .align_y(iced::Alignment::Center)
+                .into()
+            }
+        })
+        .width(FillLength)
+        .height(Length::Shrink)
         .into()
     } else {
         let not_connected_btn = button(crate::icon::lucide(Icon::Settings).size(scale::s(14.0)).center())
