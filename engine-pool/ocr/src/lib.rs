@@ -415,8 +415,9 @@ pub fn load_rgb(path: &str) -> Option<RgbImage> {
 /// `band` is the fraction of that stacked body the run actually OCRs (the
 /// whole body `(0.0, 1.0)` for normal runs, a chunk `(c/k, (c+1)/k)` for a
 /// split of a too-tall page). Margins are stitched from the bands above and
-/// below, and duplicates in the top margin are deduped against the stored
-/// entries of the page whose content touches the band's top edge.
+/// below. Top-margin duplicates are deduped by the app (which owns the
+/// committed model state), not by the engine: the engine only sends images
+/// (canvases) and returns raw job results.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RunPlan {
     /// First page index covered (inclusive).
@@ -432,10 +433,6 @@ pub struct RunPlan {
     /// Same for the content directly below the band (its top
     /// [`STITCH_MARGIN_RATIO`] becomes the bottom margin strip).
     pub below: Option<(usize, (f32, f32))>,
-    /// The page whose stored entries the top-margin duplicates are deduped
-    /// against, plus the offset in that page's pixel space of the band's top
-    /// edge. `None` only for the very first run.
-    pub dedup: Option<(usize, u32)>,
 }
 
 /// Splits a book into OCR runs by aspect ratio (height/width).
@@ -461,7 +458,6 @@ pub fn plan_runs(dims: &[(u32, u32)]) -> Vec<RunPlan> {
     let mut i = 0;
     while i < dims.len() {
         if ratio(i) > MAX_ASPECT_RATIO {
-            let height = dims[i].1;
             let chunks = (ratio(i) / MAX_ASPECT_RATIO).ceil() as u32;
             for chunk in 0..chunks {
                 let band = (chunk as f32 / chunks as f32, (chunk + 1) as f32 / chunks as f32);
@@ -475,18 +471,16 @@ pub fn plan_runs(dims: &[(u32, u32)]) -> Vec<RunPlan> {
                 } else {
                     (i + 1 < dims.len()).then(|| (i + 1, (0.0, 1.0)))
                 };
-                let dedup = if chunk > 0 {
-                    Some((i, (band.0 * height as f32).round() as u32))
-                } else {
-                    i.checked_sub(1).map(|p| (p, dims[p].1))
-                };
+                // NOTE: no `dedup` target here. Deduping is the app's job:
+                // the app derives `(page, offset)` from the committed model
+                // state once the next image has arrived (see `dedup_target`
+                // in `src/app/ocr.rs`).
                 runs.push(RunPlan {
                     page_start: i,
                     page_end: i,
                     band,
                     above,
                     below,
-                    dedup,
                 });
             }
             i += 1;
@@ -505,7 +499,6 @@ pub fn plan_runs(dims: &[(u32, u32)]) -> Vec<RunPlan> {
                 band: (0.0, 1.0),
                 above: i.checked_sub(1).map(|p| (p, (0.0, 1.0))),
                 below: (j + 1 < dims.len()).then(|| (j + 1, (0.0, 1.0))),
-                dedup: i.checked_sub(1).map(|p| (p, dims[p].1)),
             });
             i = j + 1;
         }
@@ -709,16 +702,15 @@ impl BoundaryState {
 
 }
 
-/// Assembles one run's raw lines into a commit-ready [`RunResult`], strictly
-/// in run order on the UI thread: merges nearby boxes, resolves the previous
-/// run's held boundary candidates against this run's re-detections in its top
-/// margin, dedups against the committed quads of the page above, distributes
-/// the survivors to their pages and holds this run's own boundary candidates
+/// Assembles one run's raw lines into a [`RunResult`] without deduping:
+/// merges nearby boxes, resolves the previous run's held boundary candidates
+/// against this run's re-detections in its top margin, distributes the
+/// survivors to their pages and holds this run's own boundary candidates
 /// for the next run.
 ///
-/// `prev` is the dedup target: the committed quads of the page above, its
-/// width and the offset of this run's canvas top edge in that page's pixel
-/// space (`(quads, prev_width, prev_offset)`).
+/// Deduping is the app's responsibility (it owns the committed model state):
+/// the app calls [`dedup_with_previous`] on the kept lines once the next
+/// image has arrived, then commits the current image to the model.
 #[allow(clippy::too_many_arguments)]
 pub fn assemble(
     index: usize,
@@ -728,10 +720,9 @@ pub fn assemble(
     plans: &[RunPlan],
     dims: &[(u32, u32)],
     held: Option<BoundaryState>,
-    prev: Option<(Vec<Quad>, u32, u32)>,
 ) -> RunResult {
     assemble_with_merge(
-        index, width, margin_top, lines, plans, dims, held, prev, MergeConfig::default(),
+        index, width, margin_top, lines, plans, dims, held, MergeConfig::default(),
     )
 }
 
@@ -746,11 +737,10 @@ pub fn assemble_with_merge(
     plans: &[RunPlan],
     dims: &[(u32, u32)],
     held: Option<BoundaryState>,
-    prev: Option<(Vec<Quad>, u32, u32)>,
     merge_cfg: MergeConfig,
 ) -> RunResult {
     assemble_with_config(
-        index, width, margin_top, lines, plans, dims, held, prev, merge_cfg, 0.0, 10000.0,
+        index, width, margin_top, lines, plans, dims, held, merge_cfg, 0.0, 10000.0,
     )
 }
 
@@ -765,7 +755,6 @@ pub fn assemble_with_config(
     plans: &[RunPlan],
     dims: &[(u32, u32)],
     held: Option<BoundaryState>,
-    prev: Option<(Vec<Quad>, u32, u32)>,
     merge_cfg: MergeConfig,
     min_bbox_height: f32,
     max_bbox_height: f32,
@@ -790,13 +779,9 @@ pub fn assemble_with_config(
         }
         None => (Vec::new(), merged),
     };
-    let deduped = match &prev {
-        Some((quads, prev_width, offset)) => {
-            dedup_with_previous(kept, quads, *prev_width, *offset, width, margin_top)
-        }
-        None => kept,
-    };
-    let out = distribute(deduped, &run_dims, run.band, margin_top);
+    // NOTE: no `dedup_with_previous` here. The app dedups `kept` against the
+    // committed quads of the page above once the next image has arrived.
+    let out = distribute(kept, &run_dims, run.band, margin_top);
     let mut per_page = out.per_page;
     for candidate in resolved {
         match per_page
@@ -2328,11 +2313,8 @@ mod tests {
             assert_eq!(run.band, (0.0, 1.0));
         }
         assert_eq!(runs[0].above, None);
-        assert_eq!(runs[0].dedup, None);
         assert_eq!(runs[1].above, Some((0, (0.0, 1.0))));
         assert_eq!(runs[1].below, Some((2, (0.0, 1.0))));
-        assert_eq!(runs[1].dedup, Some((0, 3000)));
-        assert_eq!(runs[2].dedup, Some((1, 2400)));
     }
 
     #[test]
@@ -2344,10 +2326,8 @@ mod tests {
         assert_eq!(runs[0].band, (0.0, 1.0));
         assert_eq!(runs[0].above, None);
         assert_eq!(runs[0].below, Some((2, (0.0, 1.0))));
-        assert_eq!(runs[0].dedup, None);
         assert_eq!((runs[1].page_start, runs[1].page_end), (2, 2));
         assert_eq!(runs[1].above, Some((1, (0.0, 1.0))));
-        assert_eq!(runs[1].dedup, Some((1, 1400)));
     }
 
     #[test]
@@ -2374,13 +2354,13 @@ mod tests {
     fn plan_runs_never_stitches_a_page_above_the_maximum() {
         // A 800x1200 (1.5) page followed by a 800x8000 (10) page: the tall
         // page becomes its own split runs, the short page stays a short run.
+        // Dedup targets are derived by the app from committed state, not by
+        // the planner.
         let runs = plan_runs(&[(800, 1200), (800, 8000)]);
         assert_eq!(runs.len(), 3);
         assert_eq!((runs[0].page_start, runs[0].page_end), (0, 0));
         assert_eq!(runs[1].above, Some((0, (0.0, 1.0))));
-        assert_eq!(runs[1].dedup, Some((0, 1200)));
         assert_eq!(runs[2].above, Some((1, (0.0, 0.5))));
-        assert_eq!(runs[2].dedup, Some((1, 4000)));
         assert_eq!(runs[2].below, None);
     }
 
@@ -2393,10 +2373,8 @@ mod tests {
         assert_eq!(runs[0].band, (0.0, 0.5));
         assert_eq!(runs[0].above, None);
         assert_eq!(runs[0].below, Some((0, (0.5, 1.0))));
-        assert_eq!(runs[0].dedup, None);
         assert_eq!(runs[1].band, (0.5, 1.0));
         assert_eq!(runs[1].above, Some((0, (0.0, 0.5))));
-        assert_eq!(runs[1].dedup, Some((0, 4000)));
     }
 
     #[test]
@@ -2710,26 +2688,25 @@ mod tests {
         }
     }
 
-    fn plan(page_start: usize, page_end: usize, band: (f32, f32), dedup: Option<(usize, u32)>) -> RunPlan {
+    fn plan(page_start: usize, page_end: usize, band: (f32, f32)) -> RunPlan {
         RunPlan {
             page_start,
             page_end,
             band,
             above: None,
             below: None,
-            dedup,
         }
     }
 
     #[test]
     fn assemble_maps_a_whole_page_run_to_per_page_entries() {
-        let plans = vec![plan(0, 1, (0.0, 1.0), None)];
+        let plans = vec![plan(0, 1, (0.0, 1.0))];
         let dims = [(100, 200), (100, 300)];
         let lines = vec![
             line("p0", 10.0, 210.0, 90.0, 240.0, 0.9),
             line("p1", 10.0, 450.0, 90.0, 480.0, 0.9),
         ];
-        let result = assemble(0, 100, 200, lines, &plans, &dims, None, None);
+        let result = assemble(0, 100, 200, lines, &plans, &dims, None);
         assert_eq!(result.per_page.len(), 2);
         assert_eq!(result.per_page[0].0, 0);
         assert_eq!(result.per_page[0].1[0].text, "p0");
@@ -2762,8 +2739,8 @@ mod tests {
         // bottom margin (the capture is held, not stored); run 1 re-detects
         // the same bubble in its top margin.
         let plans = vec![
-            plan(0, 0, (0.0, 1.0), None),
-            plan(1, 1, (0.0, 1.0), Some((0, 400))),
+            plan(0, 0, (0.0, 1.0)),
+            plan(1, 1, (0.0, 1.0)),
         ];
         let dims = [(100, 400), (100, 400)];
         let first = assemble(
@@ -2773,7 +2750,6 @@ mod tests {
             vec![line("held", 10.0, 590.0, 90.0, 640.0, 0.9)],
             &plans,
             &dims,
-            None,
             None,
         );
         assert!(first.per_page.is_empty(), "bottom-margin bubbles are held, not stored");
@@ -2792,7 +2768,6 @@ mod tests {
             &plans,
             &dims,
             Some(held),
-            Some((Vec::new(), 100, 400)),
         );
         assert_eq!(second.per_page.len(), 1);
         assert_eq!(second.per_page[0].0, 1);
@@ -2810,13 +2785,13 @@ mod tests {
     }
 
     #[test]
-    fn assemble_dedups_against_the_previous_page_quads() {
-        // Page 0's committed store has an entry whose quad sticks 50px past
-        // the page's bottom edge; run 1's top strip re-detects it as a
-        // duplicate and must drop the copy.
-        let plans = vec![plan(1, 1, (0.0, 1.0), Some((0, 500)))];
+    fn assemble_leaves_top_margin_duplicates_for_app_dedup() {
+        // Deduping is the app's responsibility: the engine returns the raw
+        // top-margin re-detection untouched, and the app drops it via
+        // `dedup_with_previous` against the committed quads once the next
+        // image has arrived.
+        let plans = vec![plan(1, 1, (0.0, 1.0))];
         let dims = [(100, 500), (100, 500)];
-        let prev_quads = vec![quad_xyxy(20.0, 450.0, 80.0, 550.0)];
         let result = assemble(
             0,
             100,
@@ -2828,21 +2803,25 @@ mod tests {
             &plans,
             &dims,
             None,
-            Some((prev_quads, 100, 500)),
         );
         assert_eq!(result.per_page.len(), 1);
         assert_eq!(result.per_page[0].0, 1);
-        assert_eq!(result.per_page[0].1.len(), 1);
-        assert_eq!(result.per_page[0].1[0].text, "own");
-        assert_eq!(
-            result.per_page[0].1[0].quad.bounds(),
-            [
-                20.0 - OCR_QUAD_PAD,
-                70.0 - OCR_QUAD_PAD,
-                80.0 + OCR_QUAD_PAD,
-                100.0 + OCR_QUAD_PAD
-            ]
+        assert_eq!(result.per_page[0].1.len(), 2);
+        // App-side dedup then drops the repeat.
+        let prev_quads = vec![quad_xyxy(20.0, 450.0, 80.0, 550.0)];
+        let kept = dedup_with_previous(
+            vec![
+                line("span", 20.0, -50.0, 80.0, 50.0, 0.9),
+                line("own", 20.0, 120.0, 80.0, 150.0, 0.9),
+            ],
+            &prev_quads,
+            100,
+            500,
+            100,
+            50,
         );
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].text, "own");
         assert!(result.held.is_none());
     }
 
@@ -2850,7 +2829,7 @@ mod tests {
     fn assemble_maps_chunk_bands_into_the_page() {
         // A too-tall page split in half: the run covers band 0.5..1.0 of page
         // 0 with a 200px top strip.
-        let plans = vec![plan(0, 0, (0.5, 1.0), Some((0, 300)))];
+        let plans = vec![plan(0, 0, (0.5, 1.0))];
         let dims = [(100, 600)];
         let result = assemble(
             0,
@@ -2862,7 +2841,6 @@ mod tests {
             ],
             &plans,
             &dims,
-            None,
             None,
         );
         assert_eq!(result.per_page.len(), 1);

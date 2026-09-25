@@ -118,6 +118,14 @@ pub struct Tab {
     pub ocr_runs: usize,
     #[cfg(feature = "ocr")]
     pub held_boundary: Option<ocr_engine::BoundaryState>,
+    /// App-owned OCR inbox: `image received` results staged here out-of-order,
+    /// then drained in order through `wait for next img` (`current` commits
+    /// only once `next` has arrived, so dedup sees committed state).
+    /// `ocr_next_commit` is the `current img` index per the diagram.
+    #[cfg(feature = "ocr")]
+    pub ocr_staged: std::collections::BTreeMap<usize, ocr_engine::RunEvent>,
+    #[cfg(feature = "ocr")]
+    pub ocr_next_commit: usize,
     pub running: bool,
 
     // inpaint (per-tab pending queues)
@@ -298,6 +306,10 @@ impl Tab {
             ocr_runs: 0,
             #[cfg(feature = "ocr")]
             held_boundary: None,
+            #[cfg(feature = "ocr")]
+            ocr_staged: std::collections::BTreeMap::new(),
+            #[cfg(feature = "ocr")]
+            ocr_next_commit: 0,
             running: false,
             #[cfg(feature = "inpaint")]
             pending_manual_multi: None,

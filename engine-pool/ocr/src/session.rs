@@ -69,8 +69,12 @@ pub(crate) fn build_canvas(
 
 /// Drives the planned run set with a bounded in-flight window (`workers + 1`).
 /// Dispatch stays parallel (`window` canvases in flight), but results are
-/// emitted strictly in index order `0,1,2…` so `dedup` and `held` chains see
-/// committed state.
+/// emitted strictly in index order `0,1,2…` so the app's `held` chain never
+/// sees a gap. Deduping itself is the app's responsibility: the engine only
+/// sends images (canvases) and returns raw job results, and the app buffers
+/// `current`/`next` images, dedups the current image once the next image has
+/// arrived, then commits it to the model (out-of-order arrivals are also
+/// tolerated by the app's inbox).
 pub struct RunSession {
     plans: Vec<RunPlan>,
     dims: Vec<(u32, u32)>,
@@ -119,7 +123,8 @@ impl RunSession {
     /// `None` when every run is done. May block (image loads + inference recv)
     /// — call from a background task/stream, never the UI. Dispatch stays
     /// parallel (`window` canvases in flight); emit is strictly `next_emit`
-    /// order so `dedup`/`held` chains never see a gap.
+    /// order so the app's `held` chain never sees a gap (the app additionally
+    /// tolerates out-of-order arrivals in its own inbox).
     pub fn step(
         &mut self,
         pipeline: &ParallelEngine,
@@ -209,7 +214,6 @@ mod tests {
             band: (0.0, 1.0),
             above: None,
             below: None,
-            dedup: None,
         }
     }
 

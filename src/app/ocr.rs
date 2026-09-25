@@ -188,6 +188,8 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
             tab.ocr_failed = 0;
             tab.ocr_cancelled = false;
             tab.held_boundary = None;
+            tab.ocr_staged.clear();
+            tab.ocr_next_commit = 0;
             #[cfg(feature = "segment")]
             {
                 tab.pipeline_seg_done = false;
@@ -339,74 +341,240 @@ pub fn handle_stop_ocr(app: &mut App) -> Task<Message> {
 }
 
 #[cfg(feature = "ocr")]
-pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: Result<ocr::RunEvent, String>) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
-    app.tabs[idx].pending = app.tabs[idx].pending.saturating_sub(1);
-    match result {
-        Ok(ocr::RunEvent::Canvas {
+/// App-side dedup target for `index`, replacing the removed `RunPlan::dedup`.
+///
+/// Chunk splits of one tall page dedup against the same page at the band's top
+/// edge; whole-page runs dedup against the previous page's full height.
+/// Returns `(page, offset)` where `offset` is the band-top edge in that page's
+/// pixel space. `None` for the very first run.
+fn dedup_target_for(
+    index: usize,
+    plans: &[ocr::RunPlan],
+    dims: &[(u32, u32)],
+) -> Option<(usize, u32)> {
+    let run = *plans.get(index)?;
+    if run.band.0 > 0.0 {
+        let h = dims.get(run.page_start)?.1;
+        Some((run.page_start, (run.band.0 * h as f32).round() as u32))
+    } else {
+        let p = run.page_start.checked_sub(1)?;
+        Some((p, dims.get(p)?.1))
+    }
+}
+
+#[cfg(feature = "ocr")]
+/// `dedup current img` per the diagram: run the full assembly pipeline for
+/// the buffered `current` run with dedup against the committed model state,
+/// then commit the result to the model. The engine only supplies raw job
+/// results; all dedup decisions live here.
+fn dedup_and_commit_current(
+    app: &mut App,
+    idx: usize,
+    index: usize,
+    width: u32,
+    margin_top: u32,
+    lines: Vec<ocr::OcrLine>,
+) {
+    let (merge_cfg, min_h, max_h) = easyscanlate_settings::get(|s| {
+        (
+            ocr::MergeConfig::from_threshold_str(&s.ocr_merge_threshold),
+            s.ocr_min_text_height.trim().parse::<f32>().unwrap_or(10.0),
+            s.ocr_max_text_height.trim().parse::<f32>().unwrap_or(100.0),
+        )
+    });
+    let (plans, dims, held) = {
+        let tab = &mut app.tabs[idx];
+        (
+            tab.ocr_plans.clone(),
+            tab.ocr_dims.clone(),
+            tab.held_boundary.take(),
+        )
+    };
+    let Some(run) = plans.get(index).copied() else {
+        app.tabs[idx].ocr_failed += 1;
+        return;
+    };
+    let run_dims: Vec<(usize, u32, u32)> = (run.page_start..=run.page_end)
+        .filter_map(|i| dims.get(i).map(|&(w, h)| (i, w, h)))
+        .collect();
+    if run_dims.is_empty() {
+        app.tabs[idx].ocr_failed += 1;
+        return;
+    }
+    // Merge + held-boundary resolve (same as the engine used to do, now app).
+    let filtered = ocr::filter_by_bbox_height(lines, min_h, max_h);
+    let merged = ocr::merge(filtered, merge_cfg);
+    let (resolved, kept) = match &held {
+        Some(state) => {
+            let transformed = ocr::transform_candidates(
+                &state.candidates,
+                state.width,
+                state.boundary,
+                width,
+                margin_top,
+            );
+            let resolution = ocr::resolve_boundary(&state.candidates, &transformed, merged);
+            (resolution.append, resolution.kept)
+        }
+        None => (Vec::new(), merged),
+    };
+    // App-owned dedup against committed quads of the page above.
+    let deduped = match dedup_target_for(index, &plans, &dims) {
+        Some((page, offset)) => {
+            let (quads, prev_width) = {
+                let tab = &app.tabs[idx];
+                let (quads, prev_width) = match tab.images.get(page) {
+                    Some(img) => {
+                        let image_id = img.image_id;
+                        let quads: Vec<Quad> = tab
+                            .project
+                            .all_for(image_id)
+                            .map(|entry| entry.quad)
+                            .collect();
+                        let w = tab
+                            .project
+                            .image(image_id)
+                            .map(|m| m.width as u32)
+                            .unwrap_or(0);
+                        (quads, w)
+                    }
+                    None => (Vec::new(), 0),
+                };
+                (quads, prev_width)
+            };
+            if quads.is_empty() {
+                kept
+            } else {
+                ocr::dedup_with_previous(kept, &quads, prev_width, offset, width, margin_top)
+            }
+        }
+        None => kept,
+    };
+    let out = ocr::distribute(deduped, &run_dims, run.band, margin_top);
+    let mut per_page = out.per_page;
+    for candidate in resolved {
+        match per_page
+            .iter_mut()
+            .find(|(page, _)| *page == candidate.page)
+        {
+            Some((_, entries)) => entries.push(candidate.entry),
+            None => per_page.push((candidate.page, vec![candidate.entry])),
+        }
+    }
+    per_page.sort_by_key(|(page, _)| *page);
+    eprintln!(
+        "[ocr-run {index}] final per-page: {:?}",
+        per_page
+            .iter()
+            .map(|(p, e)| format!("p{p}:{}", e.len()))
+            .collect::<Vec<_>>()
+    );
+    app.tabs[idx].held_boundary = (!out.held.is_empty()).then_some(ocr::BoundaryState {
+        candidates: out.held,
+        width,
+        boundary: out.boundary,
+    });
+    // Commit current image to the model, then the caller bumps next->current.
+    for (page, entries) in per_page {
+        let image_id = match app.tabs[idx].images.get(page).map(|im| im.image_id) {
+            Some(id) => id,
+            None => continue,
+        };
+        let cnt = entries.len();
+        if let Some(ev) = app.tabs[idx].project.append_ocr_for_image_with_event(image_id, entries)
+        {
+            if let easyscanlate_model::ModelEvent::EntriesAdded { ids, .. } = &ev {
+                app.tabs[idx].ocr_total += ids.len();
+            } else {
+                app.tabs[idx].ocr_total += cnt;
+            }
+            let ev_clone = ev;
+            crate::app::handle_model_event(&mut app.tabs[idx], ev_clone);
+        }
+    }
+}
+
+#[cfg(feature = "ocr")]
+/// Flush held boundary candidates for `idx` (unchanged semantics).
+fn flush_held_candidates(app: &mut App, idx: usize) {
+    if let Some(state) = app.tabs[idx].held_boundary.take() {
+        for candidate in state.candidates {
+            if candidate.page >= app.tabs[idx].images.len() {
+                continue;
+            }
+            let image_id = app.tabs[idx].images[candidate.page].image_id;
+            if let Some(ev) = app.tabs[idx]
+                .project
+                .append_ocr_for_image_with_event(image_id, vec![candidate.entry])
+            {
+                if let easyscanlate_model::ModelEvent::EntriesAdded { ids, .. } = &ev {
+                    app.tabs[idx].ocr_total += ids.len();
+                } else {
+                    app.tabs[idx].ocr_total += 1;
+                }
+                crate::app::handle_model_event(&mut app.tabs[idx], ev);
+            }
+        }
+    }
+}
+
+#[cfg(feature = "ocr")]
+/// Drain the `wait for next img` buffer: commit `current` only once `next`
+/// has arrived (or when `flush`, i.e. the stream is done). Out-of-order
+/// arrivals sit in `ocr_staged` until the gap fills, so a late `current`
+/// never dedups against incomplete committed state.
+fn drain_ocr_inbox(app: &mut App, idx: usize, flush: bool) {
+    loop {
+        let next = app.tabs[idx].ocr_next_commit;
+        let total = app.tabs[idx].ocr_runs;
+        if next >= total {
+            break;
+        }
+        if !app.tabs[idx].ocr_staged.contains_key(&next) {
+            break;
+        }
+        let is_last = next + 1 >= total;
+        if !flush && !is_last && !app.tabs[idx].ocr_staged.contains_key(&(next + 1)) {
+            // `next img` hasn't arrived yet: hold `current` per the diagram.
+            break;
+        }
+        let Some(event) = app.tabs[idx].ocr_staged.remove(&next) else {
+            break;
+        };
+        let ocr::RunEvent::Canvas {
             index,
             width,
             margin_top,
             lines,
-        }) => {
-            let run = app.tabs[idx].ocr_plans[index];
-            let prev = run.dedup.map(|(page, offset)| {
-                let tab = &app.tabs[idx];
-                let image_id = tab.images[page].image_id;
-                let quads: Vec<Quad> = tab
-                    .project
-                    .all_for(image_id)
-                    .map(|entry| entry.quad)
-                    .collect();
-                let width = tab
-                    .project
-                    .image(image_id)
-                    .map(|m| m.width as u32)
-                    .unwrap_or(0);
-                (quads, width, offset)
-            });
-            let (merge_cfg, min_h, max_h) = easyscanlate_settings::get(|s| {
-                (
-                    ocr::MergeConfig::from_threshold_str(&s.ocr_merge_threshold),
-                    s.ocr_min_text_height
-                        .trim()
-                        .parse::<f32>()
-                        .unwrap_or(10.0),
-                    s.ocr_max_text_height
-                        .trim()
-                        .parse::<f32>()
-                        .unwrap_or(100.0),
-                )
-            });
-            let (plans, dims, held) = {
-                let tab = &mut app.tabs[idx];
-                (tab.ocr_plans.clone(), tab.ocr_dims.clone(), tab.held_boundary.take())
+        } = event;
+        dedup_and_commit_current(app, idx, index, width, margin_top, lines);
+        app.tabs[idx].ocr_next_commit = next + 1;
+    }
+}
+
+#[cfg(feature = "ocr")]
+pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: Result<ocr::RunEvent, String>) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    app.tabs[idx].pending = app.tabs[idx].pending.saturating_sub(1);
+    match result {
+        Ok(event) => {
+            // `image received`: stage it; out-of-order arrivals wait here.
+            let index = match &event {
+                ocr::RunEvent::Canvas { index, .. } => *index,
             };
-            let run_result = ocr::assemble_with_config(
-                index,
-                width,
-                margin_top,
-                lines,
-                &plans,
-                &dims,
-                held,
-                prev,
-                merge_cfg,
-                min_h,
-                max_h,
-            );
-            app.tabs[idx].held_boundary = run_result.held;
-            // commit per page to this specific tab
-            let per_page = run_result.per_page;
-            for (page, entries) in per_page {
-                let image_id = match app.tabs[idx].images.get(page).map(|im| im.image_id) { Some(id) => id, None => continue };
-                let cnt = entries.len();
-                if let Some(ev) = app.tabs[idx].project.append_ocr_for_image_with_event(image_id, entries) {
-                    if let easyscanlate_model::ModelEvent::EntriesAdded { ids, .. } = &ev { app.tabs[idx].ocr_total += ids.len(); } else { app.tabs[idx].ocr_total += cnt; }
-                    let ev_clone = ev;
-                    crate::app::handle_model_event(&mut app.tabs[idx], ev_clone);
+            let total = app.tabs[idx].ocr_runs;
+            if index >= total {
+                eprintln!("[ocr-inbox] out-of-range run {index} (total {total}), dropping");
+                app.tabs[idx].ocr_failed += 1;
+            } else {
+                if app.tabs[idx].ocr_staged.contains_key(&index) {
+                    eprintln!("[ocr-inbox] duplicate arrival for run {index}, replacing");
                 }
+                app.tabs[idx].ocr_staged.insert(index, event);
             }
+            // `wait for next img`: only dedup+commit `current` once `next`
+            // has arrived; otherwise hold it.
+            drain_ocr_inbox(app, idx, false);
         }
         Err(e) => {
             app.tabs[idx].ocr_failed += 1;
@@ -414,18 +582,7 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
                 app.tabs[idx].ocr_cancelled = true;
             } else {
                 // flush held boundary for this tab
-                if let Some(state) = app.tabs[idx].held_boundary.take() {
-                    for candidate in state.candidates {
-                        let img_len = app.tabs[idx].images.len();
-                        if candidate.page >= img_len { continue; }
-                        let image_id = app.tabs[idx].images[candidate.page].image_id;
-                        let cnt = 1;
-                        if let Some(ev) = app.tabs[idx].project.append_ocr_for_image_with_event(image_id, vec![candidate.entry]) {
-                            if let easyscanlate_model::ModelEvent::EntriesAdded { ids, .. } = &ev { app.tabs[idx].ocr_total += ids.len(); } else { app.tabs[idx].ocr_total += cnt; }
-                            crate::app::handle_model_event(&mut app.tabs[idx], ev);
-                        }
-                    }
-                }
+                flush_held_candidates(app, idx);
             }
         }
     }
@@ -435,20 +592,14 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
     let pending = app.tabs[idx].pending;
     let cancelled = app.tabs[idx].ocr_cancelled;
     if pending == 0 || cancelled {
+        // Stream done: commit whatever is still staged in order (the tail
+        // has no `next`, so it dedups against committed state as-is), then
+        // flush held boundary candidates.
+        drain_ocr_inbox(app, idx, true);
         // finalize for this tab
         {
+            flush_held_candidates(app, idx);
             let tab = &mut app.tabs[idx];
-            let held = tab.held_boundary.take();
-            if let Some(state) = held {
-                for candidate in state.candidates {
-                    if candidate.page >= tab.images.len() { continue; }
-                    let image_id = tab.images[candidate.page].image_id;
-                    if let Some(ev) = tab.project.append_ocr_for_image_with_event(image_id, vec![candidate.entry]) {
-                        if let easyscanlate_model::ModelEvent::EntriesAdded { ids, .. } = &ev { tab.ocr_total += ids.len(); } else { tab.ocr_total += 1; }
-                        crate::app::handle_model_event(tab, ev);
-                    }
-                }
-            }
             let (total, failed, cancelled) = (tab.ocr_total, tab.ocr_failed, tab.ocr_cancelled);
             tab.running = false;
             tab.cancel = None;
@@ -610,18 +761,13 @@ pub fn handle_ocr_stream_failed(app: &mut App, tab_id: super::tab::TabId, e: Str
     app.tabs[idx].ocr_failed += 1;
     if e == "cancelled" {
         app.tabs[idx].ocr_cancelled = true;
-    } else {
+    }
+    // Stream aborted: commit staged runs in order (best effort), then flush
+    // held boundary candidates (skipped on cancel, matching stream-run path).
+    drain_ocr_inbox(app, idx, true);
+    if e != "cancelled" {
         // flush
-        if let Some(state) = app.tabs[idx].held_boundary.take() {
-            for candidate in state.candidates {
-                if candidate.page >= app.tabs[idx].images.len() { continue; }
-                let image_id = app.tabs[idx].images[candidate.page].image_id;
-                if let Some(ev) = app.tabs[idx].project.append_ocr_for_image_with_event(image_id, vec![candidate.entry]) {
-                    if let easyscanlate_model::ModelEvent::EntriesAdded { ids, .. } = &ev { app.tabs[idx].ocr_total += ids.len(); } else { app.tabs[idx].ocr_total += 1; }
-                    crate::app::handle_model_event(&mut app.tabs[idx], ev);
-                }
-            }
-        }
+        flush_held_candidates(app, idx);
     }
     if app.tabs[idx].pending > 0 {
         app.tabs[idx].pending = 0;
