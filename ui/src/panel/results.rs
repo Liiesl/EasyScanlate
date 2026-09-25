@@ -664,8 +664,19 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             .height(FillLength)
             .width(FillLength)
             .on_scroll(|viewport| {
+                // Degenerate frames (minimized / zero-size viewport, or
+                // content that fits) carry no meaningful fraction: publish
+                // NaN so the app keeps the last good per-tab anchor instead
+                // of clobbering it with 0.0 and jumping to the top.
+                let bounds_h = viewport.bounds().height;
+                let content_h = viewport.content_bounds().height;
+                if !(bounds_h > f32::EPSILON)
+                    || !(content_h > bounds_h + f32::EPSILON)
+                {
+                    return UiEvent::PanelScroll(f32::NAN);
+                }
                 let y = viewport.relative_offset().y;
-                let anchor = if y.is_finite() { y.clamp(0.0, 1.0) } else { 0.0 };
+                let anchor = if y.is_finite() { y.clamp(0.0, 1.0) } else { f32::NAN };
                 UiEvent::PanelScroll(anchor)
             }),
     );

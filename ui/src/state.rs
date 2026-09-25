@@ -183,6 +183,11 @@ pub trait UiState {
     fn panel_scroll(&self) -> f32 {
         0.0
     }
+    /// The latest scroll relative offset of the layers panel (`0..1`).
+    /// Restored on tab-switch / minimize-restore like `panel_scroll`.
+    fn layer_scroll(&self) -> f32 {
+        0.0
+    }
     /// True while the settings modal is open.
     fn settings_open(&self) -> bool;
     /// The settings tab currently shown in the modal.

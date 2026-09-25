@@ -587,6 +587,17 @@ pub fn handle_style_inpaint_backend_selected(
     Task::none()
 }
 
+/// Mirrors `translation::handle_panel_scroll` for the Layers pane: keeps the
+/// last good per-tab relative anchor. Non-finite publishes come from
+/// degenerate frames (minimized / zero-size viewport, or content that fits)
+/// and must not clobber the stored value, or restore would jump to the top.
+pub fn handle_layer_scroll(app: &mut App, anchor: f32) -> Task<Message> {
+    if anchor.is_finite() {
+        app.active_tab_mut().layer_scroll = anchor.clamp(0.0, 1.0);
+    }
+    Task::none()
+}
+
 pub fn handle_inpaint_clicked(app: &mut App, selection: Option<(usize, usize)>) -> Task<Message> {
     use super::edit::clear_editing;
     clear_editing(app);

@@ -15,12 +15,14 @@
 - cap free transform to prevent cowtie/flipped/collapsed quad
 - cache model json as fallback and delta update only when starting up
 - app level presist of color picker swatch and recent
+- erratic retaining scroll on resize pane close to top image
 - 
 
 #### modification
 
 - move layer and edit to the left of main area
 - rework color picker ux
+- rework gradient ux
 - 
 
 ## currently in progress
@@ -29,6 +31,10 @@
 
 - proper non panic error rfd
 - text entry alignment and auto align
+- textbox styles
+  - add directional blur to typography
+  - add drop shadow to both
+  - add
 - 
 
 #### fixes
@@ -42,7 +48,6 @@
 #### modification
 
 - retire status bar
-- rework gradient ux
 - 
 
 ## not yet started
@@ -51,10 +56,6 @@
 
 - add manual textbox insertion
 - implement watermarking
-- textbox styles
-  - add directional blur to typography
-  - add drop shadow to both
-  - add
 - add more items for ocr export
   - ocr tagging
   - pdf
@@ -73,11 +74,9 @@
 
 #### modification
 
-- rework how gradient work
 - dynamic link between import export ocr and translation
 - change how translation Work
   - characters, places, and lore name dictionaries
-- hide textboximage button
 - profile improvement:
   - manual creation, deletion, rename
   - two pane view

@@ -106,6 +106,14 @@ pub fn publish_anchor<Message, R>(
 ) where
     R: Fn(f32) -> Message,
 {
+    // Degenerate frames (minimized / zero-size viewport, or content that
+    // fits) carry no meaningful anchor: publishing 0.0 would clobber the
+    // app's good per-tab `viewer_scroll`, so skip and keep the old value.
+    if !(state.viewport_height > f32::EPSILON)
+        || !(state.content_height > state.viewport_height + f32::EPSILON)
+    {
+        return;
+    }
     let anchor = anchor_from_state(state);
     let should_publish = match state.last_published_anchor {
         None => true,

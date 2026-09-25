@@ -196,6 +196,18 @@ pub fn handle_close_all(app: &mut App) -> Task<Message> {
 pub fn handle_selected(app: &mut App, raw: u64) -> Task<Message> {
     if let Some(idx) = app.tabs.iter().position(|t| t.id.0 == raw) {
         app.active = idx;
+        // Per-tab scroll restore: the shared `panel-results-list` / `layer-list`
+        // widget ids hold ephemeral iced state, so switching tabs (or
+        // returning from minimize / focus-lost, which re-resolves the same
+        // global ids) must re-apply the newly-active tab's stored anchors.
+        // The main viewer needs no task: `build_viewer` feeds
+        // `scroll_to(viewer_scroll)` every frame.
+        let panel_anchor = app.tabs[idx].panel_scroll;
+        let layer_anchor = app.tabs[idx].layer_scroll;
+        return Task::batch([
+            easyscanlate_ui::panel::results::restore_panel_scroll::<Message>(panel_anchor),
+            easyscanlate_ui::panel::inpaint::restore_layer_scroll::<Message>(layer_anchor),
+        ]);
     }
     Task::none()
 }

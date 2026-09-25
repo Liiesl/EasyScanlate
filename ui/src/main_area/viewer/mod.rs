@@ -416,12 +416,20 @@ where
         state.manual_selections_snapshot = self.manual_selections.clone();
         state.content_height = new_content_height;
         state.viewport_height = new_viewport;
+        // Degenerate frames (minimized / zero-size viewport, or content that
+        // fits) have no meaningful anchor: applying `scroll_to` here would
+        // force offset 0.0 and lose the position, so keep the stored offset
+        // until a real viewport returns.
+        let geometry_valid = new_viewport > f32::EPSILON
+            && new_content_height > new_viewport + f32::EPSILON;
         if let Some(anchor) = self.scroll_to {
-            let new_offset = offset_from_anchor(anchor, new_content_height, new_viewport);
-            if (new_offset - state.offset).abs() > f32::EPSILON {
-                state.offset = new_offset;
+            if geometry_valid && anchor.is_finite() {
+                let new_offset = offset_from_anchor(anchor, new_content_height, new_viewport);
+                if (new_offset - state.offset).abs() > f32::EPSILON {
+                    state.offset = new_offset;
+                }
             }
-        } else if size_changed {
+        } else if size_changed && geometry_valid {
             let new_offset = offset_from_anchor(old_anchor, new_content_height, new_viewport);
             if (new_offset - state.offset).abs() > f32::EPSILON {
                 state.offset = new_offset;

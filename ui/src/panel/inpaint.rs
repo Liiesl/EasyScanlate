@@ -15,6 +15,11 @@ use crate::panel::MUTED_FG;
 use crate::scale;
 use crate::state::UiState;
 
+/// Widget id of the scrollable layers list; used by the app to restore the
+/// per-tab scroll anchor after minimize / focus-lost / tab-switch instead of
+/// resetting to the top.
+pub const LAYER_LIST_ID: &str = "layer-list";
+
 /// Background of a layer row – intentionally translucent like the outer
 /// `PANEL_BG` card so the aurora shows through in a satisfying stack:
 /// aurora → outer PANEL_BG (0.78) → inner list (0.32) → row (0.48).
@@ -340,9 +345,26 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         header,
         container(
             scrollable(list)
+                .id(LAYER_LIST_ID)
                 .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
                 .width(FillLength)
                 .height(FillLength)
+                .on_scroll(|viewport| {
+                    // Degenerate frames (minimized / zero-size viewport, or
+                    // content that fits) carry no meaningful fraction: publish
+                    // 0.0 would clobber the good per-tab anchor, so the app
+                    // keeps the old value for non-finite publishes.
+                    let bounds_h = viewport.bounds().height;
+                    let content_h = viewport.content_bounds().height;
+                    if !(bounds_h > f32::EPSILON)
+                        || !(content_h > bounds_h + f32::EPSILON)
+                    {
+                        return UiEvent::LayerScroll(f32::NAN);
+                    }
+                    let y = viewport.relative_offset().y;
+                    let anchor = if y.is_finite() { y.clamp(0.0, 1.0) } else { f32::NAN };
+                    UiEvent::LayerScroll(anchor)
+                })
         )
         .width(FillLength)
         .height(FillLength)
@@ -362,4 +384,23 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     .spacing(scale::s(8.0))
     .height(FillLength)
     .into()
+}
+
+/// Restores the layers list to a previously published relative offset
+/// (`0..1`). Used on tab-switch / minimize-restore so the same fraction
+/// stays visible instead of resetting to the top. Non-finite anchors are a
+/// no-op snap to the top boundary (same convention as the results panel).
+pub fn restore_layer_scroll<T>(anchor: f32) -> iced::Task<T>
+where
+    T: Send + 'static,
+{
+    let y = if anchor.is_finite() {
+        anchor.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    iced::widget::operation::snap_to(
+        iced::widget::Id::new(LAYER_LIST_ID),
+        iced::widget::operation::RelativeOffset { x: None, y: Some(y) },
+    )
 }

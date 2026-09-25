@@ -443,11 +443,12 @@ pub fn handle_connect_modal_cancel(app: &mut App) -> Task<Message> {
 }
 
 pub fn handle_panel_scroll(app: &mut App, anchor: f32) -> Task<Message> {
-    app.active_tab_mut().panel_scroll = if anchor.is_finite() {
-        anchor.clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
+    // Non-finite publishes come from degenerate frames (minimized /
+    // zero-size viewport, or content that fits) and must not clobber the
+    // stored anchor, or restore would jump to the top.
+    if anchor.is_finite() {
+        app.active_tab_mut().panel_scroll = anchor.clamp(0.0, 1.0);
+    }
     Task::none()
 }
 

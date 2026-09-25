@@ -257,6 +257,11 @@ pub enum UiEvent {
     /// `Edit↔Translate` so the same fraction stays visible instead of the
     /// same absolute pixel offset (row heights differ between modes).
     PanelScroll(f32),
+    /// The layers panel's scroll changed; payload is the normalized relative
+    /// offset `0..1`. Mirrored per-tab like `PanelScroll` so minimize /
+    /// focus-lost / tab-switch restores the same fraction instead of
+    /// resetting to the top.
+    LayerScroll(f32),
     EditAction(text_editor::Action),
     EditRect(Rectangle),
     EditSubmit,

@@ -42,7 +42,11 @@ pub fn handle_mode(app: &mut App, mode: MainAreaMode) -> Task<Message> {
 }
 
 pub fn handle_viewer_scroll(app: &mut App, anchor: f32) -> Task<Message> {
-    app.active_tab_mut().viewer_scroll = anchor.clamp(0.0, 1.0);
+    // Non-finite anchors come from degenerate frames (minimized /
+    // zero-size viewport) and must not clobber the stored anchor.
+    if anchor.is_finite() {
+        app.active_tab_mut().viewer_scroll = anchor.clamp(0.0, 1.0);
+    }
     Task::none()
 }
 
