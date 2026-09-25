@@ -566,6 +566,18 @@ impl UiState for ActiveTab<'_> {
         &self.app.project_series_name
     }
 
+    fn adv_export_profile(&self) -> Option<easyscanlate_model::ProfileId> {
+        self.app.adv_export_profile
+    }
+
+    fn adv_import_target(&self) -> Option<easyscanlate_model::ProfileId> {
+        self.app.adv_import_target
+    }
+
+    fn adv_import_name(&self) -> &str {
+        &self.app.adv_import_name
+    }
+
     fn translation_anim_phase(&self) -> f32 {
         self.tab.translate_anim_phase
     }
@@ -827,6 +839,9 @@ impl UiState for App {
     fn has_project(&self) -> bool { self.tabs.get(self.active).is_some_and(|t| !t.is_home()) }
     fn project_series_creating(&self) -> bool { self.project_series_creating }
     fn project_series_name(&self) -> &str { &self.project_series_name }
+    fn adv_export_profile(&self) -> Option<easyscanlate_model::ProfileId> { self.adv_export_profile }
+    fn adv_import_target(&self) -> Option<easyscanlate_model::ProfileId> { self.adv_import_target }
+    fn adv_import_name(&self) -> &str { &self.adv_import_name }
     fn new_project_overlay(&self) -> Option<easyscanlate_ui::state::NewProjectOverlay> {
         self.new_project.as_ref().map(|np| easyscanlate_ui::state::NewProjectOverlay {
             source_paths: np.source_files.iter().map(|(p, _, _)| p.clone()).collect(),

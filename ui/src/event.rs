@@ -45,6 +45,8 @@ pub enum SettingsTab {
     Inpaint,
     /// Machine-translation settings (API key).
     Translation,
+    /// Advanced per-project utilities (translation export/import).
+    Advanced,
     /// App updates (Velopack, GitHub releases).
     Updates,
 }
@@ -406,6 +408,16 @@ pub enum UiEvent {
     /// Open an external URL in the system browser (used for recommended
     /// provider docs links).
     OpenUrl(String),
+    /// The user picked the export profile in Settings → Advanced.
+    AdvExportProfileSelect(ProfileId),
+    /// The user picked the existing import target in Settings → Advanced.
+    AdvImportTargetSelect(ProfileId),
+    /// The user typed the new-profile name in Settings → Advanced import.
+    AdvImportName(String),
+    /// Export the picked profile of the current project to a translation XML file.
+    TranslationExport,
+    /// Import a translation XML file, overwriting the target profile.
+    TranslationImport,
     /// Save the current project to its .mmtl path (or Save As if none).
     SaveProject,
     /// Export every page as a baked raster image (original + inpaint + overlay)

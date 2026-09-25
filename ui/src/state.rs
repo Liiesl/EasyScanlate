@@ -262,6 +262,18 @@ pub trait UiState {
     fn project_series_name(&self) -> &str {
         ""
     }
+    /// Advanced tab: picked export profile (`None` = current profile).
+    fn adv_export_profile(&self) -> Option<ProfileId> {
+        None
+    }
+    /// Advanced tab: picked existing import target (`None` = new profile).
+    fn adv_import_target(&self) -> Option<ProfileId> {
+        None
+    }
+    /// Advanced tab: new-profile name input for import.
+    fn adv_import_name(&self) -> &str {
+        ""
+    }
     fn translation_anim_phase(&self) -> f32;
     fn is_loading(&self) -> bool { false }
     fn loading_phase(&self) -> f32 { 0.0 }

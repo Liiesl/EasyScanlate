@@ -7,7 +7,7 @@ use iced::{Color, Element, Font, Subscription, Task, Theme};
 use neverliie_iced_widgets::color_picker::DropperBuffer;
 use neverliie_iced_widgets::title_bar::{FrameAction, NativeFrame};
 
-use easyscanlate_model::{EntryId, EntryStyle, ModelEvent, NewEntry};
+use easyscanlate_model::{EntryId, EntryStyle, ModelEvent, NewEntry, ProfileId};
 use easyscanlate_settings::StylePresets;
 #[cfg(feature = "ocr")]
 use easyscanlate_ocr::{self as ocr_engine};
@@ -35,6 +35,7 @@ pub mod segment;
 pub mod pipeline;
 pub mod translation;
 pub mod settings;
+pub mod advanced;
 pub mod mmtl;
 pub mod new_project;
 pub mod profile;
@@ -172,6 +173,10 @@ pub enum TabMessage {
     ExportFinished(Result<String, String>),
     ExportStreamRun(Result<ExportStreamItem, String>),
     ExportStreamFailed(String),
+    TranslationExportPicked { profile: ProfileId, path: Option<String> },
+    TranslationExported(Result<String, String>),
+    TranslationImportPicked { target: Option<ProfileId>, new_name: String, path: Option<String> },
+    TranslationImportLoaded { target: Option<ProfileId>, new_name: String, result: advanced::TranslationImportResult },
     TilesVisible(std::ops::Range<usize>),
     TileScrollEnded,
     AutosaveDone(Result<String, String>),
@@ -290,6 +295,12 @@ pub struct App {
     pub(crate) project_series_creating: bool,
     /// Current "+ New series" input text in Project settings.
     pub(crate) project_series_name: String,
+    /// Advanced tab: picked export profile (`None` = current profile).
+    pub(crate) adv_export_profile: Option<ProfileId>,
+    /// Advanced tab: picked existing import target (`None` = new profile).
+    pub(crate) adv_import_target: Option<ProfileId>,
+    /// Advanced tab: new-profile name input for import.
+    pub(crate) adv_import_name: String,
     /// Home sidebar filter: standalone recents vs one series.
     pub(crate) home_selection: easyscanlate_ui::state::HomeSelection,
     /// Whether the `Series` group as a whole is collapsed in the home
@@ -394,6 +405,9 @@ impl App {
             pending_create_series: None,
             project_series_creating: false,
             project_series_name: String::new(),
+            adv_export_profile: None,
+            adv_import_target: None,
+            adv_import_name: String::new(),
             home_selection: easyscanlate_ui::state::HomeSelection::Recent,
             home_series_collapsed: false,
             frame,
@@ -735,6 +749,10 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
         TabMessage::ExportFinished(result) => export::handle_export_finished(app, tab_id, result),
         TabMessage::ExportStreamRun(result) => export::handle_export_stream_run(app, tab_id, result),
         TabMessage::ExportStreamFailed(e) => export::handle_export_stream_failed(app, tab_id, e),
+        TabMessage::TranslationExportPicked { profile, path } => advanced::handle_export_picked(app, tab_id, profile, path),
+        TabMessage::TranslationExported(result) => advanced::handle_exported(app, tab_id, result),
+        TabMessage::TranslationImportPicked { target, new_name, path } => advanced::handle_import_picked(app, tab_id, target, new_name, path),
+        TabMessage::TranslationImportLoaded { target, new_name, result } => advanced::handle_import_loaded(app, tab_id, target, new_name, result),
         TabMessage::AutosaveDone(result) => autosave::handle_done(app, tab_id, result),
         TabMessage::AutosaveCheckDone(found) => autosave::handle_check_done(app, tab_id, found),
         TabMessage::MmtlLoaded(_) | TabMessage::CreateProjectPicked(_) | TabMessage::RecentPickedToLoad(_) => {
@@ -961,6 +979,11 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::ProjectSeriesName(name)) => settings::handle_project_series_name(app, name),
         Message::Ui(UiEvent::ProjectSeriesCreateConfirm) => settings::handle_project_series_create_confirm(app),
         Message::Ui(UiEvent::ProjectSeriesCancel) => settings::handle_project_series_cancel(app),
+        Message::Ui(UiEvent::AdvExportProfileSelect(id)) => advanced::handle_export_profile(app, id),
+        Message::Ui(UiEvent::AdvImportTargetSelect(id)) => advanced::handle_import_target(app, id),
+        Message::Ui(UiEvent::AdvImportName(name)) => advanced::handle_import_name(app, name),
+        Message::Ui(UiEvent::TranslationExport) => advanced::handle_export(app),
+        Message::Ui(UiEvent::TranslationImport) => advanced::handle_import(app),
         Message::Ui(UiEvent::OpenUrl(url)) => settings::handle_open_url(app, url),
         Message::Ui(UiEvent::SaveProject) => mmtl::handle_save(app),
         Message::Ui(UiEvent::ExportAll) => export::handle_export_all(app),

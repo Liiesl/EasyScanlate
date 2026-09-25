@@ -23,6 +23,7 @@ use crate::translation::{self, CUSTOM_ANTHROPIC, CUSTOM_OPENAI};
 
 use crate::background::AuroraWheel;
 use crate::event::{SettingEdit, SettingsTab, UiEvent};
+use easyscanlate_model::ProfileId;
 use crate::new_project::SeriesOption;
 use crate::panel::PANEL_BG;
 use neverliie_iced_widgets::advanced_dropdown::{Footer, Item, MenuItem, advanced_dropdown};
@@ -1111,6 +1112,176 @@ fn project_tab_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Elemen
 }
 
 // ---------------------------------------------------------------------------
+// Advanced tab — current tab's project: translation export/import (XML)
+// ---------------------------------------------------------------------------
+
+/// One entry of the Advanced profile dropdowns: the profile's id and name.
+#[derive(Debug, Clone, PartialEq)]
+struct AdvProfileOption {
+    id: ProfileId,
+    name: String,
+}
+
+impl std::fmt::Display for AdvProfileOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.name)
+    }
+}
+
+fn advanced_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'static, UiEvent>> {
+    if !matches_any(query, &["advanced", "export", "import", "translation", "profile", "xml"]) {
+        return Vec::new();
+    }
+    if !state.has_project() {
+        return vec![
+            container(column![
+                card_header(Icon::Wrench, "Translation transfer", Some("Export / import one profile as XML")),
+                helper_text("Open or create a project to export or import its translations."),
+            ].spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into(),
+        ];
+    }
+    let profiles: Vec<(ProfileId, String)> = state
+        .project()
+        .profiles
+        .iter()
+        .map(|p| (p.id, p.name.clone()))
+        .collect();
+    let selected_id = state.project().profiles.selected_id();
+    let export_id = state
+        .adv_export_profile()
+        .filter(|id| profiles.iter().any(|(pid, _)| pid == id))
+        .unwrap_or(selected_id);
+    let export_name = profiles
+        .iter()
+        .find(|(pid, _)| *pid == export_id)
+        .map(|(_, n)| n.clone())
+        .unwrap_or_default();
+    let total_count = state.project().visible_entries().count();
+    let translated_count = state
+        .project()
+        .profiles
+        .iter()
+        .find(|p| p.id == export_id)
+        .map(|p| state.project().visible_entries().filter(|e| p.translation_of(e.id).is_some()).count())
+        .unwrap_or(0);
+    let import_target = state
+        .adv_import_target()
+        .filter(|id| profiles.iter().any(|(pid, _)| pid == id));
+    let import_name = state.adv_import_name().to_string();
+    let can_export = total_count > 0;
+    let can_import = !import_name.trim().is_empty() || import_target.is_some();
+
+    let mut export_entries: Vec<MenuItem<AdvProfileOption, UiEvent, iced::Theme, iced::Renderer>> = Vec::with_capacity(profiles.len());
+    for (id, name) in &profiles {
+        export_entries.push(MenuItem::Item(Item::new(
+            AdvProfileOption { id: *id, name: name.clone() },
+            name.clone(),
+        )));
+    }
+    let export_selected = profiles
+        .iter()
+        .find(|(pid, _)| *pid == export_id)
+        .map(|(id, name)| AdvProfileOption { id: *id, name: name.clone() });
+    let export_dropdown: Element<'static, UiEvent> = advanced_dropdown(
+        export_entries,
+        export_selected,
+        |opt: AdvProfileOption| UiEvent::AdvExportProfileSelect(opt.id),
+    )
+    .placeholder("Profile…")
+    .text_size(scale::s(12.0))
+    .width(FillLength)
+    .into();
+    let export_btn: Element<'static, UiEvent> = crate::button::with_disabled_cursor(
+        button(text("Export…").size(scale::s(12.0)))
+            .padding([scale::s(6.0), scale::s(12.0)])
+            .style(crate::panel::button_style)
+            .on_press_maybe(can_export.then_some(UiEvent::TranslationExport))
+            .into(),
+    );
+
+    let mut import_entries: Vec<MenuItem<AdvProfileOption, UiEvent, iced::Theme, iced::Renderer>> = Vec::with_capacity(profiles.len());
+    for (id, name) in &profiles {
+        import_entries.push(MenuItem::Item(Item::new(
+            AdvProfileOption { id: *id, name: name.clone() },
+            name.clone(),
+        )));
+    }
+    let import_selected = import_target.and_then(|tid| {
+        profiles
+            .iter()
+            .find(|(pid, _)| *pid == tid)
+            .map(|(id, name)| AdvProfileOption { id: *id, name: name.clone() })
+    });
+    let import_dropdown: Element<'static, UiEvent> = advanced_dropdown(
+        import_entries,
+        import_selected,
+        |opt: AdvProfileOption| UiEvent::AdvImportTargetSelect(opt.id),
+    )
+    .placeholder("Pick profile to overwrite…")
+    .text_size(scale::s(12.0))
+    .width(FillLength)
+    .into();
+    let import_btn: Element<'static, UiEvent> = crate::button::with_disabled_cursor(
+        button(text("Import…").size(scale::s(12.0)))
+            .padding([scale::s(6.0), scale::s(12.0)])
+            .style(crate::panel::button_style)
+            .on_press_maybe(can_import.then_some(UiEvent::TranslationImport))
+            .into(),
+    );
+
+    let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
+    col.push(card_header(
+        Icon::Wrench,
+        "Translation transfer",
+        Some("One profile of the current project, same XML as project.xml"),
+    ));
+    col.push(field_row("Export profile", export_dropdown));
+    if export_name.is_empty() {
+        col.push(helper_text("No profiles yet.").into());
+    } else if total_count == 0 {
+        col.push(text("Run OCR first — there are no lines to export.".to_string()).size(scale::s(11.0)).color(MUTED_FG).into());
+    } else {
+        col.push(text(format!("{total_count} line(s) in reading order with OCR source + “{export_name}” text ({translated_count} already translated).")).size(scale::s(11.0)).color(MUTED_FG).into());
+    }
+    col.push(row![space::horizontal().width(FillLength), export_btn].spacing(scale::s(8.0)).align_y(iced::Alignment::Center).into());
+    col.push(item_separator());
+    col.push(field_row("Overwrite profile", import_dropdown));
+    col.push(
+        text_input("New profile name…", &import_name)
+            .on_input(UiEvent::AdvImportName)
+            .on_submit(UiEvent::TranslationImport)
+            .padding(scale::s(6.0))
+            .size(scale::s(12.0))
+            .width(FillLength)
+            .into(),
+    );
+    col.push(helper_text("Filled name wins: creates (or overwrites) that profile. Empty name overwrites the picked profile. Targeting Default forks a new profile, like panel edits.").into());
+    col.push(helper_text("Overwrite clears entries missing from the file; unknown entry ids are skipped. Save the project to persist.").into());
+    col.push(row![space::horizontal().width(FillLength), import_btn].spacing(scale::s(8.0)).align_y(iced::Alignment::Center).into());
+    vec![container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into()]
+}
+
+fn advanced_tab_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Element<'static, UiEvent> {
+    let cards = advanced_cards(state, query.as_str());
+    if cards.is_empty() {
+        return container(column![
+            row![
+                crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG),
+                text(format!("No settings match “{query}”")).size(scale::s(12.0)).color(MUTED_FG),
+            ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
+            text("Try a different term — e.g. advanced, export, import.").size(scale::s(11.0)).color(MUTED_FG),
+        ].spacing(scale::s(6.0)))
+        .padding(scale::s(14.0))
+        .style(|_| card_style())
+        .into();
+    }
+    scrollable(column(cards).spacing(scale::s(10.0)))
+        .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
+        .height(Length::Fill)
+        .into()
+}
+
+// ---------------------------------------------------------------------------
 // OCR tab — dedicated OCR tuning
 // ---------------------------------------------------------------------------
 
@@ -2041,6 +2212,10 @@ fn global_search_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Elem
     if !p.is_empty() {
         all.extend(p);
     }
+    let v = advanced_cards(state, q);
+    if !v.is_empty() {
+        all.extend(v);
+    }
     let u = updates_cards(state, q);
     if !u.is_empty() {
         all.extend(u);
@@ -2053,7 +2228,7 @@ fn global_search_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Elem
                     crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG),
                     text(format!("No settings match “{query}”")).size(scale::s(12.0)).color(MUTED_FG),
                 ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
-                text("Try a different term — e.g. font, ocr, inpaint, translation, automation, project.").size(scale::s(11.0)).color(MUTED_FG),
+                text("Try a different term — e.g. font, ocr, inpaint, translation, automation, project, advanced, export.").size(scale::s(11.0)).color(MUTED_FG),
             ].spacing(scale::s(6.0)))
             .padding(scale::s(14.0))
             .style(|_| card_style())
@@ -2077,6 +2252,7 @@ fn tab_fields<S: UiState + ?Sized>(state: &S) -> Element<'static, UiEvent> {
         SettingsTab::Ocr => ocr_tab_filtered(query.clone()),
         SettingsTab::Inpaint => inpaint_tab_filtered(query.clone()),
         SettingsTab::Translation => translation_tab_filtered(query.clone()),
+        SettingsTab::Advanced => advanced_tab_filtered(state, query.clone()),
         SettingsTab::Updates => updates_tab_filtered(state, query.clone()),
     }
 }
@@ -2124,6 +2300,7 @@ pub fn view<'a, S: UiState + ?Sized>(
                 tab_button(state, SettingsTab::Ocr, Icon::ScanSearch, "OCR"),
                 tab_button(state, SettingsTab::Inpaint, Icon::Brush, "Inpaint"),
                 tab_button(state, SettingsTab::Translation, Icon::Languages, "Translation"),
+                tab_button(state, SettingsTab::Advanced, Icon::Wrench, "Advanced"),
                 tab_button(state, SettingsTab::Updates, Icon::Download, "Updates"),
             ]
             .spacing(scale::s(4.0))
