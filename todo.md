@@ -14,6 +14,7 @@
   - anchor
   - horizontal/vertical align preserve
   - preserve ratio
+- text entry alignment and auto align
 - 
 
 #### fixes
@@ -28,6 +29,7 @@
 
 - move layer and edit to the left of main area
 - rework color picker ux
+- rework gradient ux
 - relayout home page
 - 
 
@@ -36,7 +38,6 @@
 #### addition
 
 - proper non panic error rfd
-- text entry alignment and auto align
 - textbox styles
   - add directional blur to typography
   - add drop shadow to both
@@ -53,7 +54,6 @@
 
 #### modification
 
-- rework gradient ux
 - retire status bar
 - 
 

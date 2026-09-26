@@ -103,7 +103,7 @@ pub struct Tab {
     #[cfg(feature = "ocr")]
     pub cancel: Option<OcrCancellationToken>,
     #[cfg(feature = "ocr")]
-    pub ocr_plans: Vec<ocr_engine::RunPlan>,
+    pub ocr_plans: Vec<super::ocr_canvas::RunPlan>,
     #[cfg(feature = "ocr")]
     pub ocr_dims: Vec<(u32, u32)>,
     #[cfg(feature = "ocr")]
@@ -116,8 +116,6 @@ pub struct Tab {
     pub ocr_cancelled: bool,
     #[cfg(feature = "ocr")]
     pub ocr_runs: usize,
-    #[cfg(feature = "ocr")]
-    pub held_boundary: Option<ocr_engine::BoundaryState>,
     /// App-owned OCR inbox: `image received` results staged here out-of-order,
     /// then drained in order through `wait for next img` (`current` commits
     /// only once `next` has arrived, so dedup sees committed state).
@@ -304,8 +302,6 @@ impl Tab {
             ocr_cancelled: false,
             #[cfg(feature = "ocr")]
             ocr_runs: 0,
-            #[cfg(feature = "ocr")]
-            held_boundary: None,
             #[cfg(feature = "ocr")]
             ocr_staged: std::collections::BTreeMap::new(),
             #[cfg(feature = "ocr")]

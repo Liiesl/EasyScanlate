@@ -28,6 +28,7 @@ pub mod backdrop;
 pub mod state;
 pub mod edit;
 pub mod ocr;
+pub mod ocr_canvas;
 pub mod inpaint;
 pub mod manual;
 pub mod styling;
