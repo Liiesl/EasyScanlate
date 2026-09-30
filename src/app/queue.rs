@@ -164,15 +164,20 @@ fn dispatch_ocr(
         return Task::none();
     }
     // otherwise pipeline OCR
-    if app.engines.pipeline.is_some() {
-        return crate::app::ocr::maybe_start_ocr(app, tab_id);
-    }
-    // need to build pipeline
     let (workers, cfg) = easyscanlate_settings::get(|s| {
         let workers = s.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
         let cfg = easyscanlate_ocr::config_from_strings(&s.ocr_text_score, &s.ocr_max_side_len);
         (workers, cfg)
     });
+    let (fp_workers, fp_score, fp_side) =
+        easyscanlate_ocr::pipeline_fingerprint(&cfg, workers);
+    if app.engines.pipeline_matches(fp_workers, fp_score, fp_side) {
+        return crate::app::ocr::maybe_start_ocr(app, tab_id);
+    }
+    // First build or stale config: drop the old pipeline (if any) so the
+    // build below loads exactly one fresh engine.
+    app.engines.clear_pipeline();
+    // need to build pipeline
     let tid = tab_id;
     Task::perform(
         async move {

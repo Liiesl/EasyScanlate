@@ -6,10 +6,49 @@
 
 use crate::queue::EngineQueue;
 
+/// Shared auto-OCR pipeline plus the config it was built with. The engine is
+/// expensive (ONNX sessions + worker threads) and reusable across tabs as
+/// long as the effective config matches and the previous stream finished
+/// cleanly (see `RunSession`: sequential streams re-index `0..total-1` and
+/// reorder locally via `recv_unordered`, so no pipeline-side ordered state
+/// leaks between tabs).
+#[cfg(feature = "ocr")]
+#[derive(Debug, Clone)]
+pub struct OcrPipelineCache {
+    pub engine: easyscanlate_ocr::ParallelEngine,
+    pub workers: usize,
+    pub text_score_bits: u32,
+    pub max_side_len: u32,
+}
+
+#[cfg(feature = "ocr")]
+impl OcrPipelineCache {
+    pub fn new(
+        engine: easyscanlate_ocr::ParallelEngine,
+        workers: usize,
+        text_score_bits: u32,
+        max_side_len: u32,
+    ) -> Self {
+        Self {
+            engine,
+            workers: workers.max(1),
+            text_score_bits,
+            max_side_len,
+        }
+    }
+
+    /// True when this cached engine was built with the same effective config.
+    pub fn matches(&self, workers: usize, text_score_bits: u32, max_side_len: u32) -> bool {
+        self.workers == workers.max(1)
+            && self.text_score_bits == text_score_bits
+            && self.max_side_len == max_side_len
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct EnginePool {
     #[cfg(feature = "ocr")]
-    pub pipeline: Option<easyscanlate_ocr::ParallelEngine>,
+    pub pipeline: Option<OcrPipelineCache>,
     #[cfg(feature = "ocr")]
     pub manual_ocr: Option<easyscanlate_ocr::Engine>,
     #[cfg(feature = "inpaint")]
@@ -40,6 +79,49 @@ impl EnginePool {
     #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Cloned handle to the cached auto-OCR pipeline, if any.
+    #[cfg(feature = "ocr")]
+    pub fn pipeline_engine(&self) -> Option<easyscanlate_ocr::ParallelEngine> {
+        self.pipeline.as_ref().map(|c| c.engine.clone())
+    }
+
+    /// True when the cached pipeline exists and matches the effective config.
+    #[cfg(feature = "ocr")]
+    pub fn pipeline_matches(
+        &self,
+        workers: usize,
+        text_score_bits: u32,
+        max_side_len: u32,
+    ) -> bool {
+        self.pipeline
+            .as_ref()
+            .is_some_and(|c| c.matches(workers, text_score_bits, max_side_len))
+    }
+
+    /// Store a freshly built auto-OCR pipeline with its config fingerprint.
+    #[cfg(feature = "ocr")]
+    pub fn set_pipeline(
+        &mut self,
+        engine: easyscanlate_ocr::ParallelEngine,
+        workers: usize,
+        text_score_bits: u32,
+        max_side_len: u32,
+    ) {
+        self.pipeline = Some(OcrPipelineCache::new(
+            engine,
+            workers,
+            text_score_bits,
+            max_side_len,
+        ));
+    }
+
+    /// Drop the cached auto-OCR pipeline (config change, cancel/error in
+    /// Phase 1; dropping aborts worker threads via `DetRecPipeline::cancel`).
+    #[cfg(feature = "ocr")]
+    pub fn clear_pipeline(&mut self) {
+        self.pipeline = None;
     }
 
     /// Shared manual+auto inpaint lookup: manual and auto use the same

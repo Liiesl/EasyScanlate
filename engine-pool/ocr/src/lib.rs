@@ -246,6 +246,16 @@ pub fn config_from_strings(text_score_str: &str, max_side_str: &str) -> RapidOcr
     config_with(text_score, max_side)
 }
 
+/// Cache fingerprint for the shared auto-OCR pipeline: sanitized
+/// `(workers, text_score_bits, max_side_len)` derived from an already-built
+/// [`RapidOcrConfig`]. Both build and reuse paths go through
+/// [`config_from_strings`]/[`config_with`], so comparing fingerprints avoids
+/// reloads on cosmetic string differences (`"0.5"` vs `" 0.5 "`) while still
+/// rebuilding when the effective config changes.
+pub fn pipeline_fingerprint(cfg: &RapidOcrConfig, workers: usize) -> (usize, u32, u32) {
+    (workers.max(1), cfg.text_score.to_bits(), cfg.max_side_len)
+}
+
 /// Tuning for merging nearby OCR text boxes into one entry.
 ///
 /// Horizontal-only (vertical text out of scope): group formation uses

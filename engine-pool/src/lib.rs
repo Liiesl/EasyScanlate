@@ -23,6 +23,8 @@ pub use exec::run_auto_inpaint_job;
 pub use exec::run_segment_grid;
 pub use message::{BuiltEngine, EngineJobDone, EngineOutcome};
 pub use pool::EnginePool;
+#[cfg(feature = "ocr")]
+pub use pool::OcrPipelineCache;
 pub use queue::{EngineQueue, POOL_CAPACITY};
 
 // Re-export engines so the app has one import root (old paths keep working).

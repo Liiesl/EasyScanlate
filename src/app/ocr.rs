@@ -17,8 +17,7 @@ use crate::app::queue::owner_of;
 pub fn start_ocr_stream(app: &mut App, tab_id: super::tab::TabId) -> Task<Message> {
     let pipeline = app
         .engines
-        .pipeline
-        .clone()
+        .pipeline_engine()
         .expect("pipeline must be built before starting the stream");
     let tab = app.tab_by_id(tab_id).expect("tab must exist for ocr stream");
     let token = tab
@@ -123,13 +122,13 @@ pub fn start_ocr_stream(app: &mut App, tab_id: super::tab::TabId) -> Task<Messag
 pub fn maybe_start_ocr(app: &mut App, tab_id: super::tab::TabId) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
     if app.tabs[idx].running && app.engines.pipeline.is_some() {
-        let token = app.engines.pipeline.as_ref().map(|pipeline| pipeline.cancellation_token().clone());
+        let token = app.engines.pipeline.as_ref().map(|cached| cached.engine.cancellation_token().clone());
         app.tabs[idx].cancel = token;
         start_ocr_stream(app, tab_id)
     } else if !app.tabs[idx].running {
-        if let Some(pipeline) = app.engines.pipeline.take() {
-            pipeline.cancel();
-        }
+        // Idle: keep the shared pipeline cached for the next tab. It is only
+        // dropped on cancel/error (finalize paths) or on config mismatch at
+        // the next `handle_start_ocr`/`dispatch_ocr` build decision.
         Task::none()
     } else {
         Task::none()
@@ -258,12 +257,31 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
                     crate::app::queue::POOL_CAPACITY,
                     run_count
                 );
-                if app.engines.pipeline.is_none() {
-                    let (workers, cfg) = easyscanlate_settings::get(|s| {
-                        let workers = s.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
-                        let cfg = ocr::config_from_strings(&s.ocr_text_score, &s.ocr_max_side_len);
-                        (workers, cfg)
-                    });
+                let (workers, cfg) = easyscanlate_settings::get(|s| {
+                    let workers = s.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
+                    let cfg = ocr::config_from_strings(&s.ocr_text_score, &s.ocr_max_side_len);
+                    (workers, cfg)
+                });
+                let (fp_workers, fp_score, fp_side) =
+                    ocr::pipeline_fingerprint(&cfg, workers);
+                let needs_build = if app
+                    .engines
+                    .pipeline_matches(fp_workers, fp_score, fp_side)
+                {
+                    app.tabs[idx].status = format!(
+                        "OCR running (pool {}/{}) on {} run(s)...",
+                        app.engines.queue.used_weight(),
+                        crate::app::queue::POOL_CAPACITY,
+                        run_count
+                    );
+                    false
+                } else {
+                    // First build or stale config: drop the old pipeline (if any)
+                    // so the build below loads exactly one fresh engine.
+                    app.engines.clear_pipeline();
+                    true
+                };
+                if needs_build {
                     app.tabs[idx].status =
                         format!("Loading the OCR engine ({workers} detection worker(s))... pool {}/{}", app.engines.queue.used_weight(), crate::app::queue::POOL_CAPACITY);
                     let tid = tab_id;
@@ -336,7 +354,21 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
 pub fn handle_parallel_ready(app: &mut App, tab_id: super::tab::TabId, result: Result<ParallelEngine, String>) -> Task<Message> {
     match result {
         Ok(pipeline) => {
-            app.engines.pipeline = Some(pipeline.clone());
+            // Fingerprint from current settings: a settings change mid-build is
+            // rare, and the next start/dispatch re-checks and rebuilds if stale.
+            let (workers, cfg) = easyscanlate_settings::get(|s| {
+                let workers = s.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
+                let cfg = ocr::config_from_strings(&s.ocr_text_score, &s.ocr_max_side_len);
+                (workers, cfg)
+            });
+            let (fp_workers, fp_score, fp_side) =
+                ocr::pipeline_fingerprint(&cfg, workers);
+            app.engines.set_pipeline(
+                pipeline.clone(),
+                fp_workers,
+                fp_score,
+                fp_side,
+            );
             maybe_start_ocr(app, tab_id)
         }
         Err(e) => {
@@ -555,7 +587,12 @@ pub fn handle_ocr_stream_run(app: &mut App, tab_id: super::tab::TabId, result: R
             tab.cancel = None;
             tab.status = if cancelled { "OCR cancelled.".to_string() } else if failed>0 { format!("OCR done: {} line(s), {} run(s) failed.", total, failed) } else { format!("OCR done: {} line(s).", total) };
         }
-        app.engines.pipeline = None;
+        // Keep the shared pipeline cached for the next tab on clean finish.
+        // On cancel the pipeline's cancellation token is terminal (workers
+        // exit), so Phase 1 drops it; Phase 2 will make cancel non-destructive.
+        if cancelled {
+            app.engines.clear_pipeline();
+        }
         // free OCR weight and update queued positions
         app.engines.queue.complete_ocr(crate::app::queue::owner_of(tab_id));
         crate::app::queue::refresh_queued_statuses(app);
@@ -720,7 +757,9 @@ pub fn handle_ocr_stream_failed(app: &mut App, tab_id: super::tab::TabId, e: Str
         let (total, failed, cancelled) = { let t=&app.tabs[idx]; (t.ocr_total, t.ocr_failed, t.ocr_cancelled) };
         app.tabs[idx].running = false;
         app.tabs[idx].cancel = None;
-        app.engines.pipeline = None;
+        // Stream aborted: the pipeline may be cancelled or broken, so drop it
+        // (Phase 1). The next OCR rebuilds exactly once.
+        app.engines.clear_pipeline();
         app.tabs[idx].status = if cancelled { "OCR cancelled.".to_string() } else if failed>0 { format!("OCR done: {} line(s), {} run(s) failed.", total, failed) } else { format!("OCR done: {} line(s).", total) };
         app.engines.queue.complete_ocr(crate::app::queue::owner_of(tab_id));
         let promote = crate::app::queue::dispatch_pending(app);
