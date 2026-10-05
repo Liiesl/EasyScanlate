@@ -15,9 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::LazyLock;
 
-use rig::completion::{AssistantContent, CompletionResponse};
-use rig::prelude::*;
-use rig::providers::openai;
+use rig::completion::{AssistantContent, CompletionRequest, CompletionResponse};
 use serde::{Deserialize, Serialize};
 
 pub mod cache;
@@ -1266,146 +1264,161 @@ async fn complete(
     let api = effective_api(provider);
     match provider.kind {
         CompatKind::OpenAI => {
-            let client = openai::CompletionsClient::builder()
-                .api_key(key)
-                .base_url(&api)
-                .build()
-                .map_err(|e| format!("Translation init failed: {e}"))?;
-            let completion = client.completion_model(model);
-            let response = completion
-                .completion_request(prompt)
-                .preamble(SYSTEM.to_string())
-                .temperature(1.0)
-                .send()
+            let client = rig::providers::openai::OpenAIConfig::with_key(
+                &rig::providers::openai::wire::OPENAI,
+                key,
+            )
+            .with_base_url(api)
+            .client();
+            let m = client.chat(model);
+            let response = m
+                .call(
+                    CompletionRequest::new(prompt)
+                        .preamble(SYSTEM.to_string())
+                        .temperature(1.0),
+                )
                 .await
                 .map_err(|e| e.to_string())?;
             choice_text(&response)
         }
         CompatKind::Anthropic => {
-            let client = rig::providers::anthropic::Client::builder()
-                .api_key(key)
-                .base_url(&api)
-                .build()
-                .map_err(|e| format!("Translation init failed: {e}"))?;
-            let completion = client.completion_model(model);
-            let response = completion
-                .completion_request(prompt)
-                .preamble(SYSTEM.to_string())
-                .max_tokens(ANTHROPIC_MAX_TOKENS)
-                .temperature(1.0)
-                .send()
+            let client = rig::providers::anthropic::wire::AnthropicConfig::with_dialect(
+                key,
+                &rig::providers::anthropic::wire::ANTHROPIC,
+            )
+            .with_base_url(api)
+            .client();
+            let m = client.completion(model);
+            let response = m
+                .call(
+                    CompletionRequest::new(prompt)
+                        .preamble(SYSTEM.to_string())
+                        .max_tokens(ANTHROPIC_MAX_TOKENS)
+                        .temperature(1.0),
+                )
                 .await
                 .map_err(|e| e.to_string())?;
             choice_text(&response)
         }
         CompatKind::Gemini => {
-            let client = rig::providers::gemini::Client::builder()
-                .api_key(key)
-                .base_url(&api)
-                .build()
-                .map_err(|e| format!("Translation init failed: {e}"))?;
-            let completion = client.completion_model(model);
-            let response = completion
-                .completion_request(prompt)
-                .preamble(SYSTEM.to_string())
-                .temperature(1.0)
-                .send()
+            let client = rig::providers::gemini::GeminiConfig::new(key)
+                .with_base_url(api)
+                .client();
+            let m = client.completion(model);
+            let response = m
+                .call(
+                    CompletionRequest::new(prompt)
+                        .preamble(SYSTEM.to_string())
+                        .temperature(1.0),
+                )
                 .await
                 .map_err(|e| e.to_string())?;
             choice_text(&response)
         }
         CompatKind::Xai => {
-            let client = rig::providers::xai::Client::builder()
-                .api_key(key)
-                .base_url(&api)
-                .build()
-                .map_err(|e| format!("Translation init failed: {e}"))?;
-            let completion = client.completion_model(model);
-            let response = completion
-                .completion_request(prompt)
-                .preamble(SYSTEM.to_string())
-                .temperature(1.0)
-                .send()
+            let client = rig::providers::openai::OpenAIConfig::with_key(
+                &rig::providers::xai::DIALECT,
+                key,
+            )
+            .with_base_url(api)
+            .client();
+            let m = client.completion(model);
+            let response = m
+                .call(
+                    CompletionRequest::new(prompt)
+                        .preamble(SYSTEM.to_string())
+                        .temperature(1.0),
+                )
                 .await
                 .map_err(|e| e.to_string())?;
             choice_text(&response)
         }
         CompatKind::Mistral => {
-            let client = rig::providers::mistral::Client::builder()
-                .api_key(key)
-                .base_url(&api)
-                .build()
-                .map_err(|e| format!("Translation init failed: {e}"))?;
-            let completion = client.completion_model(model);
-            let response = completion
-                .completion_request(prompt)
-                .preamble(SYSTEM.to_string())
-                .temperature(1.0)
-                .send()
+            let client = rig::providers::openai::OpenAIConfig::with_key(
+                &rig::providers::openai::wire::MISTRAL,
+                key,
+            )
+            .with_base_url(api)
+            .client();
+            let m = client.chat(model);
+            let response = m
+                .call(
+                    CompletionRequest::new(prompt)
+                        .preamble(SYSTEM.to_string())
+                        .temperature(1.0),
+                )
                 .await
                 .map_err(|e| e.to_string())?;
             choice_text(&response)
         }
         CompatKind::DeepSeek => {
-            let client = rig::providers::deepseek::Client::builder()
-                .api_key(key)
-                .base_url(&api)
-                .build()
-                .map_err(|e| format!("Translation init failed: {e}"))?;
-            let completion = client.completion_model(model);
-            let response = completion
-                .completion_request(prompt)
-                .preamble(SYSTEM.to_string())
-                .temperature(1.0)
-                .send()
+            let client = rig::providers::openai::OpenAIConfig::with_key(
+                &rig::providers::openai::wire::DEEPSEEK,
+                key,
+            )
+            .with_base_url(api)
+            .client();
+            let m = client.chat(model);
+            let response = m
+                .call(
+                    CompletionRequest::new(prompt)
+                        .preamble(SYSTEM.to_string())
+                        .temperature(1.0),
+                )
                 .await
                 .map_err(|e| e.to_string())?;
             choice_text(&response)
         }
         CompatKind::OpenRouter => {
-            let client = rig::providers::openrouter::Client::builder()
-                .api_key(key)
-                .base_url(&api)
-                .build()
-                .map_err(|e| format!("Translation init failed: {e}"))?;
-            let completion = client.completion_model(model);
-            let response = completion
-                .completion_request(prompt)
-                .preamble(SYSTEM.to_string())
-                .temperature(1.0)
-                .send()
+            let client = rig::providers::openai::OpenAIConfig::with_key(
+                &rig::providers::openai::wire::OPENROUTER,
+                key,
+            )
+            .with_base_url(api)
+            .client();
+            let m = client.chat(model);
+            let response = m
+                .call(
+                    CompletionRequest::new(prompt)
+                        .preamble(SYSTEM.to_string())
+                        .temperature(1.0),
+                )
                 .await
                 .map_err(|e| e.to_string())?;
             choice_text(&response)
         }
         CompatKind::Moonshot => {
-            let client = rig::providers::moonshot::Client::builder()
-                .api_key(key)
-                .base_url(&api)
-                .build()
-                .map_err(|e| format!("Translation init failed: {e}"))?;
-            let completion = client.completion_model(model);
-            let response = completion
-                .completion_request(prompt)
-                .preamble(SYSTEM.to_string())
-                .temperature(1.0)
-                .send()
+            let client = rig::providers::openai::OpenAIConfig::with_key(
+                &rig::providers::openai::wire::MOONSHOT,
+                key,
+            )
+            .with_base_url(api)
+            .client();
+            let m = client.chat(model);
+            let response = m
+                .call(
+                    CompletionRequest::new(prompt)
+                        .preamble(SYSTEM.to_string())
+                        .temperature(1.0),
+                )
                 .await
                 .map_err(|e| e.to_string())?;
             choice_text(&response)
         }
         CompatKind::Zai => {
-            let client = rig::providers::zai::Client::builder()
-                .api_key(key)
-                .base_url(&api)
-                .build()
-                .map_err(|e| format!("Translation init failed: {e}"))?;
-            let completion = client.completion_model(model);
-            let response = completion
-                .completion_request(prompt)
-                .preamble(SYSTEM.to_string())
-                .temperature(1.0)
-                .send()
+            let client = rig::providers::openai::OpenAIConfig::with_key(
+                &rig::providers::openai::wire::ZAI,
+                key,
+            )
+            .with_base_url(api)
+            .client();
+            let m = client.chat(model);
+            let response = m
+                .call(
+                    CompletionRequest::new(prompt)
+                        .preamble(SYSTEM.to_string())
+                        .temperature(1.0),
+                )
                 .await
                 .map_err(|e| e.to_string())?;
             choice_text(&response)
@@ -1414,18 +1427,20 @@ async fn complete(
             // MiniMax's Anthropic-compatible endpoint (api.minimax.io/anthropic)
             // mirrors the Anthropic Messages API shape, so it requires max_tokens
             // just like the Anthropic native client.
-            let client = rig::providers::minimax::AnthropicClient::builder()
-                .api_key(key)
-                .base_url(&api)
-                .build()
-                .map_err(|e| format!("Translation init failed: {e}"))?;
-            let completion = client.completion_model(model);
-            let response = completion
-                .completion_request(prompt)
-                .preamble(SYSTEM.to_string())
-                .max_tokens(ANTHROPIC_MAX_TOKENS)
-                .temperature(1.0)
-                .send()
+            let client = rig::providers::anthropic::wire::AnthropicConfig::with_dialect(
+                key,
+                &rig::providers::anthropic::wire::MINIMAX,
+            )
+            .with_base_url(api)
+            .client();
+            let m = client.completion(model);
+            let response = m
+                .call(
+                    CompletionRequest::new(prompt)
+                        .preamble(SYSTEM.to_string())
+                        .max_tokens(ANTHROPIC_MAX_TOKENS)
+                        .temperature(1.0),
+                )
                 .await
                 .map_err(|e| e.to_string())?;
             choice_text(&response)
@@ -1434,28 +1449,22 @@ async fn complete(
             // Local Ollama uses its own `api/chat` protocol, not OpenAI compat.
             // Auth is optional (bare `ollama` daemon needs no key); a dummy
             // `provider.id` key from `resolve_credentials` is treated as no-auth.
-            // The builder requires an explicit `api_key` even for no-auth (the
-            // `OllamaApiKey` wraps `Option<String>` and `""` → `None`).
             let is_dummy = key.is_empty() || key == provider.id;
-            let client = if is_dummy {
-                rig::providers::ollama::Client::builder()
-                    .api_key("")
-                    .base_url(&api)
-                    .build()
-                    .map_err(|e| format!("Translation init failed: {e}"))?
+            let config =
+                rig::providers::ollama::OllamaConfig::new().with_base_url(api);
+            let config = if is_dummy {
+                config
             } else {
-                rig::providers::ollama::Client::builder()
-                    .api_key(key)
-                    .base_url(&api)
-                    .build()
-                    .map_err(|e| format!("Translation init failed: {e}"))?
+                config.with_api_key(key)
             };
-            let completion = client.completion_model(model);
-            let response = completion
-                .completion_request(prompt)
-                .preamble(SYSTEM.to_string())
-                .temperature(1.0)
-                .send()
+            let client = config.client();
+            let m = client.completion(model);
+            let response = m
+                .call(
+                    CompletionRequest::new(prompt)
+                        .preamble(SYSTEM.to_string())
+                        .temperature(1.0),
+                )
                 .await
                 .map_err(|e| e.to_string())?;
             choice_text(&response)

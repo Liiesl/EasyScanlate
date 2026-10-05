@@ -23,6 +23,8 @@
 - cache model json as fallback and delta update only when starting up
 - app level presist of color picker swatch and recent
 - scroll reset on minimize/focus lost.
+- duplicate inpaint introduced in 0.4.2
+- erratic retaining scroll on resize pane close to top image
 - 
 
 #### modification
@@ -46,8 +48,6 @@
 
 #### fixes
 
-- duplicate inpaint introduced in 0.4.2
-- erratic retaining scroll on resize pane close to top image
 - under heavy computation, switching tabs make ui froze, interaction seem to work but the ui graphics themself froze.
 - case not working as intended
 - 

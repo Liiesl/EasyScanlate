@@ -1,0 +1,17 @@
+[package]
+name = "rig-fastembed"
+version = "0.43.0"
+edition = "2024"
+description = "Workspace-local shim for rig-fastembed 0.43.0: same name/version, but without the fastembed dependency. See the [patch.crates-io] note in the workspace root Cargo.toml."
+license = "MIT"
+
+[dependencies]
+rig-core = { version = "0.43.0", default-features = false }
+futures = "0.3"
+
+[features]
+default = ["hf-hub", "ort-download-binaries", "hf-hub-rustls-tls"]
+hf-hub = []
+ort-download-binaries = []
+hf-hub-rustls-tls = []
+hf-hub-native-tls = []
