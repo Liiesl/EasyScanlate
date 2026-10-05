@@ -55,7 +55,7 @@ pub const KOHARU_SEG: ModelSpec = ModelSpec {
 pub const KOREAN_REC: ModelSpec = ModelSpec {
     id: "korean-rec",
     filename: "korean_PP-OCRv5_rec_mobile.onnx",
-    url: "https://modelscope.cn/api/v1/models/RapidAI/RapidOCR/repo?Revision=master&FilePath=onnx%2FPP-OCRv5%2Frec%2Fkorean_PP-OCRv5_rec_mobile.onnx",
+    url: "https://huggingface.co/PaddlePaddle/korean_PP-OCRv5_mobile_rec_onnx/resolve/main/inference.onnx?download=true",
     description: "Korean PP-OCRv5 recognition (mobile)",
     available: true,
     replaces: None,
@@ -64,7 +64,7 @@ pub const KOREAN_REC: ModelSpec = ModelSpec {
 pub const PPOCR_DET_TINY: ModelSpec = ModelSpec {
     id: "ppocr-det-tiny",
     filename: "PP-OCRv6_det_tiny.onnx",
-    url: "https://modelscope.cn/api/v1/models/RapidAI/RapidOCR/repo?Revision=master&FilePath=onnx%2FPP-OCRv6%2Fdet%2FPP-OCRv6_det_tiny.onnx",
+    url: "https://huggingface.co/PaddlePaddle/PP-OCRv6_tiny_det_onnx/resolve/main/inference.onnx?download=true",
     description: "PP-OCRv6 detection tiny",
     available: true,
     replaces: None,
