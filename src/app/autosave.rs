@@ -552,6 +552,11 @@ pub fn handle_load(app: &mut App, raw: u64) -> Task<Message> {
         }
         Err(e) => {
             app.tabs[idx].status = format!("Autosave load failed: {e}");
+            // Keep the autosave files until the next manual save (crash during
+            // review still recovers); dismiss the prompt but interrupt with a
+            // dialog so the failure isn't silent.
+            app.autosave_prompt = None;
+            return super::error::show("Couldn't restore the autosave", e);
         }
     }
     // Keep the autosave files until the next manual save (crash during

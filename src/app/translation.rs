@@ -659,7 +659,10 @@ pub fn handle_translate_finished(app: &mut App, tab_id: crate::app::tab::TabId, 
                         }
             }
         }
-        Err(e) => { app.tabs[idx].status = e; }
+        Err(e) => {
+            app.tabs[idx].status = e.clone();
+            return super::error::show("Couldn't translate", e);
+        }
     }
     Task::none()
 }
@@ -724,7 +727,10 @@ pub fn handle_retranslate_finished(app: &mut App, tab_id: crate::app::tab::TabId
             let label = forked.unwrap_or_else(|| app.tabs[idx].project.profiles.selected().name.clone());
             app.tabs[idx].status = format!("Retranslated 1 line into '{label}'.");
         }
-        Err(e) => { app.tabs[idx].status = e; }
+        Err(e) => {
+            app.tabs[idx].status = e.clone();
+            return super::error::show("Couldn't retranslate", e);
+        }
     }
     Task::none()
 }

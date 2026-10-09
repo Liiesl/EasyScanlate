@@ -272,11 +272,14 @@ pub fn handle_source_picked(app: &mut App, tab_id: TabId, result: Result<Vec<(St
     match result {
         Ok(files) if !files.is_empty() => {
             if let Some(np) = app.new_project.as_mut() { np.source_files = files; }
+            Task::none()
         }
-        Ok(_) => {}
-        Err(e) => { app.tabs[idx].status = e; }
+        Ok(_) => Task::none(),
+        Err(e) => {
+            app.tabs[idx].status = e.clone();
+            super::error::show("Couldn't read the selected images", e)
+        }
     }
-    Task::none()
 }
 
 pub fn handle_folder_picked(app: &mut App, tab_id: TabId, result: Result<Vec<(String, u32, u32)>, String>) -> Task<Message> {
@@ -284,11 +287,14 @@ pub fn handle_folder_picked(app: &mut App, tab_id: TabId, result: Result<Vec<(St
     match result {
         Ok(files) if !files.is_empty() => {
             if let Some(np) = app.new_project.as_mut() { np.source_files = files; }
+            Task::none()
         }
-        Ok(_) => { app.tabs[idx].status = "No images found in folder.".to_string(); }
-        Err(e) => { app.tabs[idx].status = e; }
+        Ok(_) => { app.tabs[idx].status = "No images found in folder.".to_string(); Task::none() }
+        Err(e) => {
+            app.tabs[idx].status = e.clone();
+            super::error::show("Couldn't read that folder", e)
+        }
     }
-    Task::none()
 }
 
 pub fn handle_location_picked(app: &mut App, _tab_id: TabId, picked: Option<String>) -> Task<Message> {

@@ -54,6 +54,7 @@ pub mod autosave;
 pub mod autosave_prompt;
 pub mod queue;
 pub mod onboarding;
+pub mod error;
 
 /// Pending autosave-recovery prompt for one tab (in-app modal).
 #[derive(Debug, Clone)]
@@ -249,6 +250,12 @@ pub enum Message {
     AutosaveTick,
     /// No-op completion for fire-and-forget autosave cleanup after save.
     AutosaveCleared,
+    /// Non-panic error dialog dismissed (see `app::error::show`). The dialog
+    /// itself is fire-and-forget; this only completes the `Task::perform`.
+    ErrorDismissed,
+    /// Non-panic error dialog: user pressed "Copy details". Handler writes
+    /// the full text to the clipboard and re-shows the dialog for dismissal.
+    ErrorCopyRetry { title: String, details: String },
 }
 
 impl From<UiEvent> for Message {
@@ -595,7 +602,7 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
                             } else {
                                 app.active_tab_mut().status = format!("Load failed: {e}");
                             }
-                            return Task::none();
+                            return error::show("Couldn't open the project", e);
                         }
                     }
                 }
@@ -622,7 +629,7 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
                                 }
                                 let series = app.pending_create_series.take().flatten();
                                 mmtl::touch_opened(app, path_str.clone(), series);
-                                return Task::none();
+                                return error::show("Project created, but it wouldn't open", format!("{path_str}\n{e}"));
                             }
                         },
                         Err(e) => {
@@ -639,7 +646,7 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
                             } else {
                                 app.active_tab_mut().status = format!("Create failed: {e}");
                             }
-                            return Task::none();
+                            return error::show("Couldn't create the project", e);
                         }
                     }
                 }
@@ -826,6 +833,8 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             | Message::ModelsFetched(_)
             | Message::Tab(_, _)
             | Message::ExternalOpen(_)
+            | Message::ErrorDismissed
+            | Message::ErrorCopyRetry { .. }
             | Message::BackdropCaptured(_, _)
             | Message::BackdropReady(_, _) => true,
             _ => false,
@@ -1017,6 +1026,12 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::AutosaveLater) => autosave::handle_later(app),
         Message::AutosaveTick => autosave::handle_tick(app),
         Message::AutosaveCleared => Task::none(),
+        Message::ErrorDismissed => Task::none(),
+        Message::ErrorCopyRetry { title, details } => {
+            let full = error::full_text(&title, &details);
+            let copy: Task<Message> = iced::clipboard::write(full);
+            Task::batch([copy, error::show(title, details)])
+        }
         // ——— Onboarding (first-run, blocking) ———
         Message::Ui(UiEvent::OnboardingNext) => onboarding::handle_next(app),
         Message::Ui(UiEvent::OnboardingBack) => onboarding::handle_back(app),

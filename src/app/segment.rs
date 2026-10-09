@@ -218,7 +218,7 @@ pub fn handle_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, result
             app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
-            promote
+            return Task::batch([promote, super::error::show("Segmentation couldn't start", e)]);
         }
     }
 }

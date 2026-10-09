@@ -626,7 +626,7 @@ pub fn handle_export_picked(app: &mut App, tab_id: crate::app::tab::TabId, folde
     if !folder_path.exists()
         && let Err(e) = std::fs::create_dir_all(&folder_path) {
             app.tabs[idx].status = format!("Export failed: cannot create folder: {e}");
-            return Task::none();
+            return super::error::show("Couldn't create the export folder", format!("{}\n{e}", folder_path.display()));
         }
 
     if app.tabs[idx].exporting {
@@ -938,15 +938,20 @@ pub fn handle_export_finished(app: &mut App, tab_id: crate::app::tab::TabId, res
     app.tabs[idx].exporting = false;
     clear_export_overlay(app, idx);
     match result {
-        Ok(msg) => app.tabs[idx].status = msg,
-        Err(e) => app.tabs[idx].status = format!("Export failed: {e}"),
+        Ok(msg) => {
+            app.tabs[idx].status = msg;
+            Task::none()
+        }
+        Err(e) => {
+            app.tabs[idx].status = format!("Export failed: {e}");
+            super::error::show("Couldn't export images", e)
+        }
     }
-    Task::none()
 }
 
-fn finish_export_if_done(app: &mut App, idx: usize) {
+fn finish_export_if_done(app: &mut App, idx: usize) -> Task<Message> {
     if !app.tabs[idx].exporting || app.tabs[idx].export_done < app.tabs[idx].export_total {
-        return;
+        return Task::none();
     }
     app.tabs[idx].exporting = false;
     clear_export_overlay(app, idx);
@@ -962,12 +967,16 @@ fn finish_export_if_done(app: &mut App, idx: usize) {
             app.tabs[idx].export_errors.join("; ")
         };
         app.tabs[idx].status = format!("Export failed: {detail}");
+        // Total failure: interrupt with a native dialog. Partial failures
+        // (saved > 0) stay counters-only per the no-spam rule.
+        return super::error::show("Couldn't export images", detail);
     } else {
         // Same final wording as before (bit-identical UX); partial errors stay
         // in `export_errors` and are not appended to keep the message stable.
         let _ = total;
         app.tabs[idx].status = format!("Saved {saved} image(s) to {}", folder.display());
     }
+    Task::none()
 }
 
 pub fn handle_export_stream_run(
@@ -1001,7 +1010,7 @@ pub fn handle_export_stream_run(
                     format!("Exporting {done} of {total} image(s)...")
                 };
             } else {
-                finish_export_if_done(app, idx);
+                return finish_export_if_done(app, idx);
             }
         }
         Err(e) => {
@@ -1018,6 +1027,7 @@ pub fn handle_export_stream_run(
                     app.tabs[idx].export_errors.join("; ")
                 };
                 app.tabs[idx].status = format!("Export failed: {detail}");
+                return super::error::show("Couldn't export images", detail);
             } else if let Some(folder) = app.tabs[idx].export_folder.clone() {
                 app.tabs[idx].status = format!("Saved {saved} image(s) to {}", folder.display());
             }
@@ -1048,6 +1058,13 @@ pub fn handle_export_stream_failed(app: &mut App, tab_id: crate::app::tab::TabId
             app.tabs[idx].export_errors.join("; ")
         };
         app.tabs[idx].status = format!("Export failed: {detail}");
+        // Total failure (stream dropped): dialog. Partial saves stay silent.
+        // "export cancelled" alone (empty errors, user pressed Cancel) stays
+        // status-only — check the caller: cancel sets exporting=false first,
+        // so this path with empty errors only runs on real stream failure.
+        if detail != "export cancelled" {
+            return super::error::show("Couldn't export images", detail);
+        }
     } else if let Some(folder) = app.tabs[idx].export_folder.clone() {
         app.tabs[idx].status = format!("Saved {saved} image(s) to {}", folder.display());
     }

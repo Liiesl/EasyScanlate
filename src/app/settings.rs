@@ -179,6 +179,7 @@ pub fn handle_open_url(app: &mut App, url: String) -> Task<Message> {
     if let Err(e) = open::that(&url) {
         eprintln!("[app] failed to open {url}: {e}");
         app.active_tab_mut().status = format!("Failed to open {url}: {e}");
+        return super::error::show("Couldn't open the link", format!("{url}\n{e}"));
     }
     Task::none()
 }

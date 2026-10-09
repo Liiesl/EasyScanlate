@@ -167,6 +167,9 @@ fn main() -> iced::Result {
     if early_args.iter().any(|a| a == crash::CRASH_TEST_ARG) {
         panic!("crash-test: intentional panic to exercise the panic panel");
     }
+    if let Some(result) = crate::app::error::run_error_test_if_requested(&early_args) {
+        return result;
+    }
     // ---- CLI flags (fast path: before Velopack / single-instance / iced) ----
     // (`early_args` above was only for the crash reporter pre-check.)
     // Keep these above `VelopackApp::run()` so `--help`/`--version`/headless

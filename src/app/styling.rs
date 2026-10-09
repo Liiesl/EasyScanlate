@@ -817,7 +817,7 @@ pub fn handle_styling_ready(app: &mut App, tab_id: crate::app::tab::TabId, resul
             app.engines.queue.complete(crate::app::queue::owner_of(tab_id), crate::app::queue::JobKind::Styling);
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
-            promote
+            return Task::batch([promote, super::error::show("Styling couldn't start", e)]);
         }
     }
 }

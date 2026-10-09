@@ -198,10 +198,15 @@ pub fn handle_exported(app: &mut App, tab_id: TabId, result: Result<String, Stri
         None => return Task::none(),
     };
     match result {
-        Ok(msg) => app.tabs[idx].status = msg,
-        Err(e) => app.tabs[idx].status = format!("Export failed: {e}"),
+        Ok(msg) => {
+            app.tabs[idx].status = msg;
+            Task::none()
+        }
+        Err(e) => {
+            app.tabs[idx].status = format!("Export failed: {e}");
+            super::error::show("Couldn't export translations", e)
+        }
     }
-    Task::none()
 }
 
 pub fn handle_import(app: &mut App) -> Task<Message> {
@@ -282,7 +287,7 @@ pub fn handle_import_loaded(
         Ok(v) => v,
         Err(e) => {
             app.tabs[idx].status = format!("Import failed: {e}");
-            return Task::none();
+            return super::error::show("Couldn't import translations", e);
         }
     };
     let trimmed = new_name.trim().to_string();

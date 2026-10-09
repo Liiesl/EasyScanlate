@@ -443,7 +443,7 @@ pub fn handle_recent_open(app: &mut App, path: String) -> Task<Message> {
     if !p.exists() {
         app.active_tab_mut().status = format!("Missing: {path}");
         drop_missing(app, &path);
-        return Task::none();
+        return super::error::show("The project file is missing", path);
     }
     let Some(new_id) = create_loading_tab(app, p.clone()) else {
         return Task::none();
@@ -490,9 +490,9 @@ pub fn handle_saved(app: &mut App, tab_id: crate::app::tab::TabId, result: Resul
         }
         Err(e) => {
             app.tabs[idx].status = format!("Save failed: {e}");
+            return super::error::show("Couldn't save the project", e);
         }
     }
-    Task::none()
 }
 
 pub fn load_created_project(path_str: String) -> LoadedProjectResult {
@@ -510,12 +510,14 @@ pub fn handle_external_opens(app: &mut App, paths: Vec<String>) -> Task<Message>
         if trimmed.is_empty() { continue; }
         if !trimmed.to_ascii_lowercase().ends_with(".mmtl") {
             app.active_tab_mut().status = format!("Not a .mmtl: {trimmed}");
+            tasks.push(super::error::show("That isn't an EasyScanlate project", trimmed));
             continue;
         }
         let path = std::path::PathBuf::from(&trimmed);
         if !path.exists() {
             app.active_tab_mut().status = format!("Missing: {}", path.display());
             drop_missing(app, &trimmed);
+            tasks.push(super::error::show("The project file is missing", path.display().to_string()));
             continue;
         }
         let Some(new_id) = create_loading_tab(app, path.clone()) else {
@@ -560,7 +562,7 @@ pub fn handle_loaded(
             } else {
                 app.active_tab_mut().status = format!("Load failed: {e}");
             }
+            return super::error::show("Couldn't open the project", e);
         }
     }
-    Task::none()
 }

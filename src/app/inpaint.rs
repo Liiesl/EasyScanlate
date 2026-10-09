@@ -1606,9 +1606,9 @@ pub fn handle_inpaint_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId
             if freed {
                 let promote = crate::app::queue::dispatch_pending(app);
                 crate::app::queue::refresh_queued_statuses(app);
-                return promote;
+                return Task::batch([promote, super::error::show("Inpainting couldn't start", e)]);
             }
-            Task::none()
+            return super::error::show("Inpainting couldn't start", e);
         }
     }
 }
@@ -1667,7 +1667,7 @@ pub fn handle_auto_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, b
             app.engines.queue.complete(owner_of(tab_id), kind);
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
-            promote
+            return Task::batch([promote, super::error::show("Auto-inpainting couldn't start", e)]);
         }
     }
 }
