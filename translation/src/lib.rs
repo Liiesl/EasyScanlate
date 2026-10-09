@@ -242,7 +242,7 @@ pub static SUPPORTED_PROVIDERS: LazyLock<Vec<Provider>> = LazyLock::new(|| {
 /// project's own docs replace them).
 #[derive(Debug, Clone, Copy)]
 pub struct RecommendedInfo {
-    /// Provider id as in [`SUPPORTED_PROVIDERS`] (`kilo`, `mistral`, ...).
+    /// Provider id as in [`SUPPORTED_PROVIDERS`] (`kilo`, `google`, ...).
     pub id: &'static str,
     /// URL to the provider's API-key / setup docs.
     pub docs_url: &'static str,
@@ -263,11 +263,6 @@ pub static RECOMMENDED: &[RecommendedInfo] = &[
         id: "google",
         docs_url: "https://ai.google.dev/gemini-api/docs/api-key#getting-started",
         description: "Delivered the best translation quality in our testing, and its free tier doesn't require a credit card. The free tier does have strict rate limits, and models are often busy or briefly unavailable, so expect the occasional retry.",
-    },
-    RecommendedInfo {
-        id: "mistral",
-        docs_url: "https://docs.mistral.ai/studio#getting-started-api",
-        description: "Offers a free tier, though you do need a credit card to activate it. Its models are widely regarded as the least censored available — they weren't heavily trained to refuse instructions — so they follow translation prompts reliably and suit scanlations particularly well.",
     },
     RecommendedInfo {
         id: "opencode-go",

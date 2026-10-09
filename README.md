@@ -6,7 +6,7 @@ an app that lets you MTL your manhwa with ease. designed with simplicity at its 
   - [Table of Contents](#table-of-contents)
 - [Workflow](#workflow)
   - [Create Project](#create-project)
-  - [Start the OCR and Translate with Gemini/Mistral API (Free!)](#start-the-ocr-and-translate-with-geminimistral-api-free)
+  - [Start the OCR and Translate with Gemini API (Free!)](#start-the-ocr-and-translate-with-gemini-api-free)
   - [Apply Translation and Save Manhwa](#apply-translation-and-save-manhwa)
 - [Installation](#installation)
 - [Troubleshooting](#troubleshooting)
@@ -22,11 +22,11 @@ an app that lets you MTL your manhwa with ease. designed with simplicity at its 
 [Create Project](https://github.com/user-attachments/assets/a3c8a5d6-1f0a-4f1e-8091-b5b80f7cd2a2)
 
 
-## Start the OCR and Translate with Gemini/Mistral API (Free!)
+## Start the OCR and Translate with Gemini API (Free!)
 
-yes, gemini and mistral api is free. if you still haven't made one, what are you waiting for!?!
+yes, gemini api is free. if you still haven't made one, what are you waiting for!?!
 
-[Start the OCR Translate with Gemini/Mistral API](https://github.com/user-attachments/assets/75db9893-1eb8-4a54-9eaf-2d4d631ed09c)
+[Start the OCR Translate with Gemini API](https://github.com/user-attachments/assets/75db9893-1eb8-4a54-9eaf-2d4d631ed09c)
 
 
 ## Apply Translation and Save Manhwa
