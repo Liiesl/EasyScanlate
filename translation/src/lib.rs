@@ -224,7 +224,7 @@ pub static SUPPORTED_PROVIDERS: LazyLock<Vec<Provider>> = LazyLock::new(|| {
         entry("moonshotai", "Moonshot AI", "https://api.moonshot.ai/v1", CompatKind::Moonshot, "MOONSHOT_API_KEY", &["kimi-k2.5", "kimi-k3"]),
         entry("zai", "Z.AI", "https://api.z.ai/api/paas/v4", CompatKind::Zai, "ZHIPU_API_KEY", &["glm-4.5-flash", "glm-4.6"]),
         entry("minimax", "MiniMax", "https://api.minimax.io/anthropic", CompatKind::MiniMax, "MINIMAX_API_KEY", &["MiniMax-M2.1", "MiniMax-M2.5"]),
-        entry("opencode", "OpenCode Zen", "https://opencode.ai/zen/v1", CompatKind::OpenAI, "OPENCODE_API_KEY", &["deepseek-v4-flash", "mimo-v2.5-free"]),
+        entry("opencode", "OpenCode", "https://opencode.ai/zen/v1", CompatKind::OpenAI, "OPENCODE_API_KEY", &["deepseek-v4-flash", "mimo-v2.5-free"]),
         entry("opencode-go", "OpenCode Go", "https://opencode.ai/zen/go/v1", CompatKind::OpenAI, "OPENCODE_API_KEY", &["deepseek-v4-flash", "mimo-v2.5"]),
         entry("mistral", "Mistral", "https://api.mistral.ai", CompatKind::Mistral, "MISTRAL_API_KEY", &["mistral-small-latest", "mistral-medium-2508"]),
         entry("ollama-cloud", "Ollama Cloud", "https://ollama.com/v1", CompatKind::OpenAI, "OLLAMA_API_KEY", &["deepseek-v4-flash", "kimi-k3"]),
@@ -266,7 +266,7 @@ pub static RECOMMENDED: &[RecommendedInfo] = &[
     },
     RecommendedInfo {
         id: "opencode-go",
-        docs_url: "https://docs.mistral.ai/studio#getting-started-api",
+        docs_url: "https://opencode.ai/v2/docs/console/go/",
         description: "A subscription-based provider with the lowest cost per credit of the options here. It's the best value if you translate frequently or work on larger projects.",
     },
     RecommendedInfo {
@@ -2135,7 +2135,7 @@ mod tests {
             "id": "opencode",
             "env": ["OPENCODE_API_KEY"],
             "api": "https://opencode.ai/zen/v1",
-            "name": "OpenCode Zen",
+            "name": "OpenCode",
             "models": {
                 "deepseek-v4-flash-free": {
                     "id": "deepseek-v4-flash-free",
