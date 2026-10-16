@@ -101,6 +101,7 @@ pub const LANGUAGES: [&str; 13] = [
     "Italian",
     "Portuguese",
     "Russian",
+    "Ukrainian",
     "Thai",
     "Vietnamese",
 ];
