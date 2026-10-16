@@ -84,6 +84,7 @@ pub const LANGUAGES: [&str; 13] = [
     "Italian",
     "Portuguese",
     "Russian",
+    "Ukrainian",
     "Thai",
     "Vietnamese",
 ];
@@ -1144,3 +1145,4 @@ mod tests {
         assert_eq!(session.selected_model, "fake-gpt-4o");
     }
 }
+
