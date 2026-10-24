@@ -522,7 +522,7 @@ impl UiState for ActiveTab<'_> {
 
     fn new_project_overlay(&self) -> Option<easyscanlate_ui::state::NewProjectOverlay> {
         self.app.new_project.as_ref().map(|np| easyscanlate_ui::state::NewProjectOverlay {
-            source_paths: np.source_files.iter().map(|(p, _, _)| p.clone()).collect(),
+            source_paths: np.source_files.clone(),
             project_name: np.project_name.clone(),
             total_bytes: np.total_bytes,
             source_dir: np.source_dir.clone(),
@@ -851,7 +851,7 @@ impl UiState for App {
     fn adv_import_name(&self) -> &str { &self.adv_import_name }
     fn new_project_overlay(&self) -> Option<easyscanlate_ui::state::NewProjectOverlay> {
         self.new_project.as_ref().map(|np| easyscanlate_ui::state::NewProjectOverlay {
-            source_paths: np.source_files.iter().map(|(p, _, _)| p.clone()).collect(),
+            source_paths: np.source_files.clone(),
             project_name: np.project_name.clone(),
             total_bytes: np.total_bytes,
             source_dir: np.source_dir.clone(),

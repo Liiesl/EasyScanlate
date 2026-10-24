@@ -10,7 +10,7 @@ use super::{App, Message, TabMessage};
 
 #[derive(Debug, Clone)]
 pub struct NewProjectState {
-    pub source_files: Vec<(String, u32, u32)>,
+    pub source_files: Vec<String>,
     pub project_name: String,
     pub total_bytes: u64,
     pub source_dir: Option<String>,
@@ -108,28 +108,13 @@ pub fn handle_source_image(app: &mut App) -> Task<Message> {
                 .pick_files()
                 .await;
             let Some(files) = files else { return Ok(Vec::new()) };
-            let paths: Vec<String> = files
+            // Paths only — dimensions are probed in parallel at Create time.
+            let mut out: Vec<String> = files
                 .iter()
                 .map(|f| f.path().to_string_lossy().into_owned())
                 .collect();
-            // `ImageReader::open` + header decode on the blocking pool so the
-            // async executor never stalls on image I/O.
-            tokio::task::spawn_blocking(move || {
-                let mut out = Vec::with_capacity(paths.len());
-                for path in paths {
-                    let dims = image::ImageReader::open(&path)
-                        .map_err(|e| format!("Failed to open {path}: {e}"))?
-                        .into_dimensions()
-                        .map_err(|e| format!("Failed to decode {path}: {e}"));
-                    match dims {
-                        Ok((w, h)) => out.push((path, w, h)),
-                        Err(e) => return Err(e),
-                    }
-                }
-                Ok(out)
-            })
-            .await
-            .unwrap_or_else(|e| Err(format!("source scan task failed: {e}")))
+            out.sort_by(|a, b| natural_cmp(a, b));
+            Ok(out)
         },
         move |res| Message::Tab(tid, TabMessage::NewProjectSourcePicked(res)),
     )
@@ -142,27 +127,20 @@ pub fn handle_source_folder(app: &mut App) -> Task<Message> {
             let folder = rfd::AsyncFileDialog::new().pick_folder().await;
             let Some(folder) = folder else { return Ok(Vec::new()) };
             let dir = folder.path().to_path_buf();
-            // `read_dir` + image header probes on the blocking pool.
+            // `read_dir` on the blocking pool. Paths only — dimensions are
+            // probed in parallel at Create time.
             tokio::task::spawn_blocking(move || {
                 let entries = std::fs::read_dir(&dir).map_err(|e| e.to_string())?;
-                let mut out = Vec::new();
+                let mut out: Vec<String> = Vec::new();
                 for entry in entries {
                     let entry = entry.map_err(|e| e.to_string())?;
                     let path = entry.path();
                     if !path.is_file() { continue; }
                     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
                     if !IMAGE_FILTERS.contains(&ext.as_str()) { continue; }
-                    let pstr = path.to_string_lossy().into_owned();
-                    let dims = image::ImageReader::open(&path)
-                        .map_err(|e| format!("Failed to open {pstr}: {e}"))?
-                        .into_dimensions()
-                        .map_err(|e| format!("Failed to decode {pstr}: {e}"));
-                    match dims {
-                        Ok((w, h)) => out.push((pstr, w, h)),
-                        Err(e) => return Err(e),
-                    }
+                    out.push(path.to_string_lossy().into_owned());
                 }
-                out.sort_by(|a, b| natural_cmp(&a.0, &b.0));
+                out.sort_by(|a, b| natural_cmp(a, b));
                 Ok(out)
             })
             .await
@@ -206,7 +184,7 @@ pub fn handle_location_browse(app: &mut App) -> Task<Message> {
     let default_dir = app
         .new_project
         .as_ref()
-        .and_then(|np| np.source_files.first().map(|(p, _, _)| std::path::Path::new(p).parent().map(|par| par.to_path_buf()).unwrap_or_default()))
+        .and_then(|np| np.source_files.first().map(|p| std::path::Path::new(p).parent().map(|par| par.to_path_buf()).unwrap_or_default()))
         .unwrap_or_default();
     let file_name = app
         .new_project
@@ -254,7 +232,7 @@ pub fn handle_series_toggle(app: &mut App) -> Task<Message> {
 fn refresh_source_meta(app: &mut App) {
     let Some(np) = app.new_project.as_mut() else { return };
     let mut total: u64 = 0;
-    for (p, _, _) in &np.source_files {
+    for p in &np.source_files {
         if let Ok(m) = std::fs::metadata(p) {
             total = total.saturating_add(m.len());
         }
@@ -263,14 +241,14 @@ fn refresh_source_meta(app: &mut App) {
     np.source_dir = np
         .source_files
         .first()
-        .and_then(|(p, _, _)| std::path::Path::new(p).parent())
+        .and_then(|p| std::path::Path::new(p).parent())
         .map(|par| par.to_string_lossy().into_owned());
 }
 
 fn spawn_thumbs(app: &App) -> Task<Message> {
     let Some(np) = app.new_project.clone() else { return Task::none() };
     let tab_id = app.active_tab().id;
-    let paths: Vec<String> = np.source_files.iter().take(8).map(|(p, _, _)| p.clone()).collect();
+    let paths: Vec<String> = np.source_files.iter().take(8).cloned().collect();
     if paths.is_empty() {
         return Task::none();
     }
@@ -305,7 +283,8 @@ pub fn handle_dropped(app: &mut App, paths: Vec<String>) -> Task<Message> {
     if app.new_project.is_none() {
         return Task::none();
     }
-    let mut out: Vec<(String, u32, u32)> = Vec::new();
+    // Paths only — dimensions are probed in parallel at Create time.
+    let mut out: Vec<String> = Vec::new();
     for raw in paths {
         let pb = std::path::PathBuf::from(&raw);
         if pb.is_dir() {
@@ -319,28 +298,21 @@ pub fn handle_dropped(app: &mut App, paths: Vec<String>) -> Task<Message> {
                 if !IMAGE_FILTERS.contains(&ext.as_str()) {
                     continue;
                 }
-                let pstr = path.to_string_lossy().into_owned();
-                if let Ok(reader) = image::ImageReader::open(&path)
-                    && let Ok((w, h)) = reader.into_dimensions() {
-                        out.push((pstr, w, h));
-                    }
+                out.push(path.to_string_lossy().into_owned());
             }
         } else {
             let ext = pb.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
             if !IMAGE_FILTERS.contains(&ext.as_str()) {
                 continue;
             }
-            if let Ok(reader) = image::ImageReader::open(&pb)
-                && let Ok((w, h)) = reader.into_dimensions() {
-                    out.push((raw, w, h));
-                }
+            out.push(raw);
         }
     }
     if out.is_empty() {
         app.active_tab_mut().status = "No images found in dropped files.".to_string();
         return Task::none();
     }
-    out.sort_by(|a, b| natural_cmp(&a.0, &b.0));
+    out.sort_by(|a, b| natural_cmp(a, b));
     if let Some(np) = app.new_project.as_mut() {
         np.source_files = out;
         np.thumbs.clear();
@@ -401,6 +373,7 @@ pub fn handle_path_input(app: &mut App, input: String) -> Task<Message> {
 }
 
 /// Parse the paste-a-path input as an image file or a folder of images.
+/// Paths only — dimensions are probed in parallel at Create time.
 pub fn handle_path_submit(app: &mut App) -> Task<Message> {
     let raw = app
         .new_project
@@ -417,7 +390,7 @@ pub fn handle_path_submit(app: &mut App) -> Task<Message> {
                 let pb = std::path::PathBuf::from(&raw);
                 if pb.is_dir() {
                     let entries = std::fs::read_dir(&pb).map_err(|e| e.to_string())?;
-                    let mut out = Vec::new();
+                    let mut out: Vec<String> = Vec::new();
                     for entry in entries {
                         let entry = entry.map_err(|e| e.to_string())?;
                         let path = entry.path();
@@ -428,17 +401,9 @@ pub fn handle_path_submit(app: &mut App) -> Task<Message> {
                         if !IMAGE_FILTERS.contains(&ext.as_str()) {
                             continue;
                         }
-                        let pstr = path.to_string_lossy().into_owned();
-                        let dims = image::ImageReader::open(&path)
-                            .map_err(|e| format!("Failed to open {pstr}: {e}"))?
-                            .into_dimensions()
-                            .map_err(|e| format!("Failed to decode {pstr}: {e}"));
-                        match dims {
-                            Ok((w, h)) => out.push((pstr, w, h)),
-                            Err(e) => return Err(e),
-                        }
+                        out.push(path.to_string_lossy().into_owned());
                     }
-                    out.sort_by(|a, b| natural_cmp(&a.0, &b.0));
+                    out.sort_by(|a, b| natural_cmp(a, b));
                     if out.is_empty() {
                         return Err("No images found in that folder.".to_string());
                     }
@@ -448,11 +413,7 @@ pub fn handle_path_submit(app: &mut App) -> Task<Message> {
                     if !IMAGE_FILTERS.contains(&ext.as_str()) {
                         return Err("Not an image file (JPG, PNG, WebP).".to_string());
                     }
-                    let dims = image::ImageReader::open(&pb)
-                        .map_err(|e| format!("Failed to open {raw}: {e}"))?
-                        .into_dimensions()
-                        .map_err(|e| format!("Failed to decode {raw}: {e}"))?;
-                    Ok(vec![(raw, dims.0, dims.1)])
+                    Ok(vec![raw])
                 } else {
                     Err("Path doesn't exist.".to_string())
                 }
@@ -525,8 +486,24 @@ pub fn handle_create(app: &mut App) -> Task<Message> {
                     }
                 let mut project = Project::new();
                 project.set_series(series);
-                let mut metas: Vec<(String, u32, u32)> = files;
-                metas.sort_by(|a, b| natural_cmp(&a.0, &b.0));
+                let mut paths: Vec<String> = files;
+                paths.sort_by(|a, b| natural_cmp(a, b));
+                // Header-only dimension probes in parallel; unreadable files
+                // are skipped.
+                use rayon::prelude::*;
+                let metas: Vec<(String, u32, u32)> = paths
+                    .into_par_iter()
+                    .filter_map(|path| {
+                        image::ImageReader::open(&path)
+                            .ok()?
+                            .into_dimensions()
+                            .ok()
+                            .map(|(w, h)| (path, w, h))
+                    })
+                    .collect();
+                if metas.is_empty() {
+                    return Err("No readable images found.".to_string());
+                }
                 let mut loaded: Vec<LoadedImage> = Vec::new();
                 for (path, w, h) in metas {
                     let image_id = project.add_image(path.clone(), w as f32, h as f32);
@@ -546,7 +523,7 @@ pub fn handle_create(app: &mut App) -> Task<Message> {
 }
 
 // TabMessage handlers
-pub fn handle_source_picked(app: &mut App, tab_id: TabId, result: Result<Vec<(String, u32, u32)>, String>) -> Task<Message> {
+pub fn handle_source_picked(app: &mut App, tab_id: TabId, result: Result<Vec<String>, String>) -> Task<Message> {
     let Some(idx) = app.tabs.iter().position(|t| t.id == tab_id) else { return Task::none() };
     match result {
         Ok(files) if !files.is_empty() => {
@@ -565,7 +542,7 @@ pub fn handle_source_picked(app: &mut App, tab_id: TabId, result: Result<Vec<(St
     }
 }
 
-pub fn handle_folder_picked(app: &mut App, tab_id: TabId, result: Result<Vec<(String, u32, u32)>, String>) -> Task<Message> {
+pub fn handle_folder_picked(app: &mut App, tab_id: TabId, result: Result<Vec<String>, String>) -> Task<Message> {
     let Some(idx) = app.tabs.iter().position(|t| t.id == tab_id) else { return Task::none() };
     match result {
         Ok(files) if !files.is_empty() => {
