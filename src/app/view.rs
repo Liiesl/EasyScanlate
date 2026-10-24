@@ -89,7 +89,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         } else if app.settings_open {
             0.70
         } else {
-            0.45
+            0.55
         };
         let title_dim = container(
             space::horizontal()

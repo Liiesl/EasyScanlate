@@ -523,9 +523,14 @@ impl UiState for ActiveTab<'_> {
     fn new_project_overlay(&self) -> Option<easyscanlate_ui::state::NewProjectOverlay> {
         self.app.new_project.as_ref().map(|np| easyscanlate_ui::state::NewProjectOverlay {
             source_paths: np.source_files.iter().map(|(p, _, _)| p.clone()).collect(),
+            project_name: np.project_name.clone(),
+            total_bytes: np.total_bytes,
+            source_dir: np.source_dir.clone(),
+            thumbs: np.thumbs.clone(),
             original_lang: np.original_lang.clone(),
             project_location: np.project_location.clone(),
             series: np.series.clone(),
+            series_open: np.series_open,
             available_series: {
                 let mut seen = std::collections::BTreeSet::new();
                 let mut out = Vec::new();
@@ -539,6 +544,8 @@ impl UiState for ActiveTab<'_> {
             },
             creating_series: np.creating_series,
             new_series_name: np.new_series_name.clone(),
+            path_input: np.path_input.clone(),
+            drag_hovered: np.drag_hovered,
         })
     }
 
@@ -845,9 +852,14 @@ impl UiState for App {
     fn new_project_overlay(&self) -> Option<easyscanlate_ui::state::NewProjectOverlay> {
         self.new_project.as_ref().map(|np| easyscanlate_ui::state::NewProjectOverlay {
             source_paths: np.source_files.iter().map(|(p, _, _)| p.clone()).collect(),
+            project_name: np.project_name.clone(),
+            total_bytes: np.total_bytes,
+            source_dir: np.source_dir.clone(),
+            thumbs: np.thumbs.clone(),
             original_lang: np.original_lang.clone(),
             project_location: np.project_location.clone(),
             series: np.series.clone(),
+            series_open: np.series_open,
             available_series: {
                 let mut seen = std::collections::BTreeSet::new();
                 let mut out = Vec::new();
@@ -861,6 +873,8 @@ impl UiState for App {
             },
             creating_series: np.creating_series,
             new_series_name: np.new_series_name.clone(),
+            path_input: np.path_input.clone(),
+            drag_hovered: np.drag_hovered,
         })
     }
     fn translation_anim_phase(&self) -> f32 { self.tabs[self.active].translate_anim_phase }

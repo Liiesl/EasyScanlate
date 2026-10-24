@@ -62,12 +62,30 @@ fn keys_subscription(app: &App) -> Subscription<Message> {
     })
 }
 
-fn drops_subscription() -> Subscription<Message> {
-    iced::event::listen().filter_map(|event| match event {
+fn drops_subscription(app: &App) -> Subscription<Message> {
+    let modal_open = app.new_project.is_some();
+    iced::event::listen().with(modal_open).filter_map(|(modal_open, event)| match event {
+        iced::Event::Window(iced::window::Event::FileHovered(path)) => {
+            if modal_open {
+                let _ = path;
+                Some(Message::NewProjectDragHover(true))
+            } else {
+                None
+            }
+        }
         iced::Event::Window(iced::window::Event::FileDropped(path)) => {
             let s = path.to_string_lossy().to_string();
-            if s.to_ascii_lowercase().ends_with(".mmtl") {
+            if modal_open {
                 Some(Message::ExternalOpen(vec![s]))
+            } else if s.to_ascii_lowercase().ends_with(".mmtl") {
+                Some(Message::ExternalOpen(vec![s]))
+            } else {
+                None
+            }
+        }
+        iced::Event::Window(iced::window::Event::FilesHoveredLeft) => {
+            if modal_open {
+                Some(Message::NewProjectDragHover(false))
             } else {
                 None
             }
@@ -96,7 +114,7 @@ fn ticks_subscriptions(app: &App) -> Vec<Subscription<Message>> {
 
 pub fn subscription(app: &App) -> Subscription<Message> {
     let frame_sub = app.frame.subscription().map(Message::Frame);
-    let mut subs = vec![frame_sub, keys_subscription(app), drops_subscription()];
+    let mut subs = vec![frame_sub, keys_subscription(app), drops_subscription(app)];
 
     if app.ipc_listener.is_some() {
         subs.push(iced::time::every(Duration::from_millis(250)).map(|_| Message::IpcPoll));

@@ -161,6 +161,10 @@ pub enum UiEvent {
     NewProjectSourceFolder,
     NewProjectLocationBrowse,
     NewProjectOriginalLang(String),
+    NewProjectName(String),
+    NewProjectSeriesToggle,
+    NewProjectPathInput(String),
+    NewProjectPathSubmit,
     /// Pick the series for the new project (`None` = standalone).
     NewProjectSeriesSelect(Option<String>),
     /// Show the "+ New series" inline input.

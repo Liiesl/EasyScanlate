@@ -168,6 +168,7 @@ pub enum TabMessage {
     MmtlLoaded(MmtlLoadedPayload),
     NewProjectSourcePicked(Result<Vec<(String, u32, u32)>, String>),
     NewProjectFolderPicked(Result<Vec<(String, u32, u32)>, String>),
+    NewProjectThumbs(Vec<iced::widget::image::Handle>),
     NewProjectLocationPicked(Option<String>),
     CreateProjectPicked(Result<String, String>),
     RecentPickedToLoad(MmtlLoadedPayload),
@@ -233,6 +234,9 @@ pub enum Message {
     /// External open requests (CLI forward, drag-drop, IPC). Each string is
     /// a raw path that may contain quotes/spaces.
     ExternalOpen(Vec<String>),
+    /// A file drag is hovering the window (`true`) or left (`false`).
+    /// Only meaningful while the New Project modal is open.
+    NewProjectDragHover(bool),
     // ——— Updates (Velopack; stubbed when the `updates` feature is off) ———
     UpdateCheckResult(Box<Option<crate::updater::UpdateInfo>>),
     UpdateDownloadStart,
@@ -767,6 +771,7 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
         TabMessage::MmtlSaved(result) => mmtl::handle_saved(app, tab_id, result),
         TabMessage::NewProjectSourcePicked(result) => new_project::handle_source_picked(app, tab_id, result),
         TabMessage::NewProjectFolderPicked(result) => new_project::handle_folder_picked(app, tab_id, result),
+        TabMessage::NewProjectThumbs(handles) => new_project::handle_thumbs(app, tab_id, handles),
         TabMessage::NewProjectLocationPicked(picked) => new_project::handle_location_picked(app, tab_id, picked),
         TabMessage::ExportFolderPicked(picked) => export::handle_export_picked(app, tab_id, picked),
         TabMessage::ExportFinished(result) => export::handle_export_finished(app, tab_id, result),
@@ -850,7 +855,22 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             let paths: Vec<String> = pending.into_iter().filter(|s| !s.is_empty()).collect();
             if paths.is_empty() { Task::none() } else { backdrop::begin_load(app, backdrop::PendingLoad::External(paths)) }
         }
-        Message::ExternalOpen(paths) => backdrop::begin_load(app, backdrop::PendingLoad::External(paths)),
+        Message::ExternalOpen(paths) => {
+            if app.new_project.is_some() {
+                let has_images = paths.iter().any(|p| {
+                    let pb = std::path::PathBuf::from(p);
+                    if pb.is_dir() {
+                        return true;
+                    }
+                    let ext = pb.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+                    crate::app::layout::IMAGE_FILTERS.contains(&ext.as_str())
+                });
+                if has_images {
+                    return new_project::handle_dropped(app, paths);
+                }
+            }
+            backdrop::begin_load(app, backdrop::PendingLoad::External(paths))
+        }
         Message::Frame(action) => app.frame.update(action, Message::Frame),
         Message::Tab(tab_id, tab_msg) => handle_tab_message(app, tab_id, tab_msg),
         Message::Model(ev) => {
@@ -891,6 +911,11 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::NewProjectSourceFolder) => new_project::handle_source_folder(app),
         Message::Ui(UiEvent::NewProjectLocationBrowse) => new_project::handle_location_browse(app),
         Message::Ui(UiEvent::NewProjectOriginalLang(lang)) => new_project::handle_original_lang(app, lang),
+        Message::Ui(UiEvent::NewProjectName(name)) => new_project::handle_name(app, name),
+        Message::Ui(UiEvent::NewProjectSeriesToggle) => new_project::handle_series_toggle(app),
+        Message::Ui(UiEvent::NewProjectPathInput(input)) => new_project::handle_path_input(app, input),
+        Message::Ui(UiEvent::NewProjectPathSubmit) => new_project::handle_path_submit(app),
+        Message::NewProjectDragHover(hovered) => new_project::handle_drag_hover(app, hovered),
         Message::Ui(UiEvent::NewProjectSeriesSelect(series)) => new_project::handle_series_select(app, series),
         Message::Ui(UiEvent::NewProjectSeriesCreateStart) => new_project::handle_series_create_start(app),
         Message::Ui(UiEvent::NewProjectSeriesName(name)) => new_project::handle_series_name(app, name),

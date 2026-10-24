@@ -20,16 +20,26 @@ pub enum AppView {
 #[derive(Debug, Clone)]
 pub struct NewProjectOverlay {
     pub source_paths: Vec<String>,
+    pub project_name: String,
+    pub total_bytes: u64,
+    pub source_dir: Option<String>,
+    pub thumbs: Vec<iced::widget::image::Handle>,
     pub original_lang: String,
     pub project_location: Option<String>,
     /// Selected series (`None` = standalone). Defaults to `None`.
     pub series: Option<String>,
+    /// Whether the "+ Add to a series" section is expanded.
+    pub series_open: bool,
     /// Existing series names for the dropdown, sorted most-recent first.
     pub available_series: Vec<String>,
     /// Whether the "+ New series" inline input is shown.
     pub creating_series: bool,
     /// Current text of the "+ New series" input.
     pub new_series_name: String,
+    /// Paste-a-path input in the empty drop zone (image or folder).
+    pub path_input: String,
+    /// Whether a file drag is hovering the window (highlights drop zone).
+    pub drag_hovered: bool,
 }
 
 /// Home sidebar selection: standalone recents or one tracked series.
@@ -216,8 +226,8 @@ pub trait UiState {
     fn manage_models_open(&self) -> bool;
     /// Current filter text of the Manage Models search field.
     fn manage_models_search(&self) -> &str;
-    /// Blurred snapshot of the window behind the Settings / Manage Models
-    /// overlays (`None` = not captured yet: render flat). Captured clean
+    /// Blurred snapshot of the window behind the Settings / Manage Models /
+    /// New Project overlays (`None` = not captured yet: render flat). Captured clean
     /// before the modal opens, downscaled + blurred off-thread.
     fn backdrop_blur(&self) -> Option<iced::widget::image::Handle> { None }
     /// Every connected provider's *all* toggleable models (deprecated already

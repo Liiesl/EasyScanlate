@@ -33,9 +33,15 @@ pub fn handle_settings_close(app: &mut App) -> Task<Message> {
     app.manage_models_open = false;
     app.connect_modal = None;
     app.settings_search.clear();
-    // Drop the frozen frame so the next open re-captures fresh content.
-    app.backdrop_blur = None;
-    app.backdrop_frame = None;
+    // Drop the frozen frame so the next open re-captures fresh content —
+    // unless New Project is still open underneath (Home stacking), in which
+    // case keep the frame re-cropped for its fixed rect.
+    if app.new_project.is_some() {
+        backdrop::recrop(app, BackdropKind::NewProject);
+    } else {
+        app.backdrop_blur = None;
+        app.backdrop_frame = None;
+    }
     app.backdrop_pending = None;
     Task::none()
 }

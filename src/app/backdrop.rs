@@ -1,4 +1,4 @@
-//! Blurred backdrop confined to the Settings / Manage Models panel rect.
+//! Blurred backdrop confined to the Settings / Manage Models / New Project panel rect.
 //!
 //! Real blur of the iced widgets behind the panel, without forking `iced`:
 //! capture a window screenshot *before* the modal opens (clean base frame),
@@ -44,12 +44,17 @@ const EXPORT_H: f32 = 280.0;
 /// `rounded(scale::s(16.0))`).
 const UPDATE_W: f32 = 480.0;
 const UPDATE_H: f32 = 320.0;
+/// New Project modal design size (mirrors `ui/src/new_project.rs`, which
+/// renders `scale::s(MODAL_WIDTH) × scale::s(MODAL_HEIGHT)`).
+const NEW_PROJECT_W: f32 = 640.0;
+const NEW_PROJECT_H: f32 = 520.0;
 
 /// Which modal the pending/ready backdrop belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackdropKind {
     Settings,
     ManageModels,
+    NewProject,
     Loading,
     Export,
     Update,
@@ -198,6 +203,9 @@ pub fn handle_ready(
         BackdropKind::ManageModels => {
             app.manage_models_open = true;
             app.manage_models_search.clear();
+        }
+        BackdropKind::NewProject => {
+            super::new_project::ensure_new_project_state(app);
         }
         BackdropKind::Loading | BackdropKind::Export | BackdropKind::Update => unreachable!("handled above"),
     }
@@ -460,7 +468,7 @@ fn box_blur_rgba_inplace(buf: &mut Vec<u8>, w: u32, h: u32, radius: u32, passes:
 /// Panel rect in low-res pixels: the modal window occupies the content area
 /// (full window minus titlebar strip minus `OUTER_PADDING` frame). Settings
 /// is the centered 80% cell (`FillPortion` 1-8-1 split both axes);
-/// Manage Models is the fixed size centered via `center()`.
+/// Manage Models and New Project are fixed sizes centered via `center()`.
 fn panel_rect_lowres(frame: &CapturedBackdrop, kind: BackdropKind) -> Option<(u32, u32, u32, u32)> {
     let pad = easyscanlate_ui::layout::OUTER_PADDING;
     let cx = pad;
@@ -479,6 +487,14 @@ fn panel_rect_lowres(frame: &CapturedBackdrop, kind: BackdropKind) -> Option<(u3
             ch,
             easyscanlate_ui::scale::s(MANAGE_W),
             easyscanlate_ui::scale::s(MANAGE_H),
+        ),
+        BackdropKind::NewProject => centered_fixed(
+            cx,
+            cy,
+            cw,
+            ch,
+            easyscanlate_ui::scale::s(NEW_PROJECT_W),
+            easyscanlate_ui::scale::s(NEW_PROJECT_H),
         ),
         BackdropKind::Loading => centered_fixed(
             cx,

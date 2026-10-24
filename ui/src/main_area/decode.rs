@@ -117,11 +117,46 @@ pub fn decode_page(path: &str, max_edge: u32) -> Result<DecodedPage, String> {
         (source_width, source_height)
     };
     let rgba = img.thumbnail(width, height).into_rgba8();
+    let (w, h) = (rgba.width(), rgba.height());
     let pixels = Bytes::from(rgba.into_raw());
     Ok(DecodedPage {
-        handle: Handle::from_rgba(width, height, pixels),
-        width,
-        height,
+        handle: Handle::from_rgba(w, h, pixels),
+        width: w,
+        height: h,
+    })
+}
+
+/// Decodes `path`, resizes to fill `out_w` x `out_h`, then center-crops to
+/// exactly `out_w` x `out_h`. Used for fixed-size previews (New Project
+/// strip) where the widget expects exact pixels, not aspect-preserved pages.
+pub fn decode_cover(path: &str, out_w: u32, out_h: u32) -> Result<DecodedPage, String> {
+    let out_w = out_w.max(1);
+    let out_h = out_h.max(1);
+    let img = image::ImageReader::open(path)
+        .map_err(|e| format!("Failed to open {path}: {e}"))?
+        .with_guessed_format()
+        .map_err(|e| format!("Failed to decode {path}: {e}"))?
+        .decode()
+        .map_err(|e| format!("Failed to decode {path}: {e}"))?;
+    let (sw, sh) = (img.width().max(1), img.height().max(1));
+    let scale = (out_w as f32 / sw as f32).max(out_h as f32 / sh as f32);
+    let iw = ((sw as f32 * scale).ceil() as u32).max(out_w).max(1);
+    let ih = ((sh as f32 * scale).ceil() as u32).max(out_h).max(1);
+    let resized = img
+        .resize_exact(iw, ih, image::imageops::FilterType::Lanczos3)
+        .into_rgba8();
+    let (rw, rh) = (resized.width(), resized.height());
+    if rw < out_w || rh < out_h {
+        return Err(format!("Failed to decode {path}: resize produced {rw}x{rh}"));
+    }
+    let x = (rw - out_w) / 2;
+    let y = (rh - out_h) / 2;
+    let cropped = image::imageops::crop_imm(&resized, x, y, out_w, out_h).to_image();
+    let pixels = Bytes::from(cropped.into_raw());
+    Ok(DecodedPage {
+        handle: Handle::from_rgba(out_w, out_h, pixels),
+        width: out_w,
+        height: out_h,
     })
 }
 
