@@ -4,6 +4,7 @@ pub mod entry;
 pub mod fallback;
 pub mod fit;
 pub mod gradient;
+pub mod shadow;
 pub mod style;
 pub mod text;
 pub mod warp;
@@ -28,6 +29,7 @@ use crate::main_area::geometry::{
 };
 
 use self::gradient::{bg_fill_in_rect, fill_gradient_text, text_fill, StrokePaint};
+use self::shadow::ShadowPaint;
 
 /// Bounding rect of a frame-space quad, for gradient endpoints drawn in
 /// frame coordinates (untransformed quad paths).
@@ -207,6 +209,7 @@ pub fn draw_entries<'a, I, F>(
         let styled = styled_font_for_text(font, &entry.style, &display);
         let stroke = StrokePaint::for_style(&entry.style, entry.style.stroke_width * scale);
         let gradient = text_fill(&entry.style);
+        let shadow = ShadowPaint::for_style(&entry.style, scale);
         // Per-entry typography: relative line-height multiplier and letter
         // spacing in image px (scaled to frame px). Spacing is real
         // tracking via cosmic-text `Attrs::letter_spacing` (EM) shared by
@@ -251,7 +254,7 @@ pub fn draw_entries<'a, I, F>(
                         align_x: TextAlignment::Center,
                         ..Text::default()
                     };
-                    draw_warped_text(frame, &text, box_rect, quad, stroke, gradient, ls);
+                    draw_warped_text(frame, &text, box_rect, quad, stroke, gradient, ls, shadow.as_ref());
                 }
             } else {
                 if let Some(transform) = &layout_transform {
@@ -289,6 +292,7 @@ pub fn draw_entries<'a, I, F>(
                             b,
                             StrokePaint::for_style(&entry.style, entry.style.stroke_width * scale),
                             ls,
+                            shadow.as_ref(),
                         );
                     } else {
                         draw_spaced_text(
@@ -297,6 +301,7 @@ pub fn draw_entries<'a, I, F>(
                             ls,
                             StrokePaint::for_style(&entry.style, entry.style.stroke_width * scale),
                             block_rect,
+                            shadow.as_ref(),
                         );
                     }
                 }
@@ -339,7 +344,7 @@ pub fn draw_entries<'a, I, F>(
         };
 
         if warp {
-            draw_warped_text(frame, &text, box_rect, quad, stroke, gradient, ls);
+            draw_warped_text(frame, &text, box_rect, quad, stroke, gradient, ls, shadow.as_ref());
         } else {
             if let Some(transform) = &layout_transform {
                 frame.push_transform();
@@ -361,6 +366,7 @@ pub fn draw_entries<'a, I, F>(
                     b,
                     StrokePaint::for_style(&entry.style, entry.style.stroke_width * scale),
                     ls,
+                    shadow.as_ref(),
                 );
             } else {
                 draw_spaced_text(
@@ -369,6 +375,7 @@ pub fn draw_entries<'a, I, F>(
                     ls,
                     StrokePaint::for_style(&entry.style, entry.style.stroke_width * scale),
                     block_rect,
+                    shadow.as_ref(),
                 );
             }
             if layout_transform.is_some() {

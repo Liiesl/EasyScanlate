@@ -2,7 +2,7 @@
 //! header with the panel title, an auto-detect action and a reset button
 //! (visual only), the font picker, a toolbar of bold/italic toggles next
 //! to the alignment segments, then labeled sections for the text fill,
-//! the stroke and the background/corner radius.
+//! the stroke, the drop shadow and the background/corner radius.
 //! All controls edit exactly one OCR entry: the one selected in the main
 //! area. When no entry is selected the controls stay visible but are inert.
 //! Each color section is a unified `HexColorInput` (solid hex + alpha `%`,
@@ -511,6 +511,88 @@ fn stroke_section<'a, S: UiState + ?Sized>(
     .into()
 }
 
+/// The "Shadow" section: drop-shadow toggle, solid color input, and
+/// distance / direction / feather number inputs (image px / degrees).
+fn shadow_section<'a, S: UiState + ?Sized>(
+    state: &'a S,
+    style: &EntryStyle,
+    selected: bool,
+) -> Element<'a, UiEvent> {
+    let toggle: Element<'a, UiEvent> = checkbox(style.shadow_enabled)
+        .label("Enabled")
+        .text_size(scale::s(12.0))
+        .on_toggle_maybe(selected.then_some(UiEvent::StyleShadowEnabled))
+        .into();
+    column![
+        section_title("Shadow"),
+        row![
+            container(unified_field(
+                state,
+                StyleField::Shadow,
+                state.style_shadow_value(),
+            ))
+            .width(Length::FillPortion(1)),
+            container(toggle).width(Length::Shrink),
+        ]
+        .spacing(scale::s(8.0))
+        .align_y(iced::Alignment::Center),
+        row![
+            container(
+                column![
+                    caption("Distance"),
+                    style_number(
+                        Icon::Move,
+                        style.shadow_distance,
+                        0.0..=50.0,
+                        0.5,
+                        2.0,
+                        UiEvent::StyleShadowDistance,
+                        selected,
+                    ),
+                ]
+                .spacing(scale::s(4.0))
+            )
+            .width(Length::FillPortion(1)),
+            container(
+                column![
+                    caption("Direction"),
+                    style_number(
+                        Icon::Compass,
+                        style.shadow_angle,
+                        0.0..=360.0,
+                        1.0,
+                        15.0,
+                        UiEvent::StyleShadowAngle,
+                        selected,
+                    ),
+                ]
+                .spacing(scale::s(4.0))
+            )
+            .width(Length::FillPortion(1)),
+            container(
+                column![
+                    caption("Feather"),
+                    style_number(
+                        Icon::Feather,
+                        style.shadow_blur,
+                        0.0..=20.0,
+                        0.5,
+                        2.0,
+                        UiEvent::StyleShadowBlur,
+                        selected,
+                    ),
+                ]
+                .spacing(scale::s(4.0))
+            )
+            .width(Length::FillPortion(1)),
+        ]
+        .spacing(scale::s(8.0))
+        .align_y(iced::Alignment::End),
+    ]
+    .spacing(scale::s(8.0))
+    .into()
+}
+
 /// Split-button value for the "Inpaint Background" control. `SplitButton`
 /// renders the selected *value's* `Display` on its face (item labels only
 /// appear in the menu rows), so this wrapper carries the full face text
@@ -873,6 +955,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         typography_section(state, style, selected),
         fill_section(state),
         stroke_section(state, selected),
+        shadow_section(state, style, selected),
         background_section(state, selected),
         presets_grid(state),
         text(HINT).size(scale::s(12.0)).color(MUTED_FG),

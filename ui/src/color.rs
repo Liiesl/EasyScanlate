@@ -149,6 +149,16 @@ pub fn bg_value(
     }
 }
 
+/// Drop-shadow color for the shadow hex input. Shadows are always a solid
+/// color (no gradient); alpha is the shadow opacity.
+pub fn shadow_value(
+    style: &easyscanlate_model::EntryStyle,
+) -> neverliie_iced_widgets::hex_color_input::HexColorValue {
+    neverliie_iced_widgets::hex_color_input::HexColorValue::Solid(rgba_to_color(
+        style.shadow_color,
+    ))
+}
+
 /// The uppercase hex value of `color`, or "None" for fully transparent
 /// colors (matching the mockup's background swatch). Used by the styling
 /// panel's hex inputs: `a==0` → `"None"`, `a==255` → `"#RRGGBB"`,

@@ -106,6 +106,8 @@ pub trait UiState {
     fn style_stroke_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue;
     /// Unified background value (solid or gradient) for the bg hex input.
     fn style_bg_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue;
+    /// Drop-shadow color (always solid) for the shadow hex input.
+    fn style_shadow_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue;
     /// The styling color picker currently open (if any).
     fn style_picker_open(&self) -> Option<StyleField>;
     /// The picker's top-level tab last reported for the open field, if any.

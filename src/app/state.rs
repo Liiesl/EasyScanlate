@@ -260,6 +260,10 @@ impl UiState for ActiveTab<'_> {
         easyscanlate_ui::color::bg_value(&self.tab.style_working)
     }
 
+    fn style_shadow_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue {
+        easyscanlate_ui::color::shadow_value(&self.tab.style_working)
+    }
+
     fn style_picker_open(&self) -> Option<StyleField> {
         self.tab.style_picker
     }
@@ -711,6 +715,7 @@ impl UiState for App {
     fn style_fill_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue { easyscanlate_ui::color::fill_value(&self.tabs[self.active].style_working) }
     fn style_stroke_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue { easyscanlate_ui::color::stroke_value(&self.tabs[self.active].style_working) }
     fn style_bg_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue { easyscanlate_ui::color::bg_value(&self.tabs[self.active].style_working) }
+    fn style_shadow_value(&self) -> neverliie_iced_widgets::hex_color_input::HexColorValue { easyscanlate_ui::color::shadow_value(&self.tabs[self.active].style_working) }
     fn style_picker_open(&self) -> Option<StyleField> { self.tabs[self.active].style_picker }
     fn style_picker_tab(&self) -> Option<neverliie_iced_widgets::color_picker::PickerTab> { self.tabs[self.active].style_picker_tab }
     fn dropper_buffer(&self) -> Option<neverliie_iced_widgets::color_picker::DropperBuffer> { Some(self.dropper_buffer.clone()) }

@@ -266,6 +266,7 @@ pub fn draw_warped_text<F>(
     stroke: Option<(StrokePaint, f32)>,
     gradient: Option<(f32, [u8; 4], [u8; 4])>,
     letter_spacing: f32,
+    shadow: Option<&super::shadow::ShadowPaint>,
 ) where
     F: geometry::frame::Backend,
 {
@@ -290,6 +291,8 @@ pub fn draw_warped_text<F>(
         TextAlignment::Right => text.position.x - layout.min_width,
     };
     let translation_y = text.position.y;
+    let shadow_passes: Vec<(Vector, iced::Color)> =
+        shadow.map(|paint| paint.passes()).unwrap_or_default();
     for glyph in &layout.glyphs {
         let [gx, gy, gw, gh] = glyph.rect;
         let ax = translation_x + gx;
@@ -327,6 +330,14 @@ pub fn draw_warped_text<F>(
         frame.scale_nonuniform(Vector::new(s1, s2));
         frame.rotate(-alpha);
         frame.translate(Vector::new(-rect_center.x, -rect_center.y));
+        // Drop shadow in layout space so it warps with the glyph: nested
+        // translate inside the glyph's warp transform.
+        for (delta, shadow_color) in &shadow_passes {
+            frame.push_transform();
+            frame.translate(*delta);
+            frame.fill(&glyph.path, Fill::from(*shadow_color));
+            frame.pop_transform();
+        }
         if let Some((paint, stroke_width)) = stroke {
             frame.stroke(
                 &glyph.path,

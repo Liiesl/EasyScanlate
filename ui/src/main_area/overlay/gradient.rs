@@ -186,10 +186,11 @@ pub fn fill_gradient_text<F>(
     b: [u8; 4],
     stroke: Option<(StrokePaint, f32)>,
     letter_spacing: f32,
+    shadow: Option<&super::shadow::ShadowPaint>,
 ) where
     F: geometry::frame::Backend,
 {
-    fill_gradient_glyphs(frame, text, box_rect, angle, a, b, stroke, letter_spacing)
+    fill_gradient_glyphs(frame, text, box_rect, angle, a, b, stroke, letter_spacing, shadow)
 }
 
 fn fill_gradient_glyphs<F>(
@@ -201,6 +202,7 @@ fn fill_gradient_glyphs<F>(
     b: [u8; 4],
     stroke: Option<(StrokePaint, f32)>,
     letter_spacing: f32,
+    shadow: Option<&super::shadow::ShadowPaint>,
 ) where
     F: geometry::frame::Backend,
 {
@@ -237,6 +239,8 @@ fn fill_gradient_glyphs<F>(
             .add_stop(0.0, rgba8(a))
             .add_stop(1.0, rgba8(b)),
     );
+    let shadow_passes: Vec<(Vector, Color)> =
+        shadow.map(|paint| paint.passes()).unwrap_or_default();
     for run in buffer.layout_runs() {
         for glyph in run.glyphs.iter() {
             let physical_glyph = glyph.physical((0.0, 0.0), 1.0);
@@ -269,6 +273,38 @@ fn fill_gradient_glyphs<F>(
                         }
                     }
                 });
+                // Drop shadow: same glyph shape, offset behind the stroke
+                // and gradient fill.
+                for (delta, color) in &shadow_passes {
+                    let shadow_path = Path::new(|path| {
+                        use cosmic_text::Command;
+                        for command in commands {
+                            match command {
+                                Command::MoveTo(p) => {
+                                    path.move_to(Point::new(p.x, -p.y) + offset + *delta)
+                                }
+                                Command::LineTo(p) => {
+                                    path.line_to(Point::new(p.x, -p.y) + offset + *delta)
+                                }
+                                Command::CurveTo(control_a, control_b, to) => {
+                                    path.bezier_curve_to(
+                                        Point::new(control_a.x, -control_a.y) + offset + *delta,
+                                        Point::new(control_b.x, -control_b.y) + offset + *delta,
+                                        Point::new(to.x, -to.y) + offset + *delta,
+                                    );
+                                }
+                                Command::QuadTo(control, to) => {
+                                    path.quadratic_curve_to(
+                                        Point::new(control.x, -control.y) + offset + *delta,
+                                        Point::new(to.x, -to.y) + offset + *delta,
+                                    );
+                                }
+                                Command::Close => path.close(),
+                            }
+                        }
+                    });
+                    frame.fill(&shadow_path, Fill::from(*color));
+                }
                 if let Some((paint, stroke_width)) = stroke {
                     frame.stroke(
                         &glyph_path,

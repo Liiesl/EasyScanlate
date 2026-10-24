@@ -193,6 +193,14 @@ fn default_gradient_angle() -> f32 {
     180.0
 }
 
+fn default_shadow_angle() -> f32 {
+    135.0
+}
+
+fn default_shadow_color() -> [u8; 4] {
+    [0, 0, 0, 191]
+}
+
 fn default_opaque_black() -> [u8; 4] {
     [0, 0, 0, 255]
 }
@@ -312,6 +320,24 @@ pub struct EntryStyle {
     /// `gradient_angle`).
     #[serde(default = "default_gradient_angle")]
     pub bg_gradient_angle: f32,
+    /// Drop shadow toggle; default false (no shadow is drawn).
+    #[serde(default)]
+    pub shadow_enabled: bool,
+    /// RGBA shadow color (alpha = opacity); default black at 75%.
+    #[serde(default = "default_shadow_color")]
+    pub shadow_color: [u8; 4],
+    /// Shadow direction in degrees (same convention as `gradient_angle`:
+    /// `0` = bottom→top, `90` = left→right); default `135.0` (down-right).
+    #[serde(default = "default_shadow_angle")]
+    pub shadow_angle: f32,
+    /// Shadow offset distance in image pixels; `0` with no feather disables
+    /// the shadow, with feather it glows around the glyph (Photoshop
+    /// distance-0 behavior).
+    #[serde(default)]
+    pub shadow_distance: f32,
+    /// Shadow feather/blur radius in image pixels; `0` = hard shadow.
+    #[serde(default)]
+    pub shadow_blur: f32,
 }
 
 impl Default for EntryStyle {
@@ -344,6 +370,11 @@ impl Default for EntryStyle {
             bg_gradient_a: [0, 0, 0, 255],
             bg_gradient_b: [0, 0, 0, 255],
             bg_gradient_angle: 180.0,
+            shadow_enabled: false,
+            shadow_color: [0, 0, 0, 191],
+            shadow_angle: 135.0,
+            shadow_distance: 0.0,
+            shadow_blur: 0.0,
         }
     }
 }
@@ -368,6 +399,11 @@ mod tests {
         assert_eq!(style.font_family.as_deref(), Some(DEFAULT_FONT_FAMILY));
         assert_eq!(style.text_align, TextAlign::Circular);
         assert!(!style.text_gradient);
+        assert!(!style.shadow_enabled);
+        assert_eq!(style.shadow_color, [0, 0, 0, 191]);
+        assert_eq!(style.shadow_angle, 135.0);
+        assert_eq!(style.shadow_distance, 0.0);
+        assert_eq!(style.shadow_blur, 0.0);
     }
 
     #[test]

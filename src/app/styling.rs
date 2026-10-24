@@ -224,6 +224,8 @@ pub fn handle_color_tab_changed(
         StyleField::Fill => working.text_gradient,
         StyleField::Stroke => working.stroke_gradient,
         StyleField::Background => working.bg_gradient,
+        // Shadows are solid-only: no gradient state to seed.
+        StyleField::Shadow => return Task::none(),
     };
     if already_gradient {
         return Task::none();
@@ -244,6 +246,8 @@ pub fn handle_color_tab_changed(
             working.bg_gradient_a = working.bg_color;
             working.bg_gradient_b = working.bg_color;
         }
+        // Solid-only (see above): unreachable, kept for exhaustiveness.
+        StyleField::Shadow => return Task::none(),
     }
     let style = app.active_tab().style_working.clone();
     let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
@@ -372,6 +376,15 @@ fn apply_unified_value(
             }
             working.bg_gradient_angle = angle;
         }
+        // Shadows are solid-only: a gradient pick keeps just its first stop.
+        (StyleField::Shadow, HexColorValue::Solid(c)) => {
+            working.shadow_color = c.into_rgba8();
+        }
+        (StyleField::Shadow, HexColorValue::Gradient { gradient, .. }) => {
+            if let Some(a) = gradient.stop(0) {
+                working.shadow_color = a.color.into_rgba8();
+            }
+        }
     }
     let style = app.active_tab().style_working.clone();
     let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
@@ -440,6 +453,9 @@ pub fn handle_gradient_angle(
             }
             working.bg_gradient_angle = angle;
         }
+        // The shadow direction is edited via its own number input, not the
+        // gradient angle handle.
+        StyleField::Shadow => return Task::none(),
     }
     let style = app.active_tab().style_working.clone();
     let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
@@ -459,6 +475,43 @@ pub fn handle_stroke_width(app: &mut App, width: f32) -> Task<Message> {
 pub fn handle_bg_radius(app: &mut App, radius: f32) -> Task<Message> {
     let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
     app.active_tab_mut().style_working.bg_radius = radius.max(0.0);
+    let style = app.active_tab().style_working.clone();
+    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    crate::app::handle_model_event(app.active_tab_mut(), ev);
+    Task::none()
+}
+
+pub fn handle_shadow_enabled(app: &mut App, enabled: bool) -> Task<Message> {
+    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    app.active_tab_mut().style_working.shadow_enabled = enabled;
+    let style = app.active_tab().style_working.clone();
+    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    crate::app::handle_model_event(app.active_tab_mut(), ev);
+    Task::none()
+}
+
+pub fn handle_shadow_distance(app: &mut App, distance: f32) -> Task<Message> {
+    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    app.active_tab_mut().style_working.shadow_distance = distance.clamp(0.0, 50.0);
+    let style = app.active_tab().style_working.clone();
+    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    crate::app::handle_model_event(app.active_tab_mut(), ev);
+    Task::none()
+}
+
+pub fn handle_shadow_angle(app: &mut App, angle: f32) -> Task<Message> {
+    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    app.active_tab_mut().style_working.shadow_angle =
+        neverliie_iced_widgets::hex_color_input::normalize_angle(angle);
+    let style = app.active_tab().style_working.clone();
+    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    crate::app::handle_model_event(app.active_tab_mut(), ev);
+    Task::none()
+}
+
+pub fn handle_shadow_blur(app: &mut App, blur: f32) -> Task<Message> {
+    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    app.active_tab_mut().style_working.shadow_blur = blur.clamp(0.0, 20.0);
     let style = app.active_tab().style_working.clone();
     let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);

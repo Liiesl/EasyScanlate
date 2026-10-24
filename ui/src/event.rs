@@ -102,8 +102,8 @@ pub enum TargetProfileSelection {
 
 /// The color field a styling [`HexColorInput`](neverliie_iced_widgets::hex_color_input::HexColorInput)
 /// edits: the text fill, the stroke, or the background of the selected
-/// entry. Each field holds a unified solid-or-gradient value, so no
-/// per-stop sub-fields are needed.
+/// entry. Fill/stroke/background hold a unified solid-or-gradient value;
+/// the drop shadow is solid-only (a gradient pick keeps its first stop).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StyleField {
     /// The entry's text fill (solid color or gradient).
@@ -112,6 +112,8 @@ pub enum StyleField {
     Stroke,
     /// The entry's background (solid color or gradient).
     Background,
+    /// The entry's drop shadow (solid color only).
+    Shadow,
 }
 
 /// A deferred settings edit for widget builders that take a *message value*
@@ -336,6 +338,14 @@ pub enum UiEvent {
     StyleDropperShot(Box<Screenshot>),
     StyleStrokeWidth(f32),
     StyleBgRadius(f32),
+    /// The user toggled the drop shadow for the selected entry.
+    StyleShadowEnabled(bool),
+    /// The user typed a drop-shadow offset distance (image px).
+    StyleShadowDistance(f32),
+    /// The user typed a drop-shadow direction (degrees).
+    StyleShadowAngle(f32),
+    /// The user typed a drop-shadow feather/blur radius (image px).
+    StyleShadowBlur(f32),
     /// The user typed a fixed font size (image px) for the selected entry;
     /// applied only when auto-size is off.
     StyleFontSize(f32),

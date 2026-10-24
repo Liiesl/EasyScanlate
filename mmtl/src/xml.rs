@@ -335,6 +335,10 @@ pub fn to_xml_string(project: &Project) -> Result<String, String> {
             s.push_attribute(("stroke_gradient_angle", style.stroke_gradient_angle.to_string().as_str()));
             s.push_attribute(("bg_gradient", if style.bg_gradient { "true" } else { "false" }));
             s.push_attribute(("bg_gradient_angle", style.bg_gradient_angle.to_string().as_str()));
+            s.push_attribute(("shadow_enabled", if style.shadow_enabled { "true" } else { "false" }));
+            s.push_attribute(("shadow_angle", style.shadow_angle.to_string().as_str()));
+            s.push_attribute(("shadow_distance", style.shadow_distance.to_string().as_str()));
+            s.push_attribute(("shadow_blur", style.shadow_blur.to_string().as_str()));
             if let Some(fam) = &style.font_family {
                 s.push_attribute(("font_family", esc(fam).as_str()));
             }
@@ -352,6 +356,7 @@ pub fn to_xml_string(project: &Project) -> Result<String, String> {
                 ("stroke_gradient_b", style.stroke_gradient_b),
                 ("bg_gradient_a", style.bg_gradient_a),
                 ("bg_gradient_b", style.bg_gradient_b),
+                ("shadow_color", style.shadow_color),
             ] {
                 writer
                     .write_event(Event::Text(BytesText::from_escaped("\n      ")))
@@ -799,11 +804,15 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                         let stroke_gradient_angle = attr(&e, b"stroke_gradient_angle").map(|v| parse_f32(&v)).unwrap_or(180.0);
                         let bg_gradient = attr(&e, b"bg_gradient").map(|v| v=="true").unwrap_or(false);
                         let bg_gradient_angle = attr(&e, b"bg_gradient_angle").map(|v| parse_f32(&v)).unwrap_or(180.0);
+                        let shadow_enabled = attr(&e, b"shadow_enabled").map(|v| v=="true").unwrap_or(false);
+                        let shadow_angle = attr(&e, b"shadow_angle").map(|v| parse_f32(&v)).unwrap_or(135.0);
+                        let shadow_distance = attr(&e, b"shadow_distance").map(|v| parse_f32(&v)).unwrap_or(0.0);
+                        let shadow_blur = attr(&e, b"shadow_blur").map(|v| parse_f32(&v)).unwrap_or(0.0);
                         let font_family = attr(&e, b"font_family").map(|v| unesc(&v));
-                        cur_style = Some((eid, EntryStyle{ font_size, auto_size, line_height, letter_spacing, caps, bold, italic, text_color:[0,0,0,255], stroke_color:[0,0,0,255], stroke_width, bg_color:[255,255,255,255], bg_radius, font_family, text_align, text_gradient, gradient_a:[0,0,0,255], gradient_b:[0,0,0,255], gradient_dir, gradient_angle, stroke_gradient, stroke_gradient_a:[0,0,0,255], stroke_gradient_b:[0,0,0,255], stroke_gradient_angle, bg_gradient, bg_gradient_a:[0,0,0,255], bg_gradient_b:[0,0,0,255], bg_gradient_angle }));
+                        cur_style = Some((eid, EntryStyle{ font_size, auto_size, line_height, letter_spacing, caps, bold, italic, text_color:[0,0,0,255], stroke_color:[0,0,0,255], stroke_width, bg_color:[255,255,255,255], bg_radius, font_family, text_align, text_gradient, gradient_a:[0,0,0,255], gradient_b:[0,0,0,255], gradient_dir, gradient_angle, stroke_gradient, stroke_gradient_a:[0,0,0,255], stroke_gradient_b:[0,0,0,255], stroke_gradient_angle, bg_gradient, bg_gradient_a:[0,0,0,255], bg_gradient_b:[0,0,0,255], bg_gradient_angle, shadow_enabled, shadow_color:[0,0,0,191], shadow_angle, shadow_distance, shadow_blur }));
                         cur_style_colors.clear();
                     }
-                    "text_color" | "stroke_color" | "bg_color" | "gradient_a" | "gradient_b" | "stroke_gradient_a" | "stroke_gradient_b" | "bg_gradient_a" | "bg_gradient_b" => {
+                    "text_color" | "stroke_color" | "bg_color" | "gradient_a" | "gradient_b" | "stroke_gradient_a" | "stroke_gradient_b" | "bg_gradient_a" | "bg_gradient_b" | "shadow_color" => {
                         let r = attr(&e, b"r").map(|v| parse_u8(&v)).unwrap_or(0);
                         let g = attr(&e, b"g").map(|v| parse_u8(&v)).unwrap_or(0);
                         let b = attr(&e, b"b").map(|v| parse_u8(&v)).unwrap_or(0);
@@ -908,7 +917,7 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                             }
                         }
                     }
-                    "text_color" | "stroke_color" | "bg_color" | "gradient_a" | "gradient_b" | "stroke_gradient_a" | "stroke_gradient_b" | "bg_gradient_a" | "bg_gradient_b" => {
+                    "text_color" | "stroke_color" | "bg_color" | "gradient_a" | "gradient_b" | "stroke_gradient_a" | "stroke_gradient_b" | "bg_gradient_a" | "bg_gradient_b" | "shadow_color" => {
                         let r = attr(&e, b"r").map(|v| parse_u8(&v)).unwrap_or(0);
                         let g = attr(&e, b"g").map(|v| parse_u8(&v)).unwrap_or(0);
                         let b = attr(&e, b"b").map(|v| parse_u8(&v)).unwrap_or(0);
@@ -1041,6 +1050,7 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                             if let Some(c) = cur_style_colors.get("stroke_gradient_b") { style.stroke_gradient_b = *c; }
                             if let Some(c) = cur_style_colors.get("bg_gradient_a") { style.bg_gradient_a = *c; }
                             if let Some(c) = cur_style_colors.get("bg_gradient_b") { style.bg_gradient_b = *c; }
+                            if let Some(c) = cur_style_colors.get("shadow_color") { style.shadow_color = *c; }
                             ctx.styles.insert(eid, style);
                             cur_style_colors.clear();
                         }

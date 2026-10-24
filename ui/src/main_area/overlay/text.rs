@@ -164,6 +164,7 @@ pub fn draw_spaced_text<F>(
     letter_spacing: f32,
     stroke: Option<(super::gradient::StrokePaint, f32)>,
     box_rect: iced::Rectangle,
+    shadow: Option<&super::shadow::ShadowPaint>,
 ) where
     F: iced::advanced::graphics::geometry::frame::Backend,
 {
@@ -199,6 +200,9 @@ pub fn draw_spaced_text<F>(
     };
     let mut swash_cache = cosmic_crate::SwashCache::new();
     let mut font_system = gfx_text::font_system().write().expect("Write font system");
+    // Resolved once per text run: the shadow's fill passes in frame px.
+    let shadow_passes: Vec<(Vector, iced::Color)> =
+        shadow.map(|paint| paint.passes()).unwrap_or_default();
     for run in buffer.layout_runs() {
         for glyph in run.glyphs.iter() {
             let physical_glyph = glyph.physical((0.0, 0.0), 1.0);
@@ -231,6 +235,38 @@ pub fn draw_spaced_text<F>(
                         }
                     }
                 });
+                // Drop shadow first: the same glyph shape, offset behind the
+                // stroke and fill.
+                for (delta, color) in &shadow_passes {
+                    let shadow_path = Path::new(|path| {
+                        use cosmic_crate::Command;
+                        for command in commands {
+                            match command {
+                                Command::MoveTo(p) => {
+                                    path.move_to(Point::new(p.x, -p.y) + offset + *delta)
+                                }
+                                Command::LineTo(p) => {
+                                    path.line_to(Point::new(p.x, -p.y) + offset + *delta)
+                                }
+                                Command::CurveTo(control_a, control_b, to) => {
+                                    path.bezier_curve_to(
+                                        Point::new(control_a.x, -control_a.y) + offset + *delta,
+                                        Point::new(control_b.x, -control_b.y) + offset + *delta,
+                                        Point::new(to.x, -to.y) + offset + *delta,
+                                    );
+                                }
+                                Command::QuadTo(control, to) => {
+                                    path.quadratic_curve_to(
+                                        Point::new(control.x, -control.y) + offset + *delta,
+                                        Point::new(to.x, -to.y) + offset + *delta,
+                                    );
+                                }
+                                Command::Close => path.close(),
+                            }
+                        }
+                    });
+                    frame.fill(&shadow_path, Fill::from(*color));
+                }
                 if let Some((paint, stroke_width)) = stroke {
                     frame.stroke(
                         &glyph_path,
@@ -245,11 +281,30 @@ pub fn draw_spaced_text<F>(
                 frame.fill(&glyph_path, Fill::from(text.color));
             } else {
                 let [r, g, b, a] = text.color.into_rgba8();
+                // Color glyphs without outlines (rare): single base shadow
+                // pass, no feather — the per-pixel loop is already the
+                // expensive path.
+                let shadow_base = shadow_passes.first().copied();
                 swash_cache.with_pixels(
                     font_system.raw(),
                     physical_glyph.cache_key,
                     cosmic_crate::Color::rgba(r, g, b, a),
                     |x, y, color| {
+                        if let Some((delta, shadow_color)) = shadow_base {
+                            let [sr, sg, sb, _] = shadow_color.into_rgba8();
+                            frame.fill(
+                                &Path::rectangle(
+                                    Point::new(x as f32, y as f32) + offset + delta,
+                                    Size::new(1.0, 1.0),
+                                ),
+                                Fill::from(iced::Color::from_rgba8(
+                                    sr,
+                                    sg,
+                                    sb,
+                                    color.a() as f32 / 255.0,
+                                )),
+                            );
+                        }
                         frame.fill(
                             &Path::rectangle(
                                 Point::new(x as f32, y as f32) + offset,

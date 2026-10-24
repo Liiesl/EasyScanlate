@@ -335,8 +335,9 @@ impl StylePrediction {
     ///   background becomes fully transparent (alpha 0) so the original
     ///   artwork shows through. A gradient background has no single
     ///   representable color and is left untouched.
-    /// - `shadow`/`glow` are detected but have no style field, so they are
-    ///   dropped here.
+    /// - `shadow` enables a default drop shadow (black at 75%, down-right at
+    ///   135°, 3px distance, 2px feather); `glow` has no style field and is
+    ///   still dropped.
     pub fn to_entry_style(&self, base: EntryStyle) -> EntryStyle {
         let mut style = base;
         style.bold = self.bold;
@@ -350,6 +351,18 @@ impl StylePrediction {
                 255,
             ];
             style.stroke_width = style.stroke_width.max(5.0);
+        }
+        if self.shadow {
+            style.shadow_enabled = true;
+            style.shadow_color = [
+                self.effect_color[0],
+                self.effect_color[1],
+                self.effect_color[2],
+                191,
+            ];
+            style.shadow_angle = 135.0;
+            style.shadow_distance = style.shadow_distance.max(3.0);
+            style.shadow_blur = style.shadow_blur.max(2.0);
         }
         match self.bg_type {
             BgType::Solid => {
