@@ -15,6 +15,7 @@
   - horizontal/vertical align preserve
   - preserve ratio
 - text entry alignment and auto align
+- proper non panic error rfd
 - 
 
 #### fixes
@@ -39,7 +40,6 @@
 
 #### addition
 
-- proper non panic error rfd
 - textbox styles
   - add directional blur to typography
   - add drop shadow to both

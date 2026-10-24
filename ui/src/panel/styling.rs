@@ -365,7 +365,7 @@ fn caption<'a>(label: &'a str) -> Element<'a, UiEvent> {
 
 /// The typography size/spacing controls: an `Auto size` checkbox (default on:
 /// the text is fitted to its box) plus a fixed font-size input used only
-/// while auto-size is off with the mutually exclusive All Caps / Small Caps
+/// while auto-size is off with the mutually exclusive All Caps / Title Case
 /// toggle on its right, then one row of line-height and letter-spacing
 /// (image px).
 fn typography_section<'a, S: UiState + ?Sized>(
@@ -399,12 +399,12 @@ fn typography_section<'a, S: UiState + ?Sized>(
         Font::DEFAULT,
     );
     let caps_sc = segment_compact(
-        style.caps == CapsMode::SmallCaps,
-        "aA",
-        selected.then_some(UiEvent::StyleCaps(if style.caps == CapsMode::SmallCaps {
+        style.caps == CapsMode::TitleCase,
+        "Aa",
+        selected.then_some(UiEvent::StyleCaps(if style.caps == CapsMode::TitleCase {
             CapsMode::None
         } else {
-            CapsMode::SmallCaps
+            CapsMode::TitleCase
         })),
         Font::DEFAULT,
     );

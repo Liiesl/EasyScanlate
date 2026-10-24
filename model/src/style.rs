@@ -111,16 +111,17 @@ pub const BUNDLED_FONTS: &[&str] = &[
     KOMIKA_SLIM_FAMILY,
 ];
 
-/// All-caps / small-caps transform applied to the entry text before
-/// layout and rendering. `SmallCaps` currently renders as uppercase (same
-/// shaping as `AllCaps`); true scaled small-cap glyphs need per-span
-/// rendering and are a follow-up.
+/// Caps transform applied to the entry text before layout and rendering.
+/// `SmallCaps` is a legacy value that renders as uppercase (same as
+/// `AllCaps`); it is kept only so old projects/MMTL files still load with
+/// unchanged visuals and is no longer offered in the styling panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum CapsMode {
     #[default]
     None,
     AllCaps,
     SmallCaps,
+    TitleCase,
 }
 
 impl CapsMode {
@@ -129,16 +130,42 @@ impl CapsMode {
             CapsMode::None => "None",
             CapsMode::AllCaps => "AllCaps",
             CapsMode::SmallCaps => "SmallCaps",
+            CapsMode::TitleCase => "TitleCase",
         }
     }
 
     pub fn from_label(label: &str) -> Self {
         match label {
             "AllCaps" => CapsMode::AllCaps,
-            "SmallCaps" => CapsMode::SmallCaps,
+            "TitleCase" => CapsMode::TitleCase,
+            // Legacy panel value: rendered as uppercase, so preserve visuals.
+            "SmallCaps" => CapsMode::AllCaps,
             _ => CapsMode::None,
         }
     }
+}
+
+/// Capitalizes the first letter of each whitespace-separated word and
+/// lowercases the rest, preserving the original whitespace.
+pub fn title_case(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut new_word = true;
+    for c in text.chars() {
+        if c.is_whitespace() {
+            out.push(c);
+            new_word = true;
+        } else if new_word {
+            for u in c.to_uppercase() {
+                out.push(u);
+            }
+            new_word = false;
+        } else {
+            for l in c.to_lowercase() {
+                out.push(l);
+            }
+        }
+    }
+    out
 }
 
 /// Applies the caps transform to display/measure text.
@@ -146,6 +173,7 @@ pub fn apply_caps(text: &str, caps: CapsMode) -> String {
     match caps {
         CapsMode::None => text.to_string(),
         CapsMode::AllCaps | CapsMode::SmallCaps => text.to_uppercase(),
+        CapsMode::TitleCase => title_case(text),
     }
 }
 
