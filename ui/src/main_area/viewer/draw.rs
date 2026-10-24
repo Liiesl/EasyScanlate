@@ -6,10 +6,10 @@ use crate::main_area::geometry::order_quad;
 use crate::scale;
 use lucide_icons::Icon;
 
+use super::TileSpec;
 use super::constants::{
-    ALIGN_GUIDE, FAILED_BG, FAILED_FG, HANDLE_FILL, HANDLE_SIZE, PLACEHOLDER_BG,
-    PLACEHOLDER_FG, SCROLLBAR_THUMB, SCROLLBAR_TRACK, TOOLBAR_BG, TOOLBAR_FG,
-    TOOLBAR_HOVER_BG,
+    ALIGN_GUIDE, FAILED_BG, FAILED_FG, HANDLE_FILL, HANDLE_SIZE, PLACEHOLDER_BG, PLACEHOLDER_FG,
+    SCROLLBAR_THUMB, SCROLLBAR_TRACK, TOOLBAR_BG, TOOLBAR_FG, TOOLBAR_HOVER_BG,
 };
 use super::hit_test::{hit_inpaint_toolbar_button, hit_toolbar_button};
 use super::interaction::Interaction;
@@ -19,7 +19,6 @@ use super::motion::{
 };
 use super::scroll::{thumb_rect, track_rect};
 use super::state::TileViewState;
-use super::TileSpec;
 
 pub fn draw_scrollbar<F>(frame: &mut F, state: &TileViewState, bounds: Rectangle)
 where
@@ -198,8 +197,12 @@ where
     });
 }
 
-fn draw_toolbar_button<F>(frame: &mut F, toolbar: Rectangle, action: crate::event::ToolbarAction, hovered: bool)
-where
+fn draw_toolbar_button<F>(
+    frame: &mut F,
+    toolbar: Rectangle,
+    action: crate::event::ToolbarAction,
+    hovered: bool,
+) where
     F: geometry::frame::Backend,
 {
     let rect = super::motion::toolbar_button_rect(toolbar, action);
@@ -211,8 +214,13 @@ where
     draw_action_button(frame, rect, icon, hovered);
 }
 
-pub fn draw_save_menu_button<F>(frame: &mut F, rect: Rectangle, icon: Icon, label: &str, hovered: bool)
-where
+pub fn draw_save_menu_button<F>(
+    frame: &mut F,
+    rect: Rectangle,
+    icon: Icon,
+    label: &str,
+    hovered: bool,
+) where
     F: geometry::frame::Backend,
 {
     if hovered {
@@ -271,7 +279,8 @@ pub fn draw_overlay_buttons<F>(
         .zip(super::interaction::OverlayButton::column())
     {
         match button {
-            super::interaction::OverlayButton::GoTop | super::interaction::OverlayButton::GoBottom => {
+            super::interaction::OverlayButton::GoTop
+            | super::interaction::OverlayButton::GoBottom => {
                 draw_circle_button(frame, rect, icon, hovered == Some(button));
             }
             super::interaction::OverlayButton::Save => {
@@ -295,8 +304,12 @@ pub fn draw_overlay_buttons<F>(
     }
 }
 
-pub fn draw_top_decor<F>(frame: &mut F, decor: super::interaction::TopDecor, show_revert: bool, hover: bool)
-where
+pub fn draw_top_decor<F>(
+    frame: &mut F,
+    decor: super::interaction::TopDecor,
+    show_revert: bool,
+    hover: bool,
+) where
     F: geometry::frame::Backend,
 {
     frame.stroke(
@@ -346,8 +359,9 @@ pub fn draw_gradient_handle<F>(
         super::motion::gradient_square_rect(start),
         super::motion::gradient_square_rect(end),
     );
-    for (index, (rect, color)) in
-        [(square_a, color_a), (square_b, color_b)].into_iter().enumerate()
+    for (index, (rect, color)) in [(square_a, color_a), (square_b, color_b)]
+        .into_iter()
+        .enumerate()
     {
         let path = Path::rectangle(rect.position(), rect.size());
         frame.fill(&path, Fill::from(color));
@@ -388,8 +402,7 @@ pub fn draw_selection_decorations<'a, F>(
             if entry.hide_text {
                 return;
             }
-            let scale =
-                frame.width() / tiles[tile_index].source_width.max(1) as f32;
+            let scale = frame.width() / tiles[tile_index].source_width.max(1) as f32;
             let box_rect = Rectangle::new(
                 Point::new(entry.bounds[0] * scale, entry.bounds[1] * scale),
                 Size::new(
@@ -397,22 +410,24 @@ pub fn draw_selection_decorations<'a, F>(
                     (entry.bounds[3] - entry.bounds[1]) * scale,
                 ),
             );
-            let factor = super::motion::gradient_rest_factor(
-                state,
-                spec.index,
-                spec.id,
-                spec.field,
-            );
+            let factor =
+                super::motion::gradient_rest_factor(state, spec.index, spec.id, spec.field);
             // While dragging, the grabbed square sticks exactly to the
             // cursor (no restriction) and the other mirrors across the
             // center; otherwise both rest at the cached free radius.
             let dragging_endpoint = match state.interaction {
-                Interaction::GradientPending { index, id, endpoint, .. }
-                | Interaction::GradientDragging { index, id, endpoint, .. }
-                    if index == tile_index && id == entry.id =>
-                {
-                    Some(endpoint)
+                Interaction::GradientPending {
+                    index,
+                    id,
+                    endpoint,
+                    ..
                 }
+                | Interaction::GradientDragging {
+                    index,
+                    id,
+                    endpoint,
+                    ..
+                } if index == tile_index && id == entry.id => Some(endpoint),
                 _ => None,
             };
             let center = super::motion::gradient_box_center(box_rect);
@@ -420,18 +435,13 @@ pub fn draw_selection_decorations<'a, F>(
                 Interaction::GradientDragging { index, id, .. }
                     if index == tile_index && id == entry.id =>
                 {
-                    cursor_local.filter(|p| {
-                        (p.x - center.x).hypot(p.y - center.y) >= 1.0
-                    })
+                    cursor_local.filter(|p| (p.x - center.x).hypot(p.y - center.y) >= 1.0)
                 }
                 _ => None,
             };
             let (start, end, hover) = match (exact_cursor, dragging_endpoint) {
                 (Some(cursor), Some(endpoint)) => {
-                    let mirror = Point::new(
-                        2.0 * center.x - cursor.x,
-                        2.0 * center.y - cursor.y,
-                    );
+                    let mirror = Point::new(2.0 * center.x - cursor.x, 2.0 * center.y - cursor.y);
                     let (s, e) = if endpoint == 0 {
                         (cursor, mirror)
                     } else {
@@ -440,30 +450,14 @@ pub fn draw_selection_decorations<'a, F>(
                     (s, e, Some(endpoint))
                 }
                 _ => {
-                    let (s, e) = super::motion::gradient_free_points(
-                        box_rect,
-                        spec.angle,
-                        factor,
-                    );
+                    let (s, e) = super::motion::gradient_free_points(box_rect, spec.angle, factor);
                     let hover = cursor_local.and_then(|local| {
-                        super::motion::gradient_handle_hit(
-                            box_rect,
-                            spec.angle,
-                            factor,
-                            local,
-                        )
+                        super::motion::gradient_handle_hit(box_rect, spec.angle, factor, local)
                     });
                     (s, e, hover.or(dragging_endpoint))
                 }
             };
-            draw_gradient_handle(
-                frame,
-                start,
-                end,
-                spec.color_a,
-                spec.color_b,
-                hover,
-            );
+            draw_gradient_handle(frame, start, end, spec.color_a, spec.color_b, hover);
             return;
         }
     }
@@ -581,7 +575,10 @@ pub fn draw_inpaint_decorations<'a, F>(
     // Use quad polygon when available, otherwise fallback to AABB rectangle
     let (rect, quad_path) = if let Some(quad) = layer.quad {
         let [x, y, w, h] = layer.bounds;
-        let r = Rectangle::new(Point::new(x * scale, y * scale), Size::new(w * scale, h * scale));
+        let r = Rectangle::new(
+            Point::new(x * scale, y * scale),
+            Size::new(w * scale, h * scale),
+        );
         let pts = quad.points.map(|p| Point::new(p[0] * scale, p[1] * scale));
         let path = Path::new(|b| {
             b.move_to(pts[0]);
@@ -593,7 +590,10 @@ pub fn draw_inpaint_decorations<'a, F>(
         (r, Some(path))
     } else {
         let [x, y, w, h] = layer.bounds;
-        let r = Rectangle::new(Point::new(x * scale, y * scale), Size::new(w * scale, h * scale));
+        let r = Rectangle::new(
+            Point::new(x * scale, y * scale),
+            Size::new(w * scale, h * scale),
+        );
         (r, None)
     };
     // Border highlight – same color as overlay selection.

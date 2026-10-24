@@ -3,17 +3,17 @@
 //! this style keeps the knob near-white on a muted dark track so the circle
 //! is always visible.
 
-use iced::{Color, Theme};
 use iced::widget::toggler;
+use iced::{Color, Theme};
 
 const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);
 
 pub fn style(_theme: &Theme, status: toggler::Status) -> toggler::Style {
     use toggler::Status;
     let is_on = match status {
-        Status::Active { is_toggled } | Status::Hovered { is_toggled } | Status::Disabled { is_toggled } => {
-            is_toggled
-        }
+        Status::Active { is_toggled }
+        | Status::Hovered { is_toggled }
+        | Status::Disabled { is_toggled } => is_toggled,
     };
     let is_hovered = matches!(status, Status::Hovered { .. });
     let is_disabled = matches!(status, Status::Disabled { .. });

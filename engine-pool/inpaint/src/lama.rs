@@ -10,25 +10,25 @@
 #[cfg(feature = "onnx")]
 use std::path::Path;
 
-use image::{GrayImage, RgbImage};
 #[cfg(any(test, feature = "onnx"))]
 use image::Rgb;
 #[cfg(feature = "onnx")]
 use image::RgbaImage;
+use image::{GrayImage, RgbImage};
 
 use easyscanlate_model::Quad;
 
 #[cfg(feature = "onnx")]
 use ndarray::{Array4, ArrayD};
 #[cfg(feature = "onnx")]
-use ort::session::builder::GraphOptimizationLevel;
-#[cfg(feature = "onnx")]
 use ort::session::Session;
+#[cfg(feature = "onnx")]
+use ort::session::builder::GraphOptimizationLevel;
 #[cfg(feature = "onnx")]
 use ort::value::TensorRef;
 
 #[cfg(feature = "onnx")]
-use crate::common::{bbox_crops, build_mask_expanded, crop_spec, InpaintResult};
+use crate::common::{InpaintResult, bbox_crops, build_mask_expanded, crop_spec};
 
 /// The fixed square input size of the LaMa model.
 pub const MODEL_EDGE: u32 = 512;
@@ -56,9 +56,7 @@ pub(crate) fn build_session() -> Result<Session, String> {
             .with_execution_providers([ort::ep::CPU::default().build()])
             .map_err(|e| format!("ORT init failed: {e}"))?
             .commit_from_file(path)
-            .map_err(|e| {
-                format!("failed to load inpainting model {}: {e}", path.display())
-            })
+            .map_err(|e| format!("failed to load inpainting model {}: {e}", path.display()))
     };
     #[cfg(all(feature = "directml", target_os = "windows"))]
     let build_directml = |path: &Path, _label: &str| -> Result<Session, String> {
@@ -68,14 +66,10 @@ pub(crate) fn build_session() -> Result<Session, String> {
             .map_err(|e| format!("ORT init failed: {e}"))?
             .with_intra_threads(4)
             .map_err(|e| format!("ORT init failed: {e}"))?
-            .with_execution_providers([ort::ep::DirectML::default()
-                .build()
-                .error_on_failure()])
+            .with_execution_providers([ort::ep::DirectML::default().build().error_on_failure()])
             .map_err(|e| format!("ORT init failed: {e}"))?
             .commit_from_file(path)
-            .map_err(|e| {
-                format!("failed to load inpainting model {}: {e}", path.display())
-            })
+            .map_err(|e| format!("failed to load inpainting model {}: {e}", path.display()))
     };
     #[cfg(all(feature = "directml", target_os = "windows"))]
     let session = {
@@ -103,10 +97,7 @@ pub(crate) fn build_session() -> Result<Session, String> {
 /// Weight-only INT8 model (`lama-manga_int8.onnx`, per-channel asymmetric UINT8
 /// + DequantizeLinear axis=0) keeps compute in FP32.
 #[cfg(feature = "onnx")]
-fn run_session(
-    session: &mut Session,
-    input: Array4<f32>,
-) -> Result<ArrayD<f32>, String> {
+fn run_session(session: &mut Session, input: Array4<f32>) -> Result<ArrayD<f32>, String> {
     let outputs = session
         .run(ort::inputs![
             "input" => TensorRef::from_array_view(&input).map_err(|e| format!("{e}"))?,
@@ -145,8 +136,10 @@ pub(crate) fn mask_center(crop_w: u32, crop_h: u32, quads: &[Quad], origin: [f32
     let mut sum_x = 0.0f32;
     let mut sum_y = 0.0f32;
     for quad in quads {
-        let cx = (quad.points[0][0] + quad.points[1][0] + quad.points[2][0] + quad.points[3][0]) * 0.25;
-        let cy = (quad.points[0][1] + quad.points[1][1] + quad.points[2][1] + quad.points[3][1]) * 0.25;
+        let cx =
+            (quad.points[0][0] + quad.points[1][0] + quad.points[2][0] + quad.points[3][0]) * 0.25;
+        let cy =
+            (quad.points[0][1] + quad.points[1][1] + quad.points[2][1] + quad.points[3][1]) * 0.25;
         sum_x += cx;
         sum_y += cy;
     }
@@ -186,11 +179,7 @@ pub(crate) fn reflect_index(x: i64, len: i64) -> i64 {
     if x < 0 {
         x += period;
     }
-    if x >= len {
-        period - x - 1
-    } else {
-        x
-    }
+    if x >= len { period - x - 1 } else { x }
 }
 
 /// Fills `canvas` by placing `region` at `(dst_x, dst_y)` and reflecting
@@ -209,7 +198,12 @@ pub(crate) fn reflect_place_rgb(canvas: &mut RgbImage, region: &RgbImage, dst_x:
 
 /// Fills `canvas` by placing `region` at `(dst_x, dst_y)` and reflecting
 /// the region's edge pixels into the surrounding canvas area.
-pub(crate) fn reflect_place_gray(canvas: &mut GrayImage, region: &GrayImage, dst_x: i64, dst_y: i64) {
+pub(crate) fn reflect_place_gray(
+    canvas: &mut GrayImage,
+    region: &GrayImage,
+    dst_x: i64,
+    dst_y: i64,
+) {
     let (canvas_w, canvas_h) = canvas.dimensions();
     let (region_w, region_h) = (region.width() as i64, region.height() as i64);
     for cy in 0..canvas_h as i64 {
@@ -318,7 +312,15 @@ pub fn inpaint_crop(
     );
     let exp_origin = [ex as f32, ey as f32];
 
-    let mask = build_mask_expanded(exp_w, exp_h, quads, rect, exp_origin, image.width(), image.height());
+    let mask = build_mask_expanded(
+        exp_w,
+        exp_h,
+        quads,
+        rect,
+        exp_origin,
+        image.width(),
+        image.height(),
+    );
     eprintln!(
         "[inpaint::lama] rect={:?} quads={} pad={} image={}x{} exp=[{},{},{},{}] exp_origin={:?}",
         rect,
@@ -358,19 +360,44 @@ pub fn inpaint_crop(
             exp_w, exp_h, MODEL_EDGE, MODEL_EDGE, MODEL_EDGE
         );
         // sx..dx unused in resize path; set to cover whole canvas
-        (resized_rgb, resized_mask, 0, 0, MODEL_EDGE as i64, MODEL_EDGE as i64, 0, 0)
+        (
+            resized_rgb,
+            resized_mask,
+            0,
+            0,
+            MODEL_EDGE as i64,
+            MODEL_EDGE as i64,
+            0,
+            0,
+        )
     } else {
         // Center the model window on the mask (quad union or original rect when empty).
         let (sx, sy, sw, sh, dx, dy) = if quads.is_empty() {
             // Empty quads: mask is the original rect, centered on its center in expanded-local coords.
-            let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
+            let [ox, oy, ow, oh] =
+                crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
             let center_x = (ox as f32 + ow as f32 / 2.0) - exp_origin[0];
             let center_y = (oy as f32 + oh as f32 / 2.0) - exp_origin[1];
             let (sx, sw, dx) = window_dim(exp_w as i64, center_x, MODEL_EDGE as i64);
             let (sy, sh, dy) = window_dim(exp_h as i64, center_y, MODEL_EDGE as i64);
             eprintln!(
                 "[inpaint::lama] empty quads window: ox,oy,ow,oh=[{},{},{},{}] center=({:.1},{:.1}) sx,sy,sw,sh,dx,dy={},{},{},{},{},{} exp={}x{} will_white_h={} will_white_w={}",
-                ox, oy, ow, oh, center_x, center_y, sx, sy, sw, sh, dx, dy, exp_w, exp_h, exp_h as i64 - sh, exp_w as i64 - sw
+                ox,
+                oy,
+                ow,
+                oh,
+                center_x,
+                center_y,
+                sx,
+                sy,
+                sw,
+                sh,
+                dx,
+                dy,
+                exp_w,
+                exp_h,
+                exp_h as i64 - sh,
+                exp_w as i64 - sw
             );
             (sx, sy, sw, sh, dx, dy)
         } else {
@@ -411,10 +438,18 @@ pub fn inpaint_crop(
     };
     let input = compose_inputs(&canvas, &canvas_mask);
     let output = run_session(session, input)?;
-    eprintln!("[inpaint::lama] inference done output shape={:?}", output.shape());
+    eprintln!(
+        "[inpaint::lama] inference done output shape={:?}",
+        output.shape()
+    );
     let rgb = if needs_resize {
         // Output is 512x512 representing the whole exp area → resize back to exp size
-        let out_canvas = match output.clone().into_shape_with_order([1usize, 3, MODEL_EDGE as usize, MODEL_EDGE as usize]) {
+        let out_canvas = match output.clone().into_shape_with_order([
+            1usize,
+            3,
+            MODEL_EDGE as usize,
+            MODEL_EDGE as usize,
+        ]) {
             Ok(reshaped) => {
                 let to_u8 = |v: f32| (v * 255.0).round().clamp(0.0, 255.0) as u8;
                 let mut img = RgbImage::new(MODEL_EDGE, MODEL_EDGE);
@@ -430,7 +465,10 @@ pub fn inpaint_crop(
                 img
             }
             Err(_) => {
-                eprintln!("[inpaint::lama] resize path shape mismatch -> white {}x{}", exp_w, exp_h);
+                eprintln!(
+                    "[inpaint::lama] resize path shape mismatch -> white {}x{}",
+                    exp_w, exp_h
+                );
                 RgbImage::from_pixel(MODEL_EDGE, MODEL_EDGE, Rgb([255, 255, 255]))
             }
         };
@@ -470,22 +508,28 @@ pub fn inpaint_crop(
     }
     if quads.is_empty() {
         let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
-        let sub = image::imageops::crop_imm(
-            &patch,
-            ox - ex,
-            oy - ey,
-            ow,
-            oh,
-        )
-        .to_image();
+        let sub = image::imageops::crop_imm(&patch, ox - ex, oy - ey, ow, oh).to_image();
         eprintln!(
             "[inpaint::lama] empty quads -> returning sub [{},{},{},{}] from patch {}x{}",
-            ox, oy, ow, oh, patch.width(), patch.height()
+            ox,
+            oy,
+            ow,
+            oh,
+            patch.width(),
+            patch.height()
         );
-        return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32], None)]);
+        return Ok(vec![(
+            sub,
+            [ox as f32, oy as f32, ow as f32, oh as f32],
+            None,
+        )]);
     }
     let out = bbox_crops(patch, exp_origin, quads);
-    eprintln!("[inpaint::lama] quads={} -> {} bbox crops", quads.len(), out.len());
+    eprintln!(
+        "[inpaint::lama] quads={} -> {} bbox crops",
+        quads.len(),
+        out.len()
+    );
     Ok(out)
 }
 
@@ -508,28 +552,62 @@ mod tests {
     #[test]
     fn window_dim_follows_the_mask_center_without_padding() {
         assert_eq!(window_dim(1024, 400.0, 512), (144, 512, 0));
-        assert_eq!(window_dim(1024, 10.0, 512), (0, 512, 0), "clamped at the left edge");
-        assert_eq!(window_dim(1024, 1010.0, 512), (512, 512, 0), "clamped at the right edge");
+        assert_eq!(
+            window_dim(1024, 10.0, 512),
+            (0, 512, 0),
+            "clamped at the left edge"
+        );
+        assert_eq!(
+            window_dim(1024, 1010.0, 512),
+            (512, 512, 0),
+            "clamped at the right edge"
+        );
     }
 
     #[test]
     fn view_window_centers_on_the_combined_mask_boxes() {
-        let quads = [quad([[10.0, 10.0], [30.0, 10.0], [30.0, 20.0], [10.0, 20.0]])];
+        let quads = [quad([
+            [10.0, 10.0],
+            [30.0, 10.0],
+            [30.0, 20.0],
+            [10.0, 20.0],
+        ])];
         let small = view_window(100, 100, &quads, [0.0, 0.0]);
-        assert_eq!(small, (0, 0, 100, 100, 206, 206), "small area is centered + padded");
-        let mid = [quad([[1000.0, 1000.0], [1100.0, 1000.0], [1100.0, 1100.0], [1000.0, 1100.0]])];
+        assert_eq!(
+            small,
+            (0, 0, 100, 100, 206, 206),
+            "small area is centered + padded"
+        );
+        let mid = [quad([
+            [1000.0, 1000.0],
+            [1100.0, 1000.0],
+            [1100.0, 1100.0],
+            [1000.0, 1100.0],
+        ])];
         let big = view_window(2048, 2048, &mid, [0.0, 0.0]);
-        assert_eq!(big, (794, 794, 512, 512, 0, 0), "window starts at the box center minus 256");
+        assert_eq!(
+            big,
+            (794, 794, 512, 512, 0, 0),
+            "window starts at the box center minus 256"
+        );
     }
 
     #[test]
     fn view_window_masks_the_whole_area_center_when_no_boxes() {
         let (sx, sy, w, h, dx, dy) = view_window(600, 300, &[], [0.0, 0.0]);
-        assert_eq!(sx, (600 - 512) / 2, "wide area: sides are cut evenly around the center");
+        assert_eq!(
+            sx,
+            (600 - 512) / 2,
+            "wide area: sides are cut evenly around the center"
+        );
         assert_eq!(sy, 0, "narrow area: no cut");
         assert_eq!((w, h), (512, 300));
         assert_eq!(dx, 0);
-        assert_eq!(dy, (512 - 300) / 2, "narrow area is white-padded top and bottom");
+        assert_eq!(
+            dy,
+            (512 - 300) / 2,
+            "narrow area is white-padded top and bottom"
+        );
     }
 
     #[test]
@@ -556,9 +634,17 @@ mod tests {
         reflect_place_rgb(&mut canvas, &region, 1, 1);
         assert_eq!(canvas[(1, 1)], Rgb([1, 2, 3]), "region pixels copy through");
         assert_eq!(canvas[(2, 1)], Rgb([4, 5, 6]));
-        assert_eq!(canvas[(1, 0)], Rgb([1, 2, 3]), "top padding mirrors the edge row");
+        assert_eq!(
+            canvas[(1, 0)],
+            Rgb([1, 2, 3]),
+            "top padding mirrors the edge row"
+        );
         assert_eq!(canvas[(0, 0)], Rgb([1, 2, 3]), "corners reflect both edges");
-        assert_eq!(canvas[(0, 3)], Rgb([7, 8, 9]), "bottom padding mirrors the bottom row");
+        assert_eq!(
+            canvas[(0, 3)],
+            Rgb([7, 8, 9]),
+            "bottom padding mirrors the bottom row"
+        );
         assert_eq!(canvas[(3, 3)], Rgb([10, 11, 12]));
     }
 
@@ -606,7 +692,11 @@ mod tests {
         // Center pixel should be from region center
         assert_eq!(canvas[(256, 256)], region[(150, 150)]);
         // Corner top-left should be mirrored from region via reflect_index(-106,300)=105
-        assert_eq!(canvas[(0, 0)], region[(105, 105)], "top-left mirrors correctly via reflect_index");
+        assert_eq!(
+            canvas[(0, 0)],
+            region[(105, 105)],
+            "top-left mirrors correctly via reflect_index"
+        );
     }
 
     #[cfg(feature = "onnx")]
@@ -617,7 +707,10 @@ mod tests {
         let mut mask = GrayImage::from_pixel(MODEL_EDGE, MODEL_EDGE, image::Luma([0]));
         mask[(7, 3)] = image::Luma([255]);
         let input = compose_inputs(&canvas, &mask);
-        assert_eq!(input.shape(), &[1, 4, MODEL_EDGE as usize, MODEL_EDGE as usize]);
+        assert_eq!(
+            input.shape(),
+            &[1, 4, MODEL_EDGE as usize, MODEL_EDGE as usize]
+        );
         // masked pixel (7,3) has mask=1 -> rgb zeroed, mask channel 1
         assert!(input[[0, 0, 3, 7]].abs() < 1e-6);
         assert!(input[[0, 1, 3, 7]].abs() < 1e-6);
@@ -649,7 +742,11 @@ mod tests {
             .into_dyn();
         let fitted = extract_window(&output, 100, 100, sx, sy, sw, sh, dx, dy);
         assert_eq!(fitted[(0, 0)], Rgb([128, 255, 64]));
-        assert_eq!(fitted[(1, 1)], Rgb([0, 0, 0]), "the rest of the copied region is read 1:1");
+        assert_eq!(
+            fitted[(1, 1)],
+            Rgb([0, 0, 0]),
+            "the rest of the copied region is read 1:1"
+        );
     }
 
     #[cfg(feature = "onnx")]
@@ -669,6 +766,10 @@ mod tests {
             .into_dyn();
         let fitted = extract_window(&output, 1024, 512, sx, sy, sw, sh, dx, dy);
         assert_eq!(fitted[(144, 0)], Rgb([128, 0, 0]));
-        assert_eq!(fitted[(143, 0)], Rgb([255, 255, 255]), "cut-off sides stay white");
+        assert_eq!(
+            fitted[(143, 0)],
+            Rgb([255, 255, 255]),
+            "cut-off sides stay white"
+        );
     }
 }

@@ -1,13 +1,15 @@
-use iced::keyboard::{key, Key};
-use iced::widget::{space, text_editor};
+use iced::keyboard::{Key, key};
 use iced::widget::text::Wrapping;
+use iced::widget::{space, text_editor};
 use iced::{Background, Border, Element, Font, Length, Padding, Size};
 
-use easyscanlate_model::{apply_caps, EntryStyle};
+use easyscanlate_model::{EntryStyle, apply_caps};
 
 use crate::color::rgba_to_color;
 use crate::event::{EditOrigin, UiEvent};
-use crate::main_area::overlay::{fit::fit_font_metrics, style::styled_font_for_text, text::measure_text};
+use crate::main_area::overlay::{
+    fit::fit_font_metrics, style::styled_font_for_text, text::measure_text,
+};
 use crate::state::UiState;
 
 /// Widget id of the floating inline editor; must match the app's focus id.
@@ -26,8 +28,16 @@ pub fn edit_overlay<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     };
     let project = state.project();
     let (text, style) = match project.entry(id) {
-        Some(entry) if state.images().get(index).is_some_and(|img| img.image_id == entry.image_id) => {
-            (project.display_text(entry).to_string(), project.entry_style(entry.id))
+        Some(entry)
+            if state
+                .images()
+                .get(index)
+                .is_some_and(|img| img.image_id == entry.image_id) =>
+        {
+            (
+                project.display_text(entry).to_string(),
+                project.entry_style(entry.id),
+            )
         }
         _ => (String::new(), EntryStyle::default()),
     };
@@ -75,7 +85,9 @@ pub fn edit_overlay<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         })
         .on_action(UiEvent::EditAction)
         .key_binding(|press| match press.modified_key.as_ref() {
-            Key::Named(key::Named::Escape) => Some(text_editor::Binding::Custom(UiEvent::EditSubmit)),
+            Key::Named(key::Named::Escape) => {
+                Some(text_editor::Binding::Custom(UiEvent::EditSubmit))
+            }
             Key::Named(key::Named::Enter) if press.modifiers.command() => {
                 Some(text_editor::Binding::Custom(UiEvent::EditSubmit))
             }
@@ -92,5 +104,8 @@ pub fn edit_overlay<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             selection: crate::accent::accent_translucent(0.35),
         });
     let block_top = rect.y + (rect.height - fitted_height).max(0.0) / 2.0 - pad;
-    iced::widget::Pin::new(editor).x(rect.x - pad).y(block_top).into()
+    iced::widget::Pin::new(editor)
+        .x(rect.x - pad)
+        .y(block_top)
+        .into()
 }

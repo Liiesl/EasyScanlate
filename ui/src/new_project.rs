@@ -1,10 +1,12 @@
+use iced::mouse;
+use iced::widget::canvas::{self, Geometry, LineDash, Path, Stroke};
 use iced::widget::{
     button, center, column, container, image, mouse_area, opaque, row, scrollable, space, stack,
     text, text_input,
 };
-use iced::widget::canvas::{self, Geometry, LineDash, Path, Stroke};
-use iced::{Background, Border, Color, Element, Length, Point, Rectangle, Size, Fill as FillLength};
-use iced::mouse;
+use iced::{
+    Background, Border, Color, Element, Fill as FillLength, Length, Point, Rectangle, Size,
+};
 
 use neverliie_iced_widgets::advanced_dropdown::{Footer, Item, MenuItem, advanced_dropdown};
 
@@ -131,11 +133,8 @@ impl canvas::Program<UiEvent> for DashedDropBorder {
             (bounds.width - inset * 2.0).max(1.0),
             (bounds.height - inset * 2.0).max(1.0),
         );
-        let path = Path::rounded_rectangle(
-            top_left,
-            size,
-            iced::border::Radius::from(scale::s(10.0)),
-        );
+        let path =
+            Path::rounded_rectangle(top_left, size, iced::border::Radius::from(scale::s(10.0)));
         let color = if self.hovered {
             crate::accent::accent()
         } else {
@@ -217,16 +216,17 @@ fn lang_pill<'a>(label: &'a str, active: bool) -> Element<'a, UiEvent> {
         .into()
 }
 
-pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -> Element<'a, UiEvent> {
+pub fn view<'a, S: UiState + ?Sized>(
+    state: &'a S,
+    base: Element<'a, UiEvent>,
+) -> Element<'a, UiEvent> {
     let Some(np) = state.new_project_overlay() else {
         return base;
     };
     let has_pages = !np.source_paths.is_empty();
     let can_create = has_pages && np.project_location.is_some();
 
-    let title = text("New project")
-        .size(scale::s(16.0))
-        .color(Color::WHITE);
+    let title = text("New project").size(scale::s(16.0)).color(Color::WHITE);
 
     let body: Element<'_, UiEvent> = if !has_pages {
         // ---- Empty state: dashed drop zone (transparent, canvas outline) ----
@@ -298,9 +298,7 @@ pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -
         .width(FillLength)
         .style(|_| drop_zone_style())
         .into();
-        column![title, drop_zone]
-            .spacing(scale::s(14.0))
-            .into()
+        column![title, drop_zone].spacing(scale::s(14.0)).into()
     } else {
         // ---- Filled state ----
         let count = np.source_paths.len();
@@ -317,7 +315,9 @@ pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -
             format_bytes(np.total_bytes),
             np.source_dir.clone().unwrap_or_default()
         );
-        let mut thumb_row = row![].spacing(scale::s(6.0)).align_y(iced::Alignment::Center);
+        let mut thumb_row = row![]
+            .spacing(scale::s(6.0))
+            .align_y(iced::Alignment::Center);
         let shown = np.thumbs.len().min(8);
         for handle in np.thumbs.iter().take(8) {
             let thumb: Element<'_, UiEvent> = container(
@@ -387,7 +387,9 @@ pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -
         .style(|_| card_style())
         .into();
 
-        let mut pills = row![].spacing(scale::s(8.0)).align_y(iced::Alignment::Center);
+        let mut pills = row![]
+            .spacing(scale::s(8.0))
+            .align_y(iced::Alignment::Center);
         for lang in LANGS {
             pills = pills.push(lang_pill(lang, np.original_lang == lang));
         }
@@ -419,8 +421,9 @@ pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -
             .into();
 
         let series_section: Element<'_, UiEvent> = if np.series_open || np.series.is_some() {
-            let mut series_entries: Vec<MenuItem<SeriesOption, UiEvent, iced::Theme, iced::Renderer>> =
-                Vec::with_capacity(np.available_series.len() + 2);
+            let mut series_entries: Vec<
+                MenuItem<SeriesOption, UiEvent, iced::Theme, iced::Renderer>,
+            > = Vec::with_capacity(np.available_series.len() + 2);
             series_entries.push(MenuItem::Item(Item::new(
                 SeriesOption { name: None },
                 "No series",
@@ -440,21 +443,20 @@ pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -
             let series_selected = Some(SeriesOption {
                 name: np.series.clone(),
             });
-            let series_dropdown: Element<'_, UiEvent> = advanced_dropdown(
-                series_entries,
-                series_selected,
-                |opt: SeriesOption| UiEvent::NewProjectSeriesSelect(opt.name.clone()),
-            )
-            .placeholder("No series")
-            .searchable(true)
-            .text_size(scale::s(12.0))
-            .width(FillLength)
-            .menu_max_height(240.0)
-            .footer(Footer::new(
-                "+ New series",
-                UiEvent::NewProjectSeriesCreateStart,
-            ))
-            .into();
+            let series_dropdown: Element<'_, UiEvent> =
+                advanced_dropdown(series_entries, series_selected, |opt: SeriesOption| {
+                    UiEvent::NewProjectSeriesSelect(opt.name.clone())
+                })
+                .placeholder("No series")
+                .searchable(true)
+                .text_size(scale::s(12.0))
+                .width(FillLength)
+                .menu_max_height(240.0)
+                .footer(Footer::new(
+                    "+ New series",
+                    UiEvent::NewProjectSeriesCreateStart,
+                ))
+                .into();
             let series_picker: Element<'_, UiEvent> = if np.creating_series {
                 column![
                     series_dropdown,
@@ -471,11 +473,16 @@ pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -
                             .width(Length::Fixed(scale::s(90.0)))
                             .style(crate::panel::button_style)
                             .on_press(UiEvent::NewProjectSeriesCreateConfirm),
-                        button(text("Cancel").size(scale::s(12.0)).width(FillLength).center())
-                            .padding(scale::s(6.0))
-                            .width(Length::Fixed(scale::s(90.0)))
-                            .style(crate::panel::button_style)
-                            .on_press(UiEvent::NewProjectSeriesCancel),
+                        button(
+                            text("Cancel")
+                                .size(scale::s(12.0))
+                                .width(FillLength)
+                                .center()
+                        )
+                        .padding(scale::s(6.0))
+                        .width(Length::Fixed(scale::s(90.0)))
+                        .style(crate::panel::button_style)
+                        .on_press(UiEvent::NewProjectSeriesCancel),
                     ]
                     .spacing(scale::s(8.0))
                     .align_y(iced::Alignment::Center),
@@ -486,25 +493,29 @@ pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -
                 series_dropdown
             };
             column![divider, series_picker,]
-            .spacing(scale::s(8.0))
-            .into()
+                .spacing(scale::s(8.0))
+                .into()
         } else {
             column![
                 divider,
-                button(text("+ Add to a series").size(scale::s(12.0)).color(MUTED_FG))
-                    .padding(scale::s(4.0))
-                    .style(|_, status: button::Status| {
-                        use button::Status;
-                        button::Style {
-                            background: Some(Background::Color(match status {
-                                Status::Hovered => Color::from_rgba8(46, 48, 62, 0.6),
-                                _ => Color::TRANSPARENT,
-                            })),
-                            text_color: MUTED_FG,
-                            ..button::Style::default()
-                        }
-                    })
-                    .on_press(UiEvent::NewProjectSeriesToggle),
+                button(
+                    text("+ Add to a series")
+                        .size(scale::s(12.0))
+                        .color(MUTED_FG)
+                )
+                .padding(scale::s(4.0))
+                .style(|_, status: button::Status| {
+                    use button::Status;
+                    button::Style {
+                        background: Some(Background::Color(match status {
+                            Status::Hovered => Color::from_rgba8(46, 48, 62, 0.6),
+                            _ => Color::TRANSPARENT,
+                        })),
+                        text_color: MUTED_FG,
+                        ..button::Style::default()
+                    }
+                })
+                .on_press(UiEvent::NewProjectSeriesToggle),
             ]
             .spacing(scale::s(4.0))
             .into()
@@ -514,7 +525,9 @@ pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -
             title,
             summary,
             column![
-                text("Project name").size(scale::s(12.0)).color(Color::WHITE),
+                text("Project name")
+                    .size(scale::s(12.0))
+                    .color(Color::WHITE),
                 text_input("Project name...", &np.project_name)
                     .on_input(UiEvent::NewProjectName)
                     .padding(scale::s(8.0))
@@ -524,7 +537,9 @@ pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -
             ]
             .spacing(scale::s(6.0)),
             column![
-                text("Original language").size(scale::s(12.0)).color(Color::WHITE),
+                text("Original language")
+                    .size(scale::s(12.0))
+                    .color(Color::WHITE),
                 pills,
             ]
             .spacing(scale::s(6.0)),
@@ -583,7 +598,10 @@ pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -
         )
     };
     let footer = row![
-        text(footer_hint).size(scale::s(12.0)).color(MUTED_FG).width(FillLength),
+        text(footer_hint)
+            .size(scale::s(12.0))
+            .color(MUTED_FG)
+            .width(FillLength),
         button(text("Cancel").size(scale::s(12.0)).center())
             .padding([scale::s(8.0), scale::s(16.0)])
             .style(crate::panel::button_style)
@@ -637,9 +655,19 @@ pub fn view<'a, S: UiState + ?Sized>(state: &'a S, base: Element<'a, UiEvent>) -
     };
 
     let overlay = center(opaque(stack![blur_cover, window])).style(|_| container::Style {
-        background: Some(Color { a: 0.55, ..Color::BLACK }.into()),
+        background: Some(
+            Color {
+                a: 0.55,
+                ..Color::BLACK
+            }
+            .into(),
+        ),
         ..Default::default()
     });
 
-    stack![base, opaque(mouse_area(overlay).on_press(UiEvent::NewProjectClose))].into()
+    stack![
+        base,
+        opaque(mouse_area(overlay).on_press(UiEvent::NewProjectClose))
+    ]
+    .into()
 }

@@ -75,7 +75,12 @@ fn extract_inpaint_raw(tab: &Tab) -> Vec<RawInpaint> {
         let image_id = loaded.image_id;
         for layer in &loaded.inpaint {
             match &layer.handle {
-                iced::widget::image::Handle::Rgba { width, height, pixels, .. } => {
+                iced::widget::image::Handle::Rgba {
+                    width,
+                    height,
+                    pixels,
+                    ..
+                } => {
                     out.push(RawInpaint::Rgba {
                         image_id,
                         bounds: layer.bounds,
@@ -102,7 +107,13 @@ fn decode_raw_inpaint(raw: Vec<RawInpaint>) -> Vec<easyscanlate_mmtl::InpaintIma
     let mut out = Vec::with_capacity(raw.len());
     for r in raw {
         match r {
-            RawInpaint::Rgba { image_id, bounds, width, height, pixels } => {
+            RawInpaint::Rgba {
+                image_id,
+                bounds,
+                width,
+                height,
+                pixels,
+            } => {
                 out.push(easyscanlate_mmtl::InpaintImageData {
                     image_id,
                     bounds,
@@ -111,7 +122,11 @@ fn decode_raw_inpaint(raw: Vec<RawInpaint>) -> Vec<easyscanlate_mmtl::InpaintIma
                     rgba: pixels,
                 });
             }
-            RawInpaint::Bytes { image_id, bounds, bytes } => {
+            RawInpaint::Bytes {
+                image_id,
+                bounds,
+                bytes,
+            } => {
                 if let Ok(img) = image::load_from_memory(&bytes) {
                     let rgba = img.to_rgba8();
                     let (w, h) = (rgba.width(), rgba.height());
@@ -169,8 +184,15 @@ pub fn handle_open(_app: &mut App) -> Task<Message> {
     )
 }
 
-pub fn handle_save_picked(app: &mut App, tab_id: crate::app::tab::TabId, picked: Option<String>) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+pub fn handle_save_picked(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    picked: Option<String>,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     let Some(path_str) = picked else {
         app.tabs[idx].status = "Save cancelled.".to_string();
         return Task::none();
@@ -193,27 +215,58 @@ pub fn handle_save_picked(app: &mut App, tab_id: crate::app::tab::TabId, picked:
 
 fn build_loaded_images(res: easyscanlate_mmtl::LoadResult, display: String) -> LoadedProjectResult {
     let project = res.project;
-    let mut inpaint_map: std::collections::HashMap<easyscanlate_model::ImageId, Vec<easyscanlate_ui::loaded::InpaintLayer>> = std::collections::HashMap::new();
+    let mut inpaint_map: std::collections::HashMap<
+        easyscanlate_model::ImageId,
+        Vec<easyscanlate_ui::loaded::InpaintLayer>,
+    > = std::collections::HashMap::new();
     for (img_id, bounds, png_path) in &res.inpaint_files {
         let data = std::fs::read(png_path).map_err(|e| e.to_string())?;
-        let img = image::load_from_memory(&data).map_err(|e| e.to_string())?.to_rgba8();
+        let img = image::load_from_memory(&data)
+            .map_err(|e| e.to_string())?
+            .to_rgba8();
         let (w, h) = (img.width(), img.height());
-        let handle = iced::widget::image::Handle::from_rgba(w, h, bytes::Bytes::from(img.into_raw()));
-        let quad = project.inpaint_for(*img_id).find(|p| p.bounds == *bounds).and_then(|p| p.quad).or_else(|| {
-            project.inpaint_for(*img_id).find(|p| p.bounds[2] as u32 == w && p.bounds[3] as u32 == h).and_then(|p| p.quad)
-        });
-        inpaint_map.entry(*img_id).or_default().push(easyscanlate_ui::loaded::InpaintLayer { bounds: *bounds, quad, handle, width: w, height: h });
+        let handle =
+            iced::widget::image::Handle::from_rgba(w, h, bytes::Bytes::from(img.into_raw()));
+        let quad = project
+            .inpaint_for(*img_id)
+            .find(|p| p.bounds == *bounds)
+            .and_then(|p| p.quad)
+            .or_else(|| {
+                project
+                    .inpaint_for(*img_id)
+                    .find(|p| p.bounds[2] as u32 == w && p.bounds[3] as u32 == h)
+                    .and_then(|p| p.quad)
+            });
+        inpaint_map
+            .entry(*img_id)
+            .or_default()
+            .push(easyscanlate_ui::loaded::InpaintLayer {
+                bounds: *bounds,
+                quad,
+                handle,
+                width: w,
+                height: h,
+            });
     }
     let mut out_images = Vec::new();
     for meta in project.images() {
         let layers = inpaint_map.remove(&meta.id).unwrap_or_default();
-        out_images.push(easyscanlate_ui::LoadedImage { image_id: meta.id, decode: easyscanlate_ui::main_area::decode::PageDecode::default(), inpaint: layers });
+        out_images.push(easyscanlate_ui::LoadedImage {
+            image_id: meta.id,
+            decode: easyscanlate_ui::main_area::decode::PageDecode::default(),
+            inpaint: layers,
+        });
     }
     debug_assert_eq!(project.image_count(), out_images.len());
     Ok((project, out_images, display, Some(Arc::new(res.temp_dir))))
 }
 
-fn do_save(tab_id: crate::app::tab::TabId, project: easyscanlate_model::Project, raw: Vec<RawInpaint>, path: PathBuf) -> Task<Message> {
+fn do_save(
+    tab_id: crate::app::tab::TabId,
+    project: easyscanlate_model::Project,
+    raw: Vec<RawInpaint>,
+    path: PathBuf,
+) -> Task<Message> {
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
@@ -221,7 +274,9 @@ fn do_save(tab_id: crate::app::tab::TabId, project: easyscanlate_model::Project,
                 project.ensure_project_id();
                 // Image decode + zip + FS all off the UI thread.
                 let inpaint = decode_raw_inpaint(raw);
-                easyscanlate_mmtl::save_mmtl(&project, &inpaint, &path).map(|_| path.to_string_lossy().to_string()).map_err(|e| e.to_string())
+                easyscanlate_mmtl::save_mmtl(&project, &inpaint, &path)
+                    .map(|_| path.to_string_lossy().to_string())
+                    .map_err(|e| e.to_string())
             })
             .await
             .unwrap_or_else(|e| Err(format!("save task failed: {e}")))
@@ -232,8 +287,7 @@ fn do_save(tab_id: crate::app::tab::TabId, project: easyscanlate_model::Project,
 
 fn find_tab_by_path(app: &App, path: &Path) -> Option<usize> {
     app.tabs.iter().position(|t| {
-        t.mmtl_path.as_deref() == Some(path)
-            || t.loading_path.as_deref() == Some(path)
+        t.mmtl_path.as_deref() == Some(path) || t.loading_path.as_deref() == Some(path)
     })
 }
 
@@ -282,63 +336,68 @@ pub(crate) fn push_project_tab(
 
     // Hydration path: `id` is a loading placeholder that was created optimistically.
     if let Some(idx) = app.tabs.iter().position(|t| t.id == id)
-        && app.tabs[idx].loading {
-            // Another non-placeholder tab already has this path (race: opened elsewhere while loading).
-            // Remove the placeholder and activate the existing one.
-            if let Some(other_idx) = app
-                .tabs
-                .iter()
-                .position(|t| t.id != id && t.mmtl_path.as_deref() == Some(path.as_path()))
-            {
-                // Remove placeholder
-                let ph_pos = app.tabs.iter().position(|t| t.id == id).unwrap();
-                app.tabs.remove(ph_pos);
-                // Adjust active if needed
-                if app.active >= app.tabs.len() {
-                    app.active = app.tabs.len().saturating_sub(1);
-                } else if ph_pos < app.active {
-                    app.active -= 1;
-                } else if ph_pos == app.active {
-                    // active was placeholder, switch to existing (re-find)
-                    if let Some(new_other) = app.tabs.iter().position(|t| t.mmtl_path.as_deref() == Some(path.as_path())) {
-                        app.active = new_other;
-                    }
+        && app.tabs[idx].loading
+    {
+        // Another non-placeholder tab already has this path (race: opened elsewhere while loading).
+        // Remove the placeholder and activate the existing one.
+        if let Some(other_idx) = app
+            .tabs
+            .iter()
+            .position(|t| t.id != id && t.mmtl_path.as_deref() == Some(path.as_path()))
+        {
+            // Remove placeholder
+            let ph_pos = app.tabs.iter().position(|t| t.id == id).unwrap();
+            app.tabs.remove(ph_pos);
+            // Adjust active if needed
+            if app.active >= app.tabs.len() {
+                app.active = app.tabs.len().saturating_sub(1);
+            } else if ph_pos < app.active {
+                app.active -= 1;
+            } else if ph_pos == app.active {
+                // active was placeholder, switch to existing (re-find)
+                if let Some(new_other) = app
+                    .tabs
+                    .iter()
+                    .position(|t| t.mmtl_path.as_deref() == Some(path.as_path()))
+                {
+                    app.active = new_other;
                 }
-                // dedup_activate semantics
-                if let Some(nidx) = find_tab_by_path(app, &path) {
-                    app.active = nidx;
-                    app.tabs[nidx].status = format!("Already open: {}", app.tabs[nidx].title);
-                } else {
-                    // fallback: activate other_idx adjusted
-                    let _ = other_idx;
-                }
-                bump_opened(app, display_path.clone());
-                return Task::none();
             }
-            // Normal hydration: fill placeholder in place.
-            let len = images.len();
-            let project_clone = project.clone();
-            let series = project.series().map(str::to_owned);
-            {
-                let tab = &mut app.tabs[idx];
-                tab.hydrate_from_loaded(project, images, path.clone(), temp_dir);
+            // dedup_activate semantics
+            if let Some(nidx) = find_tab_by_path(app, &path) {
+                app.active = nidx;
+                app.tabs[nidx].status = format!("Already open: {}", app.tabs[nidx].title);
+            } else {
+                // fallback: activate other_idx adjusted
+                let _ = other_idx;
             }
-            app.active = idx;
-            touch_opened(app, display_path.clone(), series);
-            let tid = app.tabs[idx].id;
-            let pid = app.tabs[idx].project.project_id().map(str::to_owned);
-            let check = super::autosave::check_after_load(app, tid, path, pid);
-            if len > 0 {
-                let new_tab = &mut app.tabs[idx];
-                let thumbs = new_tab.scheduler.decode_thumbs_with_project(
-                    &mut new_tab.images,
-                    &project_clone,
-                    move |i, r| Message::Tab(tid, crate::app::TabMessage::ThumbDecoded(i, r)),
-                );
-                return Task::batch(vec![thumbs, check]);
-            }
-            return check;
+            bump_opened(app, display_path.clone());
+            return Task::none();
         }
+        // Normal hydration: fill placeholder in place.
+        let len = images.len();
+        let project_clone = project.clone();
+        let series = project.series().map(str::to_owned);
+        {
+            let tab = &mut app.tabs[idx];
+            tab.hydrate_from_loaded(project, images, path.clone(), temp_dir);
+        }
+        app.active = idx;
+        touch_opened(app, display_path.clone(), series);
+        let tid = app.tabs[idx].id;
+        let pid = app.tabs[idx].project.project_id().map(str::to_owned);
+        let check = super::autosave::check_after_load(app, tid, path, pid);
+        if len > 0 {
+            let new_tab = &mut app.tabs[idx];
+            let thumbs = new_tab.scheduler.decode_thumbs_with_project(
+                &mut new_tab.images,
+                &project_clone,
+                move |i, r| Message::Tab(tid, crate::app::TabMessage::ThumbDecoded(i, r)),
+            );
+            return Task::batch(vec![thumbs, check]);
+        }
+        return check;
+    }
 
     // Non-hydration (legacy or placeholder was closed before load finished).
     // Dedup: if already open, just activate it and discard this load.
@@ -385,10 +444,21 @@ pub(crate) fn push_project_tab(
     } else {
         id
     };
-    let tab = crate::app::tab::Tab::project_from_loaded(use_id, title, project, images, path.clone(), temp_dir);
+    let tab = crate::app::tab::Tab::project_from_loaded(
+        use_id,
+        title,
+        project,
+        images,
+        path.clone(),
+        temp_dir,
+    );
     app.tabs.push(tab);
     app.active = app.tabs.len() - 1;
-    touch_opened(app, display_path.clone(), project_clone.series().map(str::to_owned));
+    touch_opened(
+        app,
+        display_path.clone(),
+        project_clone.series().map(str::to_owned),
+    );
     // Update status on the newly created tab (project_from_loaded already sets Loaded, keep it)
     // but ensure recent already touched; no extra status override needed.
     let pid = project_clone.project_id().map(str::to_owned);
@@ -406,7 +476,11 @@ pub(crate) fn push_project_tab(
     check
 }
 
-pub fn handle_open_picked(app: &mut App, tab_id: crate::app::tab::TabId, picked: Option<String>) -> Task<Message> {
+pub fn handle_open_picked(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    picked: Option<String>,
+) -> Task<Message> {
     let idx_opt = app.tabs.iter().position(|t| t.id == tab_id);
     let Some(path_str) = picked else {
         if let Some(idx) = idx_opt {
@@ -451,37 +525,60 @@ pub fn handle_recent_open(app: &mut App, path: String) -> Task<Message> {
     let path_clone = p.clone();
     Task::perform(
         async move {
-            tokio::task::spawn_blocking(move || load_created_project(path_clone.to_string_lossy().to_string()))
-                .await
-                .unwrap_or_else(|e| Err(format!("load task failed: {e}")))
+            tokio::task::spawn_blocking(move || {
+                load_created_project(path_clone.to_string_lossy().to_string())
+            })
+            .await
+            .unwrap_or_else(|e| Err(format!("load task failed: {e}")))
         },
         move |res| Message::Tab(new_id, crate::app::TabMessage::RecentPickedToLoad(res)),
     )
 }
 
-pub fn handle_saved(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<String, String>) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+pub fn handle_saved(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    result: Result<String, String>,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     match result {
         Ok(path) => {
             // Capture the id before a pending-close removal shifts tabs.
-            let pid = app.tabs.get(idx).and_then(|t| t.project.project_id().map(str::to_owned));
-            let series = app.tabs.get(idx).and_then(|t| t.project.series().map(str::to_owned));
+            let pid = app
+                .tabs
+                .get(idx)
+                .and_then(|t| t.project.project_id().map(str::to_owned));
+            let series = app
+                .tabs
+                .get(idx)
+                .and_then(|t| t.project.series().map(str::to_owned));
             {
                 let tab = &mut app.tabs[idx];
                 tab.status = format!("Saved to {path}");
                 tab.mmtl_path = Some(PathBuf::from(path.clone()));
                 tab.dirty = false;
-                tab.title = PathBuf::from(&path).file_stem().and_then(|s| s.to_str()).unwrap_or("project").to_string();
+                tab.title = PathBuf::from(&path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("project")
+                    .to_string();
             }
             touch_opened(app, path.clone(), series);
             // If there was a pending close for this tab, now close it
             if app.pending_close == Some(tab_id) {
                 if let Some(pos) = app.tabs.iter().position(|t| t.id == tab_id)
-                    && app.tabs[pos].is_project() {
-                        app.tabs.remove(pos);
-                        if app.active >= app.tabs.len() { app.active = app.tabs.len().saturating_sub(1); }
-                        else if pos < app.active { app.active -= 1; }
+                    && app.tabs[pos].is_project()
+                {
+                    app.tabs.remove(pos);
+                    if app.active >= app.tabs.len() {
+                        app.active = app.tabs.len().saturating_sub(1);
+                    } else if pos < app.active {
+                        app.active -= 1;
                     }
+                }
                 app.pending_close = None;
             }
             // Manual save makes the central autosave delta redundant.
@@ -503,21 +600,31 @@ pub fn load_created_project(path_str: String) -> LoadedProjectResult {
 }
 
 pub fn handle_external_opens(app: &mut App, paths: Vec<String>) -> Task<Message> {
-    if paths.is_empty() { return Task::none(); }
+    if paths.is_empty() {
+        return Task::none();
+    }
     let mut tasks = Vec::new();
     for raw in paths {
         let trimmed = raw.trim().trim_matches('"').trim().to_string();
-        if trimmed.is_empty() { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
         if !trimmed.to_ascii_lowercase().ends_with(".mmtl") {
             app.active_tab_mut().status = format!("Not a .mmtl: {trimmed}");
-            tasks.push(super::error::show("That isn't an EasyScanlate project", trimmed));
+            tasks.push(super::error::show(
+                "That isn't an EasyScanlate project",
+                trimmed,
+            ));
             continue;
         }
         let path = std::path::PathBuf::from(&trimmed);
         if !path.exists() {
             app.active_tab_mut().status = format!("Missing: {}", path.display());
             drop_missing(app, &trimmed);
-            tasks.push(super::error::show("The project file is missing", path.display().to_string()));
+            tasks.push(super::error::show(
+                "The project file is missing",
+                path.display().to_string(),
+            ));
             continue;
         }
         let Some(new_id) = create_loading_tab(app, path.clone()) else {
@@ -526,14 +633,20 @@ pub fn handle_external_opens(app: &mut App, paths: Vec<String>) -> Task<Message>
         let path_clone = path.clone();
         tasks.push(Task::perform(
             async move {
-                tokio::task::spawn_blocking(move || load_created_project(path_clone.to_string_lossy().to_string()))
-                    .await
-                    .unwrap_or_else(|e| Err(format!("load task failed: {e}")))
+                tokio::task::spawn_blocking(move || {
+                    load_created_project(path_clone.to_string_lossy().to_string())
+                })
+                .await
+                .unwrap_or_else(|e| Err(format!("load task failed: {e}")))
             },
             move |res| Message::Tab(new_id, crate::app::TabMessage::RecentPickedToLoad(res)),
         ));
     }
-    if tasks.is_empty() { Task::none() } else { Task::batch(tasks) }
+    if tasks.is_empty() {
+        Task::none()
+    } else {
+        Task::batch(tasks)
+    }
 }
 
 pub fn handle_loaded(
@@ -543,7 +656,11 @@ pub fn handle_loaded(
 ) -> Task<Message> {
     match result {
         Ok((project, images, display_path, temp_dir)) => {
-            debug_assert_eq!(project.image_count(), images.len(), "project/images parity must hold after load");
+            debug_assert_eq!(
+                project.image_count(),
+                images.len(),
+                "project/images parity must hold after load"
+            );
             return push_project_tab(app, tab_id, project, images, display_path, temp_dir);
         }
         Err(e) => {

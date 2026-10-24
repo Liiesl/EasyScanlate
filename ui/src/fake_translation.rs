@@ -138,7 +138,10 @@ impl Provider {
     }
 
     pub fn model_display_name(&self, id: &str) -> Option<&str> {
-        self.models.iter().find(|m| m.id == id).map(|m| m.display_name())
+        self.models
+            .iter()
+            .find(|m| m.id == id)
+            .map(|m| m.display_name())
     }
 }
 
@@ -237,7 +240,9 @@ pub fn default_hidden_ids_for_models(models: &[Model]) -> BTreeSet<String> {
     use std::collections::BTreeMap;
     let mut latest: BTreeMap<String, &Model> = BTreeMap::new();
     for m in models {
-        if m.free || m.id.ends_with("-latest") { continue; }
+        if m.free || m.id.ends_with("-latest") {
+            continue;
+        }
         let family = m.family.clone().unwrap_or_else(|| m.id.clone());
         let keep = match latest.get(&family) {
             Some(current) => {
@@ -255,16 +260,28 @@ pub fn default_hidden_ids_for_models(models: &[Model]) -> BTreeSet<String> {
             }
             None => true,
         };
-        if keep { latest.insert(family, m); }
+        if keep {
+            latest.insert(family, m);
+        }
     }
     let visible_latest: BTreeSet<String> = latest.into_values().map(|m| m.id.clone()).collect();
-    models.iter().filter(|m| {
-        if m.free || m.id.ends_with("-latest") { return false; }
-        if visible_latest.contains(&m.id) { return false; }
-        true
-    }).map(|m| m.id.clone()).collect()
+    models
+        .iter()
+        .filter(|m| {
+            if m.free || m.id.ends_with("-latest") {
+                return false;
+            }
+            if visible_latest.contains(&m.id) {
+                return false;
+            }
+            true
+        })
+        .map(|m| m.id.clone())
+        .collect()
 }
-pub fn usable_models(_listing: &()) -> Vec<Model> { Vec::new() }
+pub fn usable_models(_listing: &()) -> Vec<Model> {
+    Vec::new()
+}
 
 /// Looks up a fake gateway by its provider id.
 pub fn catalog_provider(id: &str) -> Option<&'static Provider> {
@@ -442,8 +459,8 @@ pub async fn fetch_local_models(_base_url: &str, _id: &str) -> Result<Vec<Model>
 /// On-disk listing cache stub for UI-only builds: same surface as the real
 /// `translation::cache`, but a no-op (fake providers are already local).
 pub mod cache {
-    use std::collections::HashMap;
     use super::Provider;
+    use std::collections::HashMap;
 
     /// Whether two listings differ. Mirrors the real cache helper.
     pub fn providers_equal(a: &Provider, b: &Provider) -> bool {
@@ -495,17 +512,27 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
             .unwrap_or_else(|| provider.api.clone());
         if let Some(model) = connection.model.clone().filter(|m| !m.trim().is_empty()) {
             if provider.models.is_empty() {
-                provider.models = vec![Model { id: model.clone(), name: model.clone(), free: false, family: None, release_date: None, last_updated: None }];
+                provider.models = vec![Model {
+                    id: model.clone(),
+                    name: model.clone(),
+                    free: false,
+                    family: None,
+                    release_date: None,
+                    last_updated: None,
+                }];
             }
         }
         return provider;
     }
     if is_custom(id) {
         provider.api = connection.base_url.clone().unwrap_or_default();
-        let model = connection
-            .model
-            .clone()
-            .unwrap_or_else(|| provider.models.first().map(|m| m.id.clone()).unwrap_or_default());
+        let model = connection.model.clone().unwrap_or_else(|| {
+            provider
+                .models
+                .first()
+                .map(|m| m.id.clone())
+                .unwrap_or_default()
+        });
         provider.models = vec![Model {
             id: model.clone(),
             name: model,
@@ -537,7 +564,10 @@ pub fn build_retranslate_content(
     }
     let mut selected_by_file: HashMap<String, Vec<u64>> = HashMap::new();
     for (filename, id) in selected {
-        selected_by_file.entry(filename.clone()).or_default().push(*id);
+        selected_by_file
+            .entry(filename.clone())
+            .or_default()
+            .push(*id);
     }
     let mut filenames: Vec<String> = selected_by_file.keys().cloned().collect();
     filenames.sort();
@@ -584,12 +614,7 @@ pub fn build_retranslate_content(
                 let it = file_results[idx];
                 let text = it.text.replace(['\r', '\n'], " ");
                 if selected_set.contains(&idx) {
-                    content.push_str(&format!(
-                        "<{}>{}</{}>\n",
-                        it.id,
-                        escape(&text),
-                        it.id
-                    ));
+                    content.push_str(&format!("<{}>{}</{}>\n", it.id, escape(&text), it.id));
                 } else {
                     content.push_str(&format!("<context>{}</context>\n", escape(&text)));
                 }
@@ -637,7 +662,14 @@ pub async fn translate_all(
                 .cloned()
                 .collect();
             let t = translate_one_with_context(
-                &miss.text, target, provider, model, api_key.clone(), &same_file, miss.id, &miss.filename,
+                &miss.text,
+                target,
+                provider,
+                model,
+                api_key.clone(),
+                &same_file,
+                miss.id,
+                &miss.filename,
             )
             .await?;
             parsed.insert((miss.filename.clone(), miss.id), t);
@@ -714,10 +746,7 @@ pub struct Session {
 impl Session {
     /// Restores the stored connections, then picks `last_provider` when it is
     /// still connected (or falls back to the first connected provider).
-    pub fn new(
-        connections: BTreeMap<String, Connection>,
-        last_provider: Option<String>,
-    ) -> Self {
+    pub fn new(connections: BTreeMap<String, Connection>, last_provider: Option<String>) -> Self {
         let mut session = Session {
             connections,
             ..Session::default()
@@ -790,15 +819,11 @@ impl Session {
             self.selected_model = String::new();
             return;
         }
-        let provider = self
-            .fetched
-            .get(&self.selected_id)
-            .cloned()
-            .or_else(|| {
-                self.connections.get(&self.selected_id).map(|connection| {
-                    provider_for_connection(&self.selected_id, connection)
-                })
-            });
+        let provider = self.fetched.get(&self.selected_id).cloned().or_else(|| {
+            self.connections
+                .get(&self.selected_id)
+                .map(|connection| provider_for_connection(&self.selected_id, connection))
+        });
         let models = provider
             .as_ref()
             .map(|p| self.visible_models(p))
@@ -869,8 +894,7 @@ impl Session {
                         .map(|connection| provider_for_connection(id, connection))
                 })?;
                 let models = self.visible_model_pairs(&provider);
-                (!models.is_empty())
-                    .then(|| (id.clone(), provider_name(id), models))
+                (!models.is_empty()).then(|| (id.clone(), provider_name(id), models))
             })
             .collect()
     }
@@ -919,9 +943,15 @@ impl Session {
     }
 
     fn provider_for_default_hidden(&self, provider: &str) -> Option<Provider> {
-        self.fetched.get(provider).cloned().or_else(|| {
-            self.connections.get(provider).map(|c| provider_for_connection(provider, c))
-        }).or_else(|| catalog_provider(provider).cloned())
+        self.fetched
+            .get(provider)
+            .cloned()
+            .or_else(|| {
+                self.connections
+                    .get(provider)
+                    .map(|c| provider_for_connection(provider, c))
+            })
+            .or_else(|| catalog_provider(provider).cloned())
     }
     pub fn default_hidden_for(&self, provider: &str) -> BTreeSet<String> {
         if let Some(p) = self.provider_for_default_hidden(provider) {
@@ -934,21 +964,31 @@ impl Session {
         for id in self.connected_ids.clone() {
             if !self.hidden_models.contains_key(&id) {
                 let default = self.default_hidden_for(&id);
-                if !default.is_empty() { self.hidden_models.insert(id, default); }
+                if !default.is_empty() {
+                    self.hidden_models.insert(id, default);
+                }
             }
         }
         self.sync_models();
     }
     pub fn reset_hidden_to_default(&mut self, provider: &str) {
         let default = self.default_hidden_for(provider);
-        if default.is_empty() { self.hidden_models.remove(provider); } else { self.hidden_models.insert(provider.to_string(), default); }
+        if default.is_empty() {
+            self.hidden_models.remove(provider);
+        } else {
+            self.hidden_models.insert(provider.to_string(), default);
+        }
         self.sync_models();
     }
     pub fn reset_all_hidden_to_default(&mut self) {
         let ids = self.connected_ids.clone();
         for id in ids {
             let default = self.default_hidden_for(&id);
-            if default.is_empty() { self.hidden_models.remove(&id); } else { self.hidden_models.insert(id, default); }
+            if default.is_empty() {
+                self.hidden_models.remove(&id);
+            } else {
+                self.hidden_models.insert(id, default);
+            }
         }
         self.sync_models();
     }
@@ -1021,9 +1061,9 @@ impl Session {
     /// The requestable [`Provider`] for the selected connection (catalog or
     /// custom, with the connection's api/kind/model baked in).
     pub fn selected_provider(&self) -> Option<Provider> {
-        self.connections.get(&self.selected_id).map(|connection| {
-            provider_for_connection(&self.selected_id, connection)
-        })
+        self.connections
+            .get(&self.selected_id)
+            .map(|connection| provider_for_connection(&self.selected_id, connection))
     }
 
     /// The stored API key of the selected connection, if any.
@@ -1082,13 +1122,27 @@ mod tests {
     #[test]
     fn fake_translate_marks_the_target_language() {
         let items = vec![
-            TranslateItem { filename: "a.png".into(), id: 1, text: "안녕".into() },
-            TranslateItem { filename: "a.png".into(), id: 2, text: "하세요".into() },
+            TranslateItem {
+                filename: "a.png".into(),
+                id: 1,
+                text: "안녕".into(),
+            },
+            TranslateItem {
+                filename: "a.png".into(),
+                id: 2,
+                text: "하세요".into(),
+            },
         ];
         let provider = catalog_provider(FAKE_PROVIDER).unwrap().clone();
         let out = tokio::runtime::Runtime::new()
             .unwrap()
-            .block_on(translate_all(&items, "English", &provider, "fake-gpt-4o", None))
+            .block_on(translate_all(
+                &items,
+                "English",
+                &provider,
+                "fake-gpt-4o",
+                None,
+            ))
             .unwrap();
         assert_eq!(out, vec!["[English] 안녕", "[English] 하세요"]);
     }
@@ -1110,8 +1164,14 @@ mod tests {
                     "Fake LLM".to_string(),
                     vec![
                         ("fake-gpt-4o".to_string(), "Fake GPT-4o".to_string()),
-                        ("fake-claude-sonnet".to_string(), "Fake Claude Sonnet".to_string()),
-                        ("fake-deepseek-v4".to_string(), "Fake DeepSeek V4".to_string()),
+                        (
+                            "fake-claude-sonnet".to_string(),
+                            "Fake Claude Sonnet".to_string()
+                        ),
+                        (
+                            "fake-deepseek-v4".to_string(),
+                            "Fake DeepSeek V4".to_string()
+                        ),
                     ],
                 ),
                 (

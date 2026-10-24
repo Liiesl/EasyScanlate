@@ -192,7 +192,10 @@ fn remove_stale_id_dirs(keep_dir: &Path, project_id: &str) {
 /// `autosave_root()` for a `meta.toml` with the same `project_id` so a
 /// moved/renamed project still finds its backup. Duplicate ids (Explorer
 /// copy) resolve newest-wins.
-pub fn find_autosave(mmtl_path: &Path, project_id: Option<&str>) -> Option<(PathBuf, AutosaveMeta)> {
+pub fn find_autosave(
+    mmtl_path: &Path,
+    project_id: Option<&str>,
+) -> Option<(PathBuf, AutosaveMeta)> {
     let dir = easyscanlate_settings::autosave_dir_for(mmtl_path);
     if let Ok(meta_str) = std::fs::read_to_string(dir.join("meta.toml"))
         && let Ok(meta) = toml::from_str::<AutosaveMeta>(&meta_str)
@@ -357,7 +360,13 @@ fn decode_raw_inpaint(raw: Vec<RawInpaint>) -> Vec<easyscanlate_mmtl::InpaintIma
     let mut out = Vec::with_capacity(raw.len());
     for r in raw {
         match r {
-            RawInpaint::Rgba { image_id, bounds, width, height, pixels } => {
+            RawInpaint::Rgba {
+                image_id,
+                bounds,
+                width,
+                height,
+                pixels,
+            } => {
                 out.push(easyscanlate_mmtl::InpaintImageData {
                     image_id,
                     bounds,
@@ -366,7 +375,11 @@ fn decode_raw_inpaint(raw: Vec<RawInpaint>) -> Vec<easyscanlate_mmtl::InpaintIma
                     rgba: pixels,
                 });
             }
-            RawInpaint::Bytes { image_id, bounds, bytes } => {
+            RawInpaint::Bytes {
+                image_id,
+                bounds,
+                bytes,
+            } => {
                 if let Ok(img) = image::load_from_memory(&bytes) {
                     let rgba = img.to_rgba8();
                     let (w, h) = (rgba.width(), rgba.height());
@@ -437,11 +450,7 @@ pub fn handle_tick(app: &mut App) -> Task<Message> {
     }
 }
 
-pub fn handle_done(
-    app: &mut App,
-    tab_id: TabId,
-    result: Result<String, String>,
-) -> Task<Message> {
+pub fn handle_done(app: &mut App, tab_id: TabId, result: Result<String, String>) -> Task<Message> {
     let Some(idx) = app.tabs.iter().position(|t| t.id == tab_id) else {
         return Task::none();
     };
@@ -452,8 +461,10 @@ pub fn handle_done(
             // A short status confirms the backup without implying safety.
             app.tabs[idx].last_autosave_unix = now_unix();
             if app.tabs[idx].status.starts_with("Autosaved") || app.tabs[idx].status.is_empty() {
-                app.tabs[idx].status =
-                    format!("Autosaved {}", format_saved_at(app.tabs[idx].last_autosave_unix));
+                app.tabs[idx].status = format!(
+                    "Autosaved {}",
+                    format_saved_at(app.tabs[idx].last_autosave_unix)
+                );
             }
         }
         Err(e) => {
@@ -520,7 +531,10 @@ pub fn handle_check_done(
     });
     app.tabs[idx].status = format!(
         "Autosave found from {} — choose Load or Discard.",
-        app.autosave_prompt.as_ref().map(|p| p.saved_at_display.as_str()).unwrap_or("")
+        app.autosave_prompt
+            .as_ref()
+            .map(|p| p.saved_at_display.as_str())
+            .unwrap_or("")
     );
     Task::none()
 }
@@ -626,7 +640,10 @@ fn load_autosave_into_tab(
         .images()
         .iter()
         .map(|m| {
-            let path = id_to_path.get(&m.id).cloned().unwrap_or_else(|| m.path.clone());
+            let path = id_to_path
+                .get(&m.id)
+                .cloned()
+                .unwrap_or_else(|| m.path.clone());
             easyscanlate_model::ImageMeta {
                 id: m.id,
                 path,
@@ -651,7 +668,9 @@ fn load_autosave_into_tab(
     let pid = project.project_id().map(str::to_owned);
     // Keep the tab's live id when the autosave predates ids (legacy).
     let pid = pid.or_else(|| tab.project.project_id().map(str::to_owned));
-    let series = project.series().map(str::to_owned)
+    let series = project
+        .series()
+        .map(str::to_owned)
         .or_else(|| tab.project.series().map(str::to_owned));
     let next_image_id = images.iter().map(|m| m.id.0 + 1).max().unwrap_or(0);
     project = easyscanlate_model::Project::from_raw(
@@ -670,11 +689,16 @@ fn load_autosave_into_tab(
         std::fs::read_to_string(dir.join("inpaint_manifest.json")).map_err(|e| e.to_string())?;
     let manifest: Vec<InpaintManifestEntry> =
         serde_json::from_str(&manifest_str).map_err(|e| e.to_string())?;
-    let mut per_image: HashMap<easyscanlate_model::ImageId, Vec<easyscanlate_ui::loaded::InpaintLayer>> =
-        HashMap::new();
+    let mut per_image: HashMap<
+        easyscanlate_model::ImageId,
+        Vec<easyscanlate_ui::loaded::InpaintLayer>,
+    > = HashMap::new();
     for entry in &manifest {
-        let data = std::fs::read(dir.join("inpaint").join(&entry.file)).map_err(|e| e.to_string())?;
-        let img = image::load_from_memory(&data).map_err(|e| e.to_string())?.to_rgba8();
+        let data =
+            std::fs::read(dir.join("inpaint").join(&entry.file)).map_err(|e| e.to_string())?;
+        let img = image::load_from_memory(&data)
+            .map_err(|e| e.to_string())?
+            .to_rgba8();
         let (w, h) = (img.width(), img.height());
         let handle =
             iced::widget::image::Handle::from_rgba(w, h, bytes::Bytes::from(img.into_raw()));
@@ -683,15 +707,16 @@ fn load_autosave_into_tab(
             .inpaint_for(image_id)
             .find(|p| p.bounds == entry.bounds)
             .and_then(|p| p.quad);
-        per_image.entry(image_id).or_default().push(
-            easyscanlate_ui::loaded::InpaintLayer {
+        per_image
+            .entry(image_id)
+            .or_default()
+            .push(easyscanlate_ui::loaded::InpaintLayer {
                 bounds: entry.bounds,
                 quad,
                 handle,
                 width: w,
                 height: h,
-            },
-        );
+            });
     }
     let count: usize = per_image.values().map(|v| v.len()).sum();
     tab.project = project;

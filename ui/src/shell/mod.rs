@@ -2,10 +2,12 @@ use iced::widget::pane_grid;
 use iced::{Element, Length};
 
 use crate::event::UiEvent;
-use crate::layout::{CARD_RADIUS, GAP, MAIN_AREA_MIN_WIDTH, OUTER_PADDING, EditorPaneKind, PaneKind, ResultsPaneKind};
+use crate::layout::{
+    CARD_RADIUS, EditorPaneKind, GAP, MAIN_AREA_MIN_WIDTH, OUTER_PADDING, PaneKind, ResultsPaneKind,
+};
+use crate::settings as settings_modal;
 use crate::state::UiState;
 use crate::{main_area, panel, scale, toolbar};
-use crate::settings as settings_modal;
 
 /// Canonical shell: the `inner: Element<UiEvent>` that `src/app/view.rs` used to build inline.
 /// Covers onboarding page vs Home (with new-project/settings/connect/manage_models overlays)
@@ -47,8 +49,11 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         // + Main/Styling). Need pane states from UiState; fallback to empty
         // if missing (e.g. tests)
         let Some((panes, results_panes, outer_panes)) = state.editor_panes() else {
-            let fallback: Element<'_, UiEvent> = iced::widget::container(iced::widget::text("No editor panes").size(scale::s(12.0)))
-                .width(Length::Fill).height(Length::Fill).into();
+            let fallback: Element<'_, UiEvent> =
+                iced::widget::container(iced::widget::text("No editor panes").size(scale::s(12.0)))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into();
             return fallback;
         };
 
@@ -60,81 +65,87 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         let content: Element<'_, UiEvent> = pane_grid::PaneGrid::new(outer_panes, |_, kind, _| {
             pane_grid::Content::new(match kind {
                 EditorPaneKind::Left => {
-                    let left: Element<'_, UiEvent> = pane_grid::PaneGrid::new(
-                        results_panes,
-                        |_, kind, _| {
+                    let left: Element<'_, UiEvent> =
+                        pane_grid::PaneGrid::new(results_panes, |_, kind, _| {
                             let body: Element<'_, UiEvent> = match kind {
-                                ResultsPaneKind::Translation => iced::widget::container(panel::results::view(state))
-                                    .padding(scale::s(10.0))
-                                    .width(Length::Fill)
-                                    .height(Length::Fill)
-                                    .style(|_theme| iced::widget::container::Style {
-                                        background: Some(panel::PANEL_BG.into()),
-                                        border: iced::Border::default().rounded(scale::s(CARD_RADIUS)),
-                                        ..Default::default()
-                                    })
-                                    .into(),
-                                ResultsPaneKind::Layers => iced::widget::container(panel::inpaint::view(state))
-                                    .padding(scale::s(10.0))
-                                    .width(Length::Fill)
-                                    .height(Length::Fill)
-                                    .style(|_theme| iced::widget::container::Style {
-                                        background: Some(panel::PANEL_BG.into()),
-                                        border: iced::Border::default().rounded(scale::s(CARD_RADIUS)),
-                                        ..Default::default()
-                                    })
-                                    .into(),
-                            };
-                            pane_grid::Content::new(body)
-                        },
-                    )
-                    .spacing(scale::s(GAP))
-                    .min_size(scale::s(90.0))
-                    .on_resize(scale::s(GAP), UiEvent::ResultsPaneResized)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .into();
-                    left
-                }
-                EditorPaneKind::Right => {
-                    let right_grid: Element<'_, UiEvent> = pane_grid::PaneGrid::new(
-                        panes,
-                        |_, kind, _| {
-                            pane_grid::Content::new(match kind {
-                                PaneKind::MainArea => {
-                                    let el: Element<'_, UiEvent> = iced::widget::container(main_area::view(state))
-                                        .width(Length::Fill)
-                                        .height(Length::Fill)
-                                        .style(|_theme| iced::widget::container::Style {
-                                            background: Some(panel::PANEL_BG.into()),
-                                            border: iced::Border::default().rounded(scale::s(CARD_RADIUS)),
-                                            ..Default::default()
-                                        })
-                                        .into();
-                                    el
-                                }
-                                PaneKind::Styling => {
-                                    let el: Element<'_, UiEvent> = iced::widget::container(panel::styling::view(state))
+                                ResultsPaneKind::Translation => {
+                                    iced::widget::container(panel::results::view(state))
                                         .padding(scale::s(10.0))
                                         .width(Length::Fill)
                                         .height(Length::Fill)
                                         .style(|_theme| iced::widget::container::Style {
                                             background: Some(panel::PANEL_BG.into()),
-                                            border: iced::Border::default().rounded(scale::s(CARD_RADIUS)),
+                                            border: iced::Border::default()
+                                                .rounded(scale::s(CARD_RADIUS)),
                                             ..Default::default()
                                         })
-                                        .into();
+                                        .into()
+                                }
+                                ResultsPaneKind::Layers => {
+                                    iced::widget::container(panel::inpaint::view(state))
+                                        .padding(scale::s(10.0))
+                                        .width(Length::Fill)
+                                        .height(Length::Fill)
+                                        .style(|_theme| iced::widget::container::Style {
+                                            background: Some(panel::PANEL_BG.into()),
+                                            border: iced::Border::default()
+                                                .rounded(scale::s(CARD_RADIUS)),
+                                            ..Default::default()
+                                        })
+                                        .into()
+                                }
+                            };
+                            pane_grid::Content::new(body)
+                        })
+                        .spacing(scale::s(GAP))
+                        .min_size(scale::s(90.0))
+                        .on_resize(scale::s(GAP), UiEvent::ResultsPaneResized)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .into();
+                    left
+                }
+                EditorPaneKind::Right => {
+                    let right_grid: Element<'_, UiEvent> =
+                        pane_grid::PaneGrid::new(panes, |_, kind, _| {
+                            pane_grid::Content::new(match kind {
+                                PaneKind::MainArea => {
+                                    let el: Element<'_, UiEvent> =
+                                        iced::widget::container(main_area::view(state))
+                                            .width(Length::Fill)
+                                            .height(Length::Fill)
+                                            .style(|_theme| iced::widget::container::Style {
+                                                background: Some(panel::PANEL_BG.into()),
+                                                border: iced::Border::default()
+                                                    .rounded(scale::s(CARD_RADIUS)),
+                                                ..Default::default()
+                                            })
+                                            .into();
+                                    el
+                                }
+                                PaneKind::Styling => {
+                                    let el: Element<'_, UiEvent> =
+                                        iced::widget::container(panel::styling::view(state))
+                                            .padding(scale::s(10.0))
+                                            .width(Length::Fill)
+                                            .height(Length::Fill)
+                                            .style(|_theme| iced::widget::container::Style {
+                                                background: Some(panel::PANEL_BG.into()),
+                                                border: iced::Border::default()
+                                                    .rounded(scale::s(CARD_RADIUS)),
+                                                ..Default::default()
+                                            })
+                                            .into();
                                     el
                                 }
                             })
-                        },
-                    )
-                    .spacing(scale::s(GAP))
-                    .min_size(MAIN_AREA_MIN_WIDTH)
-                    .on_resize(scale::s(GAP), UiEvent::PanelResized)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .into();
+                        })
+                        .spacing(scale::s(GAP))
+                        .min_size(MAIN_AREA_MIN_WIDTH)
+                        .on_resize(scale::s(GAP), UiEvent::PanelResized)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .into();
                     let right: Element<'_, UiEvent> =
                         iced::widget::column![panel::actions::view(state), right_grid]
                             .spacing(scale::s(GAP))
@@ -169,8 +180,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         // Single floating color picker above the pane grid but below the
         // modals: outside every scrollable so the header drag clamps against
         // the full window viewport and the window stays movable.
-        let with_picker: Element<'_, UiEvent> =
-            panel::styling::overlay_host(state, padded_content);
+        let with_picker: Element<'_, UiEvent> = panel::styling::overlay_host(state, padded_content);
 
         let inner_with_modals: Element<'_, UiEvent> = {
             let base: Element<'_, UiEvent> = with_picker;
@@ -233,7 +243,9 @@ pub fn loading_overlay_data<S: UiState + ?Sized>(state: &S) -> Option<(f32, Stri
 
 /// Export progress overlay data: `(done, total, failed, folder)`.
 /// Mirrors `loading_overlay_data`; `None` when no export is running.
-pub fn export_overlay_data<S: UiState + ?Sized>(state: &S) -> Option<(usize, usize, usize, Option<String>)> {
+pub fn export_overlay_data<S: UiState + ?Sized>(
+    state: &S,
+) -> Option<(usize, usize, usize, Option<String>)> {
     if !state.is_exporting() {
         return None;
     }

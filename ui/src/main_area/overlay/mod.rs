@@ -9,26 +9,26 @@ pub mod style;
 pub mod text;
 pub mod warp;
 
-pub use entry::OverlayEntry;
+pub use crate::main_area::geometry::order_quad;
 pub(crate) use circle::{fit_circle_metrics, layout_circle_lines};
+pub use entry::OverlayEntry;
 #[allow(unused_imports)]
 pub(crate) use fit::{fit_font_metrics, fit_font_size};
 pub use style::{FontSupport, font_support, preview_font, styled_font, styled_font_for_text};
-pub use crate::main_area::geometry::order_quad;
 
 use iced::advanced::graphics::geometry::{self, Path, Stroke, Text};
 use iced::advanced::text::Alignment as TextAlignment;
 use iced::advanced::text::LineHeight;
 use iced::{Color, Font, Pixels, Point, Rectangle, Size};
 
-use easyscanlate_model::{apply_caps, TextAlign};
+use easyscanlate_model::{TextAlign, apply_caps};
 
 use crate::color::rgba_to_color;
 use crate::main_area::geometry::{
-    apply_quad_transform, quad_path, quad_transform, rotated_rect_geometry, QuadTransform,
+    QuadTransform, apply_quad_transform, quad_path, quad_transform, rotated_rect_geometry,
 };
 
-use self::gradient::{bg_fill_in_rect, fill_gradient_text, text_fill, StrokePaint};
+use self::gradient::{StrokePaint, bg_fill_in_rect, fill_gradient_text, text_fill};
 use self::shadow::ShadowPaint;
 
 /// Bounding rect of a frame-space quad, for gradient endpoints drawn in
@@ -82,7 +82,8 @@ pub fn draw_entries<'a, I, F>(
         let quad = entry.quad.points.map(|p| [p[0] * scale, p[1] * scale]);
         let rotated = rotated_rect_geometry(quad).and_then(|(tl, w, h, angle)| {
             let upright = angle.rem_euclid(2.0 * std::f32::consts::PI);
-            let is_upright = upright.abs() < 0.01 || (upright - 2.0 * std::f32::consts::PI).abs() < 0.01;
+            let is_upright =
+                upright.abs() < 0.01 || (upright - 2.0 * std::f32::consts::PI).abs() < 0.01;
             if is_upright {
                 None
             } else {
@@ -103,10 +104,14 @@ pub fn draw_entries<'a, I, F>(
         let (layout_position, layout_width, layout_height, layout_transform) = match rotated {
             Some((tl, w, h, t)) => (tl, w, h, Some(t)),
             None => {
-                let w_top = ((quad[1][0] - quad[0][0]).powi(2) + (quad[1][1] - quad[0][1]).powi(2)).sqrt();
-                let w_bot = ((quad[2][0] - quad[3][0]).powi(2) + (quad[2][1] - quad[3][1]).powi(2)).sqrt();
-                let h_left = ((quad[3][0] - quad[0][0]).powi(2) + (quad[3][1] - quad[0][1]).powi(2)).sqrt();
-                let h_right = ((quad[2][0] - quad[1][0]).powi(2) + (quad[2][1] - quad[1][1]).powi(2)).sqrt();
+                let w_top =
+                    ((quad[1][0] - quad[0][0]).powi(2) + (quad[1][1] - quad[0][1]).powi(2)).sqrt();
+                let w_bot =
+                    ((quad[2][0] - quad[3][0]).powi(2) + (quad[2][1] - quad[3][1]).powi(2)).sqrt();
+                let h_left =
+                    ((quad[3][0] - quad[0][0]).powi(2) + (quad[3][1] - quad[0][1]).powi(2)).sqrt();
+                let h_right =
+                    ((quad[2][0] - quad[1][0]).powi(2) + (quad[2][1] - quad[1][1]).powi(2)).sqrt();
                 let w = ((w_top + w_bot) / 2.0).max(1.0);
                 let h = ((h_left + h_right) / 2.0).max(1.0);
                 let center_x = (quad[0][0] + quad[1][0] + quad[2][0] + quad[3][0]) / 4.0;
@@ -254,7 +259,16 @@ pub fn draw_entries<'a, I, F>(
                         align_x: TextAlignment::Center,
                         ..Text::default()
                     };
-                    draw_warped_text(frame, &text, box_rect, quad, stroke, gradient, ls, shadow.as_ref());
+                    draw_warped_text(
+                        frame,
+                        &text,
+                        box_rect,
+                        quad,
+                        stroke,
+                        gradient,
+                        ls,
+                        shadow.as_ref(),
+                    );
                 }
             } else {
                 if let Some(transform) = &layout_transform {
@@ -344,7 +358,16 @@ pub fn draw_entries<'a, I, F>(
         };
 
         if warp {
-            draw_warped_text(frame, &text, box_rect, quad, stroke, gradient, ls, shadow.as_ref());
+            draw_warped_text(
+                frame,
+                &text,
+                box_rect,
+                quad,
+                stroke,
+                gradient,
+                ls,
+                shadow.as_ref(),
+            );
         } else {
             if let Some(transform) = &layout_transform {
                 frame.push_transform();
@@ -387,13 +410,13 @@ pub fn draw_entries<'a, I, F>(
 
 #[cfg(test)]
 mod tests {
-    use super::gradient::{gradient_t, lerp_color};
-    use super::warp::{affine_error, perspective_map, shape_warp_layout, warp_threshold};
     use super::circle::fit_circle_metrics;
     use super::fit::{fit_font_metrics, fit_font_size};
-    use super::text::{measure_text, LINE_HEIGHT};
+    use super::gradient::{gradient_t, lerp_color};
+    use super::text::{LINE_HEIGHT, measure_text};
+    use super::warp::{affine_error, perspective_map, shape_warp_layout, warp_threshold};
     use crate::main_area::geometry::{quad_bounds, quad_transform, rotated_rect_geometry, svd2};
-    use iced::{alignment, Color, Font, Point, Rectangle, Size};
+    use iced::{Color, Font, Point, Rectangle, Size, alignment};
 
     fn lh() -> f32 {
         LINE_HEIGHT
@@ -422,12 +445,23 @@ mod tests {
             lh(),
             ls(),
         );
-        assert!(lines.len() >= 2, "expected several lines, got {}", lines.len());
+        assert!(
+            lines.len() >= 2,
+            "expected several lines, got {}",
+            lines.len()
+        );
         assert!(size > 8.0, "size {size} too small for a big bubble");
         let line_height = size * lh();
         for line in &lines {
-            let measured =
-                measure_text(&line.content, Font::DEFAULT, size, f32::INFINITY, lh(), ls()).width;
+            let measured = measure_text(
+                &line.content,
+                Font::DEFAULT,
+                size,
+                f32::INFINITY,
+                lh(),
+                ls(),
+            )
+            .width;
             assert!(
                 measured <= line.chord + 0.5 || !line.content.contains(' '),
                 "line {:?} width {measured} exceeds chord {}",
@@ -443,7 +477,10 @@ mod tests {
         let text = "hello world this is a longer bubble line for manhwa";
         let big = fit_circle_metrics(text, Font::DEFAULT, Size::new(300.0, 150.0), lh(), ls()).0;
         let small = fit_circle_metrics(text, Font::DEFAULT, Size::new(120.0, 60.0), lh(), ls()).0;
-        assert!(small < big, "small bubble must fit smaller text: {small} >= {big}");
+        assert!(
+            small < big,
+            "small bubble must fit smaller text: {small} >= {big}"
+        );
     }
 
     #[test]
@@ -497,7 +534,10 @@ mod tests {
 
         let wider = Size::new(600.0, 100.0);
         let grown = fit_font_size("hello world", Font::DEFAULT, wider, lh(), ls());
-        assert!(grown > first, "wider box should fit larger text: {grown} <= {first}");
+        assert!(
+            grown > first,
+            "wider box should fit larger text: {grown} <= {first}"
+        );
     }
 
     #[test]
@@ -553,7 +593,12 @@ mod tests {
             (lx, ly) = (c2 * lx - s2 * ly, s2 * lx + c2 * ly);
             [lx + center[0], ly + center[1]]
         };
-        let corners = [[min_x, min_y], [max_x, min_y], [max_x, max_y], [min_x, max_y]];
+        let corners = [
+            [min_x, min_y],
+            [max_x, min_y],
+            [max_x, max_y],
+            [min_x, max_y],
+        ];
         for (mapped, expected) in corners.iter().zip(quad.iter()) {
             let got = apply(mapped[0], mapped[1]);
             assert!(
@@ -648,7 +693,12 @@ mod tests {
 
     #[test]
     fn rotated_rect_geometry_detects_rotated_boxes_and_rejects_shear() {
-        let rotated = [[0.0, 0.0], [87.758256, 47.942554], [73.37549, 74.27003], [-14.382766, 26.327477]];
+        let rotated = [
+            [0.0, 0.0],
+            [87.758256, 47.942554],
+            [73.37549, 74.27003],
+            [-14.382766, 26.327477],
+        ];
         let (tl, w, h, angle) = rotated_rect_geometry(rotated).unwrap();
         assert_eq!((tl.x, tl.y), (0.0, 0.0));
         assert!((w - 100.0).abs() < 1e-3 && (h - 30.0).abs() < 1e-3);
@@ -671,7 +721,12 @@ mod tests {
             affine_error(parallelogram, width, height) < 0.01,
             "parallelogram must fit exactly"
         );
-        let trapezoid = [[302.75, 257.02], [785.25, 257.02], [815.2, 376.0], [302.75, 313.79]];
+        let trapezoid = [
+            [302.75, 257.02],
+            [785.25, 257.02],
+            [815.2, 376.0],
+            [302.75, 313.79],
+        ];
         let [min_x, min_y, max_x, max_y] = quad_bounds(trapezoid);
         let width = max_x - min_x;
         let height = max_y - min_y;
@@ -687,11 +742,16 @@ mod tests {
         let corners: [[f32; 2]; 4] = [
             perspective_map(quad, box_rect, Point::new(rect[0], rect[1])),
             perspective_map(quad, box_rect, Point::new(rect[0] + rect[2], rect[1])),
-            perspective_map(quad, box_rect, Point::new(rect[0] + rect[2], rect[1] + rect[3])),
+            perspective_map(
+                quad,
+                box_rect,
+                Point::new(rect[0] + rect[2], rect[1] + rect[3]),
+            ),
             perspective_map(quad, box_rect, Point::new(rect[0], rect[1] + rect[3])),
         ]
         .map(|p| [p.x, p.y]);
-        let (m00, m01, m10, m11) = crate::main_area::geometry::fit_affine(corners, rect[2], rect[3]).expect("fit");
+        let (m00, m01, m10, m11) =
+            crate::main_area::geometry::fit_affine(corners, rect[2], rect[3]).expect("fit");
         let [min_x, min_y, max_x, max_y] = quad_bounds(corners);
         let quad_center = [(min_x + max_x) / 2.0, (min_y + max_y) / 2.0];
         let rect_center = [rect[0] + rect[2] / 2.0, rect[1] + rect[3] / 2.0];

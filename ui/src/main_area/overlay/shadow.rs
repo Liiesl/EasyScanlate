@@ -88,10 +88,7 @@ impl ShadowPaint {
             out.push((self.offset + Vector::new(rad * DIAG, rad * DIAG), tap));
             out.push((self.offset + Vector::new(-rad * DIAG, rad * DIAG), tap));
             out.push((self.offset + Vector::new(rad * DIAG, -rad * DIAG), tap));
-            out.push((
-                self.offset + Vector::new(-rad * DIAG, -rad * DIAG),
-                tap,
-            ));
+            out.push((self.offset + Vector::new(-rad * DIAG, -rad * DIAG), tap));
         }
         out
     }

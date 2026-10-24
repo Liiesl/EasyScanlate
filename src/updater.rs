@@ -11,7 +11,7 @@
 use std::sync::mpsc;
 
 #[cfg(feature = "updates")]
-use velopack::{sources, UpdateCheck, UpdateManager};
+use velopack::{UpdateCheck, UpdateManager, sources};
 
 /// Update descriptor. Real type when `updates` is on, empty stub otherwise
 /// (never constructed — `check_for_updates` always returns `None`).

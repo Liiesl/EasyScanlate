@@ -23,9 +23,7 @@ pub fn library_to_widget(
     usize,
 ) {
     use neverliie_iced_widgets::color_picker::{Gradient, GradientStop, PickedValue, SwatchSet};
-    fn to_picked(
-        p: &easyscanlate_settings::color_library::StoredPicked,
-    ) -> Option<PickedValue> {
+    fn to_picked(p: &easyscanlate_settings::color_library::StoredPicked) -> Option<PickedValue> {
         use easyscanlate_settings::color_library::StoredPicked;
         match p {
             StoredPicked::Solid { rgba } => Some(PickedValue::Solid(rgba_to_color(*rgba))),
@@ -61,11 +59,15 @@ pub fn library_from_widget(
     recents: &[neverliie_iced_widgets::color_picker::PickedValue],
     active_tab: usize,
 ) -> easyscanlate_settings::color_library::StoredLibrary {
-    use easyscanlate_settings::color_library::{StoredLibrary, StoredPicked, StoredStop, StoredSwatchSet};
+    use easyscanlate_settings::color_library::{
+        StoredLibrary, StoredPicked, StoredStop, StoredSwatchSet,
+    };
     use neverliie_iced_widgets::color_picker::PickedValue;
     fn from_picked(p: &PickedValue) -> StoredPicked {
         match p {
-            PickedValue::Solid(c) => StoredPicked::Solid { rgba: color_to_rgba(*c) },
+            PickedValue::Solid(c) => StoredPicked::Solid {
+                rgba: color_to_rgba(*c),
+            },
             PickedValue::Gradient(g) => StoredPicked::Gradient {
                 stops: g
                     .stops
@@ -154,9 +156,7 @@ pub fn bg_value(
 pub fn shadow_value(
     style: &easyscanlate_model::EntryStyle,
 ) -> neverliie_iced_widgets::hex_color_input::HexColorValue {
-    neverliie_iced_widgets::hex_color_input::HexColorValue::Solid(rgba_to_color(
-        style.shadow_color,
-    ))
+    neverliie_iced_widgets::hex_color_input::HexColorValue::Solid(rgba_to_color(style.shadow_color))
 }
 
 /// The uppercase hex value of `color`, or "None" for fully transparent
@@ -282,14 +282,8 @@ mod tests {
         // 4-digit short with alpha
         assert!(parse_hex_color("#F80A").is_some());
         // None
-        assert_eq!(
-            parse_hex_color("None").unwrap().into_rgba8()[3],
-            0
-        );
-        assert_eq!(
-            parse_hex_color("none").unwrap().into_rgba8()[3],
-            0
-        );
+        assert_eq!(parse_hex_color("None").unwrap().into_rgba8()[3], 0);
+        assert_eq!(parse_hex_color("none").unwrap().into_rgba8()[3], 0);
         // invalid
         assert!(parse_hex_color("#12").is_none());
         assert!(parse_hex_color("GGGGGG").is_none());

@@ -61,7 +61,11 @@ impl OnboardingState {
             return 1.0;
         }
         // No byte weights without models-store: count-based only.
-        let done = self.models.iter().filter(|(_, _, s)| matches!(s, ModelDownloadStatus::Done)).count() as f32;
+        let done = self
+            .models
+            .iter()
+            .filter(|(_, _, s)| matches!(s, ModelDownloadStatus::Done))
+            .count() as f32;
         done / self.models.len() as f32
     }
 
@@ -77,9 +81,10 @@ impl OnboardingState {
         let mut known_totals: Vec<u64> = Vec::new();
         for (_, _, status) in &self.models {
             if let ModelDownloadStatus::Downloading { total, .. } = status
-                && *total > 0 {
-                    known_totals.push(*total);
-                }
+                && *total > 0
+            {
+                known_totals.push(*total);
+            }
         }
         if !known_totals.is_empty() {
             let avg_known = known_totals.iter().sum::<u64>() as f64 / known_totals.len() as f64;
@@ -93,7 +98,9 @@ impl OnboardingState {
                         let p = (*percent as f64 / 100.0).clamp(0.0, 1.0);
                         (w, p)
                     }
-                    ModelDownloadStatus::NotStarted | ModelDownloadStatus::Failed(_) => (avg_known, 0.0),
+                    ModelDownloadStatus::NotStarted | ModelDownloadStatus::Failed(_) => {
+                        (avg_known, 0.0)
+                    }
                 };
                 sum_w += w;
                 sum_pw += w * p;
@@ -103,12 +110,18 @@ impl OnboardingState {
             }
         }
         // fallback: count-based
-        let done = self.models.iter().filter(|(_, _, s)| matches!(s, ModelDownloadStatus::Done)).count() as f32;
+        let done = self
+            .models
+            .iter()
+            .filter(|(_, _, s)| matches!(s, ModelDownloadStatus::Done))
+            .count() as f32;
         done / self.models.len() as f32
     }
 
     pub fn is_all_done(&self) -> bool {
-        self.models.iter().all(|(_, _, s)| matches!(s, ModelDownloadStatus::Done))
+        self.models
+            .iter()
+            .all(|(_, _, s)| matches!(s, ModelDownloadStatus::Done))
     }
 
     pub fn next_missing(&self) -> Option<ModelSpec> {
@@ -170,7 +183,9 @@ fn is_present(_spec: &ModelSpec) -> bool {
 // ---------------------------------------------------------------------------
 
 pub fn handle_next(app: &mut App) -> Task<Message> {
-    let Some(state) = app.onboarding.as_mut() else { return Task::none() };
+    let Some(state) = app.onboarding.as_mut() else {
+        return Task::none();
+    };
     match state.step {
         0 => {
             state.step = 1;
@@ -194,16 +209,20 @@ pub fn handle_next(app: &mut App) -> Task<Message> {
 
 pub fn handle_back(app: &mut App) -> Task<Message> {
     if let Some(state) = app.onboarding.as_mut()
-        && state.step > 0 && state.step < 4 {
-            state.step -= 1;
-        }
+        && state.step > 0
+        && state.step < 4
+    {
+        state.step -= 1;
+    }
     Task::none()
 }
 
 pub fn handle_skip_translation(app: &mut App) -> Task<Message> {
     // Skippable translation step: dismiss any inline connect form and advance
     app.connect_modal = None;
-    let Some(state) = app.onboarding.as_mut() else { return Task::none() };
+    let Some(state) = app.onboarding.as_mut() else {
+        return Task::none();
+    };
     if state.step == 3 {
         state.step = 4;
     } else {
@@ -213,7 +232,9 @@ pub fn handle_skip_translation(app: &mut App) -> Task<Message> {
 }
 
 pub fn handle_download_all(app: &mut App) -> Task<Message> {
-    let Some(state) = app.onboarding.as_mut() else { return Task::none() };
+    let Some(state) = app.onboarding.as_mut() else {
+        return Task::none();
+    };
     if state.downloading {
         return Task::none();
     }
@@ -233,7 +254,11 @@ pub fn handle_download_all(app: &mut App) -> Task<Message> {
     if let Some(first) = missing.first() {
         for (id, _, st) in &mut state.models {
             if id == first {
-                *st = ModelDownloadStatus::Downloading { percent: 0.0, downloaded: 0, total: 0 };
+                *st = ModelDownloadStatus::Downloading {
+                    percent: 0.0,
+                    downloaded: 0,
+                    total: 0,
+                };
                 break;
             }
         }
@@ -267,16 +292,25 @@ fn download_task(id: String, sender: mpsc::Sender<(f32, u64, u64)>) -> Task<Mess
             let res = easyscanlate_models::ensure_model_with_sender(&spec, sender).await;
             (id, res.map(|_| ()))
         },
-        |(id, res)| Message::OnboardingModelDone { id, result: res.map_err(|e| e.to_string()) },
+        |(id, res)| Message::OnboardingModelDone {
+            id,
+            result: res.map_err(|e| e.to_string()),
+        },
     )
 }
 
 pub fn handle_retry(app: &mut App, id: String) -> Task<Message> {
-    let Some(state) = app.onboarding.as_mut() else { return Task::none() };
+    let Some(state) = app.onboarding.as_mut() else {
+        return Task::none();
+    };
     // Mark as downloading
     for (mid, _, st) in &mut state.models {
         if *mid == id {
-            *st = ModelDownloadStatus::Downloading { percent: 0.0, downloaded: 0, total: 0 };
+            *st = ModelDownloadStatus::Downloading {
+                percent: 0.0,
+                downloaded: 0,
+                total: 0,
+            };
             break;
         }
     }
@@ -293,7 +327,9 @@ pub fn handle_model_done(app: &mut App, id: String, result: Result<(), String>) 
         app.onboarding_rx = None;
         app.onboarding_active_id = None;
     }
-    let Some(state) = app.onboarding.as_mut() else { return Task::none() };
+    let Some(state) = app.onboarding.as_mut() else {
+        return Task::none();
+    };
     match result {
         Ok(()) => {
             for (mid, _, st) in &mut state.models {
@@ -321,8 +357,17 @@ pub fn handle_model_done(app: &mut App, id: String, result: Result<(), String>) 
     let next = state.next_missing().map(|s| s.id.to_string());
     if let Some(nid) = next {
         for (mid, _, st) in &mut state.models {
-            if *mid == nid && matches!(st, ModelDownloadStatus::NotStarted | ModelDownloadStatus::Failed(_)) {
-                *st = ModelDownloadStatus::Downloading { percent: 0.0, downloaded: 0, total: 0 };
+            if *mid == nid
+                && matches!(
+                    st,
+                    ModelDownloadStatus::NotStarted | ModelDownloadStatus::Failed(_)
+                )
+            {
+                *st = ModelDownloadStatus::Downloading {
+                    percent: 0.0,
+                    downloaded: 0,
+                    total: 0,
+                };
                 break;
             }
         }
@@ -339,9 +384,15 @@ pub fn handle_model_done(app: &mut App, id: String, result: Result<(), String>) 
 }
 
 pub fn handle_poll(app: &mut App) -> Task<Message> {
-    let Some(state) = app.onboarding.as_mut() else { return Task::none() };
-    let Some(rx_arc) = app.onboarding_rx.clone() else { return Task::none() };
-    let Some(active_id) = app.onboarding_active_id.clone() else { return Task::none() };
+    let Some(state) = app.onboarding.as_mut() else {
+        return Task::none();
+    };
+    let Some(rx_arc) = app.onboarding_rx.clone() else {
+        return Task::none();
+    };
+    let Some(active_id) = app.onboarding_active_id.clone() else {
+        return Task::none();
+    };
     // Drain all pending progress values, keep last
     let mut last: Option<(f32, u64, u64)> = None;
     if let Ok(rx) = rx_arc.lock() {
@@ -352,7 +403,11 @@ pub fn handle_poll(app: &mut App) -> Task<Message> {
     if let Some((percent, downloaded, total)) = last {
         for (mid, _, st) in &mut state.models {
             if *mid == active_id {
-                *st = ModelDownloadStatus::Downloading { percent, downloaded, total };
+                *st = ModelDownloadStatus::Downloading {
+                    percent,
+                    downloaded,
+                    total,
+                };
                 break;
             }
         }
@@ -368,7 +423,11 @@ pub fn handle_toggle_theme(_app: &mut App) -> Task<Message> {
 
 pub fn handle_font_size(_app: &mut App, inc: bool) -> Task<Message> {
     let cur = easyscanlate_settings::get(|s| s.ui_font_size);
-    let next = if inc { cur.saturating_add(1) } else { cur.saturating_sub(1) };
+    let next = if inc {
+        cur.saturating_add(1)
+    } else {
+        cur.saturating_sub(1)
+    };
     let clamped = next.clamp(8, 30);
     let _ = easyscanlate_settings::modify(|s| s.ui_font_size = clamped);
     Task::none()
@@ -392,7 +451,11 @@ pub fn handle_toggle_auto_inpaint(_app: &mut App) -> Task<Message> {
 
 pub fn handle_finish(app: &mut App) -> Task<Message> {
     // Final validation: all mandatory must be present
-    let all_done = app.onboarding.as_ref().map(|s| s.is_all_done()).unwrap_or(false);
+    let all_done = app
+        .onboarding
+        .as_ref()
+        .map(|s| s.is_all_done())
+        .unwrap_or(false);
     if !all_done {
         if let Some(s) = app.onboarding.as_mut() {
             s.error = Some("Cannot finish: models still missing".to_string());

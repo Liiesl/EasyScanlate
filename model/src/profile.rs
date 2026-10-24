@@ -34,14 +34,17 @@ impl Profile {
     }
 
     pub fn translation_of(&self, entry_id: EntryId) -> Option<&str> {
-        self.deltas.get(&entry_id).and_then(|d| d.translation.as_deref())
+        self.deltas
+            .get(&entry_id)
+            .and_then(|d| d.translation.as_deref())
     }
 
     /// Set (or clear) the translated text for an entry.
     pub fn set_translation(&mut self, entry_id: EntryId, translation: Option<String>) {
-        let delta = self.deltas.entry(entry_id).or_insert(EntryDelta {
-            translation: None,
-        });
+        let delta = self
+            .deltas
+            .entry(entry_id)
+            .or_insert(EntryDelta { translation: None });
         delta.translation = translation;
         self.prune(entry_id);
     }
@@ -62,7 +65,11 @@ impl Profile {
     }
 
     /// Reconstruct from raw parts (for persistence).
-    pub fn from_raw(id: ProfileId, name: String, deltas: std::collections::HashMap<EntryId, EntryDelta>) -> Self {
+    pub fn from_raw(
+        id: ProfileId,
+        name: String,
+        deltas: std::collections::HashMap<EntryId, EntryDelta>,
+    ) -> Self {
         Self { id, name, deltas }
     }
 
@@ -92,7 +99,9 @@ impl Default for Profiles {
             selected: ProfileId(0),
             next_id: 1,
         };
-        profiles.profiles.push(Profile::new(ProfileId(0), "Default"));
+        profiles
+            .profiles
+            .push(Profile::new(ProfileId(0), "Default"));
         profiles
     }
 }
@@ -135,10 +144,7 @@ impl Profiles {
     /// selected are forked into a fresh profile instead, keeping the source
     /// of truth (the OCR result) immutable.
     pub fn original_id(&self) -> ProfileId {
-        self.profiles
-            .first()
-            .map(|p| p.id)
-            .unwrap_or(ProfileId(0))
+        self.profiles.first().map(|p| p.id).unwrap_or(ProfileId(0))
     }
 
     /// The next unused auto-forked profile name: `Profile 1`, `Profile 2`,
@@ -147,7 +153,11 @@ impl Profiles {
         let highest = self
             .profiles
             .iter()
-            .filter_map(|p| p.name.strip_prefix("Profile ").and_then(|n| n.parse::<u64>().ok()))
+            .filter_map(|p| {
+                p.name
+                    .strip_prefix("Profile ")
+                    .and_then(|n| n.parse::<u64>().ok())
+            })
             .max()
             .unwrap_or(0);
         format!("Profile {}", highest + 1)
@@ -217,7 +227,11 @@ impl Profiles {
 
     /// Reconstruct from raw parts (for persistence).
     pub fn from_raw(profiles: Vec<Profile>, selected: ProfileId, next_id: u64) -> Self {
-        Self { profiles, selected, next_id }
+        Self {
+            profiles,
+            selected,
+            next_id,
+        }
     }
 }
 
@@ -232,8 +246,13 @@ mod tests {
         let entry = EntryId(1);
 
         assert_eq!(profiles.selected().translation_of(entry), None);
-        profiles.selected_mut().set_translation(entry, Some("こんにちは".into()));
-        assert_eq!(profiles.selected().translation_of(entry), Some("こんにちは"));
+        profiles
+            .selected_mut()
+            .set_translation(entry, Some("こんにちは".into()));
+        assert_eq!(
+            profiles.selected().translation_of(entry),
+            Some("こんにちは")
+        );
 
         profiles.select(jp);
         assert_eq!(profiles.selected().name, "JP");
@@ -244,7 +263,9 @@ mod tests {
     fn empty_delta_is_pruned() {
         let mut profiles = Profiles::default();
         let entry = EntryId(1);
-        profiles.selected_mut().set_translation(entry, Some("hi".into()));
+        profiles
+            .selected_mut()
+            .set_translation(entry, Some("hi".into()));
         profiles.selected_mut().set_translation(entry, None);
         assert!(profiles.selected().delta(entry).is_none());
     }
@@ -300,7 +321,9 @@ mod tests {
         assert_eq!(profiles.selected_id(), forked);
 
         let entry = EntryId(1);
-        profiles.selected_mut().set_translation(entry, Some("edited".into()));
+        profiles
+            .selected_mut()
+            .set_translation(entry, Some("edited".into()));
         let original = profiles
             .iter()
             .find(|p| p.id == profiles.original_id())

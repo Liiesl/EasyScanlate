@@ -1,5 +1,5 @@
-use iced::widget::text;
 use iced::Font;
+use iced::widget::text;
 use lucide_icons::Icon;
 
 /// Returns a `Text` widget rendering the given Lucide icon with the correct font.

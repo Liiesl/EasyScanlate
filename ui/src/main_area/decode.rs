@@ -11,8 +11,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use iced::widget::image::Handle;
 use iced::Task;
+use iced::widget::image::Handle;
 
 use crate::loaded::LoadedImage;
 
@@ -147,7 +147,9 @@ pub fn decode_cover(path: &str, out_w: u32, out_h: u32) -> Result<DecodedPage, S
         .into_rgba8();
     let (rw, rh) = (resized.width(), resized.height());
     if rw < out_w || rh < out_h {
-        return Err(format!("Failed to decode {path}: resize produced {rw}x{rh}"));
+        return Err(format!(
+            "Failed to decode {path}: resize produced {rw}x{rh}"
+        ));
     }
     let x = (rw - out_w) / 2;
     let y = (rh - out_h) / 2;
@@ -193,7 +195,11 @@ impl Scheduler {
 
     /// Bumps the settle generation and spawns the debounce task; `map`
     /// turns the sequence number into the app's message.
-    pub fn schedule<T>(&mut self, range: Range<usize>, map: impl Fn(u64) -> T + Send + Clone + 'static) -> Task<T>
+    pub fn schedule<T>(
+        &mut self,
+        range: Range<usize>,
+        map: impl Fn(u64) -> T + Send + Clone + 'static,
+    ) -> Task<T>
     where
         T: Send + 'static,
     {
@@ -228,7 +234,9 @@ impl Scheduler {
 
     /// Whether `index` lies outside the settled window (needs a settle).
     pub fn needs_settle(&self, index: usize, _len: usize) -> bool {
-        self.settled.as_ref().is_none_or(|range| !range.contains(&index))
+        self.settled
+            .as_ref()
+            .is_none_or(|range| !range.contains(&index))
     }
 
     /// Whether a full decode for `index` should be kept (inside the settled
@@ -302,7 +310,9 @@ impl Scheduler {
                 move |result| map(index, result),
             ));
         }
-        let keep = range.start.saturating_sub(DECODE_PRELOAD + FULL_KEEP_MARGIN)
+        let keep = range
+            .start
+            .saturating_sub(DECODE_PRELOAD + FULL_KEEP_MARGIN)
             ..range
                 .end
                 .saturating_add(DECODE_PRELOAD + FULL_KEEP_MARGIN)
@@ -354,12 +364,14 @@ impl Scheduler {
                 if path.is_empty() {
                     image.decode.thumb = Tier::Failed;
                     // Still return a trivial task that immediately reports failure? No-op for now.
-                    return Task::perform(async { Err("missing image path".to_string()) }, move |r| map(index, r));
+                    return Task::perform(
+                        async { Err("missing image path".to_string()) },
+                        move |r| map(index, r),
+                    );
                 }
-                Task::perform(
-                    decode_async(path, THUMB_DECODE_EDGE),
-                    move |result| map(index, result),
-                )
+                Task::perform(decode_async(path, THUMB_DECODE_EDGE), move |result| {
+                    map(index, result)
+                })
             })
             .collect();
         Task::batch(tasks)

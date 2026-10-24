@@ -1,22 +1,22 @@
 use std::collections::HashSet;
 
-use iced::{Task, window};
 use easyscanlate_model::{CapsMode, EntryId, EntryStyle, Quad, TextAlign};
 #[cfg(feature = "styling")]
 use easyscanlate_styling::Engine as StylingEngine;
 use easyscanlate_ui::event::{StyleField, UiEvent};
+use iced::{Task, window};
 
 use easyscanlate_ui::UiState;
 
-use super::{App, Message};
 use super::edit::seed_style_inputs;
-
-
+use super::{App, Message};
 
 // ---- UI handlers ----
 
 pub fn handle_bold(app: &mut App, bold: bool) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     // Per-font availability: ignore enabling Bold when the selected family
     // has no Bold face (button is disabled in the panel; this is defense for
     // stale events). Clearing is always allowed.
@@ -37,13 +37,18 @@ pub fn handle_bold(app: &mut App, bold: bool) -> Task<Message> {
         app.active_tab_mut().style_working.bold = false;
     }
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
 pub fn handle_italic(app: &mut App, italic: bool) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     // Mirror of `handle_bold`: ignore enabling Italic without an Italic face;
     // exclusive families switch off Bold when Italic turns on.
     if italic {
@@ -61,20 +66,28 @@ pub fn handle_italic(app: &mut App, italic: bool) -> Task<Message> {
         app.active_tab_mut().style_working.italic = false;
     }
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
 pub fn handle_font(app: &mut App, name: String) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     // Intentionally preserves `bold`/`italic`: when the new family lacks the
     // face, the panel shows the stored (e.g. auto-detected) value as disabled
     // yet visually selected instead of clearing it. Rendering degrades in
     // `styled_font_for_text`.
     app.active_tab_mut().style_working.font_family = Some(name.clone());
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     // Bundled fonts are already embedded in the binary via `include_bytes!`
     // in `main.rs` — no `font::load` needed. System-installed duplicates are
@@ -170,10 +183,15 @@ pub fn handle_font_preview_hover(app: &mut App, name: String) -> Task<Message> {
 }
 
 pub fn handle_text_align(app: &mut App, align: TextAlign) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     app.active_tab_mut().style_working.text_align = align;
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
@@ -218,7 +236,9 @@ pub fn handle_color_tab_changed(
     if tab != PickerTab::Gradient {
         return Task::none();
     }
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     let working = &mut app.active_tab_mut().style_working;
     let already_gradient = match field {
         StyleField::Fill => working.text_gradient,
@@ -250,7 +270,10 @@ pub fn handle_color_tab_changed(
         StyleField::Shadow => return Task::none(),
     }
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
@@ -331,7 +354,9 @@ fn apply_unified_value(
         app.active_tab_mut().style_picker = None;
         app.active_tab_mut().style_picker_tab = None;
     }
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     let working = &mut app.active_tab_mut().style_working;
     match (field, value) {
         (StyleField::Fill, HexColorValue::Solid(c)) => {
@@ -387,7 +412,10 @@ fn apply_unified_value(
         }
     }
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
@@ -458,118 +486,181 @@ pub fn handle_gradient_angle(
         StyleField::Shadow => return Task::none(),
     }
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
 pub fn handle_stroke_width(app: &mut App, width: f32) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     app.active_tab_mut().style_working.stroke_width = width.max(0.0);
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
 pub fn handle_bg_radius(app: &mut App, radius: f32) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     app.active_tab_mut().style_working.bg_radius = radius.max(0.0);
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
 pub fn handle_shadow_enabled(app: &mut App, enabled: bool) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     app.active_tab_mut().style_working.shadow_enabled = enabled;
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
 pub fn handle_shadow_distance(app: &mut App, distance: f32) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     app.active_tab_mut().style_working.shadow_distance = distance.clamp(0.0, 50.0);
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
 pub fn handle_shadow_angle(app: &mut App, angle: f32) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     app.active_tab_mut().style_working.shadow_angle =
         neverliie_iced_widgets::hex_color_input::normalize_angle(angle);
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
 pub fn handle_shadow_blur(app: &mut App, blur: f32) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     app.active_tab_mut().style_working.shadow_blur = blur.clamp(0.0, 20.0);
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
 pub fn handle_font_size(app: &mut App, size: f32) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     app.active_tab_mut().style_working.font_size = size.max(1.0);
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
 pub fn handle_line_height(app: &mut App, height: f32) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     app.active_tab_mut().style_working.line_height = height.clamp(0.5, 3.0);
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
 pub fn handle_letter_spacing(app: &mut App, spacing: f32) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     app.active_tab_mut().style_working.letter_spacing = spacing.clamp(0.0, 20.0);
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
 pub fn handle_auto_size(app: &mut App, enabled: bool) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     app.active_tab_mut().style_working.auto_size = enabled;
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
 pub fn handle_caps(app: &mut App, caps: CapsMode) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     app.active_tab_mut().style_working.caps = caps;
     let style = app.active_tab().style_working.clone();
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
 
 pub fn handle_preset_apply(app: &mut App, preset: usize) -> Task<Message> {
-    let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+    let Some((_index, id)) = app.active_tab_mut().selected else {
+        return Task::none();
+    };
     let Some(preset_style) = app.presets.get(preset) else {
         return Task::none();
     };
     seed_style_inputs(app, preset_style.clone());
-    let ev = app.active_tab_mut().project.set_entry_style_with_event(id, preset_style);
+    let ev = app
+        .active_tab_mut()
+        .project
+        .set_entry_style_with_event(id, preset_style);
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()
 }
@@ -602,12 +693,18 @@ pub fn handle_auto_detect(app: &mut App) -> Task<Message> {
     #[cfg(feature = "styling")]
     {
         use easyscanlate_styling::tracker::PendingSingle;
-        let Some((index, id)) = app.active_tab().selected else { return Task::none() };
+        let Some((index, id)) = app.active_tab().selected else {
+            return Task::none();
+        };
         // Validate entry still exists and get its view quad.
         let (path, quad) = {
             let tab = app.active_tab();
-            let Some(entry) = tab.project.entry(id) else { return Task::none() };
-            let Some(img) = tab.images.get(index) else { return Task::none() };
+            let Some(entry) = tab.project.entry(id) else {
+                return Task::none();
+            };
+            let Some(img) = tab.images.get(index) else {
+                return Task::none();
+            };
             let image_id = img.image_id;
             let path = tab
                 .project
@@ -632,16 +729,20 @@ pub fn handle_auto_detect(app: &mut App) -> Task<Message> {
                     .unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
                     (index, id, classified)
                 },
-                move |(idx, eid, result)| Message::Tab(tid, crate::app::TabMessage::StyleDetected(idx, eid, result)),
+                move |(idx, eid, result)| {
+                    Message::Tab(tid, crate::app::TabMessage::StyleDetected(idx, eid, result))
+                },
             );
         }
         // Engine not yet built: remember the *original* request so ready resumes single entry.
-        app.active_tab_mut().styling.set_pending_single(PendingSingle {
-            index,
-            id,
-            path,
-            quad,
-        });
+        app.active_tab_mut()
+            .styling
+            .set_pending_single(PendingSingle {
+                index,
+                id,
+                path,
+                quad,
+            });
         // Queue gate for the manual single build (weight 2) so parallel tabs
         // backpressure instead of spawning duplicate builds.
         let tid = app.active_tab().id;
@@ -649,11 +750,19 @@ pub fn handle_auto_detect(app: &mut App) -> Task<Message> {
             use crate::app::queue::{AcquireResult, JobKind, owner_of};
             // If a styling build is already in flight globally, just wait for it.
             if app.engines.is_styling_building()
-                || app.engines.queue.running_for(owner_of(tid), JobKind::Styling).is_some()
+                || app
+                    .engines
+                    .queue
+                    .running_for(owner_of(tid), JobKind::Styling)
+                    .is_some()
             {
                 return Task::none();
             }
-            match app.engines.queue.try_acquire_or_enqueue(owner_of(tid), JobKind::Styling) {
+            match app
+                .engines
+                .queue
+                .try_acquire_or_enqueue(owner_of(tid), JobKind::Styling)
+            {
                 AcquireResult::Acquired(job) => job.id,
                 AcquireResult::Queued(_, pos) => {
                     let used = app.engines.queue.used_weight();
@@ -679,7 +788,9 @@ pub fn handle_auto_detect(app: &mut App) -> Task<Message> {
                     .await
                     .unwrap_or_else(|e| Err(format!("styling build task failed: {e}")))
                 {
-                    Ok(engine) => engine_ready_msg(tid, job_id, kind, Ok(BuiltEngine::Styling(engine))),
+                    Ok(engine) => {
+                        engine_ready_msg(tid, job_id, kind, Ok(BuiltEngine::Styling(engine)))
+                    }
                     Err(e) => engine_ready_msg(tid, job_id, kind, Err(e)),
                 }
             },
@@ -688,16 +799,21 @@ pub fn handle_auto_detect(app: &mut App) -> Task<Message> {
     }
     #[cfg(not(feature = "styling"))]
     {
-        let Some((_index, id)) = app.active_tab_mut().selected else { return Task::none() };
+        let Some((_index, id)) = app.active_tab_mut().selected else {
+            return Task::none();
+        };
         let style = EntryStyle {
             bold: true,
             italic: false,
             ..EntryStyle::default()
         };
-        let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style);
+        let ev = app
+            .active_tab_mut()
+            .project
+            .set_entry_style_with_event(id, style);
         crate::app::handle_model_event(app.active_tab_mut(), ev);
-        app.active_tab_mut().status = "Applied a fake auto-detected text style (no styling model in this build)."
-            .to_string();
+        app.active_tab_mut().status =
+            "Applied a fake auto-detected text style (no styling model in this build).".to_string();
         Task::none()
     }
 }
@@ -705,13 +821,22 @@ pub fn handle_auto_detect(app: &mut App) -> Task<Message> {
 // ---- TabId-aware wrappers for Phase 2 ----
 #[cfg(feature = "styling")]
 fn collect_jobs(app: &App, tab_id: crate::app::tab::TabId) -> Vec<(usize, EntryId, String, Quad)> {
-    let tab = match app.tab_by_id(tab_id) { Some(t) => t, None => return Vec::new() };
+    let tab = match app.tab_by_id(tab_id) {
+        Some(t) => t,
+        None => return Vec::new(),
+    };
     let mut jobs: Vec<(usize, EntryId, String, Quad)> = Vec::new();
     for (index, image) in tab.images.iter().enumerate() {
         let image_id = image.image_id;
-        let path = tab.project.image(image_id).map(|m| m.path.clone()).unwrap_or_default();
+        let path = tab
+            .project
+            .image(image_id)
+            .map(|m| m.path.clone())
+            .unwrap_or_default();
         for entry in tab.project.visible_for(image_id).collect::<Vec<_>>() {
-            if tab.styling.is_done(index, entry.id) { continue; }
+            if tab.styling.is_done(index, entry.id) {
+                continue;
+            }
             jobs.push((index, entry.id, path.clone(), tab.project.view_quad(entry)));
         }
     }
@@ -722,18 +847,38 @@ pub fn classify(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Message> 
     // queue gate — weight 2, backfill + priority (cap 5)
     {
         use crate::app::queue::{AcquireResult, JobKind, owner_of};
-        let already_reserved = app.engines.queue.running_for(owner_of(tab_id), JobKind::Styling).is_some();
+        let already_reserved = app
+            .engines
+            .queue
+            .running_for(owner_of(tab_id), JobKind::Styling)
+            .is_some();
         if !already_reserved {
-            let idx_tmp = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none()};
-            match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), JobKind::Styling) {
-                AcquireResult::Acquired(_) => {},
+            let idx_tmp = match app.tabs.iter().position(|t| t.id == tab_id) {
+                Some(i) => i,
+                None => return Task::none(),
+            };
+            match app
+                .engines
+                .queue
+                .try_acquire_or_enqueue(owner_of(tab_id), JobKind::Styling)
+            {
+                AcquireResult::Acquired(_) => {}
                 AcquireResult::Queued(_, pos) => {
-                    app.tabs[idx_tmp].status = format!("Queued {} (pos {}, pool {}/{}) ...", JobKind::Styling.label(), pos, app.engines.queue.used_weight(), crate::app::queue::POOL_CAPACITY);
+                    app.tabs[idx_tmp].status = format!(
+                        "Queued {} (pos {}, pool {}/{}) ...",
+                        JobKind::Styling.label(),
+                        pos,
+                        app.engines.queue.used_weight(),
+                        crate::app::queue::POOL_CAPACITY
+                    );
                     // mark pipeline active if deferred chain expected
-                    let deferred = easyscanlate_settings::get(|s| s.auto_inpaint) && cfg!(feature = "inpaint");
+                    let deferred =
+                        easyscanlate_settings::get(|s| s.auto_inpaint) && cfg!(feature = "inpaint");
                     if deferred {
                         #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-                        { app.tabs[idx_tmp].pipeline_active = true; }
+                        {
+                            app.tabs[idx_tmp].pipeline_active = true;
+                        }
                     }
                     return Task::none();
                 }
@@ -741,7 +886,10 @@ pub fn classify(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Message> 
         }
     }
     let deferred = easyscanlate_settings::get(|s| s.auto_inpaint) && cfg!(feature = "inpaint");
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     let engine_opt = app.engines.styling.clone();
     match engine_opt {
         Some(engine) => start_jobs(app, tab_id, engine, deferred),
@@ -749,13 +897,22 @@ pub fn classify(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Message> 
             app.engines.mark_styling_building();
             if deferred {
                 #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-                { app.tabs[idx].pipeline_active = true; }
+                {
+                    app.tabs[idx].pipeline_active = true;
+                }
             }
-            app.tabs[idx].status = format!("Loading the styling model... pool {}/{}", app.engines.queue.used_weight(), crate::app::queue::POOL_CAPACITY);
+            app.tabs[idx].status = format!(
+                "Loading the styling model... pool {}/{}",
+                app.engines.queue.used_weight(),
+                crate::app::queue::POOL_CAPACITY
+            );
             let job_id = app
                 .engines
                 .queue
-                .running_for(crate::app::queue::owner_of(tab_id), crate::app::queue::JobKind::Styling)
+                .running_for(
+                    crate::app::queue::owner_of(tab_id),
+                    crate::app::queue::JobKind::Styling,
+                )
                 .map(|j| j.id)
                 .unwrap_or(0);
             let tid = tab_id;
@@ -768,7 +925,9 @@ pub fn classify(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Message> 
                         .await
                         .unwrap_or_else(|e| Err(format!("styling build task failed: {e}")))
                     {
-                        Ok(engine) => engine_ready_msg(tid, job_id, kind, Ok(BuiltEngine::Styling(engine))),
+                        Ok(engine) => {
+                            engine_ready_msg(tid, job_id, kind, Ok(BuiltEngine::Styling(engine)))
+                        }
                         Err(e) => engine_ready_msg(tid, job_id, kind, Err(e)),
                     }
                 },
@@ -778,84 +937,151 @@ pub fn classify(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Message> 
     }
 }
 #[cfg(feature = "styling")]
-fn start_jobs(app: &mut App, tab_id: crate::app::tab::TabId, engine: StylingEngine, deferred: bool) -> Task<Message> {
+fn start_jobs(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    engine: StylingEngine,
+    deferred: bool,
+) -> Task<Message> {
     let jobs = collect_jobs(app, tab_id);
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     if jobs.is_empty() {
         if deferred {
             #[cfg(all(feature = "styling", feature = "inpaint"))]
-            { return super::pipeline::dispatch_inpaint(app, tab_id, Vec::new()); }
+            {
+                return super::pipeline::dispatch_inpaint(app, tab_id, Vec::new());
+            }
         }
         return Task::none();
     }
-    for (index, id, _, _) in &jobs { app.tabs[idx].styling.mark_done(*index, *id); }
+    for (index, id, _, _) in &jobs {
+        app.tabs[idx].styling.mark_done(*index, *id);
+    }
     if deferred {
         #[cfg(all(feature = "styling", feature = "inpaint"))]
         {
             app.tabs[idx].pipeline_style_pending = jobs.len();
             app.tabs[idx].pipeline_style_results = Vec::with_capacity(jobs.len());
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-            { app.tabs[idx].pipeline_active = true; }
-            app.tabs[idx].status = format!("Classifying {} entries (deferred for bg-aware inpaint)...", jobs.len());
-            let tasks: Vec<Task<Message>> = jobs.into_iter().map(|(index, id, path, quad)| {
-                let engine = engine.clone();
-                let qc = quad;
-                let tid = tab_id;
-                Task::perform(
-                    async move {
-                        let res = tokio::task::spawn_blocking(move || engine.classify_entry_with_prediction(&path, &qc)).await.unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
-                        (index, id, res)
-                    },
-                    move |(index, id, result)| Message::Tab(tid, crate::app::TabMessage::PipelineStyleDetected(index, id, result)),
-                )
-            }).collect();
+            {
+                app.tabs[idx].pipeline_active = true;
+            }
+            app.tabs[idx].status = format!(
+                "Classifying {} entries (deferred for bg-aware inpaint)...",
+                jobs.len()
+            );
+            let tasks: Vec<Task<Message>> = jobs
+                .into_iter()
+                .map(|(index, id, path, quad)| {
+                    let engine = engine.clone();
+                    let qc = quad;
+                    let tid = tab_id;
+                    Task::perform(
+                        async move {
+                            let res = tokio::task::spawn_blocking(move || {
+                                engine.classify_entry_with_prediction(&path, &qc)
+                            })
+                            .await
+                            .unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
+                            (index, id, res)
+                        },
+                        move |(index, id, result)| {
+                            Message::Tab(
+                                tid,
+                                crate::app::TabMessage::PipelineStyleDetected(index, id, result),
+                            )
+                        },
+                    )
+                })
+                .collect();
             return Task::batch(tasks);
         }
     }
-    let tasks: Vec<Task<Message>> = jobs.into_iter().map(|(index, id, path, quad)| {
-        let engine = engine.clone();
-        let tid = tab_id;
-        Task::perform(
-            async move {
-                let classified = tokio::task::spawn_blocking(move || engine.classify_entry(&path, &quad)).await.unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
-                (index, id, classified)
-            },
-            move |(index, id, result)| Message::Tab(tid, crate::app::TabMessage::StyleDetected(index, id, result)),
-        )
-    }).collect();
+    let tasks: Vec<Task<Message>> = jobs
+        .into_iter()
+        .map(|(index, id, path, quad)| {
+            let engine = engine.clone();
+            let tid = tab_id;
+            Task::perform(
+                async move {
+                    let classified =
+                        tokio::task::spawn_blocking(move || engine.classify_entry(&path, &quad))
+                            .await
+                            .unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
+                    (index, id, classified)
+                },
+                move |(index, id, result)| {
+                    Message::Tab(
+                        tid,
+                        crate::app::TabMessage::StyleDetected(index, id, result),
+                    )
+                },
+            )
+        })
+        .collect();
     Task::batch(tasks)
 }
 #[cfg(feature = "styling")]
-pub fn handle_styling_ready(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<StylingEngine, String>) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+pub fn handle_styling_ready(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    result: Result<StylingEngine, String>,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     match result {
         Ok(engine) => {
             let is_pipeline = {
                 #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-                { app.tabs[idx].pipeline_active }
+                {
+                    app.tabs[idx].pipeline_active
+                }
                 #[cfg(not(all(feature = "styling", feature = "inpaint", feature = "segment")))]
-                { false }
+                {
+                    false
+                }
             };
             let was_building = app.engines.set_styling_engine(engine.clone());
-            if !was_building { return Task::none(); }
+            if !was_building {
+                return Task::none();
+            }
             if let Some(pending) = app.tabs[idx].styling.take_pending_single() {
-                let (pi, pid, ppath, pquad) = (pending.index, pending.id, pending.path, pending.quad);
+                let (pi, pid, ppath, pquad) =
+                    (pending.index, pending.id, pending.path, pending.quad);
                 app.tabs[idx].styling.mark_done(pi, pid);
                 let eng = engine.clone();
                 let tid = tab_id;
                 return Task::perform(
                     async move {
-                        let classified = tokio::task::spawn_blocking(move || eng.classify_entry(&ppath, &pquad)).await.unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
+                        let classified =
+                            tokio::task::spawn_blocking(move || eng.classify_entry(&ppath, &pquad))
+                                .await
+                                .unwrap_or_else(|e| Err(format!("styling task cancelled: {e}")));
                         (pi, pid, classified)
                     },
-                    move |(index, id, result)| Message::Tab(tid, crate::app::TabMessage::StyleDetected(index, id, result)),
+                    move |(index, id, result)| {
+                        Message::Tab(
+                            tid,
+                            crate::app::TabMessage::StyleDetected(index, id, result),
+                        )
+                    },
                 );
             }
             if is_pipeline {
                 #[cfg(all(feature = "styling", feature = "inpaint"))]
-                { start_jobs(app, tab_id, engine, true)}
+                {
+                    start_jobs(app, tab_id, engine, true)
+                }
                 #[cfg(not(all(feature = "styling", feature = "inpaint")))]
-                { let _ = engine; return Task::none(); }
+                {
+                    let _ = engine;
+                    return Task::none();
+                }
             } else {
                 start_jobs(app, tab_id, engine, false)
             }
@@ -865,9 +1091,14 @@ pub fn handle_styling_ready(app: &mut App, tab_id: crate::app::tab::TabId, resul
             app.tabs[idx].styling.clear_pending_single();
             app.tabs[idx].status = e.clone();
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-            { app.tabs[idx].pipeline_active = false; }
+            {
+                app.tabs[idx].pipeline_active = false;
+            }
             // free queue weight (build failed) and promote
-            app.engines.queue.complete(crate::app::queue::owner_of(tab_id), crate::app::queue::JobKind::Styling);
+            app.engines.queue.complete(
+                crate::app::queue::owner_of(tab_id),
+                crate::app::queue::JobKind::Styling,
+            );
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
             return Task::batch([promote, super::error::show("Styling couldn't start", e)]);
@@ -875,10 +1106,26 @@ pub fn handle_styling_ready(app: &mut App, tab_id: crate::app::tab::TabId, resul
     }
 }
 #[cfg(feature = "styling")]
-pub fn handle_style_detected(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, id: EntryId, result: Result<EntryStyle, String>) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+pub fn handle_style_detected(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    index: usize,
+    id: EntryId,
+    result: Result<EntryStyle, String>,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     // For single style detect (manual), free queue weight after completion
-    let is_queued_style = app.engines.queue.running_for(crate::app::queue::owner_of(tab_id), crate::app::queue::JobKind::Styling).is_some();
+    let is_queued_style = app
+        .engines
+        .queue
+        .running_for(
+            crate::app::queue::owner_of(tab_id),
+            crate::app::queue::JobKind::Styling,
+        )
+        .is_some();
     match result {
         Ok(style) => {
             if index < app.tabs[idx].images.len() {
@@ -888,14 +1135,19 @@ pub fn handle_style_detected(app: &mut App, tab_id: crate::app::tab::TabId, inde
                 app.tabs[idx].status = "Applied auto-detected text style.".to_string();
             }
         }
-        Err(e) => { app.tabs[idx].status = format!("Style detect failed for {}:{:?}: {}", index, id, e); }
+        Err(e) => {
+            app.tabs[idx].status = format!("Style detect failed for {}:{:?}: {}", index, id, e);
+        }
     }
     if is_queued_style {
         // Check if this was the last pending single? For single detect, we free now.
         // For bulk pipeline, free is handled in pipeline handler's pending==0.
         // Detect bulk by pipeline_style_pending >0 — don't free yet
         if app.tabs[idx].pipeline_style_pending == 0 {
-            app.engines.queue.complete(crate::app::queue::owner_of(tab_id), crate::app::queue::JobKind::Styling);
+            app.engines.queue.complete(
+                crate::app::queue::owner_of(tab_id),
+                crate::app::queue::JobKind::Styling,
+            );
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
             return promote;
@@ -904,19 +1156,43 @@ pub fn handle_style_detected(app: &mut App, tab_id: crate::app::tab::TabId, inde
     Task::none()
 }
 #[cfg(all(feature = "styling", feature = "inpaint"))]
-pub fn handle_pipeline_style_detected(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, id: EntryId, result: Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+pub fn handle_pipeline_style_detected(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    index: usize,
+    id: EntryId,
+    result: Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     let (quad, path) = {
         let tab = &app.tabs[idx];
-        let quad = tab.project.entry_including_deleted(id).map(|e| tab.project.view_quad(e)).unwrap_or(Quad { points: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]] });
-        let path = tab.images.get(index).and_then(|img| tab.project.image(img.image_id).map(|m| m.path.clone())).unwrap_or_default();
+        let quad = tab
+            .project
+            .entry_including_deleted(id)
+            .map(|e| tab.project.view_quad(e))
+            .unwrap_or(Quad {
+                points: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            });
+        let path = tab
+            .images
+            .get(index)
+            .and_then(|img| tab.project.image(img.image_id).map(|m| m.path.clone()))
+            .unwrap_or_default();
         (quad, path)
     };
-    app.tabs[idx].pipeline_style_results.push((index, id, result, quad, path));
+    app.tabs[idx]
+        .pipeline_style_results
+        .push((index, id, result, quad, path));
     app.tabs[idx].pipeline_style_pending = app.tabs[idx].pipeline_style_pending.saturating_sub(1);
     if app.tabs[idx].pipeline_style_pending == 0 {
         // style bulk done — free queue weight for Style
-        app.engines.queue.complete(crate::app::queue::owner_of(tab_id), crate::app::queue::JobKind::Styling);
+        app.engines.queue.complete(
+            crate::app::queue::owner_of(tab_id),
+            crate::app::queue::JobKind::Styling,
+        );
         crate::app::queue::refresh_queued_statuses(app);
         let buffered = std::mem::take(&mut app.tabs[idx].pipeline_style_results);
         // dispatch_inpaint will enqueue inpaint jobs via queue (backfill + priority)

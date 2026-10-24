@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::{is_custom, is_local, Provider};
+use super::{Provider, is_custom, is_local};
 
 /// Schema version of the cached files. A mismatch means ignore the file.
 const CACHE_VERSION: u32 = 1;

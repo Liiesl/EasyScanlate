@@ -16,13 +16,13 @@
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-use image::{Rgb, RgbImage};
-use imageproc::geometric_transformations::{warp_into, Border, Interpolation, Projection};
-use ndarray::{Array4, ArrayD};
-use ort::session::builder::GraphOptimizationLevel;
-use ort::session::Session;
-use ort::value::TensorRef;
 use easyscanlate_model::{EntryStyle, Quad};
+use image::{Rgb, RgbImage};
+use imageproc::geometric_transformations::{Border, Interpolation, Projection, warp_into};
+use ndarray::{Array4, ArrayD};
+use ort::session::Session;
+use ort::session::builder::GraphOptimizationLevel;
+use ort::value::TensorRef;
 
 pub mod tracker;
 
@@ -112,11 +112,7 @@ impl Engine {
     /// input, and classifies the crop. The model was trained on flat
     /// stretched crops, so rotated quads are de-skewed first and no
     /// aspect-ratio padding is applied.
-    pub fn predict_entry(
-        &self,
-        path: &str,
-        quad: &Quad,
-    ) -> Result<StylePrediction, String> {
+    pub fn predict_entry(&self, path: &str, quad: &Quad) -> Result<StylePrediction, String> {
         let image = image::ImageReader::open(path)
             .map_err(|e| format!("Failed to open {path}: {e}"))?
             .with_guessed_format()
@@ -186,7 +182,11 @@ fn crop_aabb(image: &RgbImage, quad: &Quad) -> RgbImage {
 /// the homography cannot be solved, so the caller can fall back to the AABB.
 fn warp_quad(image: &RgbImage, quad: &Quad) -> Option<RgbImage> {
     let [p0, p1, p2, p3] = quad.points;
-    if !quad.points.iter().all(|p| p[0].is_finite() && p[1].is_finite()) {
+    if !quad
+        .points
+        .iter()
+        .all(|p| p[0].is_finite() && p[1].is_finite())
+    {
         return None;
     }
     let dist = |a: [f32; 2], b: [f32; 2]| ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt();
@@ -196,8 +196,18 @@ fn warp_quad(image: &RgbImage, quad: &Quad) -> Option<RgbImage> {
     // fallbacks) should not allocate a full-res warp before the 160x64
     // squish.
     let (w, h) = (w.clamp(1, 1024), h.clamp(1, 1024));
-    let from = [(p0[0], p0[1]), (p1[0], p1[1]), (p2[0], p2[1]), (p3[0], p3[1])];
-    let to = [(0.0, 0.0), (w as f32, 0.0), (w as f32, h as f32), (0.0, h as f32)];
+    let from = [
+        (p0[0], p0[1]),
+        (p1[0], p1[1]),
+        (p2[0], p2[1]),
+        (p3[0], p3[1]),
+    ];
+    let to = [
+        (0.0, 0.0),
+        (w as f32, 0.0),
+        (w as f32, h as f32),
+        (0.0, h as f32),
+    ];
     let projection = Projection::from_control_points(from, to)?;
     let mut out = RgbImage::new(w, h);
     warp_into(
@@ -295,7 +305,12 @@ fn read_flags(out: &ArrayD<f32>) -> [bool; 5] {
 /// Parses the eight ordered model outputs into a [`StylePrediction`]. Missing
 /// outputs (unexpected model) fall back to neutral values instead of panicking.
 fn parse_outputs(outputs: &[ArrayD<f32>]) -> StylePrediction {
-    let get = |i: usize| outputs.get(i).cloned().unwrap_or_else(|| ArrayD::zeros(vec![0]));
+    let get = |i: usize| {
+        outputs
+            .get(i)
+            .cloned()
+            .unwrap_or_else(|| ArrayD::zeros(vec![0]))
+    };
 
     let [bold, italic, stroke, shadow, glow] = read_flags(&get(0));
     let bg_type_index = get(1)
@@ -342,7 +357,12 @@ impl StylePrediction {
         let mut style = base;
         style.bold = self.bold;
         style.italic = self.italic;
-        style.text_color = [self.text_color[0], self.text_color[1], self.text_color[2], 255];
+        style.text_color = [
+            self.text_color[0],
+            self.text_color[1],
+            self.text_color[2],
+            255,
+        ];
         if self.stroke {
             style.stroke_color = [
                 self.effect_color[0],
@@ -399,7 +419,12 @@ mod tests {
     fn crop_quad_clamps_to_image_bounds() {
         let image = RgbImage::from_pixel(100, 50, Rgb([1, 2, 3]));
         let quad = Quad {
-            points: [[-10.0, -10.0], [200.0, -10.0], [200.0, 300.0], [-10.0, 300.0]],
+            points: [
+                [-10.0, -10.0],
+                [200.0, -10.0],
+                [200.0, 300.0],
+                [-10.0, 300.0],
+            ],
         };
         let crop = crop_quad(&image, &quad);
         assert_eq!(crop.dimensions(), (100, 50), "clamped to the whole image");
@@ -467,15 +492,13 @@ mod tests {
     #[test]
     fn read_flags_thresholds_sigmoid_at_0_5() {
         let out: ArrayD<f32> =
-            ArrayD::from_shape_vec(vec![1, 5], vec![0.0, 1.0, -1.0, 10.0, -10.0])
-                .unwrap();
+            ArrayD::from_shape_vec(vec![1, 5], vec![0.0, 1.0, -1.0, 10.0, -10.0]).unwrap();
         assert_eq!(read_flags(&out), [false, true, false, true, false]);
     }
 
     #[test]
     fn read_rgb_maps_normalized_to_8bit() {
-        let out: ArrayD<f32> =
-            ArrayD::from_shape_vec(vec![1, 3], vec![0.0, 0.5, 1.0]).unwrap();
+        let out: ArrayD<f32> = ArrayD::from_shape_vec(vec![1, 3], vec![0.0, 0.5, 1.0]).unwrap();
         assert_eq!(read_rgb(&out), [0, 128, 255]);
     }
 
@@ -549,7 +572,10 @@ mod tests {
             bg_direction: [0.0, 1.0],
         };
         let style = prediction.to_entry_style(base.clone());
-        assert_eq!(style.bg_color, base.bg_color, "no single color for gradients");
+        assert_eq!(
+            style.bg_color, base.bg_color,
+            "no single color for gradients"
+        );
         assert_eq!(style.text_color, [1, 2, 3, 255]);
     }
 
@@ -572,7 +598,11 @@ mod tests {
             bg_direction: [0.0, 0.0],
         };
         let style = prediction.to_entry_style(base);
-        assert_eq!(style.bg_color, [0, 0, 0, 0], "artwork bg must be transparent");
+        assert_eq!(
+            style.bg_color,
+            [0, 0, 0, 0],
+            "artwork bg must be transparent"
+        );
         assert_eq!(style.text_color, [1, 2, 3, 255]);
     }
 }

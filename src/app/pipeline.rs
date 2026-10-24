@@ -1,14 +1,14 @@
-use iced::Task;
-#[cfg(all(feature = "styling", feature = "inpaint"))]
-use easyscanlate_model::EntryStyle;
 #[cfg(all(feature = "styling", feature = "inpaint"))]
 use super::tab::PipelineStyleItem;
+#[cfg(all(feature = "styling", feature = "inpaint"))]
+use easyscanlate_model::EntryStyle;
 #[cfg(feature = "inpaint")]
 use easyscanlate_settings::InpaintBackend;
+use iced::Task;
 
-use super::{App, Message};
 #[cfg(feature = "inpaint")]
-use super::{AutoInpaintJob};
+use super::AutoInpaintJob;
+use super::{App, Message};
 
 #[cfg(all(feature = "styling", feature = "inpaint"))]
 pub fn dispatch_inpaint(
@@ -16,7 +16,10 @@ pub fn dispatch_inpaint(
     tab_id: crate::app::tab::TabId,
     buffered: Vec<PipelineStyleItem>,
 ) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     let results = if buffered.is_empty() && app.tabs[idx].pipeline_style_results.is_empty() {
         Vec::new()
     } else if !buffered.is_empty() {
@@ -29,7 +32,9 @@ pub fn dispatch_inpaint(
     let mut lama_jobs: Vec<AutoInpaintJob> = Vec::new();
     let mut aot_jobs: Vec<AutoInpaintJob> = Vec::new();
     let effective_model = easyscanlate_settings::get(|s| {
-        if !s.auto_style_detect && s.auto_inpaint_model == easyscanlate_settings::AutoInpaintModel::Mixed {
+        if !s.auto_style_detect
+            && s.auto_inpaint_model == easyscanlate_settings::AutoInpaintModel::Mixed
+        {
             easyscanlate_settings::AutoInpaintModel::Telea
         } else {
             s.auto_inpaint_model
@@ -107,7 +112,8 @@ pub fn dispatch_inpaint(
             }),
         };
         if let Some(backend) = need {
-            let parts = super::inpaint::split_quad_global(quad, index, &page_ws, &page_hs, &offsets);
+            let parts =
+                super::inpaint::split_quad_global(quad, index, &page_ws, &page_hs, &offsets);
             if parts.is_empty() {
                 let [bx0, by0, bx1, by1] = quad.bounds();
                 eprintln!(
@@ -128,7 +134,12 @@ pub fn dispatch_inpaint(
                         tquad.bounds(),
                     );
                 }
-                let job = AutoInpaintJob { index: page_idx, id, path: tpath, quad: tquad };
+                let job = AutoInpaintJob {
+                    index: page_idx,
+                    id,
+                    path: tpath,
+                    quad: tquad,
+                };
                 match backend {
                     InpaintBackend::Telea => telea_jobs.push(job),
                     InpaintBackend::Harmonic => harmonic_jobs.push(job),
@@ -145,23 +156,44 @@ pub fn dispatch_inpaint(
     app.tabs[idx].pipeline_style_pending = 0;
     let mut tasks: Vec<Task<Message>> = Vec::new();
     if !telea_jobs.is_empty() {
-        tasks.push(super::inpaint::dispatch_auto(app, tab_id, telea_jobs, InpaintBackend::Telea));
+        tasks.push(super::inpaint::dispatch_auto(
+            app,
+            tab_id,
+            telea_jobs,
+            InpaintBackend::Telea,
+        ));
     }
     if !harmonic_jobs.is_empty() {
-        tasks.push(super::inpaint::dispatch_auto(app, tab_id, harmonic_jobs, InpaintBackend::Harmonic));
+        tasks.push(super::inpaint::dispatch_auto(
+            app,
+            tab_id,
+            harmonic_jobs,
+            InpaintBackend::Harmonic,
+        ));
     }
     if !lama_jobs.is_empty() {
-        tasks.push(super::inpaint::dispatch_auto(app, tab_id, lama_jobs, InpaintBackend::Lama));
+        tasks.push(super::inpaint::dispatch_auto(
+            app,
+            tab_id,
+            lama_jobs,
+            InpaintBackend::Lama,
+        ));
     }
     if !aot_jobs.is_empty() {
-        tasks.push(super::inpaint::dispatch_auto(app, tab_id, aot_jobs, InpaintBackend::Aot));
+        tasks.push(super::inpaint::dispatch_auto(
+            app,
+            tab_id,
+            aot_jobs,
+            InpaintBackend::Aot,
+        ));
     }
     if tasks.is_empty() {
         #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
         {
             app.tabs[idx].pipeline_active = false;
         }
-        app.tabs[idx].status = "Pipeline done: styles applied (solid bg, no inpaint needed).".to_string();
+        app.tabs[idx].status =
+            "Pipeline done: styles applied (solid bg, no inpaint needed).".to_string();
         return Task::none();
     }
     Task::batch(tasks)

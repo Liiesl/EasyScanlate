@@ -12,13 +12,25 @@ pub fn handle_reorder(app: &mut App) -> Task<Message> {
         app.active_tab_mut().status = "No images to reorder.".to_string();
         return Task::none();
     }
-    let ids: Vec<_> = app.active_tab().project.images().iter().map(|m| m.id).collect();
+    let ids: Vec<_> = app
+        .active_tab()
+        .project
+        .images()
+        .iter()
+        .map(|m| m.id)
+        .collect();
     if ids.is_empty() {
-        let ev = app.active_tab_mut().project.reorder_entries_for_image_with_event(easyscanlate_model::ImageId(0));
+        let ev = app
+            .active_tab_mut()
+            .project
+            .reorder_entries_for_image_with_event(easyscanlate_model::ImageId(0));
         crate::app::state::handle_model_event(app.active_tab_mut(), ev);
     } else {
         for image_id in ids {
-            let ev = app.active_tab_mut().project.reorder_entries_for_image_with_event(image_id);
+            let ev = app
+                .active_tab_mut()
+                .project
+                .reorder_entries_for_image_with_event(image_id);
             crate::app::state::handle_model_event(app.active_tab_mut(), ev);
         }
     }

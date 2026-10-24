@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use iced::widget::{button, column, container, row, scrollable, text};
-use iced::{Color, Element, Length, Fill as FillLength};
+use iced::{Color, Element, Fill as FillLength, Length};
 use lucide_icons::Icon;
 use neverliie_iced_widgets::ellipsis_text::EllipsisText;
 
@@ -187,22 +187,22 @@ fn project_row<'a>(
             .width(Length::Fixed(scale::s(REL_W))),
     );
     button(cells)
-    .width(Length::Fill)
-    .padding(scale::s(10.0))
-    .style(|_, status| {
-        let bg = if status == iced::widget::button::Status::Hovered {
-            Color::from_rgba8(255, 255, 255, 0.08)
-        } else {
-            Color::TRANSPARENT
-        };
-        iced::widget::button::Style {
-            background: Some(bg.into()),
-            border: iced::Border::default().rounded(scale::s(6.0)),
-            ..Default::default()
-        }
-    })
-    .on_press(UiEvent::HomeRecentClicked(open_path))
-    .into()
+        .width(Length::Fill)
+        .padding(scale::s(10.0))
+        .style(|_, status| {
+            let bg = if status == iced::widget::button::Status::Hovered {
+                Color::from_rgba8(255, 255, 255, 0.08)
+            } else {
+                Color::TRANSPARENT
+            };
+            iced::widget::button::Style {
+                background: Some(bg.into()),
+                border: iced::Border::default().rounded(scale::s(6.0)),
+                ..Default::default()
+            }
+        })
+        .on_press(UiEvent::HomeRecentClicked(open_path))
+        .into()
 }
 
 fn empty_hint(msg: &str) -> Element<'_, UiEvent> {
@@ -232,13 +232,11 @@ pub fn view<'a, S: crate::state::UiState + ?Sized>(state: &'a S) -> Element<'a, 
     } else {
         "Recent".to_string()
     };
-    let mut nav = column![
-        nav_button(
-            recent_label,
-            selection == HomeSelection::Recent,
-            UiEvent::HomeSelectRecent,
-        ),
-    ]
+    let mut nav = column![nav_button(
+        recent_label,
+        selection == HomeSelection::Recent,
+        UiEvent::HomeSelectRecent,
+    ),]
     .spacing(scale::s(4.0))
     .width(Length::Fill);
 
@@ -286,8 +284,13 @@ pub fn view<'a, S: crate::state::UiState + ?Sized>(state: &'a S) -> Element<'a, 
     // --- Sidebar bottom: New Project (full width + icon), then Open + cog ---
     let new_btn = button(
         row![
-            crate::icon::lucide(Icon::Plus).size(scale::s(14.0)).center(),
-            text("New Project").size(scale::s(13.0)).width(FillLength).center(),
+            crate::icon::lucide(Icon::Plus)
+                .size(scale::s(14.0))
+                .center(),
+            text("New Project")
+                .size(scale::s(13.0))
+                .width(FillLength)
+                .center(),
         ]
         .spacing(scale::s(8.0))
         .align_y(iced::Alignment::Center),
@@ -298,7 +301,9 @@ pub fn view<'a, S: crate::state::UiState + ?Sized>(state: &'a S) -> Element<'a, 
     .on_press(UiEvent::HomeNewProject);
     let open_btn = button(
         row![
-            crate::icon::lucide(Icon::FolderOpen).size(scale::s(14.0)).center(),
+            crate::icon::lucide(Icon::FolderOpen)
+                .size(scale::s(14.0))
+                .center(),
             text("Open Project").size(scale::s(13.0)),
         ]
         .spacing(scale::s(8.0))
@@ -400,27 +405,42 @@ pub fn view<'a, S: crate::state::UiState + ?Sized>(state: &'a S) -> Element<'a, 
     // series-filtered view (implied by the selection).
     let show_series = matches!(&selection, HomeSelection::Recent);
     let mut header_cells = row![
-        text("Name").size(scale::s(12.0)).color(Color::WHITE).width(FillLength),
-        text("Size").size(scale::s(12.0)).color(Color::WHITE).width(Length::Fixed(scale::s(SIZE_W))),
-        text("Path").size(scale::s(12.0)).color(Color::WHITE).width(Length::FillPortion(2)),
+        text("Name")
+            .size(scale::s(12.0))
+            .color(Color::WHITE)
+            .width(FillLength),
+        text("Size")
+            .size(scale::s(12.0))
+            .color(Color::WHITE)
+            .width(Length::Fixed(scale::s(SIZE_W))),
+        text("Path")
+            .size(scale::s(12.0))
+            .color(Color::WHITE)
+            .width(Length::FillPortion(2)),
     ]
     .spacing(scale::s(8.0));
     if show_series {
         header_cells = header_cells.push(
-            text("Series").size(scale::s(12.0)).color(Color::WHITE).width(Length::Fixed(scale::s(SERIES_W))),
+            text("Series")
+                .size(scale::s(12.0))
+                .color(Color::WHITE)
+                .width(Length::Fixed(scale::s(SERIES_W))),
         );
     }
     header_cells = header_cells.push(
-        text("Last Opened").size(scale::s(12.0)).color(Color::WHITE).width(Length::Fixed(scale::s(REL_W))),
+        text("Last Opened")
+            .size(scale::s(12.0))
+            .color(Color::WHITE)
+            .width(Length::Fixed(scale::s(REL_W))),
     );
     let header = container(header_cells)
-    .padding(scale::s(12.0))
-    .width(Length::Fill)
-    .style(|_| container::Style {
-        background: Some(Color::from_rgba8(60, 60, 65, 0.9).into()),
-        border: iced::Border::default().rounded(scale::s(8.0)),
-        ..Default::default()
-    });
+        .padding(scale::s(12.0))
+        .width(Length::Fill)
+        .style(|_| container::Style {
+            background: Some(Color::from_rgba8(60, 60, 65, 0.9).into()),
+            border: iced::Border::default().rounded(scale::s(8.0)),
+            ..Default::default()
+        });
 
     let main = container(
         column![
@@ -438,7 +458,9 @@ pub fn view<'a, S: crate::state::UiState + ?Sized>(state: &'a S) -> Element<'a, 
         ..Default::default()
     });
 
-    let content = row![sidebar, main].spacing(scale::s(12.0)).height(Length::Fill);
+    let content = row![sidebar, main]
+        .spacing(scale::s(12.0))
+        .height(Length::Fill);
 
     container(content)
         .padding(scale::s(16.0))

@@ -61,9 +61,7 @@ fn model_matches(query: &str, model: &str) -> bool {
     }
     let q_norm = normalize_for_search(query);
     let m_norm = normalize_for_search(model);
-    q_norm
-        .split_whitespace()
-        .all(|tok| m_norm.contains(tok))
+    q_norm.split_whitespace().all(|tok| m_norm.contains(tok))
 }
 
 pub fn view<'a, S: UiState + ?Sized>(
@@ -80,10 +78,13 @@ pub fn view<'a, S: UiState + ?Sized>(
             button(crate::icon::lucide(Icon::X).size(scale::s(14.0)).center())
                 .padding(scale::s(4.0))
                 .style(crate::panel::button_style)
-            .on_press(UiEvent::ManageModelsClose),
-            container(text("Close").size(scale::s(11.0))).padding(scale::s(6.0)).style(container::rounded_box),
+                .on_press(UiEvent::ManageModelsClose),
+            container(text("Close").size(scale::s(11.0)))
+                .padding(scale::s(6.0))
+                .style(container::rounded_box),
             tooltip::Position::Top
-        ).gap(scale::s(4.0)),
+        )
+        .gap(scale::s(4.0)),
     ];
 
     let description = column![
@@ -208,7 +209,9 @@ pub fn view<'a, S: UiState + ?Sized>(
                 let pid = provider_id.clone();
                 let mid = model_id.clone();
                 let model_row: Element<'_, UiEvent> = row![
-                    text(model_name.clone()).size(scale::s(12.0)).width(FillLength),
+                    text(model_name.clone())
+                        .size(scale::s(12.0))
+                        .width(FillLength),
                     toggler(visible)
                         .size(scale::s(18.0))
                         .style(crate::toggler_style::style)
@@ -224,10 +227,7 @@ pub fn view<'a, S: UiState + ?Sized>(
                                         }
                                     }
                                 } else {
-                                    s.hidden_models
-                                        .entry(pid)
-                                        .or_default()
-                                        .insert(mid);
+                                    s.hidden_models.entry(pid).or_default().insert(mid);
                                 }
                             })
                         }),
@@ -257,8 +257,12 @@ pub fn view<'a, S: UiState + ?Sized>(
             // Filtering hid everything
             container(
                 column![
-                    text(format!("No models match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG),
-                    text("Try a different search term.").size(scale::s(11.0)).color(MUTED_FG),
+                    text(format!("No models match “{query}”."))
+                        .size(scale::s(12.0))
+                        .color(MUTED_FG),
+                    text("Try a different search term.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG),
                 ]
                 .spacing(scale::s(4.0)),
             )
@@ -274,22 +278,32 @@ pub fn view<'a, S: UiState + ?Sized>(
 
     let footer = row![
         tooltip(
-            button(crate::icon::lucide(Icon::RotateCcw).size(scale::s(14.0)).center())
-                .padding(scale::s(6.0))
-                .style(crate::panel::button_style)
+            button(
+                crate::icon::lucide(Icon::RotateCcw)
+                    .size(scale::s(14.0))
+                    .center()
+            )
+            .padding(scale::s(6.0))
+            .style(crate::panel::button_style)
             .on_press(UiEvent::SettingEdit(SettingEdit::HiddenModelsResetAll)),
-            container(text("Reset to defaults").size(scale::s(11.0))).padding(scale::s(6.0)).style(container::rounded_box),
+            container(text("Reset to defaults").size(scale::s(11.0)))
+                .padding(scale::s(6.0))
+                .style(container::rounded_box),
             tooltip::Position::Top
-        ).gap(scale::s(4.0)),
+        )
+        .gap(scale::s(4.0)),
         space::horizontal(),
         tooltip(
             button(crate::icon::lucide(Icon::X).size(scale::s(14.0)).center())
                 .padding(scale::s(6.0))
                 .style(crate::panel::button_style)
-            .on_press(UiEvent::ManageModelsClose),
-            container(text("Close").size(scale::s(11.0))).padding(scale::s(6.0)).style(container::rounded_box),
+                .on_press(UiEvent::ManageModelsClose),
+            container(text("Close").size(scale::s(11.0)))
+                .padding(scale::s(6.0))
+                .style(container::rounded_box),
             tooltip::Position::Top
-        ).gap(scale::s(4.0)),
+        )
+        .gap(scale::s(4.0)),
     ]
     .spacing(scale::s(6.0))
     .align_y(iced::Alignment::Center);
@@ -335,18 +349,18 @@ pub fn view<'a, S: UiState + ?Sized>(
     stack![
         base,
         opaque(
-            mouse_area(
-                center(opaque(stack![blur_cover, window])).style(|_theme| container::Style {
+            mouse_area(center(opaque(stack![blur_cover, window])).style(|_theme| {
+                container::Style {
                     background: Some(
                         Color {
                             a: 0.55,
                             ..Color::BLACK
                         }
-                        .into()
+                        .into(),
                     ),
                     ..container::Style::default()
-                })
-            )
+                }
+            }))
             .on_press(UiEvent::ManageModelsClose)
         )
     ]

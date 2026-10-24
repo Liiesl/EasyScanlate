@@ -209,7 +209,12 @@ impl CrashReport {
 
     /// First line of the panic, capped for dialog titles / issue titles.
     fn short_message(&self) -> String {
-        let first = self.message.lines().next().unwrap_or("Unknown error").trim();
+        let first = self
+            .message
+            .lines()
+            .next()
+            .unwrap_or("Unknown error")
+            .trim();
         truncate_chars(first, 200)
     }
 
@@ -340,7 +345,10 @@ fn build_issue_url(report: &CrashReport) -> String {
         ("template", ISSUE_TEMPLATE.to_string()),
         (
             "title",
-            format!("[BUG] panic: {}", truncate_chars(&report.short_message(), 80)),
+            format!(
+                "[BUG] panic: {}",
+                truncate_chars(&report.short_message(), 80)
+            ),
         ),
         (
             "error-details",

@@ -194,11 +194,7 @@ pub fn perspective_map(quad: [[f32; 2]; 4], box_rect: Rectangle, p: Point) -> Po
 /// projected onto `quad` via the homography. Straight edges stay straight;
 /// quarter-circle corners are tessellated into line segments (8 per corner)
 /// before projection, so the curve is perspective-correct.
-pub fn perspective_rounded_rect_path(
-    quad: [[f32; 2]; 4],
-    rect: Rectangle,
-    radius: f32,
-) -> Path {
+pub fn perspective_rounded_rect_path(quad: [[f32; 2]; 4], rect: Rectangle, radius: f32) -> Path {
     let w = rect.width;
     let h = rect.height;
     if w <= 0.0 || h <= 0.0 {
@@ -271,7 +267,8 @@ pub fn quad_transform(quad: [[f32; 2]; 4], width: f32, height: f32) -> Option<Qu
     if m00 * m11 - m01 * m10 <= 0.0 {
         return None;
     }
-    if (m00 - 1.0).abs() < 1e-3 && (m11 - 1.0).abs() < 1e-3 && m01.abs() < 1e-3 && m10.abs() < 1e-3 {
+    if (m00 - 1.0).abs() < 1e-3 && (m11 - 1.0).abs() < 1e-3 && m01.abs() < 1e-3 && m10.abs() < 1e-3
+    {
         return None;
     }
     let (mut s1, mut s2, beta, alpha) = svd2(m00, m01, m10, m11);

@@ -21,14 +21,14 @@ use easyscanlate_model::Quad;
 #[cfg(feature = "onnx")]
 use ndarray::{Array4, ArrayD};
 #[cfg(feature = "onnx")]
-use ort::session::builder::GraphOptimizationLevel;
-#[cfg(feature = "onnx")]
 use ort::session::Session;
+#[cfg(feature = "onnx")]
+use ort::session::builder::GraphOptimizationLevel;
 #[cfg(feature = "onnx")]
 use ort::value::TensorRef;
 
 #[cfg(feature = "onnx")]
-use crate::common::{bbox_crops, build_mask_expanded, crop_spec, InpaintResult};
+use crate::common::{InpaintResult, bbox_crops, build_mask_expanded, crop_spec};
 
 /// Context pad for AOT backend (same real-pixel expansion as LaMa, but
 /// AOT uses variable resolution + pad-to-multiple instead of mirror padding).
@@ -161,14 +161,15 @@ pub(crate) fn next_multiple(v: u32, pad: u32) -> u32 {
 /// Inference dimensions for AOT: mirrors `aot_inference.py: potentially` `_next_multiple` + `max_size` logic.
 pub(crate) fn aot_infer_dims(w: u32, h: u32, pad: u32, max_size: Option<u32>) -> (u32, u32) {
     if let Some(max) = max_size
-        && w.max(h) > max {
-            let scale = max as f32 / w.max(h) as f32;
-            let mut nw = (w as f32 * scale).round() as u32;
-            let mut nh = (h as f32 * scale).round() as u32;
-            nw = next_multiple(nw.max(1), pad);
-            nh = next_multiple(nh.max(1), pad);
-            return (nw, nh);
-        }
+        && w.max(h) > max
+    {
+        let scale = max as f32 / w.max(h) as f32;
+        let mut nw = (w as f32 * scale).round() as u32;
+        let mut nh = (h as f32 * scale).round() as u32;
+        nw = next_multiple(nw.max(1), pad);
+        nh = next_multiple(nh.max(1), pad);
+        return (nw, nh);
+    }
     (next_multiple(w, pad), next_multiple(h, pad))
 }
 
@@ -192,7 +193,15 @@ pub fn aot_inpaint_crop(
     );
     let exp_origin = [ex as f32, ey as f32];
 
-    let mask = build_mask_expanded(exp_w, exp_h, quads, rect, exp_origin, image.width(), image.height());
+    let mask = build_mask_expanded(
+        exp_w,
+        exp_h,
+        quads,
+        rect,
+        exp_origin,
+        image.width(),
+        image.height(),
+    );
     let crop = image::imageops::crop_imm(image, ex, ey, exp_w, exp_h).to_image();
     eprintln!(
         "[inpaint::aot] rect={:?} quads={} pad={} image={}x{} exp=[{},{},{},{}] exp_origin={:?}",
@@ -213,9 +222,14 @@ pub fn aot_inpaint_crop(
     if mask_sum == 0 {
         eprintln!("[inpaint::aot] empty mask -> returning original crop");
         if quads.is_empty() {
-            let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
+            let [ox, oy, ow, oh] =
+                crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
             let sub = image::imageops::crop_imm(&crop, ox - ex, oy - ey, ow, oh).to_image();
-            return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32], None)]);
+            return Ok(vec![(
+                sub,
+                [ox as f32, oy as f32, ow as f32, oh as f32],
+                None,
+            )]);
         }
         return Ok(bbox_crops(crop, exp_origin, quads));
     }
@@ -230,8 +244,14 @@ pub fn aot_inpaint_crop(
 
     let rgb_crop = image::DynamicImage::ImageRgba8(crop.clone()).to_rgb8();
     let (inf_rgb, inf_mask) = if needs_resize {
-        let resized_rgb = image::imageops::resize(&rgb_crop, inf_w, inf_h, image::imageops::FilterType::Triangle);
-        let resized_mask = image::imageops::resize(&mask, inf_w, inf_h, image::imageops::FilterType::Nearest);
+        let resized_rgb = image::imageops::resize(
+            &rgb_crop,
+            inf_w,
+            inf_h,
+            image::imageops::FilterType::Triangle,
+        );
+        let resized_mask =
+            image::imageops::resize(&mask, inf_w, inf_h, image::imageops::FilterType::Nearest);
         (resized_rgb, resized_mask)
     } else {
         (rgb_crop, mask.clone())
@@ -246,7 +266,11 @@ pub fn aot_inpaint_crop(
     let mut mask_arr = Array4::<f32>::zeros((1, 1, h, w));
     for y in 0..h {
         for x in 0..w {
-            let m = if inf_mask[(x as u32, y as u32)][0] > 127 { 1.0 } else { 0.0 };
+            let m = if inf_mask[(x as u32, y as u32)][0] > 127 {
+                1.0
+            } else {
+                0.0
+            };
             mask_arr[[0, 0, y, x]] = m;
             let px = inf_rgb[(x as u32, y as u32)];
             let inv = 1.0 - m;
@@ -257,14 +281,25 @@ pub fn aot_inpaint_crop(
     }
 
     let output = run_session_aot(session, img_arr, mask_arr)?;
-    eprintln!("[inpaint::aot] inference done output shape={:?}", output.shape());
+    eprintln!(
+        "[inpaint::aot] inference done output shape={:?}",
+        output.shape()
+    );
 
     // Output is [1,3,H,W] in [-1,1] — -> uint8 via (x+1)*127.5, clip
     let shape = [1usize, 3, h, w];
     let reshaped = output.clone().into_shape_with_order(shape).map_err(|e| {
-        format!("[inpaint::aot] shape mismatch expected {:?} got {:?}: {e}", shape, output.shape())
+        format!(
+            "[inpaint::aot] shape mismatch expected {:?} got {:?}: {e}",
+            shape,
+            output.shape()
+        )
     })?;
-    let to_u8 = |v: f32| ((v.clamp(-1.0, 1.0) + 1.0) * 127.5).round().clamp(0.0, 255.0) as u8;
+    let to_u8 = |v: f32| {
+        ((v.clamp(-1.0, 1.0) + 1.0) * 127.5)
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
     let mut out_inf = RgbImage::new(inf_w, inf_h);
     for y in 0..h {
         for x in 0..w {
@@ -277,7 +312,12 @@ pub fn aot_inpaint_crop(
     }
 
     let out_exp = if needs_resize {
-        image::imageops::resize(&out_inf, exp_w, exp_h, image::imageops::FilterType::Triangle)
+        image::imageops::resize(
+            &out_inf,
+            exp_w,
+            exp_h,
+            image::imageops::FilterType::Triangle,
+        )
     } else {
         out_inf
     };
@@ -292,7 +332,11 @@ pub fn aot_inpaint_crop(
     for y in 0..exp_h {
         for x in 0..exp_w {
             let m = mask[(x, y)][0] > 127;
-            blended[(x, y)] = if m { out_exp[(x, y)] } else { image::DynamicImage::ImageRgba8(crop.clone()).to_rgb8()[(x, y)] };
+            blended[(x, y)] = if m {
+                out_exp[(x, y)]
+            } else {
+                image::DynamicImage::ImageRgba8(crop.clone()).to_rgb8()[(x, y)]
+            };
         }
     }
 
@@ -305,12 +349,25 @@ pub fn aot_inpaint_crop(
         let sub = image::imageops::crop_imm(&patch, ox - ex, oy - ey, ow, oh).to_image();
         eprintln!(
             "[inpaint::aot] empty quads -> returning sub [{},{},{},{}] from patch {}x{}",
-            ox, oy, ow, oh, patch.width(), patch.height()
+            ox,
+            oy,
+            ow,
+            oh,
+            patch.width(),
+            patch.height()
         );
-        return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32], None)]);
+        return Ok(vec![(
+            sub,
+            [ox as f32, oy as f32, ow as f32, oh as f32],
+            None,
+        )]);
     }
     let out = bbox_crops(patch, exp_origin, quads);
-    eprintln!("[inpaint::aot] quads={} -> {} bbox crops", quads.len(), out.len());
+    eprintln!(
+        "[inpaint::aot] quads={} -> {} bbox crops",
+        quads.len(),
+        out.len()
+    );
     Ok(out)
 }
 

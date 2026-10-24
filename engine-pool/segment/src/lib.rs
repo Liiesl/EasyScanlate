@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex};
 
 use image::RgbImage;
 use ndarray::{Array4, ArrayD};
-use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
+use ort::session::builder::GraphOptimizationLevel;
 use ort::value::TensorRef;
 
 pub mod filter;
@@ -152,9 +152,7 @@ impl Engine {
                 .map_err(|e| format!("ORT init failed: {e}"))?
                 .with_memory_pattern(false)
                 .map_err(|e| format!("ORT init failed: {e}"))?
-                .with_execution_providers([ort::ep::DirectML::default()
-                    .build()
-                    .error_on_failure()])
+                .with_execution_providers([ort::ep::DirectML::default().build().error_on_failure()])
                 .map_err(|e| format!("ORT init failed: {e}"))?
                 .commit_from_file(&path)
                 .map_err(|e| format!("failed to load segmentation model {}: {e}", path.display()))
@@ -205,7 +203,11 @@ fn letterbox(img: &RgbImage, size: u32) -> (RgbImage, f32, i32, i32) {
     let dy = ((size - nh) / 2) as i32;
     for y in 0..nh {
         for x in 0..nw {
-            canvas.put_pixel((dx + x as i32) as u32, (dy + y as i32) as u32, *resized.get_pixel(x, y));
+            canvas.put_pixel(
+                (dx + x as i32) as u32,
+                (dy + y as i32) as u32,
+                *resized.get_pixel(x, y),
+            );
         }
     }
     (canvas, r, dx, dy)
@@ -213,15 +215,20 @@ fn letterbox(img: &RgbImage, size: u32) -> (RgbImage, f32, i32, i32) {
 
 fn compose_input(img: &RgbImage) -> Array4<f32> {
     debug_assert_eq!(img.dimensions(), (IMG_SIZE, IMG_SIZE));
-    Array4::from_shape_fn((1, 3, IMG_SIZE as usize, IMG_SIZE as usize), |(_, c, y, x)| {
-        let px = img.get_pixel(x as u32, y as u32);
-        px[c] as f32 / 255.0
-    })
+    Array4::from_shape_fn(
+        (1, 3, IMG_SIZE as usize, IMG_SIZE as usize),
+        |(_, c, y, x)| {
+            let px = img.get_pixel(x as u32, y as u32);
+            px[c] as f32 / 255.0
+        },
+    )
 }
 
 fn run_session(session: &mut Session, input: Array4<f32>) -> Result<Vec<ArrayD<f32>>, String> {
     let outputs = session
-        .run(ort::inputs![TensorRef::from_array_view(&input).map_err(|e| format!("{e}"))?])
+        .run(ort::inputs![
+            TensorRef::from_array_view(&input).map_err(|e| format!("{e}"))?
+        ])
         .map_err(|e| format!("Segment inference failed: {e}"))?;
     outputs
         .iter()
@@ -232,9 +239,6 @@ fn run_session(session: &mut Session, input: Array4<f32>) -> Result<Vec<ArrayD<f
         })
         .collect()
 }
-
-
-
 
 /// Decode Koharu outputs. Pure translation of `grid_pages.py:50-102`.
 fn decode_koharu(
@@ -319,7 +323,11 @@ fn decode_koharu(
         });
     }
     // Sort by confidence descending, keep topK to cap work.
-    raws.sort_by(|a, b| b.conf.partial_cmp(&a.conf).unwrap_or(std::cmp::Ordering::Equal));
+    raws.sort_by(|a, b| {
+        b.conf
+            .partial_cmp(&a.conf)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     const TOPK: usize = 100;
     if raws.len() > TOPK {
         raws.truncate(TOPK);
@@ -331,7 +339,11 @@ fn decode_koharu(
         let inter = w * h;
         let area_a = ((a.x2 - a.x1).max(0.0)) * ((a.y2 - a.y1).max(0.0));
         let area_b = ((b.x2 - b.x1).max(0.0)) * ((b.y2 - b.y1).max(0.0));
-        if area_a + area_b - inter <= 0.0 { 0.0 } else { inter / (area_a + area_b - inter) }
+        if area_a + area_b - inter <= 0.0 {
+            0.0
+        } else {
+            inter / (area_a + area_b - inter)
+        }
     }
     const NMS_THRESH: f32 = 0.5;
     let mut kept: Vec<RawDet> = Vec::with_capacity(raws.len());

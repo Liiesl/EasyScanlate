@@ -1,8 +1,8 @@
-use iced::widget::text_editor;
-use iced::{Rectangle, Task};
 use easyscanlate_model::EntryId;
 use easyscanlate_ui::event::{EditOrigin, ToolbarAction};
 use easyscanlate_ui::panel::results::scroll_to_row;
+use iced::widget::text_editor;
+use iced::{Rectangle, Task};
 
 use super::layout::{EDIT_INPUT_ID, PANEL_EDIT_INPUT_ID};
 use super::{App, Message};
@@ -12,7 +12,12 @@ use super::{App, Message};
 /// keystroke replaces it, then focuses the editor of `origin` (the floating
 /// overlay editor or the panel's results-row editor). Shared by the
 /// double-click action, the toolbar's "Rename" button and the panel rows.
-pub fn start_inline_edit(app: &mut App, index: usize, id: EntryId, origin: EditOrigin) -> Task<Message> {
+pub fn start_inline_edit(
+    app: &mut App,
+    index: usize,
+    id: EntryId,
+    origin: EditOrigin,
+) -> Task<Message> {
     let tab = app.active_tab_mut();
     if index >= tab.images.len() {
         return Task::none();
@@ -89,8 +94,9 @@ pub fn select_entry(app: &mut App, index: usize, id: EntryId) -> Task<Message> {
         tab.style_picker_tab = None;
         if tab.scheduler.needs_settle(index, tab.images.len()) {
             let tid = tab.id;
-            return tab.scheduler
-                .schedule(index..index + 1, move |seq| Message::Tab(tid, crate::app::TabMessage::SettleElapsed(seq)));
+            return tab.scheduler.schedule(index..index + 1, move |seq| {
+                Message::Tab(tid, crate::app::TabMessage::SettleElapsed(seq))
+            });
         }
     }
     Task::none()
@@ -115,7 +121,10 @@ pub fn handle_entry_clicked(app: &mut App, selection: Option<(usize, EntryId)>) 
                 index < tab.images.len() && tab.project.entry(id).is_some()
             };
             if ok {
-                Task::batch([select_entry(app, index, id), scroll_to_row::<Message>(index, id)])
+                Task::batch([
+                    select_entry(app, index, id),
+                    scroll_to_row::<Message>(index, id),
+                ])
             } else {
                 app.active_tab_mut().selected = None;
                 Task::none()
@@ -134,14 +143,21 @@ pub fn handle_entry_double_clicked(app: &mut App, pair: (usize, EntryId)) -> Tas
 }
 
 pub fn handle_panel_entry_edit(app: &mut App, pair: (usize, EntryId)) -> Task<Message> {
-    if app.active_tab().translation_panel_mode == easyscanlate_ui::event::TranslationPanelMode::Translate {
+    if app.active_tab().translation_panel_mode
+        == easyscanlate_ui::event::TranslationPanelMode::Translate
+    {
         return handle_entry_clicked(app, Some(pair));
     }
     app.active_tab_mut().selected_inpaint = None;
     start_inline_edit(app, pair.0, pair.1, EditOrigin::Panel)
 }
 
-pub fn handle_entry_toolbar(app: &mut App, index: usize, id: EntryId, action: ToolbarAction) -> Task<Message> {
+pub fn handle_entry_toolbar(
+    app: &mut App,
+    index: usize,
+    id: EntryId,
+    action: ToolbarAction,
+) -> Task<Message> {
     match action {
         ToolbarAction::Rename => start_inline_edit(app, index, id, EditOrigin::Overlay),
         ToolbarAction::Delete => {
@@ -188,7 +204,12 @@ pub fn handle_entry_toolbar(app: &mut App, index: usize, id: EntryId, action: To
     }
 }
 
-pub fn handle_entry_moved(app: &mut App, index: usize, id: EntryId, quad: easyscanlate_model::Quad) -> Task<Message> {
+pub fn handle_entry_moved(
+    app: &mut App,
+    index: usize,
+    id: EntryId,
+    quad: easyscanlate_model::Quad,
+) -> Task<Message> {
     let ok = {
         let tab = app.active_tab();
         index < tab.images.len()
@@ -248,15 +269,14 @@ pub fn handle_edit_action(app: &mut App, action: text_editor::Action) -> Task<Me
                 for ev in evs {
                     crate::app::handle_model_event(tab, ev);
                 }
-                tab.status = format!(
-                    "Edit forked into '{name}': the OCR text stays untouched."
-                );
+                tab.status = format!("Edit forked into '{name}': the OCR text stays untouched.");
             }
         }
     }
     let ev = {
         let tab = app.active_tab_mut();
-        tab.project.set_translation_with_event(id, Some(text.clone()))
+        tab.project
+            .set_translation_with_event(id, Some(text.clone()))
     };
     crate::app::handle_model_event(app.active_tab_mut(), ev);
     Task::none()

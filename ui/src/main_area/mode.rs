@@ -53,7 +53,11 @@ fn view_compare_pill<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEve
 
 fn manual_banner<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
     let is_inpaint = state.manual_mode() == ManualMode::Inpaint;
-    let title = if is_inpaint { "Manual Inpaint Mode" } else { "Manual OCR Mode" };
+    let title = if is_inpaint {
+        "Manual Inpaint Mode"
+    } else {
+        "Manual OCR Mode"
+    };
     let desc = if is_inpaint {
         "Drag on the image to select areas to inpaint • Multiple selections"
     } else {
@@ -69,7 +73,11 @@ fn manual_banner<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> 
     };
     let busy = state.is_bulk_busy();
     let can_start = count > 0 && !busy;
-    let start_label = if is_inpaint { format!("Start Inpaint ({count})") } else { format!("Start OCR ({count})") };
+    let start_label = if is_inpaint {
+        format!("Start Inpaint ({count})")
+    } else {
+        format!("Start OCR ({count})")
+    };
     let start_btn: Element<'_, UiEvent> = crate::button::with_disabled_cursor(
         button(text(start_label).size(scale::s(11.0)))
             .padding([scale::s(6.0), scale::s(12.0)])
@@ -92,10 +100,17 @@ fn manual_banner<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> 
     let card = container(
         column![
             text(title).size(scale::s(13.0)),
-            text(desc).size(scale::s(10.0)).color(iced::Color::from_rgba8(160, 165, 180, 1.0)),
-            row![text(count_label).size(scale::s(10.0)).width(Length::Fill), start_btn, reset_btn, cancel_btn]
-                .spacing(scale::s(6.0))
-                .align_y(iced::Alignment::Center)
+            text(desc)
+                .size(scale::s(10.0))
+                .color(iced::Color::from_rgba8(160, 165, 180, 1.0)),
+            row![
+                text(count_label).size(scale::s(10.0)).width(Length::Fill),
+                start_btn,
+                reset_btn,
+                cancel_btn
+            ]
+            .spacing(scale::s(6.0))
+            .align_y(iced::Alignment::Center)
         ]
         .spacing(scale::s(6.0)),
     )
@@ -103,7 +118,10 @@ fn manual_banner<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> 
     .width(Length::Fixed(scale::s(420.0)))
     .style(|_theme| container::Style {
         background: Some(crate::panel::PANEL_BG.into()),
-        border: iced::Border::default().rounded(scale::s(10.0)).color(iced::Color::from_rgba8(80, 85, 110, 0.6)).width(1.0),
+        border: iced::Border::default()
+            .rounded(scale::s(10.0))
+            .color(iced::Color::from_rgba8(80, 85, 110, 0.6))
+            .width(1.0),
         ..Default::default()
     });
 

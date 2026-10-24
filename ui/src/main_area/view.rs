@@ -11,10 +11,12 @@ use super::tiles::tiles;
 
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     if state.images().is_empty() {
-        container(text("No images loaded. Click \"Open Images\" to pick some."))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        container(text(
+            "No images loaded. Click \"Open Images\" to pick some.",
+        ))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
     } else {
         // Persistent manual mode forces View and hides overlay save buttons
         let manual_active = state.manual_mode() != crate::event::ManualMode::None;
@@ -33,7 +35,8 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                 iced::widget::stack![viewer, edit_overlay(state), mode_switcher(state)].into()
             }
             crate::event::MainAreaMode::Compare => {
-                let left = build_viewer(state, tiles(state, true), true).show_overlay_buttons(false);
+                let left =
+                    build_viewer(state, tiles(state, true), true).show_overlay_buttons(false);
                 let right = build_viewer(state, tiles(state, false), false)
                     .show_overlay_buttons(show_overlay)
                     .on_save(|| UiEvent::SaveProject)
@@ -52,8 +55,13 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
 /// `viewer_scroll` is the normalized center anchor `0..1`, so both Compare
 /// panes and a later `View` restore the same centered row after a width /
 /// viewport change instead of the same absolute pixel offset.
-fn build_viewer<'a, S: UiState + ?Sized>(state: &'a S, tiles: Vec<TileSpec<'a>>, original: bool) -> TileView<'a, UiEvent> {
-    let mut viewer: TileView<'a, UiEvent> = TileView::new(tiles, state.font().unwrap_or(Font::DEFAULT));
+fn build_viewer<'a, S: UiState + ?Sized>(
+    state: &'a S,
+    tiles: Vec<TileSpec<'a>>,
+    original: bool,
+) -> TileView<'a, UiEvent> {
+    let mut viewer: TileView<'a, UiEvent> =
+        TileView::new(tiles, state.font().unwrap_or(Font::DEFAULT));
     viewer = viewer
         .on_visible_range(UiEvent::TilesVisible)
         .on_scroll_ended(|| UiEvent::TileScrollEnded)
@@ -143,11 +151,9 @@ fn gradient_handle_spec<S: UiState + ?Sized>(state: &S) -> Option<GradientHandle
             style.bg_gradient_a,
             style.bg_gradient_b,
         ),
-        StyleField::Background if on_gradient_tab => (
-            style.bg_gradient_angle,
-            style.bg_color,
-            style.bg_color,
-        ),
+        StyleField::Background if on_gradient_tab => {
+            (style.bg_gradient_angle, style.bg_color, style.bg_color)
+        }
         _ => return None,
     };
     Some(GradientHandleSpec {

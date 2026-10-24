@@ -2,27 +2,31 @@
 //! In Edit mode the list shows one input per row (current profile's text, OCR fallback); in Translate mode two inputs (base vs target).
 
 use iced::advanced::widget::operation::{self as widget_op, Operation, Outcome, Scrollable};
-use iced::advanced::widget::{operate, Id as WidgetId};
+use iced::advanced::widget::{Id as WidgetId, operate};
 use iced::widget::operation::AbsoluteOffset;
 use iced::widget::text_editor;
 use iced::widget::{
-    button, column, container, mouse_area, pick_list, responsive, row, scrollable, space, text,
-    tooltip, Column, Id,
+    Column, Id, button, column, container, mouse_area, pick_list, responsive, row, scrollable,
+    space, text, tooltip,
 };
-use iced::{keyboard, Background, Border, Color, Element, Fill as FillLength, Font, Length, Padding,
-    Rectangle, Size, Vector};
-use neverliie_iced_widgets::advanced_dropdown::{advanced_dropdown, Footer, Item, MenuItem};
+use iced::{
+    Background, Border, Color, Element, Fill as FillLength, Font, Length, Padding, Rectangle, Size,
+    Vector, keyboard,
+};
+use neverliie_iced_widgets::advanced_dropdown::{Footer, Item, MenuItem, advanced_dropdown};
 use std::fmt::{Display, Formatter};
 
-use crate::event::{EditOrigin, SettingsTab, TargetProfileSelection, ToolbarAction, TranslationPanelMode, UiEvent};
+use crate::event::{
+    EditOrigin, SettingsTab, TargetProfileSelection, ToolbarAction, TranslationPanelMode, UiEvent,
+};
 use crate::loaded::LoadedImage;
 use crate::panel::{MUTED_FG, PANEL_BG};
 use crate::scale;
 use crate::segmented::{segment_icon_label, segmented_group};
 use crate::state::UiState;
 use crate::translation;
-use lucide_icons::Icon;
 use easyscanlate_model::{EntryId, OcrEntry, ProfileId};
+use lucide_icons::Icon;
 
 /// Widget id of the multi-line editor shown in a row while the entry is
 /// edited from the panel; must match the app's focus id.
@@ -128,26 +132,43 @@ fn entry_row<'a, S: UiState + ?Sized>(
     let font = state.font().unwrap_or(Font::DEFAULT);
     let mode = state.translation_panel_mode();
 
-    let delete_btn = button(crate::icon::lucide(Icon::Trash2).size(scale::s(12.0)).center())
-        .padding(scale::s(4.0))
-        .style(crate::panel::button_style)
-        .on_press(UiEvent::EntryToolbar((index, entry_id, ToolbarAction::Delete)));
-    let delete_tip: Element<'_, UiEvent> =
-        tooltip(delete_btn, tip_label("Delete entry"), tooltip::Position::Top)
-            .gap(scale::s(4.0))
-            .into();
-    let retranslate_btn = button(crate::icon::lucide(Icon::RefreshCw).size(scale::s(12.0)).center())
-        .padding(scale::s(4.0))
-        .style(crate::panel::button_style)
-        .on_press_maybe(
-            (!state.is_bulk_busy()
-                && !easyscanlate_settings::get(|s| s.connections.is_empty()))
+    let delete_btn = button(
+        crate::icon::lucide(Icon::Trash2)
+            .size(scale::s(12.0))
+            .center(),
+    )
+    .padding(scale::s(4.0))
+    .style(crate::panel::button_style)
+    .on_press(UiEvent::EntryToolbar((
+        index,
+        entry_id,
+        ToolbarAction::Delete,
+    )));
+    let delete_tip: Element<'_, UiEvent> = tooltip(
+        delete_btn,
+        tip_label("Delete entry"),
+        tooltip::Position::Top,
+    )
+    .gap(scale::s(4.0))
+    .into();
+    let retranslate_btn = button(
+        crate::icon::lucide(Icon::RefreshCw)
+            .size(scale::s(12.0))
+            .center(),
+    )
+    .padding(scale::s(4.0))
+    .style(crate::panel::button_style)
+    .on_press_maybe(
+        (!state.is_bulk_busy() && !easyscanlate_settings::get(|s| s.connections.is_empty()))
             .then_some(UiEvent::RetranslateEntry((index, entry_id))),
-        );
-    let retranslate_tip: Element<'_, UiEvent> =
-        tooltip(crate::button::with_disabled_cursor(retranslate_btn.into()), tip_label("Retranslate"), tooltip::Position::Top)
-            .gap(scale::s(4.0))
-            .into();
+    );
+    let retranslate_tip: Element<'_, UiEvent> = tooltip(
+        crate::button::with_disabled_cursor(retranslate_btn.into()),
+        tip_label("Retranslate"),
+        tooltip::Position::Top,
+    )
+    .gap(scale::s(4.0))
+    .into();
     let buttons: Vec<Element<'_, UiEvent>> = vec![retranslate_tip, delete_tip];
 
     let project = state.project();
@@ -173,9 +194,12 @@ fn entry_row<'a, S: UiState + ?Sized>(
             };
             let row_inner = container(
                 row![
-                    column![text(profile_name).size(scale::s(10.0)).color(MUTED_FG), current]
-                        .spacing(scale::s(2.0))
-                        .width(FillLength),
+                    column![
+                        text(profile_name).size(scale::s(10.0)).color(MUTED_FG),
+                        current
+                    ]
+                    .spacing(scale::s(2.0))
+                    .width(FillLength),
                     row(buttons).spacing(scale::s(4.0)),
                 ]
                 .spacing(scale::s(ROW_SPACING))
@@ -191,15 +215,15 @@ fn entry_row<'a, S: UiState + ?Sized>(
             })
             .style(move |_theme| container::Style {
                 background: Some(if selected { SELECTED_BG } else { PANEL_BG }.into()),
-                border: Border::default()
-                    .width(0.0)
-                    .rounded(scale::s(12.0)),
+                border: Border::default().width(0.0).rounded(scale::s(12.0)),
                 ..container::Style::default()
             });
             if editing_from_panel {
                 row_inner.into()
             } else {
-                mouse_area(row_inner).on_press(UiEvent::EntryClicked(Some((index, entry_id)))).into()
+                mouse_area(row_inner)
+                    .on_press(UiEvent::EntryClicked(Some((index, entry_id))))
+                    .into()
             }
         }
         TranslationPanelMode::Translate => {
@@ -209,7 +233,9 @@ fn entry_row<'a, S: UiState + ?Sized>(
             // base text
             let base_text: String = if let Some(pid) = base_id {
                 if let Some(p) = project.profiles.iter().find(|p| p.id == pid) {
-                    p.translation_of(entry_id).unwrap_or(&entry.text).to_string()
+                    p.translation_of(entry_id)
+                        .unwrap_or(&entry.text)
+                        .to_string()
                 } else {
                     entry.text.clone()
                 }
@@ -217,22 +243,49 @@ fn entry_row<'a, S: UiState + ?Sized>(
                 entry.text.clone()
             };
             let base_name: String = if let Some(pid) = base_id {
-                project.profiles.iter().find(|p| p.id == pid).map(|p| p.name.clone()).unwrap_or_else(|| "—".to_string())
+                project
+                    .profiles
+                    .iter()
+                    .find(|p| p.id == pid)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| "—".to_string())
             } else {
                 "—".to_string()
             };
             // target text
             let (target_text, target_name) = match &target_sel {
                 TargetProfileSelection::Existing(pid) => {
-                    let name = project.profiles.iter().find(|p| p.id == *pid).map(|p| p.name.clone()).unwrap_or_else(|| "—".to_string());
-                    let txt = project.profiles.iter().find(|p| p.id == *pid).and_then(|p| p.translation_of(entry_id)).unwrap_or("").to_string();
+                    let name = project
+                        .profiles
+                        .iter()
+                        .find(|p| p.id == *pid)
+                        .map(|p| p.name.clone())
+                        .unwrap_or_else(|| "—".to_string());
+                    let txt = project
+                        .profiles
+                        .iter()
+                        .find(|p| p.id == *pid)
+                        .and_then(|p| p.translation_of(entry_id))
+                        .unwrap_or("")
+                        .to_string();
                     (txt, name)
                 }
                 TargetProfileSelection::AutoPlaceholder(name) => {
                     // If placeholder already exists as real profile, show its content (state getter usually converts, but per-image fallback)
                     if let Some(id) = project.profiles.find_by_name(name) {
-                        let txt = project.profiles.iter().find(|p| p.id == id).and_then(|p| p.translation_of(entry_id)).unwrap_or("").to_string();
-                        let real_name = project.profiles.iter().find(|p| p.id == id).map(|p| p.name.clone()).unwrap_or_else(|| name.clone());
+                        let txt = project
+                            .profiles
+                            .iter()
+                            .find(|p| p.id == id)
+                            .and_then(|p| p.translation_of(entry_id))
+                            .unwrap_or("")
+                            .to_string();
+                        let real_name = project
+                            .profiles
+                            .iter()
+                            .find(|p| p.id == id)
+                            .map(|p| p.name.clone())
+                            .unwrap_or_else(|| name.clone());
                         (txt, real_name)
                     } else {
                         (String::new(), name.clone())
@@ -247,9 +300,12 @@ fn entry_row<'a, S: UiState + ?Sized>(
                     column![text(base_name).size(scale::s(10.0)).color(MUTED_FG), left]
                         .spacing(scale::s(2.0))
                         .width(FillLength),
-                    column![text(target_name).size(scale::s(10.0)).color(MUTED_FG), right]
-                        .spacing(scale::s(2.0))
-                        .width(FillLength),
+                    column![
+                        text(target_name).size(scale::s(10.0)).color(MUTED_FG),
+                        right
+                    ]
+                    .spacing(scale::s(2.0))
+                    .width(FillLength),
                     row(buttons).spacing(scale::s(4.0)),
                 ]
                 .spacing(scale::s(ROW_SPACING))
@@ -265,12 +321,12 @@ fn entry_row<'a, S: UiState + ?Sized>(
             })
             .style(move |_theme| container::Style {
                 background: Some(if selected { SELECTED_BG } else { PANEL_BG }.into()),
-                border: Border::default()
-                    .width(0.0)
-                    .rounded(scale::s(12.0)),
+                border: Border::default().width(0.0).rounded(scale::s(12.0)),
                 ..container::Style::default()
             });
-            mouse_area(row_inner).on_press(UiEvent::EntryClicked(Some((index, entry_id)))).into()
+            mouse_area(row_inner)
+                .on_press(UiEvent::EntryClicked(Some((index, entry_id))))
+                .into()
         }
     };
 
@@ -354,12 +410,12 @@ fn translation_mode_switcher<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEv
             mode == TranslationPanelMode::Translate,
             Icon::Languages,
             "Translate",
-            Some(UiEvent::TranslationPanelMode(TranslationPanelMode::Translate)),
+            Some(UiEvent::TranslationPanelMode(
+                TranslationPanelMode::Translate,
+            )),
         ),
     ]);
-    container(pill)
-        .width(Length::Fixed(scale::s(180.0)))
-        .into()
+    container(pill).width(Length::Fixed(scale::s(180.0))).into()
 }
 
 /// The pinned header of the results column: "TRANSLATION" label and the mode
@@ -396,11 +452,13 @@ fn profile_header<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent>
             .width(FillLength),
             row![
                 text("profile").size(scale::s(11.0)).color(MUTED_FG),
-                advanced_dropdown(entries, selected, |option| UiEvent::ProfileSelect(option.id))
-                    .placeholder("Profile…")
-                    .text_size(scale::s(12.0))
-                    .width(FillLength)
-                    .footer(Footer::new("+ New Profile", UiEvent::ProfileCreate)),
+                advanced_dropdown(entries, selected, |option| UiEvent::ProfileSelect(
+                    option.id
+                ))
+                .placeholder("Profile…")
+                .text_size(scale::s(12.0))
+                .width(FillLength)
+                .footer(Footer::new("+ New Profile", UiEvent::ProfileCreate)),
             ]
             .spacing(scale::s(6.0))
             .align_y(iced::Alignment::Center)
@@ -439,7 +497,10 @@ fn translate_profile_pickers<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'
         .collect();
     let base_options: Vec<ProfileOption> = profiles
         .iter()
-        .map(|(id, name)| ProfileOption { id: *id, name: name.clone() })
+        .map(|(id, name)| ProfileOption {
+            id: *id,
+            name: name.clone(),
+        })
         .collect();
     let base_selected = base.and_then(|bid| base_options.iter().find(|o| o.id == bid).cloned());
 
@@ -450,33 +511,60 @@ fn translate_profile_pickers<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'
         if Some(*id) == base {
             continue;
         }
-        target_options.push(TargetPickOption { sel: TargetProfileSelection::Existing(*id), label: name.clone() });
+        target_options.push(TargetPickOption {
+            sel: TargetProfileSelection::Existing(*id),
+            label: name.clone(),
+        });
     }
     // Add placeholder if not already present as a real profile
     if !placeholder_exists {
         // ensure placeholder not equal to base name (already filtered base, but also name compare)
-        let base_name = base.and_then(|bid| profiles.iter().find(|(id,_)| *id==bid).map(|(_, n)| n.clone()));
+        let base_name = base.and_then(|bid| {
+            profiles
+                .iter()
+                .find(|(id, _)| *id == bid)
+                .map(|(_, n)| n.clone())
+        });
         if base_name.as_deref() != Some(&placeholder_name) {
-            target_options.push(TargetPickOption { sel: TargetProfileSelection::AutoPlaceholder(placeholder_name.clone()), label: placeholder_name.clone() });
+            target_options.push(TargetPickOption {
+                sel: TargetProfileSelection::AutoPlaceholder(placeholder_name.clone()),
+                label: placeholder_name.clone(),
+            });
         }
     }
     // If placeholder exists, it is already in target_options as Existing; no virtual needed.
 
     let target_selected_label = match &target_sel {
-        TargetProfileSelection::Existing(id) => profiles.iter().find(|(pid,_)| pid==id).map(|(_,n)| n.clone()),
+        TargetProfileSelection::Existing(id) => profiles
+            .iter()
+            .find(|(pid, _)| pid == id)
+            .map(|(_, n)| n.clone()),
         TargetProfileSelection::AutoPlaceholder(name) => Some(name.clone()),
     };
-    let target_selected = target_selected_label.and_then(|lbl| target_options.iter().find(|o| o.label==lbl).cloned());
+    let target_selected = target_selected_label
+        .and_then(|lbl| target_options.iter().find(|o| o.label == lbl).cloned());
 
     row![
         column![
             text("Base").size(scale::s(10.0)).color(MUTED_FG),
-            pick_list(base_options, base_selected, |o| UiEvent::BaseProfileSelect(o.id)).text_size(scale::s(12.0)).placeholder("Base…")
-        ].spacing(scale::s(2.0)).width(FillLength),
+            pick_list(base_options, base_selected, |o| UiEvent::BaseProfileSelect(
+                o.id
+            ))
+            .text_size(scale::s(12.0))
+            .placeholder("Base…")
+        ]
+        .spacing(scale::s(2.0))
+        .width(FillLength),
         column![
             text("Target").size(scale::s(10.0)).color(MUTED_FG),
-            pick_list(target_options, target_selected, |o| UiEvent::TargetProfileSelect(o.sel.clone())).text_size(scale::s(12.0)).placeholder("Target…")
-        ].spacing(scale::s(2.0)).width(FillLength),
+            pick_list(target_options, target_selected, |o| {
+                UiEvent::TargetProfileSelect(o.sel.clone())
+            })
+            .text_size(scale::s(12.0))
+            .placeholder("Target…")
+        ]
+        .spacing(scale::s(2.0))
+        .width(FillLength),
     ]
     .spacing(scale::s(8.0))
     .width(FillLength)
@@ -495,17 +583,13 @@ const TRANSLATE_BAR_BREAKPOINT: f32 = 360.0;
 /// When no connection is configured the bar collapses to a status row with a
 /// "Configure…" button that opens the settings modal on the Translation tab;
 /// the configure button is never shown otherwise.
-fn translate_bar<'a, S: UiState + ?Sized>(
-    state: &'a S,
-    has_entries: bool,
-) -> Element<'a, UiEvent> {
+fn translate_bar<'a, S: UiState + ?Sized>(state: &'a S, has_entries: bool) -> Element<'a, UiEvent> {
     let connected = easyscanlate_settings::get(|s| !s.connections.is_empty());
     let body: Element<'_, UiEvent> = if connected {
         responsive(move |size: Size| {
             let (sel_provider, sel_model) = state.translate_model_selection();
-            let mut entries: Vec<
-                MenuItem<'a, ModelOption, UiEvent, iced::Theme, iced::Renderer>,
-            > = Vec::new();
+            let mut entries: Vec<MenuItem<'a, ModelOption, UiEvent, iced::Theme, iced::Renderer>> =
+                Vec::new();
             let mut selected = None;
             for (provider_id, provider_name, models) in state.translate_model_groups() {
                 entries.push(MenuItem::Label(provider_name.as_str()));
@@ -523,26 +607,26 @@ fn translate_bar<'a, S: UiState + ?Sized>(
                 }
             }
 
-            let dropdown = advanced_dropdown(entries, selected, |option| {
-                UiEvent::TranslateModelSelect {
+            let dropdown =
+                advanced_dropdown(entries, selected, |option| UiEvent::TranslateModelSelect {
                     provider: option.provider_id.clone(),
                     model: option.model_id.clone(),
-                }
-            })
-            .placeholder("Select a model…")
-            .searchable(true)
-            .text_size(scale::s(12.0))
-            .width(FillLength)
-            .menu_max_height(280.0)
-            .footer(Footer::new("Manage models…", UiEvent::ManageModelsOpen));
+                })
+                .placeholder("Select a model…")
+                .searchable(true)
+                .text_size(scale::s(12.0))
+                .width(FillLength)
+                .menu_max_height(280.0)
+                .footer(Footer::new("Manage models…", UiEvent::ManageModelsOpen));
 
-            let translate_btn =
-                button(crate::icon::lucide(Icon::Send).size(scale::s(14.0)).center())
-                    .padding(scale::s(6.0))
-                    .style(crate::panel::button_style)
-                    .on_press_maybe(
-                        (has_entries && !state.is_bulk_busy()).then_some(UiEvent::Translate),
-                    );
+            let translate_btn = button(
+                crate::icon::lucide(Icon::Send)
+                    .size(scale::s(14.0))
+                    .center(),
+            )
+            .padding(scale::s(6.0))
+            .style(crate::panel::button_style)
+            .on_press_maybe((has_entries && !state.is_bulk_busy()).then_some(UiEvent::Translate));
             let translate: Element<'a, UiEvent> = tooltip(
                 crate::button::with_disabled_cursor(translate_btn.into()),
                 tip_label("Translate"),
@@ -556,11 +640,9 @@ fn translate_bar<'a, S: UiState + ?Sized>(
                     dropdown,
                     row![
                         text("To:").size(scale::s(12.0)),
-                        pick_list(
-                            translation::LANGUAGES,
-                            Some(state.translate_lang()),
-                            |l| UiEvent::TranslateLang(l.to_string()),
-                        )
+                        pick_list(translation::LANGUAGES, Some(state.translate_lang()), |l| {
+                            UiEvent::TranslateLang(l.to_string())
+                        },)
                         .text_size(scale::s(12.0))
                         .width(FillLength),
                         translate,
@@ -576,11 +658,9 @@ fn translate_bar<'a, S: UiState + ?Sized>(
                 row![
                     dropdown,
                     text("To:").size(scale::s(12.0)),
-                    pick_list(
-                        translation::LANGUAGES,
-                        Some(state.translate_lang()),
-                        |l| UiEvent::TranslateLang(l.to_string()),
-                    )
+                    pick_list(translation::LANGUAGES, Some(state.translate_lang()), |l| {
+                        UiEvent::TranslateLang(l.to_string())
+                    },)
                     .text_size(scale::s(12.0)),
                     translate,
                 ]
@@ -593,14 +673,21 @@ fn translate_bar<'a, S: UiState + ?Sized>(
         .height(Length::Shrink)
         .into()
     } else {
-        let not_connected_btn = button(crate::icon::lucide(Icon::Settings).size(scale::s(14.0)).center())
-            .padding(scale::s(6.0))
-            .style(crate::panel::button_style)
-            .on_press(UiEvent::SettingsOpenTab(SettingsTab::Translation));
-        let not_connected: Element<'_, UiEvent> =
-            tooltip(not_connected_btn, tip_label("Open translation settings"), tooltip::Position::Top)
-                .gap(scale::s(4.0))
-                .into();
+        let not_connected_btn = button(
+            crate::icon::lucide(Icon::Settings)
+                .size(scale::s(14.0))
+                .center(),
+        )
+        .padding(scale::s(6.0))
+        .style(crate::panel::button_style)
+        .on_press(UiEvent::SettingsOpenTab(SettingsTab::Translation));
+        let not_connected: Element<'_, UiEvent> = tooltip(
+            not_connected_btn,
+            tip_label("Open translation settings"),
+            tooltip::Position::Top,
+        )
+        .gap(scale::s(4.0))
+        .into();
         row![
             text("Translation service: Not connected").size(scale::s(12.0)),
             space::horizontal(),
@@ -624,7 +711,11 @@ fn translate_bar<'a, S: UiState + ?Sized>(
 
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let project = state.project();
-    let total_results: usize = state.images().iter().map(|i| project.visible_count_for(i.image_id)).sum();
+    let total_results: usize = state
+        .images()
+        .iter()
+        .map(|i| project.visible_count_for(i.image_id))
+        .sum();
     let has_entries = total_results > 0;
     let mode = state.translation_panel_mode();
 
@@ -670,13 +761,15 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                 // of clobbering it with 0.0 and jumping to the top.
                 let bounds_h = viewport.bounds().height;
                 let content_h = viewport.content_bounds().height;
-                if !(bounds_h > f32::EPSILON)
-                    || !(content_h > bounds_h + f32::EPSILON)
-                {
+                if !(bounds_h > f32::EPSILON) || !(content_h > bounds_h + f32::EPSILON) {
                     return UiEvent::PanelScroll(f32::NAN);
                 }
                 let y = viewport.relative_offset().y;
-                let anchor = if y.is_finite() { y.clamp(0.0, 1.0) } else { f32::NAN };
+                let anchor = if y.is_finite() {
+                    y.clamp(0.0, 1.0)
+                } else {
+                    f32::NAN
+                };
                 UiEvent::PanelScroll(anchor)
             }),
     );
@@ -687,9 +780,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         col = col.push(b);
     }
 
-    col.spacing(scale::s(8.0))
-        .height(FillLength)
-        .into()
+    col.spacing(scale::s(8.0)).height(FillLength).into()
 }
 
 /// Widget operation: finds the results panel's scrollable and the row
@@ -733,8 +824,7 @@ impl<T: 'static> Operation<T> for MeasurePanelRow {
     }
 
     fn finish(&self) -> Outcome<T> {
-        let (Some(panel), Some(row_y), Some(row_h)) =
-            (self.panel_bounds, self.row_y, self.row_h)
+        let (Some(panel), Some(row_y), Some(row_h)) = (self.panel_bounds, self.row_y, self.row_h)
         else {
             return Outcome::None;
         };
@@ -747,7 +837,10 @@ impl<T: 'static> Operation<T> for MeasurePanelRow {
         let target = (row_y - panel.y - (panel.height - row_h) / 2.0).max(0.0);
         Outcome::Chain(Box::new(widget_op::scrollable::scroll_to(
             self.panel.clone(),
-            AbsoluteOffset { x: Some(0.0), y: Some(target) },
+            AbsoluteOffset {
+                x: Some(0.0),
+                y: Some(target),
+            },
         )))
     }
 }
@@ -784,6 +877,9 @@ where
     };
     iced::widget::operation::snap_to(
         WidgetId::new(PANEL_LIST_ID),
-        iced::widget::operation::RelativeOffset { x: None, y: Some(y) },
+        iced::widget::operation::RelativeOffset {
+            x: None,
+            y: Some(y),
+        },
     )
 }

@@ -13,7 +13,7 @@ use rapidocr_core::config::{
 };
 use rapidocr_core::pipeline::{DetRecPipeline, PipelineError};
 pub use rapidocr_core::types::OcrLine;
-use rapidocr_core::{is_cancelled_error, RapidOcr};
+use rapidocr_core::{RapidOcr, is_cancelled_error};
 
 pub use rapidocr_core::OcrCancellationToken;
 
@@ -180,7 +180,11 @@ pub fn config() -> RapidOcrConfig {
 /// "max side len (max longer side before resize)" knob. Other pipeline sizes
 /// stay at defaults (30). Language defaults to Korean (legacy behavior).
 pub fn config_with(text_score: f32, max_side_len: u32) -> RapidOcrConfig {
-    config_for_lang(easyscanlate_settings::OcrLanguage::Korean, text_score, max_side_len)
+    config_for_lang(
+        easyscanlate_settings::OcrLanguage::Korean,
+        text_score,
+        max_side_len,
+    )
 }
 
 /// Like [`config_with`] but for an explicit OCR language. Korean uses the
@@ -195,10 +199,9 @@ pub fn config_for_lang(
     // Prefer onboarding-downloaded models in settings models_dir(), fallback to legacy crate-relative ../models.
     let det_path = easyscanlate_settings::resolve_model_path("PP-OCRv6_det_tiny.onnx");
     let (rec_file, dict_file) = match lang.backend() {
-        easyscanlate_settings::OcrRecBackend::Korean => (
-            "korean_PP-OCRv5_rec_mobile.onnx",
-            "ppocrv5_korean_dict.txt",
-        ),
+        easyscanlate_settings::OcrRecBackend::Korean => {
+            ("korean_PP-OCRv5_rec_mobile.onnx", "ppocrv5_korean_dict.txt")
+        }
         easyscanlate_settings::OcrRecBackend::PpOcrv6 => {
             ("PP-OCRv6_small_rec.onnx", "ppocrv6_dict.txt")
         }
@@ -385,9 +388,21 @@ impl MergeConfig {
 /// Filters OCR lines by bbox height (filter). `min_height` and `max_height`
 /// are in canvas pixels (bbox height = y1 - y0). Lines outside [min,max] are
 /// dropped. Use 0 and large (10000) to disable (ocr crate default).
-pub fn filter_by_bbox_height(lines: Vec<OcrLine>, min_height: f32, max_height: f32) -> Vec<OcrLine> {
-    let min_h = if min_height.is_finite() { min_height.max(0.0) } else { 0.0 };
-    let max_h = if max_height.is_finite() { max_height.max(0.0) } else { 10000.0 };
+pub fn filter_by_bbox_height(
+    lines: Vec<OcrLine>,
+    min_height: f32,
+    max_height: f32,
+) -> Vec<OcrLine> {
+    let min_h = if min_height.is_finite() {
+        min_height.max(0.0)
+    } else {
+        0.0
+    };
+    let max_h = if max_height.is_finite() {
+        max_height.max(0.0)
+    } else {
+        10000.0
+    };
     if min_h <= 0.0 && max_h >= 10000.0 {
         return lines;
     }
@@ -622,10 +637,7 @@ fn median(mut xs: Vec<f32>) -> Option<f32> {
 /// their own entry even when tucked against a bubble.
 fn is_footnote(text: &str) -> bool {
     let t = text.trim_start();
-    t.starts_with('*')
-        || t.starts_with('＊')
-        || t.starts_with("﹡")
-        || t.starts_with('※')
+    t.starts_with('*') || t.starts_with('＊') || t.starts_with("﹡") || t.starts_with('※')
 }
 
 /// Pairwise gate: direction-gated proximity + overlap + font-size + footnote.
@@ -784,11 +796,7 @@ fn group_accepts(group: &Group, b: [f32; 4], cfg: MergeConfig) -> bool {
             }
         }
         // Same-row check: vertical centers line up.
-        let mut cys: Vec<f32> = group
-            .bounds
-            .iter()
-            .map(|q| (q[1] + q[3]) / 2.0)
-            .collect();
+        let mut cys: Vec<f32> = group.bounds.iter().map(|q| (q[1] + q[3]) / 2.0).collect();
         cys.sort_by(|a, c| a.total_cmp(c));
         let med_cy = cys[cys.len() / 2];
         let cy = (b[1] + b[3]) / 2.0;
@@ -803,10 +811,34 @@ fn group_accepts(group: &Group, b: [f32; 4], cfg: MergeConfig) -> bool {
     let mut nx1 = group.max_x.max(b[2]);
     let mut ny1 = group.max_y.max(b[3]);
     // Recompute from members + candidate so a stale union never inflates.
-    nx0 = nx0.min(group.bounds.iter().map(|q| q[0]).fold(f32::INFINITY, f32::min));
-    ny0 = ny0.min(group.bounds.iter().map(|q| q[1]).fold(f32::INFINITY, f32::min));
-    nx1 = nx1.max(group.bounds.iter().map(|q| q[2]).fold(f32::NEG_INFINITY, f32::max));
-    ny1 = ny1.max(group.bounds.iter().map(|q| q[3]).fold(f32::NEG_INFINITY, f32::max));
+    nx0 = nx0.min(
+        group
+            .bounds
+            .iter()
+            .map(|q| q[0])
+            .fold(f32::INFINITY, f32::min),
+    );
+    ny0 = ny0.min(
+        group
+            .bounds
+            .iter()
+            .map(|q| q[1])
+            .fold(f32::INFINITY, f32::min),
+    );
+    nx1 = nx1.max(
+        group
+            .bounds
+            .iter()
+            .map(|q| q[2])
+            .fold(f32::NEG_INFINITY, f32::max),
+    );
+    ny1 = ny1.max(
+        group
+            .bounds
+            .iter()
+            .map(|q| q[3])
+            .fold(f32::NEG_INFINITY, f32::max),
+    );
     let union_area = ((nx1 - nx0).max(0.0)) * ((ny1 - ny0).max(0.0));
     if union_area > 0.0 {
         let text_area: f32 = group
@@ -990,15 +1022,14 @@ fn merge_lines(lines: Vec<OcrLine>, cfg: MergeConfig) -> Vec<OcrLine> {
                 .map(|line| line.text.as_str())
                 .collect::<Vec<_>>()
                 .join(" ");
-            let score = group
-                .lines
-                .iter()
-                .map(|line| line.score)
-                .sum::<f32>()
+            let score = group.lines.iter().map(|line| line.score).sum::<f32>()
                 / group.lines.len().max(1) as f32;
             OcrLine {
                 bbox: rapidocr_core::types::Quad::from_xyxy(
-                    group.min_x, group.min_y, group.max_x, group.max_y,
+                    group.min_x,
+                    group.min_y,
+                    group.max_x,
+                    group.max_y,
                 ),
                 text,
                 score,
@@ -1038,8 +1069,7 @@ fn rhythm_second_chance(
         let col_ok = overlap_x / min_w >= cfg.min_x_overlap
             || (lb[0] >= mb[0] - 1.0 && lb[2] <= mb[2] + 1.0)
             || (mb[0] >= lb[0] - 1.0 && mb[2] <= lb[2] + 1.0)
-            || (((mb[0] + mb[2]) / 2.0 - (lb[0] + lb[2]) / 2.0).abs()
-                <= cfg.center_tol * min_h);
+            || (((mb[0] + mb[2]) / 2.0 - (lb[0] + lb[2]) / 2.0).abs() <= cfg.center_tol * min_h);
         if !col_ok {
             return false;
         }
@@ -1090,9 +1120,7 @@ fn groups_combine_ok(a: &Group, b: &Group, cfg: MergeConfig) -> bool {
         if let Some(med) = median(gaps.clone()) {
             if med > 0.0 {
                 for g in gaps {
-                    if g > med * cfg.variance_cut
-                        && g > cfg.expand_y * a.mean_h().min(b.mean_h())
-                    {
+                    if g > med * cfg.variance_cut && g > cfg.expand_y * a.mean_h().min(b.mean_h()) {
                         return false;
                     }
                 }
@@ -1218,16 +1246,13 @@ mod tests {
             line("second", 130.0, 20.0, 240.0, 60.0, 0.7),
             line("far", 400.0, 20.0, 520.0, 60.0, 0.8),
         ];
-        let low_groups: Vec<String> = to_entries(low)
-            .into_iter()
-            .map(|e| e.text)
-            .collect();
-        let high_groups: Vec<String> = to_entries(high)
-            .into_iter()
-            .map(|e| e.text)
-            .collect();
+        let low_groups: Vec<String> = to_entries(low).into_iter().map(|e| e.text).collect();
+        let high_groups: Vec<String> = to_entries(high).into_iter().map(|e| e.text).collect();
         assert_eq!(low_groups, high_groups);
-        assert_eq!(low_groups, vec!["first second".to_string(), "far".to_string()]);
+        assert_eq!(
+            low_groups,
+            vec!["first second".to_string(), "far".to_string()]
+        );
     }
 
     #[test]
@@ -1351,5 +1376,4 @@ mod tests {
     fn empty_lines_yield_no_entries() {
         assert!(to_entries(vec![]).is_empty());
     }
-
 }

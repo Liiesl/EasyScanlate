@@ -3,11 +3,11 @@ use std::ops::Range;
 use iced::advanced::Shell;
 use iced::{Point, Rectangle, Size};
 
+use super::TileSpec;
 use super::constants::{MIN_THUMB_HEIGHT, SCROLLBAR_MARGIN, SCROLLBAR_WIDTH};
 use super::hit_test::editing_rect;
 use super::layout::tile_layout;
 use super::state::TileViewState;
-use super::TileSpec;
 
 pub fn scroll_by(state: &mut TileViewState, delta: f32) -> bool {
     let max_offset = (state.content_height - state.viewport_height).max(0.0);

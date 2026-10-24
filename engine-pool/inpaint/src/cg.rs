@@ -98,9 +98,8 @@ pub(crate) fn cg_solve_csr_warm(
     x0: Option<&[f64]>,
 ) -> Option<Vec<f64>> {
     let mut scratch = CgScratch::default();
-    cg_solve_csr_inner(deg, offsets, cols, rhs, x0, &mut scratch).map(|_| {
-        std::mem::take(&mut scratch.x)
-    })
+    cg_solve_csr_inner(deg, offsets, cols, rhs, x0, &mut scratch)
+        .map(|_| std::mem::take(&mut scratch.x))
 }
 
 /// CSR solve reusing caller-provided scratch (sequential multi-solve fast

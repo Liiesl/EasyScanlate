@@ -33,11 +33,11 @@ use std::fmt;
 #[cfg(feature = "onnx")]
 use std::sync::{Arc, Mutex};
 
+use easyscanlate_model::Quad;
+use easyscanlate_settings::InpaintBackend;
 use image::RgbaImage;
 #[cfg(feature = "onnx")]
 use ort::session::Session;
-use easyscanlate_model::Quad;
-use easyscanlate_settings::InpaintBackend;
 
 pub mod aot;
 pub(crate) mod cg;
@@ -50,13 +50,13 @@ pub mod shiftmap;
 pub mod telea;
 
 pub use common::{
-    harmonic_inpaint_crop, manual_square_params, shiftmap_inpaint_crop, InpaintPatch, InpaintResult,
+    InpaintPatch, InpaintResult, harmonic_inpaint_crop, manual_square_params, shiftmap_inpaint_crop,
 };
 pub use harmonic::{harmonic_inpaint_rgb, harmonic_inpaint_rgba};
-pub use poisson::{poisson_blend, MAX_PIXELS as POISSON_MAX_PIXELS};
+pub use poisson::{MAX_PIXELS as POISSON_MAX_PIXELS, poisson_blend};
 pub use shiftmap::{
-    shiftmap_inpaint_rgb, MAX_EDGE as SHIFTMAP_MAX_EDGE, N_LABELS as SHIFTMAP_N_LABELS,
-    PATCH as SHIFTMAP_PATCH,
+    MAX_EDGE as SHIFTMAP_MAX_EDGE, N_LABELS as SHIFTMAP_N_LABELS, PATCH as SHIFTMAP_PATCH,
+    shiftmap_inpaint_rgb,
 };
 pub use telea::telea_inpaint_crop;
 // LaMa/AOT model entry points need ORT; the geometry consts stay available
@@ -64,9 +64,9 @@ pub use telea::telea_inpaint_crop;
 #[cfg(feature = "onnx")]
 pub use aot::aot_inpaint_crop;
 pub use aot::{AOT_MAX_SIZE, AOT_PAD};
+pub use lama::MODEL_EDGE;
 #[cfg(feature = "onnx")]
 pub use lama::inpaint_crop;
-pub use lama::MODEL_EDGE;
 
 /// Cloneable handle to the shared inpainting engine: either a stateless
 /// pure-Rust backend or an ONNX session (one inference at a time, serialized
@@ -99,9 +99,7 @@ impl Engine {
     pub fn build(backend: InpaintBackend, radius: i32) -> Result<Self, String> {
         #[cfg(feature = "onnx")]
         let session = match backend {
-            InpaintBackend::Telea
-            | InpaintBackend::ShiftMap
-            | InpaintBackend::Harmonic => None,
+            InpaintBackend::Telea | InpaintBackend::ShiftMap | InpaintBackend::Harmonic => None,
             InpaintBackend::Lama => Some(Arc::new(Mutex::new(lama::build_session()?))),
             InpaintBackend::Aot => Some(Arc::new(Mutex::new(aot::build_session()?))),
         };
@@ -144,12 +142,7 @@ impl Engine {
     /// only the quad interior is composited. The third element is the
     /// corresponding quad (`Some` when input quads non-empty, `None` for
     /// empty-list whole-rect case).
-    pub fn run_blocking(
-        &self,
-        path: &str,
-        rect: [f32; 4],
-        quads: &[Quad],
-    ) -> InpaintResult {
+    pub fn run_blocking(&self, path: &str, rect: [f32; 4], quads: &[Quad]) -> InpaintResult {
         let image = image::ImageReader::open(path)
             .map_err(|e| format!("Failed to open {path}: {e}"))?
             .with_guessed_format()
@@ -195,12 +188,7 @@ impl Engine {
     /// space. For the stitched path every backend follows Lama's 512-edge
     /// handling (window / resize) is inside `inpaint_crop` / `aot_inpaint_crop`;
     /// Telea simply expands by `radius`.
-    pub fn run_on_image(
-        &self,
-        image: &RgbaImage,
-        rect: [f32; 4],
-        quads: &[Quad],
-    ) -> InpaintResult {
+    pub fn run_on_image(&self, image: &RgbaImage, rect: [f32; 4], quads: &[Quad]) -> InpaintResult {
         match self.backend {
             InpaintBackend::Telea => telea_inpaint_crop(image, rect, quads, self.radius),
             InpaintBackend::ShiftMap => shiftmap_inpaint_crop(image, rect, quads),

@@ -1,5 +1,5 @@
 use iced::advanced::text::{Alignment as TextAlignment, LineHeight, Shaping, Wrapping};
-use iced::{alignment, Font, Size};
+use iced::{Font, Size, alignment};
 
 /// Relative line height shared by measure and circular layout.
 /// Default for entries; per-entry `EntryStyle::line_height` overrides it.
@@ -271,10 +271,7 @@ pub fn draw_spaced_text<F>(
                     frame.stroke(
                         &glyph_path,
                         Stroke::default()
-                            .with_color(paint.color_at(
-                                box_rect,
-                                Point::new(start_x, start_y),
-                            ))
+                            .with_color(paint.color_at(box_rect, Point::new(start_x, start_y)))
                             .with_width(stroke_width),
                     );
                 }
@@ -323,5 +320,3 @@ pub fn draw_spaced_text<F>(
         }
     }
 }
-
-

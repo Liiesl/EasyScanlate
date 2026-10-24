@@ -1,5 +1,5 @@
-use iced::advanced::graphics::gradient::Linear;
 use iced::advanced::graphics::geometry::{self, Fill, Path, Stroke, Text};
+use iced::advanced::graphics::gradient::Linear;
 use iced::{Color, Point, Rectangle, Vector};
 
 use easyscanlate_model::{EntryStyle, TextGradientDir};
@@ -190,7 +190,17 @@ pub fn fill_gradient_text<F>(
 ) where
     F: geometry::frame::Backend,
 {
-    fill_gradient_glyphs(frame, text, box_rect, angle, a, b, stroke, letter_spacing, shadow)
+    fill_gradient_glyphs(
+        frame,
+        text,
+        box_rect,
+        angle,
+        a,
+        b,
+        stroke,
+        letter_spacing,
+        shadow,
+    )
 }
 
 fn fill_gradient_glyphs<F>(
@@ -206,10 +216,10 @@ fn fill_gradient_glyphs<F>(
 ) where
     F: geometry::frame::Backend,
 {
-    use iced::advanced::graphics::text::{self as gfx_text, cosmic_text};
-    use iced::advanced::text::{LineHeight, Wrapping};
     use iced::Size;
+    use iced::advanced::graphics::text::{self as gfx_text, cosmic_text};
     use iced::advanced::text::Alignment as TextAlignment;
+    use iced::advanced::text::{LineHeight, Wrapping};
 
     let line_factor = match text.line_height {
         LineHeight::Relative(f) => f,
@@ -309,10 +319,7 @@ fn fill_gradient_glyphs<F>(
                     frame.stroke(
                         &glyph_path,
                         Stroke::default()
-                            .with_color(paint.color_at(
-                                box_rect,
-                                Point::new(start_x, start_y),
-                            ))
+                            .with_color(paint.color_at(box_rect, Point::new(start_x, start_y)))
                             .with_width(stroke_width),
                     );
                 }
@@ -333,7 +340,11 @@ fn fill_gradient_glyphs<F>(
                         let base = lerp_color(
                             a,
                             b,
-                            gradient_t_angle(angle, box_rect, Point::new(x as f32, y as f32) + offset),
+                            gradient_t_angle(
+                                angle,
+                                box_rect,
+                                Point::new(x as f32, y as f32) + offset,
+                            ),
                         );
                         let [r, g, bl, al] = base.into_rgba8();
                         frame.fill(

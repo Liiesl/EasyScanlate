@@ -29,7 +29,10 @@ impl DetBox {
         ((self.bbox[2] - self.bbox[0]).max(0.0)) * ((self.bbox[3] - self.bbox[1]).max(0.0))
     }
     pub fn center(&self) -> [f32; 2] {
-        [(self.bbox[0] + self.bbox[2]) * 0.5, (self.bbox[1] + self.bbox[3]) * 0.5]
+        [
+            (self.bbox[0] + self.bbox[2]) * 0.5,
+            (self.bbox[1] + self.bbox[3]) * 0.5,
+        ]
     }
 }
 
@@ -41,13 +44,18 @@ pub struct OcrBox {
 
 impl OcrBox {
     pub fn from_xyxy(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
-        Self { bbox: [x1, y1, x2, y2] }
+        Self {
+            bbox: [x1, y1, x2, y2],
+        }
     }
     pub fn area(&self) -> f32 {
         ((self.bbox[2] - self.bbox[0]).max(0.0)) * ((self.bbox[3] - self.bbox[1]).max(0.0))
     }
     pub fn center(&self) -> [f32; 2] {
-        [(self.bbox[0] + self.bbox[2]) * 0.5, (self.bbox[1] + self.bbox[3]) * 0.5]
+        [
+            (self.bbox[0] + self.bbox[2]) * 0.5,
+            (self.bbox[1] + self.bbox[3]) * 0.5,
+        ]
     }
 }
 
@@ -178,7 +186,7 @@ mod tests {
     fn filter_sfx_removes_inside_balloon() {
         let balloons = vec![det(0.0, 0.0, 100.0, 100.0)];
         let sfx = vec![
-            det(10.0, 10.0, 30.0, 30.0), // inside balloon -> hallucination
+            det(10.0, 10.0, 30.0, 30.0),     // inside balloon -> hallucination
             det(200.0, 200.0, 250.0, 230.0), // outside
         ];
         let out = filter_sfx_outside_balloons(&sfx, &balloons);
@@ -239,12 +247,12 @@ mod tests {
     fn sfx_filter_indexes_combined() {
         let balloons = vec![det(0.0, 0.0, 100.0, 100.0)];
         let sfx_raw = vec![
-            det(10.0, 10.0, 20.0, 20.0), // inside balloon -> pruned
+            det(10.0, 10.0, 20.0, 20.0),     // inside balloon -> pruned
             det(200.0, 200.0, 260.0, 240.0), // outside
             det(400.0, 400.0, 500.0, 500.0), // outside but no entry overlaps
         ];
         let entries = vec![
-            bb(10.0, 10.0, 90.0, 90.0),   // 0 inside balloon -> keep
+            bb(10.0, 10.0, 90.0, 90.0),     // 0 inside balloon -> keep
             bb(210.0, 210.0, 250.0, 230.0), // 1 inside outside sfx -> delete
             bb(300.0, 300.0, 350.0, 320.0), // 2 nowhere -> keep
             bb(410.0, 410.0, 490.0, 490.0), // 3 inside second outside sfx -> delete

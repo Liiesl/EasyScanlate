@@ -1,20 +1,24 @@
 use iced::{Point, Rectangle, Size};
 
-use lucide_icons::Icon;
 use easyscanlate_model::{EntryId, Quad};
+use lucide_icons::Icon;
 
 use crate::main_area::geometry::order_quad;
 use crate::scale;
 
-use super::constants::{
-    HANDLE_SIZE, MIN_BOX_EDGE, ROTATE_STEM, TOOLBAR_GAP, TOOLBAR_HEIGHT,
-};
+use super::TileSpec;
+use super::constants::{HANDLE_SIZE, MIN_BOX_EDGE, ROTATE_STEM, TOOLBAR_GAP, TOOLBAR_HEIGHT};
 use super::interaction::{ResizeHandle, TopDecor};
 use super::layout::tile_layout;
 use super::state::TileViewState;
-use super::TileSpec;
 
-pub fn drag_grab(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, id: EntryId, local: Point) -> Option<[f32; 2]> {
+pub fn drag_grab(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    index: usize,
+    id: EntryId,
+    local: Point,
+) -> Option<[f32; 2]> {
     let tile = tiles.get(index)?;
     let (layout, _) = tile_layout(tiles, state.width);
     let (y, _) = layout.get(index)?;
@@ -130,7 +134,10 @@ pub fn handle_anchors(quad: [[f32; 2]; 4]) -> [(ResizeHandle, Point); 8] {
     let ordered = order_quad(quad);
     let point = |i: usize| Point::new(ordered[i][0], ordered[i][1]);
     let midpoint = |a: usize, b: usize| {
-        Point::new((ordered[a][0] + ordered[b][0]) / 2.0, (ordered[a][1] + ordered[b][1]) / 2.0)
+        Point::new(
+            (ordered[a][0] + ordered[b][0]) / 2.0,
+            (ordered[a][1] + ordered[b][1]) / 2.0,
+        )
     };
     [
         (ResizeHandle::NW, point(0)),
@@ -235,11 +242,7 @@ pub fn gradient_rest_factor(
     field: crate::event::StyleField,
 ) -> f32 {
     match state.gradient_rest {
-        Some(rest)
-            if rest.index == index && rest.id == id && rest.field == field =>
-        {
-            rest.factor
-        }
+        Some(rest) if rest.index == index && rest.id == id && rest.field == field => rest.factor,
         _ => 1.0,
     }
 }
@@ -248,12 +251,7 @@ pub fn gradient_rest_factor(
 /// squares stay reachable: at least `0.2` (no center collapse) and at most
 /// the tile frame (minus a square margin) so a dropped handle can be
 /// grabbed again afterwards.
-pub fn gradient_release_factor(
-    box_rect: Rectangle,
-    angle: f32,
-    r: f32,
-    frame: Size,
-) -> f32 {
+pub fn gradient_release_factor(box_rect: Rectangle, angle: f32, r: f32, frame: Size) -> f32 {
     let edge = gradient_edge_distance(box_rect, angle);
     let (start, end) = gradient_handle_points(box_rect, angle);
     let mut dx = end.x - start.x;
@@ -353,7 +351,13 @@ pub fn gradient_angle_from_point(box_rect: Rectangle, p: Point) -> f32 {
         .rem_euclid(360.0)
 }
 
-pub fn top_decor_geometry(rect: Rectangle, quad: [[f32; 2]; 4], width: f32, viewport_top: f32, viewport_bottom: f32) -> TopDecor {
+pub fn top_decor_geometry(
+    rect: Rectangle,
+    quad: [[f32; 2]; 4],
+    width: f32,
+    viewport_top: f32,
+    viewport_bottom: f32,
+) -> TopDecor {
     let center = quad_centroid(quad);
     let hs = scale::s(HANDLE_SIZE);
     let rot_stem = scale::s(ROTATE_STEM);
@@ -367,7 +371,9 @@ pub fn top_decor_geometry(rect: Rectangle, quad: [[f32; 2]; 4], width: f32, view
         if normal[0] * toward[0] + normal[1] * toward[1] < 0.0 {
             normal = [edge[1], -edge[0]];
         }
-        let len = (normal[0] * normal[0] + normal[1] * normal[1]).sqrt().max(f32::EPSILON);
+        let len = (normal[0] * normal[0] + normal[1] * normal[1])
+            .sqrt()
+            .max(f32::EPSILON);
         Point::new(
             mid.x + normal[0] / len * rot_stem,
             mid.y + normal[1] / len * rot_stem,
@@ -401,7 +407,11 @@ pub fn top_decor_geometry(rect: Rectangle, quad: [[f32; 2]; 4], width: f32, view
         ),
         Size::new(revert_width, toolbar_height),
     );
-    TopDecor { anchor, stem_from, revert }
+    TopDecor {
+        anchor,
+        stem_from,
+        revert,
+    }
 }
 
 pub fn delta_angle(center: Point, from: Point, to: Point, snap: bool) -> f32 {
@@ -422,7 +432,14 @@ pub fn delta_angle(center: Point, from: Point, to: Point, snap: bool) -> f32 {
     delta
 }
 
-pub fn rotate_quad(quad: Quad, center_img: [f32; 2], center_view: Point, press: Point, local: Point, snap: bool) -> Quad {
+pub fn rotate_quad(
+    quad: Quad,
+    center_img: [f32; 2],
+    center_view: Point,
+    press: Point,
+    local: Point,
+    snap: bool,
+) -> Quad {
     quad.rotate(center_img, delta_angle(center_view, press, local, snap))
 }
 
@@ -508,7 +525,14 @@ pub fn inpaint_toolbar_button_rect(
     Rectangle::new(toolbar.position(), Size::new(0.0, toolbar.height))
 }
 
-pub fn resize_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, handle: ResizeHandle, quad: Quad, local: Point) -> Option<Quad> {
+pub fn resize_quad(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    index: usize,
+    handle: ResizeHandle,
+    quad: Quad,
+    local: Point,
+) -> Option<Quad> {
     let tile = tiles.get(index)?;
     let (layout, _) = tile_layout(tiles, state.width);
     let (y, _) = layout.get(index)?;
@@ -530,21 +554,22 @@ pub fn resize_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, 
     // Pick a rotation angle that maps the quad to an axis-aligned local space.
     // For a true rotated rectangle we get the exact angle, for a skewed / free-transformed
     // quad we fall back to the average direction of top+bottom edges (keeps resize stable).
-    let angle = if let Some((_, _, _, a)) = crate::main_area::geometry::rotated_rect_geometry(ordered) {
-        a
-    } else {
-        let top_dx = ordered[1][0] - ordered[0][0];
-        let top_dy = ordered[1][1] - ordered[0][1];
-        let bot_dx = ordered[2][0] - ordered[3][0];
-        let bot_dy = ordered[2][1] - ordered[3][1];
-        let avg_dx = (top_dx + bot_dx) * 0.5;
-        let avg_dy = (top_dy + bot_dy) * 0.5;
-        if avg_dx.abs() < f32::EPSILON && avg_dy.abs() < f32::EPSILON {
-            top_dy.atan2(top_dx)
+    let angle =
+        if let Some((_, _, _, a)) = crate::main_area::geometry::rotated_rect_geometry(ordered) {
+            a
         } else {
-            avg_dy.atan2(avg_dx)
-        }
-    };
+            let top_dx = ordered[1][0] - ordered[0][0];
+            let top_dy = ordered[1][1] - ordered[0][1];
+            let bot_dx = ordered[2][0] - ordered[3][0];
+            let bot_dy = ordered[2][1] - ordered[3][1];
+            let avg_dx = (top_dx + bot_dx) * 0.5;
+            let avg_dy = (top_dy + bot_dy) * 0.5;
+            if avg_dx.abs() < f32::EPSILON && avg_dy.abs() < f32::EPSILON {
+                top_dy.atan2(top_dx)
+            } else {
+                avg_dy.atan2(avg_dx)
+            }
+        };
 
     let center = quad_centroid(ordered);
     let (sin, cos) = angle.sin_cos();
@@ -579,10 +604,18 @@ pub fn resize_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, 
     if (max_lx - min_lx).abs() < f32::EPSILON || (max_ly - min_ly).abs() < f32::EPSILON {
         let start = quad.bounds();
         let [mut min_x, mut min_y, mut max_x, mut max_y] = start;
-        if handle.left { min_x = img_x.min(max_x - min_edge); }
-        if handle.right { max_x = img_x.max(min_x + min_edge); }
-        if handle.top { min_y = img_y.min(max_y - min_edge); }
-        if handle.bottom { max_y = img_y.max(min_y + min_edge); }
+        if handle.left {
+            min_x = img_x.min(max_x - min_edge);
+        }
+        if handle.right {
+            max_x = img_x.max(min_x + min_edge);
+        }
+        if handle.top {
+            min_y = img_y.min(max_y - min_edge);
+        }
+        if handle.bottom {
+            max_y = img_y.max(min_y + min_edge);
+        }
         return Some(quad.refit(start, [min_x, min_y, max_x, max_y]));
     }
 
@@ -631,7 +664,11 @@ pub fn resize_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, 
         let mut s = if is_corner {
             let sx0 = new_w / old_w;
             let sy0 = new_h / old_h;
-            if (sx0 - 1.0).abs() >= (sy0 - 1.0).abs() { sx0 } else { sy0 }
+            if (sx0 - 1.0).abs() >= (sy0 - 1.0).abs() {
+                sx0
+            } else {
+                sy0
+            }
         } else if is_h {
             new_w / old_w
         } else if is_v {
@@ -712,7 +749,9 @@ pub fn resize_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, 
         [wp.x, wp.y]
     });
 
-    Some(Quad { points: new_local_points })
+    Some(Quad {
+        points: new_local_points,
+    })
 }
 
 /// Ctrl+Shift corner distort: lock the dragged corner's displacement
@@ -754,7 +793,14 @@ pub fn constrain_skew_local(ldx: f32, ldy: f32) -> (f32, f32) {
     }
 }
 
-pub fn distort_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, corner: usize, quad: Quad, local: Point) -> Option<Quad> {
+pub fn distort_quad(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    index: usize,
+    corner: usize,
+    quad: Quad,
+    local: Point,
+) -> Option<Quad> {
     let tile = tiles.get(index)?;
     let (layout, _) = tile_layout(tiles, state.width);
     let (y, _) = layout.get(index)?;
@@ -805,7 +851,10 @@ pub fn distort_quad(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize,
     for _ in 0..16 {
         let mid = (lo + hi) * 0.5;
         let mut probe = reference;
-        probe[corner] = [start[0] + (target[0] - start[0]) * mid, start[1] + (target[1] - start[1]) * mid];
+        probe[corner] = [
+            start[0] + (target[0] - start[0]) * mid,
+            start[1] + (target[1] - start[1]) * mid,
+        ];
         if distort_valid(probe, reference_sign, min_len, min_area) {
             lo = mid;
         } else {
@@ -874,21 +923,22 @@ pub fn skew_quad(
     };
     // Same local frame as `resize_quad` so shear follows quad rotation.
     let ordered = order_quad(reference);
-    let angle = if let Some((_, _, _, a)) = crate::main_area::geometry::rotated_rect_geometry(ordered) {
-        a
-    } else {
-        let top_dx = ordered[1][0] - ordered[0][0];
-        let top_dy = ordered[1][1] - ordered[0][1];
-        let bot_dx = ordered[2][0] - ordered[3][0];
-        let bot_dy = ordered[2][1] - ordered[3][1];
-        let avg_dx = (top_dx + bot_dx) * 0.5;
-        let avg_dy = (top_dy + bot_dy) * 0.5;
-        if avg_dx.abs() < f32::EPSILON && avg_dy.abs() < f32::EPSILON {
-            top_dy.atan2(top_dx)
+    let angle =
+        if let Some((_, _, _, a)) = crate::main_area::geometry::rotated_rect_geometry(ordered) {
+            a
         } else {
-            avg_dy.atan2(avg_dx)
-        }
-    };
+            let top_dx = ordered[1][0] - ordered[0][0];
+            let top_dy = ordered[1][1] - ordered[0][1];
+            let bot_dx = ordered[2][0] - ordered[3][0];
+            let bot_dy = ordered[2][1] - ordered[3][1];
+            let avg_dx = (top_dx + bot_dx) * 0.5;
+            let avg_dy = (top_dy + bot_dy) * 0.5;
+            if avg_dx.abs() < f32::EPSILON && avg_dy.abs() < f32::EPSILON {
+                top_dy.atan2(top_dx)
+            } else {
+                avg_dy.atan2(avg_dx)
+            }
+        };
     let center = quad_centroid(ordered);
     let (sin, cos) = angle.sin_cos();
     // Image-space drag delta, rotated into the quad-local frame.

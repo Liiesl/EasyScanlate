@@ -5,14 +5,14 @@
 //! [`UiEvent::SettingsChanged`]; the app re-syncs its runtime mirrors from
 //! the store on that one message.
 
+#[cfg(feature = "inpaint")]
+use iced::widget::pick_list;
+use iced::widget::text_input;
 #[allow(unused_imports)]
 use iced::widget::{
     button, center, checkbox, column, container, image, mouse_area, opaque, progress_bar, row,
     rule, scrollable, space, stack, text, toggler,
 };
-#[cfg(feature = "inpaint")]
-use iced::widget::pick_list;
-use iced::widget::text_input;
 use iced::{Color, Element, Fill as FillLength, Length};
 use lucide_icons::Icon;
 
@@ -25,16 +25,16 @@ use crate::translation::{self, CUSTOM_ANTHROPIC, CUSTOM_OPENAI};
 
 use crate::background::AuroraWheel;
 use crate::event::{SettingEdit, SettingsTab, UiEvent};
-use easyscanlate_model::ProfileId;
 use crate::new_project::SeriesOption;
 use crate::panel::PANEL_BG;
+use crate::scale;
+use crate::segmented::{segment, segmented_group};
+use crate::state::UiState;
+use easyscanlate_model::ProfileId;
 use neverliie_iced_widgets::advanced_dropdown::{Footer, Item, MenuItem, advanced_dropdown};
 use neverliie_iced_widgets::number_input::{
     NumberInput, Status as NumberStatus, Style as NumberStyle,
 };
-use crate::scale;
-use crate::segmented::{segment, segmented_group};
-use crate::state::UiState;
 
 const TAB_WIDTH: f32 = 170.0;
 const MUTED_FG: Color = Color::from_rgb(0.6, 0.6, 0.6);
@@ -43,7 +43,8 @@ const CARD_BORDER: Color = Color::from_rgba8(255, 255, 255, 0.08);
 
 const DOCS_URL: &str = "https://docs.easyscanlate.site/workflow/your-first-project/";
 const BUG_URL: &str = "https://github.com/Liiesl/EasyScanlate/issues/new?template=bug_report.yml";
-const FEATURE_URL: &str = "https://github.com/Liiesl/EasyScanlate/issues/new?template=feature_request.yml";
+const FEATURE_URL: &str =
+    "https://github.com/Liiesl/EasyScanlate/issues/new?template=feature_request.yml";
 
 /// Writes one change into the shared settings store (write-through) and
 /// returns the single announcement event for the app.
@@ -134,17 +135,30 @@ fn tab_button<'a, S: UiState + ?Sized>(
     let selected = state.settings_tab() == tab;
     let icon_el = crate::icon::lucide(icon)
         .size(scale::s(14.0))
-        .color(if selected { crate::accent::accent() } else { MUTED_FG });
-    let label_el = text(label)
-        .size(scale::s(13.0))
-        .color(if selected { Color::WHITE } else { MUTED_FG });
-    // left accent bar 3px
-    let accent = container(space::horizontal().width(Length::Fixed(scale::s(3.0))).height(Length::Fixed(scale::s(18.0))))
-        .style(move |_| container::Style {
-            background: Some(if selected { crate::accent::accent().into() } else { Color::TRANSPARENT.into() }),
-            border: iced::Border::default().rounded(scale::s(2.0)),
-            ..Default::default()
+        .color(if selected {
+            crate::accent::accent()
+        } else {
+            MUTED_FG
         });
+    let label_el =
+        text(label)
+            .size(scale::s(13.0))
+            .color(if selected { Color::WHITE } else { MUTED_FG });
+    // left accent bar 3px
+    let accent = container(
+        space::horizontal()
+            .width(Length::Fixed(scale::s(3.0)))
+            .height(Length::Fixed(scale::s(18.0))),
+    )
+    .style(move |_| container::Style {
+        background: Some(if selected {
+            crate::accent::accent().into()
+        } else {
+            Color::TRANSPARENT.into()
+        }),
+        border: iced::Border::default().rounded(scale::s(2.0)),
+        ..Default::default()
+    });
     let btn_content = row![accent, icon_el, label_el]
         .spacing(scale::s(7.0))
         .align_y(iced::Alignment::Center);
@@ -228,14 +242,22 @@ fn provider_row_with_connection<'a>(
             .style(crate::panel::button_style)
             .on_press(UiEvent::TranslateConnect(provider.id.clone())),
     };
-    let dot_color = if status.starts_with("Connected") { crate::accent::accent() } else { MUTED_FG };
+    let dot_color = if status.starts_with("Connected") {
+        crate::accent::accent()
+    } else {
+        MUTED_FG
+    };
     row![
-        container(space::horizontal().width(Length::Fixed(scale::s(6.0))).height(Length::Fixed(scale::s(6.0))))
-            .style(move |_| container::Style {
-                background: Some(dot_color.into()),
-                border: iced::Border::default().rounded(scale::s(3.0)),
-                ..Default::default()
-            }),
+        container(
+            space::horizontal()
+                .width(Length::Fixed(scale::s(6.0)))
+                .height(Length::Fixed(scale::s(6.0)))
+        )
+        .style(move |_| container::Style {
+            background: Some(dot_color.into()),
+            border: iced::Border::default().rounded(scale::s(3.0)),
+            ..Default::default()
+        }),
         column![
             text(&provider.name).size(scale::s(12.0)),
             text(status).size(scale::s(11.0)).color(MUTED_FG),
@@ -260,7 +282,11 @@ fn custom_row_with_connection<'a>(
         .as_ref()
         .map(|connection| format!("Connected · {}", mask_key(&connection.api_key)))
         .unwrap_or_else(|| "Not connected".to_string());
-    let dot_color = if status.starts_with("Connected") { crate::accent::accent() } else { MUTED_FG };
+    let dot_color = if status.starts_with("Connected") {
+        crate::accent::accent()
+    } else {
+        MUTED_FG
+    };
     let button = match connected {
         Some(_) => button(text("Disconnect").size(scale::s(11.0)))
             .padding([scale::s(3.0), scale::s(8.0)])
@@ -272,12 +298,16 @@ fn custom_row_with_connection<'a>(
             .on_press(UiEvent::TranslateConnect(id.to_string())),
     };
     row![
-        container(space::horizontal().width(Length::Fixed(scale::s(6.0))).height(Length::Fixed(scale::s(6.0))))
-            .style(move |_| container::Style {
-                background: Some(dot_color.into()),
-                border: iced::Border::default().rounded(scale::s(3.0)),
-                ..Default::default()
-            }),
+        container(
+            space::horizontal()
+                .width(Length::Fixed(scale::s(6.0)))
+                .height(Length::Fixed(scale::s(6.0)))
+        )
+        .style(move |_| container::Style {
+            background: Some(dot_color.into()),
+            border: iced::Border::default().rounded(scale::s(3.0)),
+            ..Default::default()
+        }),
         column![
             text(label).size(scale::s(12.0)),
             text(status).size(scale::s(11.0)).color(MUTED_FG),
@@ -315,23 +345,22 @@ fn recommended_row<'a>(
     let docs_button = button(text("Docs").size(scale::s(11.0)))
         .padding([scale::s(3.0), scale::s(8.0)])
         .style(crate::panel::button_style)
-            .on_press(UiEvent::OpenUrl(info.docs_url.to_string()));
+        .on_press(UiEvent::OpenUrl(info.docs_url.to_string()));
 
     let connect_button = button(text("Connect").size(scale::s(11.0)))
         .padding([scale::s(3.0), scale::s(8.0)])
         .style(crate::panel::button_style)
-            .on_press(UiEvent::TranslateConnect(provider.id.clone()));
+        .on_press(UiEvent::TranslateConnect(provider.id.clone()));
 
     row![
         column![
-            row![
-                text(&provider.name).size(scale::s(12.0)),
-                badge,
-            ]
-            .spacing(scale::s(6.0))
-            .align_y(iced::Alignment::Center),
+            row![text(&provider.name).size(scale::s(12.0)), badge,]
+                .spacing(scale::s(6.0))
+                .align_y(iced::Alignment::Center),
             text(info.description).size(scale::s(11.0)).color(MUTED_FG),
-            text("Not connected yet").size(scale::s(11.0)).color(MUTED_FG),
+            text("Not connected yet")
+                .size(scale::s(11.0))
+                .color(MUTED_FG),
         ]
         .spacing(scale::s(2.0))
         .width(FillLength),
@@ -411,14 +440,11 @@ fn settings_number_button_style(
 ) -> iced::widget::button::Style {
     iced::widget::button::Style {
         background: Some(iced::Background::Color(match status {
-            iced::widget::button::Status::Hovered => {
-                Color::from_rgba8(255, 255, 255, 0.10)
+            iced::widget::button::Status::Hovered => Color::from_rgba8(255, 255, 255, 0.10),
+            iced::widget::button::Status::Pressed => Color::from_rgba8(255, 255, 255, 0.16),
+            iced::widget::button::Status::Disabled | iced::widget::button::Status::Active => {
+                Color::TRANSPARENT
             }
-            iced::widget::button::Status::Pressed => {
-                Color::from_rgba8(255, 255, 255, 0.16)
-            }
-            iced::widget::button::Status::Disabled
-            | iced::widget::button::Status::Active => Color::TRANSPARENT,
         })),
         border: iced::Border::default(),
         shadow: iced::Shadow::default(),
@@ -450,11 +476,9 @@ fn settings_number_input_style(
 /// arrows, wheel and typing (previously steppers + a direct-store text
 /// input).
 fn font_size_number(value: u32) -> Element<'static, UiEvent> {
-    NumberInput::new(
-        scale::MIN_FONT_SIZE..=scale::MAX_FONT_SIZE,
-        value,
-        |v| UiEvent::SettingEdit(SettingEdit::UiFontSize(v)),
-    )
+    NumberInput::new(scale::MIN_FONT_SIZE..=scale::MAX_FONT_SIZE, value, |v| {
+        UiEvent::SettingEdit(SettingEdit::UiFontSize(v))
+    })
     .step(1u32)
     .shift_step(5u32)
     .width(Length::Fixed(scale::s(150.0)))
@@ -491,7 +515,10 @@ fn autosave_interval_number(value: u64) -> Element<'static, UiEvent> {
 // Used by the bg-aware inpaint cards; dead in translation-only builds.
 #[allow(dead_code)]
 fn warning_text<'a>(s: String) -> Element<'a, UiEvent> {
-    text(s).size(scale::s(11.0)).color(Color::from_rgb8(240, 200, 80)).into()
+    text(s)
+        .size(scale::s(11.0))
+        .color(Color::from_rgb8(240, 200, 80))
+        .into()
 }
 
 // ---------------------------------------------------------------------------
@@ -506,10 +533,50 @@ fn appearance_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     let hex = cfg.to_hex();
 
     let q = query;
-    let show_theme = matches_any(q, &["appearance", "theme", "mode", "light", "dark", "aurora", "background"]);
-    let show_palette = matches_any(q, &["appearance", "palette", "color", "primary", "wheel", "hex", "aurora", "background"]);
-    let show_density = matches_any(q, &["appearance", "density", "blob", "count", "schema", "vibrant", "analogous", "contrast", "neon", "solid"]);
-    let show_font = matches_any(q, &["appearance", "interface", "font", "size", "scale", "ui"]);
+    let show_theme = matches_any(
+        q,
+        &[
+            "appearance",
+            "theme",
+            "mode",
+            "light",
+            "dark",
+            "aurora",
+            "background",
+        ],
+    );
+    let show_palette = matches_any(
+        q,
+        &[
+            "appearance",
+            "palette",
+            "color",
+            "primary",
+            "wheel",
+            "hex",
+            "aurora",
+            "background",
+        ],
+    );
+    let show_density = matches_any(
+        q,
+        &[
+            "appearance",
+            "density",
+            "blob",
+            "count",
+            "schema",
+            "vibrant",
+            "analogous",
+            "contrast",
+            "neon",
+            "solid",
+        ],
+    );
+    let show_font = matches_any(
+        q,
+        &["appearance", "interface", "font", "size", "scale", "ui"],
+    );
 
     if !q.trim().is_empty() && !show_theme && !show_palette && !show_density && !show_font {
         return Vec::new();
@@ -536,7 +603,7 @@ fn appearance_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                 .width(FillLength)
                 .padding(scale::s(10.0))
                 .style(|_| card_style())
-                .into()
+                .into(),
         );
     }
 
@@ -546,73 +613,169 @@ fn appearance_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         let mut inner: Vec<Element<'static, UiEvent>> = Vec::new();
         if show_theme {
             let mode_row = segmented_group(vec![
-                segment(!is_dark, "Light", Some(UiEvent::SettingEdit(SettingEdit::AuroraDarkMode(false))), iced::Font::DEFAULT),
-                segment(is_dark, "Dark", Some(UiEvent::SettingEdit(SettingEdit::AuroraDarkMode(true))), iced::Font::DEFAULT),
+                segment(
+                    !is_dark,
+                    "Light",
+                    Some(UiEvent::SettingEdit(SettingEdit::AuroraDarkMode(false))),
+                    iced::Font::DEFAULT,
+                ),
+                segment(
+                    is_dark,
+                    "Dark",
+                    Some(UiEvent::SettingEdit(SettingEdit::AuroraDarkMode(true))),
+                    iced::Font::DEFAULT,
+                ),
             ]);
             inner.push(mode_row);
             if show_palette || show_density {
-                inner.push(space::vertical().height(Length::Fixed(scale::s(8.0))).into());
+                inner.push(
+                    space::vertical()
+                        .height(Length::Fixed(scale::s(8.0)))
+                        .into(),
+                );
             }
         }
         if show_palette {
-            inner.push(container(text("Primary Color").size(scale::s(12.0)).color(Color::WHITE).width(FillLength).center()).padding(scale::s(2.0)).into());
+            inner.push(
+                container(
+                    text("Primary Color")
+                        .size(scale::s(12.0))
+                        .color(Color::WHITE)
+                        .width(FillLength)
+                        .center(),
+                )
+                .padding(scale::s(2.0))
+                .into(),
+            );
             let wheel = AuroraWheel::new(cfg.clone()).view();
             inner.push(container(wheel).center_x(FillLength).into());
             let hex_owned = hex.clone();
             let hex_row: Element<'static, UiEvent> = row![
-                container(text("Hex").size(scale::s(11.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(36.0))),
+                container(text("Hex").size(scale::s(11.0)).color(Color::WHITE))
+                    .width(Length::Fixed(scale::s(36.0))),
                 text_input(&hex, &hex_owned)
                     .on_input(|input| {
                         if crate::background::AuroraConfig::from_hex(&input).is_some() {
                             set(move |s| s.aurora_color = input.clone())
-                        } else { UiEvent::SettingsChanged }
+                        } else {
+                            UiEvent::SettingsChanged
+                        }
                     })
                     .padding(scale::s(4.0))
                     .size(scale::s(11.0))
                     .width(Length::Fixed(scale::s(100.0))),
                 text(hex.clone()).size(scale::s(10.0)).color(MUTED_FG),
-            ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center).into();
+            ]
+            .spacing(scale::s(6.0))
+            .align_y(iced::Alignment::Center)
+            .into();
             inner.push(container(hex_row).center_x(FillLength).into());
             if show_density {
-                inner.push(space::vertical().height(Length::Fixed(scale::s(8.0))).into());
+                inner.push(
+                    space::vertical()
+                        .height(Length::Fixed(scale::s(8.0)))
+                        .into(),
+                );
             }
         }
         if show_density {
-            let count_label = if count == 1 { "Solid".to_string() } else { format!("{} · {}", count, schema.label()) };
-            let dec_btn = stepper_button(count > 1, "−", Some(UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(count - 1))));
-            let inc_btn = stepper_button(count < 5, "+", Some(UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(count + 1))));
+            let count_label = if count == 1 {
+                "Solid".to_string()
+            } else {
+                format!("{} · {}", count, schema.label())
+            };
+            let dec_btn = stepper_button(
+                count > 1,
+                "−",
+                Some(UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(
+                    count - 1,
+                ))),
+            );
+            let inc_btn = stepper_button(
+                count < 5,
+                "+",
+                Some(UiEvent::SettingEdit(SettingEdit::AuroraBlobCount(
+                    count + 1,
+                ))),
+            );
             let schema_btn: Element<'static, UiEvent> = crate::button::with_disabled_cursor(
                 button(text("⟳").size(scale::s(16.0)).width(FillLength).center())
-                    .width(Length::Fixed(scale::s(30.0))).height(Length::Fixed(scale::s(30.0))).padding(0)
-                    .on_press_maybe((count > 1).then(|| UiEvent::SettingEdit(SettingEdit::AuroraSchema(schema.index().wrapping_add(1) % 4))))
+                    .width(Length::Fixed(scale::s(30.0)))
+                    .height(Length::Fixed(scale::s(30.0)))
+                    .padding(0)
+                    .on_press_maybe((count > 1).then(|| {
+                        UiEvent::SettingEdit(SettingEdit::AuroraSchema(
+                            schema.index().wrapping_add(1) % 4,
+                        ))
+                    }))
                     .style(|_theme: &iced::Theme, status| {
-                        let bg = if status == iced::widget::button::Status::Hovered { Color::from_rgba8(255,255,255,0.30) } else { Color::from_rgba8(255,255,255,0.15) };
-                        iced::widget::button::Style{ background: Some(bg.into()), border: iced::Border::default().rounded(scale::s(15.0)), text_color: Color::WHITE, ..Default::default() }
-                    }).into(),
+                        let bg = if status == iced::widget::button::Status::Hovered {
+                            Color::from_rgba8(255, 255, 255, 0.30)
+                        } else {
+                            Color::from_rgba8(255, 255, 255, 0.15)
+                        };
+                        iced::widget::button::Style {
+                            background: Some(bg.into()),
+                            border: iced::Border::default().rounded(scale::s(15.0)),
+                            text_color: Color::WHITE,
+                            ..Default::default()
+                        }
+                    })
+                    .into(),
             );
             let count_row: Element<'static, UiEvent> = row![
                 dec_btn,
-                container(text(count_label).size(scale::s(11.0)).color(Color::WHITE).width(FillLength).center()).width(Length::Fixed(scale::s(80.0))),
+                container(
+                    text(count_label)
+                        .size(scale::s(11.0))
+                        .color(Color::WHITE)
+                        .width(FillLength)
+                        .center()
+                )
+                .width(Length::Fixed(scale::s(80.0))),
                 inc_btn,
                 space::horizontal(),
                 schema_btn
-            ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center).into();
+            ]
+            .spacing(scale::s(6.0))
+            .align_y(iced::Alignment::Center)
+            .into();
             inner.push(container(count_row).center_x(FillLength).into());
             inner.push(container(text(if count == 1 { "A single color — no moving blobs." } else { "Soft colored blobs blend into the background. Press ⟳ to shuffle their colors and layout." }).size(scale::s(10.0)).color(MUTED_FG).width(FillLength).center()).into());
         }
-        let aurora_card = container(column(inner).spacing(scale::s(12.0)).align_x(iced::Alignment::Center))
-            .width(Length::Fixed(scale::s(AURORA_WIDTH)))
-            .padding(scale::s(14.0))
-            .style(|_| container::Style{
-                background: Some(Color::from_rgba8(20,20,20,0.86).into()),
-                border: iced::Border::default().rounded(scale::s(20.0)).color(Color::from_rgba8(255,255,255,0.10)).width(scale::s(1.0)),
-                ..Default::default()
-            });
+        let aurora_card = container(
+            column(inner)
+                .spacing(scale::s(12.0))
+                .align_x(iced::Alignment::Center),
+        )
+        .width(Length::Fixed(scale::s(AURORA_WIDTH)))
+        .padding(scale::s(14.0))
+        .style(|_| container::Style {
+            background: Some(Color::from_rgba8(20, 20, 20, 0.86).into()),
+            border: iced::Border::default()
+                .rounded(scale::s(20.0))
+                .color(Color::from_rgba8(255, 255, 255, 0.10))
+                .width(scale::s(1.0)),
+            ..Default::default()
+        });
         let section = column![
-            card_header(Icon::Palette, "Aurora Background", Some("The animated gradient behind the app")),
-            container(aurora_card).width(FillLength).center_x(FillLength),
-        ].spacing(scale::s(10.0));
-        outer.push(container(section).width(FillLength).padding(scale::s(10.0)).style(|_| card_style()).into());
+            card_header(
+                Icon::Palette,
+                "Aurora Background",
+                Some("The animated gradient behind the app")
+            ),
+            container(aurora_card)
+                .width(FillLength)
+                .center_x(FillLength),
+        ]
+        .spacing(scale::s(10.0));
+        outer.push(
+            container(section)
+                .width(FillLength)
+                .padding(scale::s(10.0))
+                .style(|_| card_style())
+                .into(),
+        );
     }
     outer
 }
@@ -752,14 +915,40 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
     // ── Automation card: auto-detect / SFX / auto-inpaint mirror ──
     {
         // collect whether any automation sub-field matches
-        let show_auto_detect = matches_any(query_ref, &["automation", "auto", "detect", "style", "classify", "onnx", "styling"]);
-        let show_sfx = matches_any(query_ref, &["automation", "auto", "sfx", "filter", "balloon", "segment", "manga"]);
+        let show_auto_detect = matches_any(
+            query_ref,
+            &[
+                "automation",
+                "auto",
+                "detect",
+                "style",
+                "classify",
+                "onnx",
+                "styling",
+            ],
+        );
+        let show_sfx = matches_any(
+            query_ref,
+            &[
+                "automation",
+                "auto",
+                "sfx",
+                "filter",
+                "balloon",
+                "segment",
+                "manga",
+            ],
+        );
         let show_inpaint = matches_any(query_ref, &["automation", "auto", "inpaint", "bg-aware"]);
         let show_automation_header = matches_any(query_ref, &["automation", "general", "auto"]);
         let show_any = show_automation_header || show_auto_detect || show_sfx || show_inpaint;
         if show_any {
             let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-            col.push(card_header(Icon::Sparkles, "Automation", Some("Style & SFX filtering")));
+            col.push(card_header(
+                Icon::Sparkles,
+                "Automation",
+                Some("Style & SFX filtering"),
+            ));
 
             #[cfg(feature = "styling")]
             if show_auto_detect || show_automation_header || query_ref.trim().is_empty() {
@@ -773,7 +962,9 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
                         helper_text("Automatically identifies the style of each new text entry right after OCR."),
                     ].spacing(scale::s(4.0)).into()
                 );
-                if col.len() > 1 { col.push(item_separator()); }
+                if col.len() > 1 {
+                    col.push(item_separator());
+                }
             }
             #[cfg(feature = "segment")]
             if show_sfx || show_automation_header || query_ref.trim().is_empty() {
@@ -787,31 +978,43 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
                         helper_text("Hides sound effects that sit outside speech balloons so only dialogue gets translated. Sound effects drawn inside balloons are left alone."),
                     ].spacing(scale::s(4.0)).into()
                 );
-                if col.len() > 2 { col.push(item_separator()); }
+                if col.len() > 2 {
+                    col.push(item_separator());
+                }
             }
             #[cfg(feature = "inpaint")]
             if show_inpaint || show_automation_header || query_ref.trim().is_empty() {
-                if col.len() > 1 { col.push(item_separator()); }
+                if col.len() > 1 {
+                    col.push(item_separator());
+                }
                 let auto = easyscanlate_settings::get(|s| s.auto_inpaint);
                 col.push(
                     checkbox(auto)
                         .label("Auto-inpaint backgrounds")
                         .text_size(scale::s(12.0))
                         .on_toggle(|v| set(move |s| s.auto_inpaint = v))
-                        .into()
+                        .into(),
                 );
             }
 
             // only push card if it actually has content beyond header
             if col.len() > 1 {
-                cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+                cards.push(
+                    container(column(col).spacing(scale::s(8.0)))
+                        .padding(scale::s(10.0))
+                        .style(|_| card_style())
+                        .into(),
+                );
             }
         }
     }
 
     // ── Onboarding replay card
     {
-        let show_onboarding = matches_any(query_ref, &["onboarding", "setup", "wizard", "replay", "general"]);
+        let show_onboarding = matches_any(
+            query_ref,
+            &["onboarding", "setup", "wizard", "replay", "general"],
+        );
         if show_onboarding {
             let col: Vec<Element<'static, UiEvent>> = vec![
                 card_header(Icon::Sparkles, "Setup Wizard", Some("Replay the first-run walkthrough")),
@@ -823,13 +1026,23 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
                         .on_press(UiEvent::OnboardingReplay),
                 ].spacing(scale::s(6.0)).into(),
             ];
-            cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+            cards.push(
+                container(column(col).spacing(scale::s(8.0)))
+                    .padding(scale::s(10.0))
+                    .style(|_| card_style())
+                    .into(),
+            );
         }
     }
 
     // ── Autosave card: central crash-recovery delta
     {
-        let show_autosave = matches_any(query_ref, &["autosave", "auto", "save", "backup", "recovery", "crash", "general"]);
+        let show_autosave = matches_any(
+            query_ref,
+            &[
+                "autosave", "auto", "save", "backup", "recovery", "crash", "general",
+            ],
+        );
         if show_autosave {
             let enabled = easyscanlate_settings::get(|s| s.autosave_enabled);
             let raw_secs = easyscanlate_settings::get(|s| s.autosave_interval_secs);
@@ -857,7 +1070,12 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
                     helper_text("How often we save, in seconds (15–600). Projects without changes are skipped."),
                 ].spacing(scale::s(4.0)).into(),
             ];
-            cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+            cards.push(
+                container(column(col).spacing(scale::s(8.0)))
+                    .padding(scale::s(10.0))
+                    .style(|_| card_style())
+                    .into(),
+            );
         }
     }
 
@@ -869,13 +1087,24 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
     // ── Empty state ───────────────────────────────────────────────
     if cards.is_empty() {
         cards.push(
-            container(column![
-                row![
-                    crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG),
-                    text(format!("No settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG),
-                ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
-                text("Try a different term — e.g. font, OCR, inpaint, SFX.").size(scale::s(11.0)).color(MUTED_FG),
-            ].spacing(scale::s(6.0)))
+            container(
+                column![
+                    row![
+                        crate::icon::lucide(Icon::SearchX)
+                            .size(scale::s(16.0))
+                            .color(MUTED_FG),
+                        text(format!("No settings match “{query}”."))
+                            .size(scale::s(12.0))
+                            .color(MUTED_FG),
+                    ]
+                    .spacing(scale::s(6.0))
+                    .align_y(iced::Alignment::Center),
+                    text("Try a different term — e.g. font, OCR, inpaint, SFX.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG),
+                ]
+                .spacing(scale::s(6.0)),
+            )
             .padding(scale::s(14.0))
             .style(|_| card_style())
             .into(),
@@ -883,25 +1112,49 @@ fn general_tab_filtered(query: String) -> Element<'static, UiEvent> {
     }
 
     // wrap
-    scrollable(
-        column(cards).spacing(scale::s(10.0))
-    )
-    .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
-    .height(Length::Fill)
-    .into()
+    scrollable(column(cards).spacing(scale::s(10.0)))
+        .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
+        .height(Length::Fill)
+        .into()
 }
 
 fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
     {
-        let show_auto_detect = matches_any(query, &["automation", "auto", "detect", "style", "classify", "onnx", "styling"]);
-        let show_sfx = matches_any(query, &["automation", "auto", "sfx", "filter", "balloon", "segment", "manga"]);
+        let show_auto_detect = matches_any(
+            query,
+            &[
+                "automation",
+                "auto",
+                "detect",
+                "style",
+                "classify",
+                "onnx",
+                "styling",
+            ],
+        );
+        let show_sfx = matches_any(
+            query,
+            &[
+                "automation",
+                "auto",
+                "sfx",
+                "filter",
+                "balloon",
+                "segment",
+                "manga",
+            ],
+        );
         let show_inpaint = matches_any(query, &["automation", "auto", "inpaint", "bg-aware"]);
         let show_automation_header = matches_any(query, &["automation", "general", "auto"]);
         let show_any = show_automation_header || show_auto_detect || show_sfx || show_inpaint;
         if show_any {
             let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-            col.push(card_header(Icon::Sparkles, "Automation", Some("Style & SFX filtering")));
+            col.push(card_header(
+                Icon::Sparkles,
+                "Automation",
+                Some("Style & SFX filtering"),
+            ));
             #[cfg(feature = "styling")]
             if show_auto_detect || show_automation_header || query.trim().is_empty() {
                 let auto = easyscanlate_settings::get(|s| s.auto_style_detect);
@@ -914,7 +1167,9 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                         helper_text("Automatically identifies the style of each new text entry right after OCR."),
                     ].spacing(scale::s(4.0)).into()
                 );
-                if col.len() > 1 { col.push(item_separator()); }
+                if col.len() > 1 {
+                    col.push(item_separator());
+                }
             }
             #[cfg(feature = "segment")]
             if show_sfx || show_automation_header || query.trim().is_empty() {
@@ -928,28 +1183,40 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                         helper_text("Hides sound effects that sit outside speech balloons so only dialogue gets translated. Sound effects drawn inside balloons are left alone."),
                     ].spacing(scale::s(4.0)).into()
                 );
-                if col.len() > 2 { col.push(item_separator()); }
+                if col.len() > 2 {
+                    col.push(item_separator());
+                }
             }
             #[cfg(feature = "inpaint")]
             if show_inpaint || show_automation_header || query.trim().is_empty() {
-                if col.len() > 1 { col.push(item_separator()); }
+                if col.len() > 1 {
+                    col.push(item_separator());
+                }
                 let auto = easyscanlate_settings::get(|s| s.auto_inpaint);
                 col.push(
                     checkbox(auto)
                         .label("Auto-inpaint backgrounds")
                         .text_size(scale::s(12.0))
                         .on_toggle(|v| set(move |s| s.auto_inpaint = v))
-                        .into()
+                        .into(),
                 );
             }
             if col.len() > 1 {
-                cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+                cards.push(
+                    container(column(col).spacing(scale::s(8.0)))
+                        .padding(scale::s(10.0))
+                        .style(|_| card_style())
+                        .into(),
+                );
             }
         }
     }
     // Onboarding replay card
     {
-        let show_onboarding = matches_any(query, &["onboarding", "setup", "wizard", "replay", "general"]);
+        let show_onboarding = matches_any(
+            query,
+            &["onboarding", "setup", "wizard", "replay", "general"],
+        );
         if show_onboarding {
             let col: Vec<Element<'static, UiEvent>> = vec![
                 card_header(Icon::Sparkles, "Setup Wizard", Some("Replay the first-run walkthrough")),
@@ -961,11 +1228,21 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                         .on_press(UiEvent::OnboardingReplay),
                 ].spacing(scale::s(6.0)).into(),
             ];
-            cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+            cards.push(
+                container(column(col).spacing(scale::s(8.0)))
+                    .padding(scale::s(10.0))
+                    .style(|_| card_style())
+                    .into(),
+            );
         }
     }
     {
-        let show_autosave = matches_any(query, &["autosave", "auto", "save", "backup", "recovery", "crash", "general"]);
+        let show_autosave = matches_any(
+            query,
+            &[
+                "autosave", "auto", "save", "backup", "recovery", "crash", "general",
+            ],
+        );
         if show_autosave {
             let enabled = easyscanlate_settings::get(|s| s.autosave_enabled);
             let secs = easyscanlate_settings::get(|s| s.autosave_interval_secs).clamp(15, 600);
@@ -992,7 +1269,12 @@ fn general_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                     helper_text("How often we save, in seconds (15–600). Projects without changes are skipped."),
                 ].spacing(scale::s(4.0)).into(),
             ];
-            cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+            cards.push(
+                container(column(col).spacing(scale::s(8.0)))
+                    .padding(scale::s(10.0))
+                    .style(|_| card_style())
+                    .into(),
+            );
         }
     }
     if help_support_visible(query) {
@@ -1031,7 +1313,10 @@ fn project_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
         Some("Group this project with others on the home screen"),
     ));
     if !state.has_project() {
-        col.push(helper_text("Open or create a project first, then you can assign it to a series.").into());
+        col.push(
+            helper_text("Open or create a project first, then you can assign it to a series.")
+                .into(),
+        );
     } else {
         let current = state.project().series().map(str::to_owned);
         let available = available_series_names(state.series_items());
@@ -1046,7 +1331,9 @@ fn project_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
             entries.push(MenuItem::Label("Series"));
             for name in &available {
                 entries.push(MenuItem::Item(Item::new(
-                    SeriesOption { name: Some(name.clone()) },
+                    SeriesOption {
+                        name: Some(name.clone()),
+                    },
                     name.clone(),
                 )));
             }
@@ -1082,33 +1369,62 @@ fn project_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
                         .width(Length::Fixed(scale::s(90.0)))
                         .style(crate::panel::button_style)
                         .on_press(UiEvent::ProjectSeriesCreateConfirm),
-                    button(text("Cancel").size(scale::s(12.0)).width(FillLength).center())
-                        .padding(scale::s(6.0))
-                        .width(Length::Fixed(scale::s(90.0)))
-                        .style(crate::panel::button_style)
-                        .on_press(UiEvent::ProjectSeriesCancel),
+                    button(
+                        text("Cancel")
+                            .size(scale::s(12.0))
+                            .width(FillLength)
+                            .center()
+                    )
+                    .padding(scale::s(6.0))
+                    .width(Length::Fixed(scale::s(90.0)))
+                    .style(crate::panel::button_style)
+                    .on_press(UiEvent::ProjectSeriesCancel),
                 ]
                 .spacing(scale::s(8.0))
                 .align_y(iced::Alignment::Center)
                 .into(),
             );
         }
-        col.push(helper_text("Saved with your project when you save. The home sidebar updates right away.").into());
+        col.push(
+            helper_text(
+                "Saved with your project when you save. The home sidebar updates right away.",
+            )
+            .into(),
+        );
     }
-    cards.push(container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+    cards.push(
+        container(column(col).spacing(scale::s(8.0)))
+            .padding(scale::s(10.0))
+            .style(|_| card_style())
+            .into(),
+    );
     cards
 }
 
-fn project_tab_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Element<'static, UiEvent> {
+fn project_tab_filtered<S: UiState + ?Sized>(
+    state: &S,
+    query: String,
+) -> Element<'static, UiEvent> {
     let cards = project_cards(state, query.as_str());
     if cards.is_empty() {
-        return container(column![
-            row![
-                crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG),
-                text(format!("No settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG),
-            ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
-            text("Try a different term — e.g. project, series.").size(scale::s(11.0)).color(MUTED_FG),
-        ].spacing(scale::s(6.0)))
+        return container(
+            column![
+                row![
+                    crate::icon::lucide(Icon::SearchX)
+                        .size(scale::s(16.0))
+                        .color(MUTED_FG),
+                    text(format!("No settings match “{query}”."))
+                        .size(scale::s(12.0))
+                        .color(MUTED_FG),
+                ]
+                .spacing(scale::s(6.0))
+                .align_y(iced::Alignment::Center),
+                text("Try a different term — e.g. project, series.")
+                    .size(scale::s(11.0))
+                    .color(MUTED_FG),
+            ]
+            .spacing(scale::s(6.0)),
+        )
         .padding(scale::s(14.0))
         .style(|_| card_style())
         .into();
@@ -1137,7 +1453,17 @@ impl std::fmt::Display for AdvProfileOption {
 }
 
 fn advanced_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'static, UiEvent>> {
-    if !matches_any(query, &["advanced", "export", "import", "translation", "profile", "xml"]) {
+    if !matches_any(
+        query,
+        &[
+            "advanced",
+            "export",
+            "import",
+            "translation",
+            "profile",
+            "xml",
+        ],
+    ) {
         return Vec::new();
     }
     if !state.has_project() {
@@ -1170,7 +1496,13 @@ fn advanced_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'s
         .profiles
         .iter()
         .find(|p| p.id == export_id)
-        .map(|p| state.project().visible_entries().filter(|e| p.translation_of(e.id).is_some()).count())
+        .map(|p| {
+            state
+                .project()
+                .visible_entries()
+                .filter(|e| p.translation_of(e.id).is_some())
+                .count()
+        })
         .unwrap_or(0);
     let import_target = state
         .adv_import_target()
@@ -1179,26 +1511,32 @@ fn advanced_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'s
     let can_export = total_count > 0;
     let can_import = !import_name.trim().is_empty() || import_target.is_some();
 
-    let mut export_entries: Vec<MenuItem<AdvProfileOption, UiEvent, iced::Theme, iced::Renderer>> = Vec::with_capacity(profiles.len());
+    let mut export_entries: Vec<MenuItem<AdvProfileOption, UiEvent, iced::Theme, iced::Renderer>> =
+        Vec::with_capacity(profiles.len());
     for (id, name) in &profiles {
         export_entries.push(MenuItem::Item(Item::new(
-            AdvProfileOption { id: *id, name: name.clone() },
+            AdvProfileOption {
+                id: *id,
+                name: name.clone(),
+            },
             name.clone(),
         )));
     }
     let export_selected = profiles
         .iter()
         .find(|(pid, _)| *pid == export_id)
-        .map(|(id, name)| AdvProfileOption { id: *id, name: name.clone() });
-    let export_dropdown: Element<'static, UiEvent> = advanced_dropdown(
-        export_entries,
-        export_selected,
-        |opt: AdvProfileOption| UiEvent::AdvExportProfileSelect(opt.id),
-    )
-    .placeholder("Profile…")
-    .text_size(scale::s(12.0))
-    .width(FillLength)
-    .into();
+        .map(|(id, name)| AdvProfileOption {
+            id: *id,
+            name: name.clone(),
+        });
+    let export_dropdown: Element<'static, UiEvent> =
+        advanced_dropdown(export_entries, export_selected, |opt: AdvProfileOption| {
+            UiEvent::AdvExportProfileSelect(opt.id)
+        })
+        .placeholder("Profile…")
+        .text_size(scale::s(12.0))
+        .width(FillLength)
+        .into();
     let export_btn: Element<'static, UiEvent> = crate::button::with_disabled_cursor(
         button(text("Export…").size(scale::s(12.0)))
             .padding([scale::s(6.0), scale::s(12.0)])
@@ -1207,10 +1545,14 @@ fn advanced_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'s
             .into(),
     );
 
-    let mut import_entries: Vec<MenuItem<AdvProfileOption, UiEvent, iced::Theme, iced::Renderer>> = Vec::with_capacity(profiles.len());
+    let mut import_entries: Vec<MenuItem<AdvProfileOption, UiEvent, iced::Theme, iced::Renderer>> =
+        Vec::with_capacity(profiles.len());
     for (id, name) in &profiles {
         import_entries.push(MenuItem::Item(Item::new(
-            AdvProfileOption { id: *id, name: name.clone() },
+            AdvProfileOption {
+                id: *id,
+                name: name.clone(),
+            },
             name.clone(),
         )));
     }
@@ -1218,17 +1560,19 @@ fn advanced_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'s
         profiles
             .iter()
             .find(|(pid, _)| *pid == tid)
-            .map(|(id, name)| AdvProfileOption { id: *id, name: name.clone() })
+            .map(|(id, name)| AdvProfileOption {
+                id: *id,
+                name: name.clone(),
+            })
     });
-    let import_dropdown: Element<'static, UiEvent> = advanced_dropdown(
-        import_entries,
-        import_selected,
-        |opt: AdvProfileOption| UiEvent::AdvImportTargetSelect(opt.id),
-    )
-    .placeholder("Choose a profile to overwrite…")
-    .text_size(scale::s(12.0))
-    .width(FillLength)
-    .into();
+    let import_dropdown: Element<'static, UiEvent> =
+        advanced_dropdown(import_entries, import_selected, |opt: AdvProfileOption| {
+            UiEvent::AdvImportTargetSelect(opt.id)
+        })
+        .placeholder("Choose a profile to overwrite…")
+        .text_size(scale::s(12.0))
+        .width(FillLength)
+        .into();
     let import_btn: Element<'static, UiEvent> = crate::button::with_disabled_cursor(
         button(text("Import…").size(scale::s(12.0)))
             .padding([scale::s(6.0), scale::s(12.0)])
@@ -1247,12 +1591,22 @@ fn advanced_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'s
     if export_name.is_empty() {
         col.push(helper_text("No profiles yet.").into());
     } else if total_count == 0 {
-        col.push(text("Run OCR first — there are no lines to export.".to_string()).size(scale::s(11.0)).color(MUTED_FG).into());
+        col.push(
+            text("Run OCR first — there are no lines to export.".to_string())
+                .size(scale::s(11.0))
+                .color(MUTED_FG)
+                .into(),
+        );
     } else {
         let line_word = if total_count == 1 { "line" } else { "lines" };
         col.push(text(format!("Exports {total_count} {line_word} in reading order — the original OCR text plus the “{export_name}” translation ({translated_count} already done).")).size(scale::s(11.0)).color(MUTED_FG).into());
     }
-    col.push(row![space::horizontal().width(FillLength), export_btn].spacing(scale::s(8.0)).align_y(iced::Alignment::Center).into());
+    col.push(
+        row![space::horizontal().width(FillLength), export_btn]
+            .spacing(scale::s(8.0))
+            .align_y(iced::Alignment::Center)
+            .into(),
+    );
     col.push(item_separator());
     col.push(field_row("Overwrite profile", import_dropdown));
     col.push(
@@ -1266,20 +1620,44 @@ fn advanced_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'s
     );
     col.push(helper_text("Type a name to create a new profile — or overwrite an existing one with that name. Leave it empty to overwrite the profile chosen above. Overwriting Default creates a copy instead.").into());
     col.push(helper_text("Lines missing from the file are removed, and lines the file doesn't recognize are skipped. Save the project afterwards to keep the changes.").into());
-    col.push(row![space::horizontal().width(FillLength), import_btn].spacing(scale::s(8.0)).align_y(iced::Alignment::Center).into());
-    vec![container(column(col).spacing(scale::s(8.0))).padding(scale::s(10.0)).style(|_| card_style()).into()]
+    col.push(
+        row![space::horizontal().width(FillLength), import_btn]
+            .spacing(scale::s(8.0))
+            .align_y(iced::Alignment::Center)
+            .into(),
+    );
+    vec![
+        container(column(col).spacing(scale::s(8.0)))
+            .padding(scale::s(10.0))
+            .style(|_| card_style())
+            .into(),
+    ]
 }
 
-fn advanced_tab_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Element<'static, UiEvent> {
+fn advanced_tab_filtered<S: UiState + ?Sized>(
+    state: &S,
+    query: String,
+) -> Element<'static, UiEvent> {
     let cards = advanced_cards(state, query.as_str());
     if cards.is_empty() {
-        return container(column![
-            row![
-                crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG),
-                text(format!("No settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG),
-            ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
-            text("Try a different term — e.g. advanced, export, import.").size(scale::s(11.0)).color(MUTED_FG),
-        ].spacing(scale::s(6.0)))
+        return container(
+            column![
+                row![
+                    crate::icon::lucide(Icon::SearchX)
+                        .size(scale::s(16.0))
+                        .color(MUTED_FG),
+                    text(format!("No settings match “{query}”."))
+                        .size(scale::s(12.0))
+                        .color(MUTED_FG),
+                ]
+                .spacing(scale::s(6.0))
+                .align_y(iced::Alignment::Center),
+                text("Try a different term — e.g. advanced, export, import.")
+                    .size(scale::s(11.0))
+                    .color(MUTED_FG),
+            ]
+            .spacing(scale::s(6.0)),
+        )
         .padding(scale::s(14.0))
         .style(|_| card_style())
         .into();
@@ -1302,7 +1680,31 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
 
     #[cfg(feature = "ocr")]
     {
-        let show_ocr = matches_any(query_ref, &["ocr", "engine", "detection", "recognition", "confidence", "text", "height", "bbox", "merge", "distance", "threshold", "side", "len", "workers", "parallel", "tuning", "language", "korean", "chinese", "japanese"]);
+        let show_ocr = matches_any(
+            query_ref,
+            &[
+                "ocr",
+                "engine",
+                "detection",
+                "recognition",
+                "confidence",
+                "text",
+                "height",
+                "bbox",
+                "merge",
+                "distance",
+                "threshold",
+                "side",
+                "len",
+                "workers",
+                "parallel",
+                "tuning",
+                "language",
+                "korean",
+                "chinese",
+                "japanese",
+            ],
+        );
         if show_ocr {
             let workers = easyscanlate_settings::get(|s| s.ocr_workers.clone());
             let (text_score, min_bbox_h, max_bbox_h, max_side, merge_thr, ocr_lang) =
@@ -1317,84 +1719,143 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
                     )
                 });
             let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-            col.push(card_header(Icon::ScanSearch, "OCR Engine", Some("Applies the next time you run OCR")));
-            if matches_any(query_ref, &["ocr", "language", "korean", "chinese", "japanese", "recognition", "engine"]) || query_ref.trim().is_empty() {
-                col.push(field_row("Language",
-                    pick_list([OcrLanguage::Korean, OcrLanguage::Chinese, OcrLanguage::Japanese], Some(ocr_lang), |lang| set(move |s| s.ocr_language = lang)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()
+            col.push(card_header(
+                Icon::ScanSearch,
+                "OCR Engine",
+                Some("Applies the next time you run OCR"),
+            ));
+            if matches_any(
+                query_ref,
+                &[
+                    "ocr",
+                    "language",
+                    "korean",
+                    "chinese",
+                    "japanese",
+                    "recognition",
+                    "engine",
+                ],
+            ) || query_ref.trim().is_empty()
+            {
+                col.push(field_row(
+                    "Language",
+                    pick_list(
+                        [
+                            OcrLanguage::Korean,
+                            OcrLanguage::Chinese,
+                            OcrLanguage::Japanese,
+                        ],
+                        Some(ocr_lang),
+                        |lang| set(move |s| s.ocr_language = lang),
+                    )
+                    .padding(scale::s(4.0))
+                    .text_size(scale::s(12.0))
+                    .into(),
                 ));
                 col.push(helper_text("Korean uses its dedicated model; Chinese and Japanese share the multilingual PP-OCRv6 model."));
                 col.push(item_separator());
             }
-            if matches_any(query_ref, &["ocr", "workers", "parallel", "detection", "engine"]) || query_ref.trim().is_empty() {
-                col.push(field_row("Detection workers",
+            if matches_any(
+                query_ref,
+                &["ocr", "workers", "parallel", "detection", "engine"],
+            ) || query_ref.trim().is_empty()
+            {
+                col.push(field_row(
+                    "Detection workers",
                     text_input("2", &workers)
                         .on_input(|input| set(move |s| s.ocr_workers = input.clone()))
                         .padding(scale::s(4.0))
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
-                        .into()
+                        .into(),
                 ));
-                col.push(helper_text("How many regions we detect at once. 2 works fine even on a slow laptop."));
+                col.push(helper_text(
+                    "How many regions we detect at once. 2 works fine even on a slow laptop.",
+                ));
                 col.push(item_separator());
             }
-            if matches_any(query_ref, &["ocr", "tuning", "confidence"]) || query_ref.trim().is_empty() {
-                col.push(field_row("Min confidence",
+            if matches_any(query_ref, &["ocr", "tuning", "confidence"])
+                || query_ref.trim().is_empty()
+            {
+                col.push(field_row(
+                    "Min confidence",
                     text_input("0.7", &text_score)
                         .on_input(|input| set(move |s| s.ocr_text_score = input.clone()))
                         .padding(scale::s(4.0))
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
-                        .into()
+                        .into(),
                 ));
                 col.push(helper_text("How sure OCR must be to keep a line (0.0–1.0). Lower keeps more lines, including faint ones."));
             }
-            if matches_any(query_ref, &["ocr", "height", "bbox", "minimum", "min"]) || query_ref.trim().is_empty() {
-                col.push(field_row("Min text height",
+            if matches_any(query_ref, &["ocr", "height", "bbox", "minimum", "min"])
+                || query_ref.trim().is_empty()
+            {
+                col.push(field_row(
+                    "Min text height",
                     text_input("10", &min_bbox_h)
                         .on_input(|input| set(move |s| s.ocr_min_text_height = input.clone()))
                         .padding(scale::s(4.0))
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
-                        .into()
+                        .into(),
                 ));
-                col.push(helper_text("Ignores text boxes shorter than this (in pixels)."));
+                col.push(helper_text(
+                    "Ignores text boxes shorter than this (in pixels).",
+                ));
             }
-            if matches_any(query_ref, &["ocr", "height", "bbox", "maximum", "max"]) || query_ref.trim().is_empty() {
-                col.push(field_row("Max text height",
+            if matches_any(query_ref, &["ocr", "height", "bbox", "maximum", "max"])
+                || query_ref.trim().is_empty()
+            {
+                col.push(field_row(
+                    "Max text height",
                     text_input("100", &max_bbox_h)
                         .on_input(|input| set(move |s| s.ocr_max_text_height = input.clone()))
                         .padding(scale::s(4.0))
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
-                        .into()
+                        .into(),
                 ));
-                col.push(helper_text("Ignores text boxes taller than this (in pixels)."));
+                col.push(helper_text(
+                    "Ignores text boxes taller than this (in pixels).",
+                ));
             }
-            if matches_any(query_ref, &["ocr", "merge", "distance", "threshold", "gap"]) || query_ref.trim().is_empty() {
-                col.push(field_row("Merge threshold",
+            if matches_any(query_ref, &["ocr", "merge", "distance", "threshold", "gap"])
+                || query_ref.trim().is_empty()
+            {
+                col.push(field_row(
+                    "Merge threshold",
                     text_input("0.5", &merge_thr)
                         .on_input(|input| set(move |s| s.ocr_merge_threshold = input.clone()))
                         .padding(scale::s(4.0))
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
-                        .into()
+                        .into(),
                 ));
                 col.push(helper_text("How big a gap still counts as the same line, as a fraction of its height (0.5 = 50%)."));
             }
-            if matches_any(query_ref, &["ocr", "side", "len", "max", "resize"]) || query_ref.trim().is_empty() {
-                col.push(field_row("Max side length",
+            if matches_any(query_ref, &["ocr", "side", "len", "max", "resize"])
+                || query_ref.trim().is_empty()
+            {
+                col.push(field_row(
+                    "Max side length",
                     text_input("2000", &max_side)
                         .on_input(|input| set(move |s| s.ocr_max_side_len = input.clone()))
                         .padding(scale::s(4.0))
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
-                        .into()
+                        .into(),
                 ));
                 col.push(helper_text("Images with a side longer than this (in pixels) are scaled down first. Larger values keep more detail but use more memory."));
             }
             let has_field = col.len() > 1;
             if has_field {
-                cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+                cards.push(
+                    container(column(col).spacing(scale::s(7.0)))
+                        .padding(scale::s(10.0))
+                        .style(|_| card_style())
+                        .into(),
+                );
             }
         }
     }
@@ -1409,13 +1870,31 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
     }
     if cards.is_empty() {
         cards.push(
-            container(column![
-                row![crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG), text(format!("No OCR settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG)].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
-                helper_text("Try a different term — e.g. workers, confidence, height."),
-            ].spacing(scale::s(6.0))).padding(scale::s(14.0)).style(|_| card_style()).into()
+            container(
+                column![
+                    row![
+                        crate::icon::lucide(Icon::SearchX)
+                            .size(scale::s(16.0))
+                            .color(MUTED_FG),
+                        text(format!("No OCR settings match “{query}”."))
+                            .size(scale::s(12.0))
+                            .color(MUTED_FG)
+                    ]
+                    .spacing(scale::s(6.0))
+                    .align_y(iced::Alignment::Center),
+                    helper_text("Try a different term — e.g. workers, confidence, height."),
+                ]
+                .spacing(scale::s(6.0)),
+            )
+            .padding(scale::s(14.0))
+            .style(|_| card_style())
+            .into(),
         );
     }
-    scrollable(column(cards).spacing(scale::s(10.0))).spacing(scale::s(crate::scroll::EMBEDDED_SPACING)).height(Length::Fill).into()
+    scrollable(column(cards).spacing(scale::s(10.0)))
+        .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
+        .height(Length::Fill)
+        .into()
 }
 
 // `query` only feeds the `#[cfg(feature = "ocr")]` block below.
@@ -1424,7 +1903,31 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
     #[cfg(feature = "ocr")]
     {
-        let show_ocr = matches_any(query, &["ocr", "engine", "detection", "recognition", "confidence", "text", "height", "bbox", "merge", "distance", "threshold", "side", "len", "workers", "parallel", "tuning", "language", "korean", "chinese", "japanese"]);
+        let show_ocr = matches_any(
+            query,
+            &[
+                "ocr",
+                "engine",
+                "detection",
+                "recognition",
+                "confidence",
+                "text",
+                "height",
+                "bbox",
+                "merge",
+                "distance",
+                "threshold",
+                "side",
+                "len",
+                "workers",
+                "parallel",
+                "tuning",
+                "language",
+                "korean",
+                "chinese",
+                "japanese",
+            ],
+        );
         if show_ocr {
             let workers = easyscanlate_settings::get(|s| s.ocr_workers.clone());
             let (text_score, min_bbox_h, max_bbox_h, max_side, merge_thr, ocr_lang) =
@@ -1439,84 +1942,141 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                     )
                 });
             let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-            col.push(card_header(Icon::ScanSearch, "OCR Engine", Some("Applies the next time you run OCR")));
-            if matches_any(query, &["ocr", "language", "korean", "chinese", "japanese", "recognition", "engine"]) || query.trim().is_empty() {
-                col.push(field_row("Language",
-                    pick_list([OcrLanguage::Korean, OcrLanguage::Chinese, OcrLanguage::Japanese], Some(ocr_lang), |lang| set(move |s| s.ocr_language = lang)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()
+            col.push(card_header(
+                Icon::ScanSearch,
+                "OCR Engine",
+                Some("Applies the next time you run OCR"),
+            ));
+            if matches_any(
+                query,
+                &[
+                    "ocr",
+                    "language",
+                    "korean",
+                    "chinese",
+                    "japanese",
+                    "recognition",
+                    "engine",
+                ],
+            ) || query.trim().is_empty()
+            {
+                col.push(field_row(
+                    "Language",
+                    pick_list(
+                        [
+                            OcrLanguage::Korean,
+                            OcrLanguage::Chinese,
+                            OcrLanguage::Japanese,
+                        ],
+                        Some(ocr_lang),
+                        |lang| set(move |s| s.ocr_language = lang),
+                    )
+                    .padding(scale::s(4.0))
+                    .text_size(scale::s(12.0))
+                    .into(),
                 ));
                 col.push(helper_text("Korean uses its dedicated model; Chinese and Japanese share the multilingual PP-OCRv6 model."));
                 col.push(item_separator());
             }
-            if matches_any(query, &["ocr", "workers", "parallel", "detection", "engine"]) || query.trim().is_empty() {
-                col.push(field_row("Detection workers",
+            if matches_any(
+                query,
+                &["ocr", "workers", "parallel", "detection", "engine"],
+            ) || query.trim().is_empty()
+            {
+                col.push(field_row(
+                    "Detection workers",
                     text_input("2", &workers)
                         .on_input(|input| set(move |s| s.ocr_workers = input.clone()))
                         .padding(scale::s(4.0))
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
-                        .into()
+                        .into(),
                 ));
-                col.push(helper_text("How many regions we detect at once. 2 works fine even on a slow laptop."));
+                col.push(helper_text(
+                    "How many regions we detect at once. 2 works fine even on a slow laptop.",
+                ));
                 col.push(item_separator());
             }
             if matches_any(query, &["ocr", "tuning", "confidence"]) || query.trim().is_empty() {
-                col.push(field_row("Min confidence",
+                col.push(field_row(
+                    "Min confidence",
                     text_input("0.7", &text_score)
                         .on_input(|input| set(move |s| s.ocr_text_score = input.clone()))
                         .padding(scale::s(4.0))
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
-                        .into()
+                        .into(),
                 ));
                 col.push(helper_text("How sure OCR must be to keep a line (0.0–1.0). Lower keeps more lines, including faint ones."));
             }
-            if matches_any(query, &["ocr", "height", "bbox", "minimum", "min"]) || query.trim().is_empty() {
-                col.push(field_row("Min text height",
+            if matches_any(query, &["ocr", "height", "bbox", "minimum", "min"])
+                || query.trim().is_empty()
+            {
+                col.push(field_row(
+                    "Min text height",
                     text_input("10", &min_bbox_h)
                         .on_input(|input| set(move |s| s.ocr_min_text_height = input.clone()))
                         .padding(scale::s(4.0))
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
-                        .into()
+                        .into(),
                 ));
-                col.push(helper_text("Ignores text boxes shorter than this (in pixels)."));
+                col.push(helper_text(
+                    "Ignores text boxes shorter than this (in pixels).",
+                ));
             }
-            if matches_any(query, &["ocr", "height", "bbox", "maximum", "max"]) || query.trim().is_empty() {
-                col.push(field_row("Max text height",
+            if matches_any(query, &["ocr", "height", "bbox", "maximum", "max"])
+                || query.trim().is_empty()
+            {
+                col.push(field_row(
+                    "Max text height",
                     text_input("100", &max_bbox_h)
                         .on_input(|input| set(move |s| s.ocr_max_text_height = input.clone()))
                         .padding(scale::s(4.0))
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
-                        .into()
+                        .into(),
                 ));
-                col.push(helper_text("Ignores text boxes taller than this (in pixels)."));
+                col.push(helper_text(
+                    "Ignores text boxes taller than this (in pixels).",
+                ));
             }
-            if matches_any(query, &["ocr", "merge", "distance", "threshold", "gap"]) || query.trim().is_empty() {
-                col.push(field_row("Merge threshold",
+            if matches_any(query, &["ocr", "merge", "distance", "threshold", "gap"])
+                || query.trim().is_empty()
+            {
+                col.push(field_row(
+                    "Merge threshold",
                     text_input("0.5", &merge_thr)
                         .on_input(|input| set(move |s| s.ocr_merge_threshold = input.clone()))
                         .padding(scale::s(4.0))
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
-                        .into()
+                        .into(),
                 ));
                 col.push(helper_text("How big a gap still counts as the same line, as a fraction of its height (0.5 = 50%)."));
             }
-            if matches_any(query, &["ocr", "side", "len", "max", "resize"]) || query.trim().is_empty() {
-                col.push(field_row("Max side length",
+            if matches_any(query, &["ocr", "side", "len", "max", "resize"])
+                || query.trim().is_empty()
+            {
+                col.push(field_row(
+                    "Max side length",
                     text_input("2000", &max_side)
                         .on_input(|input| set(move |s| s.ocr_max_side_len = input.clone()))
                         .padding(scale::s(4.0))
                         .size(scale::s(12.0))
                         .width(Length::Fixed(scale::s(80.0)))
-                        .into()
+                        .into(),
                 ));
                 col.push(helper_text("Images with a side longer than this (in pixels) are scaled down first. Larger values keep more detail but use more memory."));
             }
             let has_field = col.len() > 1;
             if has_field {
-                cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+                cards.push(
+                    container(column(col).spacing(scale::s(7.0)))
+                        .padding(scale::s(10.0))
+                        .style(|_| card_style())
+                        .into(),
+                );
             }
         }
     }
@@ -1532,7 +2092,7 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     cards
 }
 
- // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // Inpaint tab — manual + auto bg-aware
 // ---------------------------------------------------------------------------
 
@@ -1542,41 +2102,162 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
 
     // Auto inpaint (bg-aware) — moved from General automation
     {
-        let show_auto = matches_any(query_ref, &["inpaint", "auto", "bg", "telea", "harmonic", "lama", "aot", "mixed", "pipeline", "artwork", "gradient", "solid", "automation"]);
+        let show_auto = matches_any(
+            query_ref,
+            &[
+                "inpaint",
+                "auto",
+                "bg",
+                "telea",
+                "harmonic",
+                "lama",
+                "aot",
+                "mixed",
+                "pipeline",
+                "artwork",
+                "gradient",
+                "solid",
+                "automation",
+            ],
+        );
         if show_auto {
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
             {
-                let (auto_inpaint, auto_model, auto_style) = easyscanlate_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model, s.auto_style_detect));
+                let (auto_inpaint, auto_model, auto_style) = easyscanlate_settings::get(|s| {
+                    (s.auto_inpaint, s.auto_inpaint_model, s.auto_style_detect)
+                });
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-                col.push(card_header(Icon::Sparkles, "Auto-Inpaint", Some("Runs after OCR, choosing a method for each background")));
-                col.push(checkbox(auto_inpaint).label("Auto-inpaint backgrounds").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
+                col.push(card_header(
+                    Icon::Sparkles,
+                    "Auto-Inpaint",
+                    Some("Runs after OCR, choosing a method for each background"),
+                ));
+                col.push(
+                    checkbox(auto_inpaint)
+                        .label("Auto-inpaint backgrounds")
+                        .text_size(scale::s(12.0))
+                        .on_toggle(move |v| set(move |s| s.auto_inpaint = v))
+                        .into(),
+                );
                 col.push(helper_text("Solid backgrounds keep their color, gradients are filled with Harmonic, and artwork with LaMa. The Mixed option needs auto style detection switched on."));
-                let all_models = [AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot, AutoInpaintModel::Mixed];
-                let available: Vec<AutoInpaintModel> = if auto_style { all_models.to_vec() } else { vec![AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot] };
-                let pick_value = if auto_style || auto_model != AutoInpaintModel::Mixed { Some(auto_model) } else { Some(AutoInpaintModel::Telea) };
-                col.push(row![
-                    container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
-                    pick_list(available, pick_value, move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
-                    if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style { warning_text("Mixed isn't available yet — using Harmonic instead.".to_string()) } else { text("").size(scale::s(11.0)).color(MUTED_FG).into() },
-                ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center).into());
+                let all_models = [
+                    AutoInpaintModel::Telea,
+                    AutoInpaintModel::Harmonic,
+                    AutoInpaintModel::Lama,
+                    AutoInpaintModel::Aot,
+                    AutoInpaintModel::Mixed,
+                ];
+                let available: Vec<AutoInpaintModel> = if auto_style {
+                    all_models.to_vec()
+                } else {
+                    vec![
+                        AutoInpaintModel::Telea,
+                        AutoInpaintModel::Harmonic,
+                        AutoInpaintModel::Lama,
+                        AutoInpaintModel::Aot,
+                    ]
+                };
+                let pick_value = if auto_style || auto_model != AutoInpaintModel::Mixed {
+                    Some(auto_model)
+                } else {
+                    Some(AutoInpaintModel::Telea)
+                };
+                col.push(
+                    row![
+                        container(
+                            text("Auto inpaint model")
+                                .size(scale::s(12.0))
+                                .color(Color::WHITE)
+                        )
+                        .width(Length::Fixed(scale::s(150.0))),
+                        pick_list(available, pick_value, move |model| set(move |s| s
+                            .auto_inpaint_model =
+                            model))
+                        .padding(scale::s(4.0))
+                        .text_size(scale::s(12.0)),
+                        if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style {
+                            warning_text(
+                                "Mixed isn't available yet — using Harmonic instead.".to_string(),
+                            )
+                        } else {
+                            text("").size(scale::s(11.0)).color(MUTED_FG).into()
+                        },
+                    ]
+                    .spacing(scale::s(6.0))
+                    .align_y(iced::Alignment::Center)
+                    .into(),
+                );
                 if !auto_style && auto_model == AutoInpaintModel::Mixed {
                     col.push(warning_text("Choose Telea, Harmonic, LaMa or AOT while auto style detection is off — Mixed falls back to Harmonic on its own.".to_string()));
                 }
-                col.push(helper_text("Runs once after OCR finishes, as long as the toggles above are on."));
-                cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+                col.push(helper_text(
+                    "Runs once after OCR finishes, as long as the toggles above are on.",
+                ));
+                cards.push(
+                    container(column(col).spacing(scale::s(7.0)))
+                        .padding(scale::s(10.0))
+                        .style(|_| card_style())
+                        .into(),
+                );
             }
-            #[cfg(all(feature = "inpaint", not(all(feature = "styling", feature = "segment"))))]
+            #[cfg(all(
+                feature = "inpaint",
+                not(all(feature = "styling", feature = "segment"))
+            ))]
             {
-                let (auto_inpaint, auto_model) = easyscanlate_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model));
+                let (auto_inpaint, auto_model) =
+                    easyscanlate_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model));
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-                col.push(card_header(Icon::Sparkles, "Auto-Inpaint", Some("Picks the right method for each background")).into());
-                col.push(checkbox(auto_inpaint).label("Auto-inpaint backgrounds").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
+                col.push(
+                    card_header(
+                        Icon::Sparkles,
+                        "Auto-Inpaint",
+                        Some("Picks the right method for each background"),
+                    )
+                    .into(),
+                );
+                col.push(
+                    checkbox(auto_inpaint)
+                        .label("Auto-inpaint backgrounds")
+                        .text_size(scale::s(12.0))
+                        .on_toggle(move |v| set(move |s| s.auto_inpaint = v))
+                        .into(),
+                );
                 col.push(helper_text("The full background-aware pipeline needs styling and segmentation; without them, Harmonic is used instead.").into());
-                col.push(row![
-                    container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
-                    pick_list([AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot], Some(if auto_model == AutoInpaintModel::Mixed { AutoInpaintModel::Telea } else { auto_model }), move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
-                ].spacing(scale::s(6.0)).into());
-                cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+                col.push(
+                    row![
+                        container(
+                            text("Auto inpaint model")
+                                .size(scale::s(12.0))
+                                .color(Color::WHITE)
+                        )
+                        .width(Length::Fixed(scale::s(150.0))),
+                        pick_list(
+                            [
+                                AutoInpaintModel::Telea,
+                                AutoInpaintModel::Harmonic,
+                                AutoInpaintModel::Lama,
+                                AutoInpaintModel::Aot
+                            ],
+                            Some(if auto_model == AutoInpaintModel::Mixed {
+                                AutoInpaintModel::Telea
+                            } else {
+                                auto_model
+                            }),
+                            move |model| set(move |s| s.auto_inpaint_model = model)
+                        )
+                        .padding(scale::s(4.0))
+                        .text_size(scale::s(12.0)),
+                    ]
+                    .spacing(scale::s(6.0))
+                    .into(),
+                );
+                cards.push(
+                    container(column(col).spacing(scale::s(7.0)))
+                        .padding(scale::s(10.0))
+                        .style(|_| card_style())
+                        .into(),
+                );
             }
             #[cfg(not(feature = "inpaint"))]
             {
@@ -1587,25 +2268,70 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
 
     // Manual inpaint
     {
-        let show_manual = matches_any(query_ref, &["inpaint", "backend", "telea", "lama", "aot", "shiftmap", "harmonic", "laplace", "poisson", "radius", "manual", "brush"]);
+        let show_manual = matches_any(
+            query_ref,
+            &[
+                "inpaint", "backend", "telea", "lama", "aot", "shiftmap", "harmonic", "laplace",
+                "poisson", "radius", "manual", "brush",
+            ],
+        );
         if show_manual {
             #[cfg(feature = "inpaint")]
             {
                 let backend = easyscanlate_settings::get(|s| s.inpaint_backend);
                 let radius = easyscanlate_settings::get(|s| s.inpaint_radius.clone());
                 let col: Vec<Element<'static, UiEvent>> = vec![
-                    card_header(Icon::Brush, "Inpaint (Manual)", Some("The method behind the manual touch-up brush")),
-                    field_row("Backend", pick_list([InpaintBackend::Harmonic, InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot, InpaintBackend::ShiftMap], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()),
-                    helper_text("Harmonic — fast and model-free; best for smooth or gradient backgrounds."),
-                    helper_text("Telea — fast; best for thin to medium patches on semi-detailed art."),
+                    card_header(
+                        Icon::Brush,
+                        "Inpaint (Manual)",
+                        Some("The method behind the manual touch-up brush"),
+                    ),
+                    field_row(
+                        "Backend",
+                        pick_list(
+                            [
+                                InpaintBackend::Harmonic,
+                                InpaintBackend::Telea,
+                                InpaintBackend::Lama,
+                                InpaintBackend::Aot,
+                                InpaintBackend::ShiftMap,
+                            ],
+                            Some(backend),
+                            |backend| set(move |s| s.inpaint_backend = backend),
+                        )
+                        .padding(scale::s(4.0))
+                        .text_size(scale::s(12.0))
+                        .into(),
+                    ),
+                    helper_text(
+                        "Harmonic — fast and model-free; best for smooth or gradient backgrounds.",
+                    ),
+                    helper_text(
+                        "Telea — fast; best for thin to medium patches on semi-detailed art.",
+                    ),
                     helper_text("LaMa — highest quality; runs a neural model."),
                     helper_text("AOT-GAN — similar quality to LaMa, 2–4× faster."),
                     helper_text("ShiftMap — rebuilds textures; slower and runs on your CPU."),
                     item_separator(),
-                    field_row("Sample radius", text_input("5", &radius).on_input(|input| set(move |s| s.inpaint_radius = input.clone())).padding(scale::s(4.0)).size(scale::s(12.0)).width(Length::Fixed(scale::s(80.0))).into()),
-                    helper_text("How many pixels around the mask Telea and Harmonic sample. Larger values smooth more but soften the image. Ignored by LaMa, AOT and ShiftMap."),
+                    field_row(
+                        "Sample radius",
+                        text_input("5", &radius)
+                            .on_input(|input| set(move |s| s.inpaint_radius = input.clone()))
+                            .padding(scale::s(4.0))
+                            .size(scale::s(12.0))
+                            .width(Length::Fixed(scale::s(80.0)))
+                            .into(),
+                    ),
+                    helper_text(
+                        "How many pixels around the mask Telea and Harmonic sample. Larger values smooth more but soften the image. Ignored by LaMa, AOT and ShiftMap.",
+                    ),
                 ];
-                cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+                cards.push(
+                    container(column(col).spacing(scale::s(7.0)))
+                        .padding(scale::s(10.0))
+                        .style(|_| card_style())
+                        .into(),
+                );
             }
             #[cfg(not(feature = "inpaint"))]
             {
@@ -1615,49 +2341,193 @@ fn inpaint_tab_filtered(query: String) -> Element<'static, UiEvent> {
     }
 
     if cards.is_empty() {
-        cards.push(container(column![row![crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG), text(format!("No inpaint settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG)].spacing(scale::s(6.0)).align_y(iced::Alignment::Center), helper_text("Try a different term — e.g. brush, backend, radius.")].spacing(scale::s(6.0))).padding(scale::s(14.0)).style(|_| card_style()).into());
+        cards.push(
+            container(
+                column![
+                    row![
+                        crate::icon::lucide(Icon::SearchX)
+                            .size(scale::s(16.0))
+                            .color(MUTED_FG),
+                        text(format!("No inpaint settings match “{query}”."))
+                            .size(scale::s(12.0))
+                            .color(MUTED_FG)
+                    ]
+                    .spacing(scale::s(6.0))
+                    .align_y(iced::Alignment::Center),
+                    helper_text("Try a different term — e.g. brush, backend, radius.")
+                ]
+                .spacing(scale::s(6.0)),
+            )
+            .padding(scale::s(14.0))
+            .style(|_| card_style())
+            .into(),
+        );
     }
-    scrollable(column(cards).spacing(scale::s(10.0))).spacing(scale::s(crate::scroll::EMBEDDED_SPACING)).height(Length::Fill).into()
+    scrollable(column(cards).spacing(scale::s(10.0)))
+        .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
+        .height(Length::Fill)
+        .into()
 }
 
 fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
     {
-        let show_auto = matches_any(query, &["inpaint", "auto", "bg", "telea", "harmonic", "lama", "aot", "mixed", "pipeline", "artwork", "gradient", "solid", "automation"]);
+        let show_auto = matches_any(
+            query,
+            &[
+                "inpaint",
+                "auto",
+                "bg",
+                "telea",
+                "harmonic",
+                "lama",
+                "aot",
+                "mixed",
+                "pipeline",
+                "artwork",
+                "gradient",
+                "solid",
+                "automation",
+            ],
+        );
         if show_auto {
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
             {
-                let (auto_inpaint, auto_model, auto_style) = easyscanlate_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model, s.auto_style_detect));
+                let (auto_inpaint, auto_model, auto_style) = easyscanlate_settings::get(|s| {
+                    (s.auto_inpaint, s.auto_inpaint_model, s.auto_style_detect)
+                });
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-                col.push(card_header(Icon::Sparkles, "Auto-Inpaint", Some("Runs after OCR, choosing a method for each background")));
-                col.push(checkbox(auto_inpaint).label("Auto-inpaint backgrounds").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
+                col.push(card_header(
+                    Icon::Sparkles,
+                    "Auto-Inpaint",
+                    Some("Runs after OCR, choosing a method for each background"),
+                ));
+                col.push(
+                    checkbox(auto_inpaint)
+                        .label("Auto-inpaint backgrounds")
+                        .text_size(scale::s(12.0))
+                        .on_toggle(move |v| set(move |s| s.auto_inpaint = v))
+                        .into(),
+                );
                 col.push(helper_text("Solid backgrounds keep their color, gradients are filled with Harmonic, and artwork with LaMa. The Mixed option needs auto style detection switched on."));
-                let all_models = [AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot, AutoInpaintModel::Mixed];
-                let available: Vec<AutoInpaintModel> = if auto_style { all_models.to_vec() } else { vec![AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot] };
-                let pick_value = if auto_style || auto_model != AutoInpaintModel::Mixed { Some(auto_model) } else { Some(AutoInpaintModel::Telea) };
-                col.push(row![
-                    container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
-                    pick_list(available, pick_value, move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
-                    if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style { warning_text("Mixed isn't available yet — using Harmonic instead.".to_string()) } else { text("").size(scale::s(11.0)).color(MUTED_FG).into() },
-                ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center).into());
+                let all_models = [
+                    AutoInpaintModel::Telea,
+                    AutoInpaintModel::Harmonic,
+                    AutoInpaintModel::Lama,
+                    AutoInpaintModel::Aot,
+                    AutoInpaintModel::Mixed,
+                ];
+                let available: Vec<AutoInpaintModel> = if auto_style {
+                    all_models.to_vec()
+                } else {
+                    vec![
+                        AutoInpaintModel::Telea,
+                        AutoInpaintModel::Harmonic,
+                        AutoInpaintModel::Lama,
+                        AutoInpaintModel::Aot,
+                    ]
+                };
+                let pick_value = if auto_style || auto_model != AutoInpaintModel::Mixed {
+                    Some(auto_model)
+                } else {
+                    Some(AutoInpaintModel::Telea)
+                };
+                col.push(
+                    row![
+                        container(
+                            text("Auto inpaint model")
+                                .size(scale::s(12.0))
+                                .color(Color::WHITE)
+                        )
+                        .width(Length::Fixed(scale::s(150.0))),
+                        pick_list(available, pick_value, move |model| set(move |s| s
+                            .auto_inpaint_model =
+                            model))
+                        .padding(scale::s(4.0))
+                        .text_size(scale::s(12.0)),
+                        if auto_inpaint && auto_model == AutoInpaintModel::Mixed && !auto_style {
+                            warning_text(
+                                "Mixed isn't available yet — using Harmonic instead.".to_string(),
+                            )
+                        } else {
+                            text("").size(scale::s(11.0)).color(MUTED_FG).into()
+                        },
+                    ]
+                    .spacing(scale::s(6.0))
+                    .align_y(iced::Alignment::Center)
+                    .into(),
+                );
                 if !auto_style && auto_model == AutoInpaintModel::Mixed {
                     col.push(warning_text("Choose Telea, Harmonic, LaMa or AOT while auto style detection is off — Mixed falls back to Harmonic on its own.".to_string()));
                 }
-                col.push(helper_text("Runs once after OCR finishes, as long as the toggles above are on."));
-                cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+                col.push(helper_text(
+                    "Runs once after OCR finishes, as long as the toggles above are on.",
+                ));
+                cards.push(
+                    container(column(col).spacing(scale::s(7.0)))
+                        .padding(scale::s(10.0))
+                        .style(|_| card_style())
+                        .into(),
+                );
             }
-            #[cfg(all(feature = "inpaint", not(all(feature = "styling", feature = "segment"))))]
+            #[cfg(all(
+                feature = "inpaint",
+                not(all(feature = "styling", feature = "segment"))
+            ))]
             {
-                let (auto_inpaint, auto_model) = easyscanlate_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model));
+                let (auto_inpaint, auto_model) =
+                    easyscanlate_settings::get(|s| (s.auto_inpaint, s.auto_inpaint_model));
                 let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-                col.push(card_header(Icon::Sparkles, "Auto-Inpaint", Some("Picks the right method for each background")).into());
-                col.push(checkbox(auto_inpaint).label("Auto-inpaint backgrounds").text_size(scale::s(12.0)).on_toggle(move |v| set(move |s| s.auto_inpaint = v)).into());
+                col.push(
+                    card_header(
+                        Icon::Sparkles,
+                        "Auto-Inpaint",
+                        Some("Picks the right method for each background"),
+                    )
+                    .into(),
+                );
+                col.push(
+                    checkbox(auto_inpaint)
+                        .label("Auto-inpaint backgrounds")
+                        .text_size(scale::s(12.0))
+                        .on_toggle(move |v| set(move |s| s.auto_inpaint = v))
+                        .into(),
+                );
                 col.push(helper_text("The full background-aware pipeline needs styling and segmentation; without them, Harmonic is used instead.").into());
-                col.push(row![
-                    container(text("Auto inpaint model").size(scale::s(12.0)).color(Color::WHITE)).width(Length::Fixed(scale::s(150.0))),
-                    pick_list([AutoInpaintModel::Telea, AutoInpaintModel::Harmonic, AutoInpaintModel::Lama, AutoInpaintModel::Aot], Some(if auto_model == AutoInpaintModel::Mixed { AutoInpaintModel::Telea } else { auto_model }), move |model| set(move |s| s.auto_inpaint_model = model)).padding(scale::s(4.0)).text_size(scale::s(12.0)),
-                ].spacing(scale::s(6.0)).into());
-                cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+                col.push(
+                    row![
+                        container(
+                            text("Auto inpaint model")
+                                .size(scale::s(12.0))
+                                .color(Color::WHITE)
+                        )
+                        .width(Length::Fixed(scale::s(150.0))),
+                        pick_list(
+                            [
+                                AutoInpaintModel::Telea,
+                                AutoInpaintModel::Harmonic,
+                                AutoInpaintModel::Lama,
+                                AutoInpaintModel::Aot
+                            ],
+                            Some(if auto_model == AutoInpaintModel::Mixed {
+                                AutoInpaintModel::Telea
+                            } else {
+                                auto_model
+                            }),
+                            move |model| set(move |s| s.auto_inpaint_model = model)
+                        )
+                        .padding(scale::s(4.0))
+                        .text_size(scale::s(12.0)),
+                    ]
+                    .spacing(scale::s(6.0))
+                    .into(),
+                );
+                cards.push(
+                    container(column(col).spacing(scale::s(7.0)))
+                        .padding(scale::s(10.0))
+                        .style(|_| card_style())
+                        .into(),
+                );
             }
             #[cfg(not(feature = "inpaint"))]
             {
@@ -1666,25 +2536,70 @@ fn inpaint_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         }
     }
     {
-        let show_manual = matches_any(query, &["inpaint", "backend", "telea", "lama", "aot", "shiftmap", "harmonic", "laplace", "poisson", "radius", "manual", "brush"]);
+        let show_manual = matches_any(
+            query,
+            &[
+                "inpaint", "backend", "telea", "lama", "aot", "shiftmap", "harmonic", "laplace",
+                "poisson", "radius", "manual", "brush",
+            ],
+        );
         if show_manual {
             #[cfg(feature = "inpaint")]
             {
                 let backend = easyscanlate_settings::get(|s| s.inpaint_backend);
                 let radius = easyscanlate_settings::get(|s| s.inpaint_radius.clone());
                 let col: Vec<Element<'static, UiEvent>> = vec![
-                    card_header(Icon::Brush, "Inpaint (Manual)", Some("The method behind the manual touch-up brush")),
-                    field_row("Backend", pick_list([InpaintBackend::Harmonic, InpaintBackend::Telea, InpaintBackend::Lama, InpaintBackend::Aot, InpaintBackend::ShiftMap], Some(backend), |backend| set(move |s| s.inpaint_backend = backend)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()),
-                    helper_text("Harmonic — fast and model-free; best for smooth or gradient backgrounds."),
-                    helper_text("Telea — fast; best for thin to medium patches on semi-detailed art."),
+                    card_header(
+                        Icon::Brush,
+                        "Inpaint (Manual)",
+                        Some("The method behind the manual touch-up brush"),
+                    ),
+                    field_row(
+                        "Backend",
+                        pick_list(
+                            [
+                                InpaintBackend::Harmonic,
+                                InpaintBackend::Telea,
+                                InpaintBackend::Lama,
+                                InpaintBackend::Aot,
+                                InpaintBackend::ShiftMap,
+                            ],
+                            Some(backend),
+                            |backend| set(move |s| s.inpaint_backend = backend),
+                        )
+                        .padding(scale::s(4.0))
+                        .text_size(scale::s(12.0))
+                        .into(),
+                    ),
+                    helper_text(
+                        "Harmonic — fast and model-free; best for smooth or gradient backgrounds.",
+                    ),
+                    helper_text(
+                        "Telea — fast; best for thin to medium patches on semi-detailed art.",
+                    ),
                     helper_text("LaMa — highest quality; runs a neural model."),
                     helper_text("AOT-GAN — similar quality to LaMa, 2–4× faster."),
                     helper_text("ShiftMap — rebuilds textures; slower and runs on your CPU."),
                     item_separator(),
-                    field_row("Sample radius", text_input("5", &radius).on_input(|input| set(move |s| s.inpaint_radius = input.clone())).padding(scale::s(4.0)).size(scale::s(12.0)).width(Length::Fixed(scale::s(80.0))).into()),
-                    helper_text("How many pixels around the mask Telea and Harmonic sample. Larger values smooth more but soften the image. Ignored by LaMa, AOT and ShiftMap."),
+                    field_row(
+                        "Sample radius",
+                        text_input("5", &radius)
+                            .on_input(|input| set(move |s| s.inpaint_radius = input.clone()))
+                            .padding(scale::s(4.0))
+                            .size(scale::s(12.0))
+                            .width(Length::Fixed(scale::s(80.0)))
+                            .into(),
+                    ),
+                    helper_text(
+                        "How many pixels around the mask Telea and Harmonic sample. Larger values smooth more but soften the image. Ignored by LaMa, AOT and ShiftMap.",
+                    ),
                 ];
-                cards.push(container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+                cards.push(
+                    container(column(col).spacing(scale::s(7.0)))
+                        .padding(scale::s(10.0))
+                        .style(|_| card_style())
+                        .into(),
+                );
             }
         }
     }
@@ -1704,11 +2619,15 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
 
     // helper to test provider match
     let provider_matches = |id: &str, name: &str| -> bool {
-        if !query_active { return true; }
+        if !query_active {
+            return true;
+        }
         matches_query(&q, &format!("{id} {name}"))
     };
     let custom_matches = |id: &str, label: &str| -> bool {
-        if !query_active { return true; }
+        if !query_active {
+            return true;
+        }
         matches_query(&q, &format!("{id} {label}"))
     };
 
@@ -1717,7 +2636,9 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
     let mut available_rows: Vec<Element<'static, UiEvent>> = Vec::new();
     let mut connected_ids: Vec<String> = Vec::new();
     for provider in translation::SUPPORTED_PROVIDERS.iter() {
-        if !provider_matches(&provider.id, &provider.name) { continue; }
+        if !provider_matches(&provider.id, &provider.name) {
+            continue;
+        }
         let conn = connections.get(&provider.id).cloned();
         let el = provider_row_with_connection(provider, conn.clone());
         if conn.is_some() {
@@ -1731,7 +2652,9 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
         (CUSTOM_OPENAI, "OpenAI-compatible"),
         (CUSTOM_ANTHROPIC, "Anthropic-compatible"),
     ] {
-        if !custom_matches(id, label) { continue; }
+        if !custom_matches(id, label) {
+            continue;
+        }
         let conn = connections.get(id).cloned();
         let el = custom_row_with_connection(id, label, conn.clone());
         if conn.is_some() {
@@ -1746,11 +2669,18 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
     let mut recommended_rows: Vec<Element<'static, UiEvent>> = Vec::new();
     if !translation::RECOMMENDED.is_empty() {
         for info in translation::RECOMMENDED.iter() {
-            if connections.contains_key(info.id) { continue; }
+            if connections.contains_key(info.id) {
+                continue;
+            }
             if let Some(provider) = translation::catalog_provider(info.id) {
-                if !provider_matches(provider.id.as_str(), &provider.name) { continue; }
+                if !provider_matches(provider.id.as_str(), &provider.name) {
+                    continue;
+                }
                 // also match description/docs
-                if query_active && !matches_query(&q, &format!("{} {}", info.description, info.docs_url)) && !matches_query(&q, &provider.name) {
+                if query_active
+                    && !matches_query(&q, &format!("{} {}", info.description, info.docs_url))
+                    && !matches_query(&q, &provider.name)
+                {
                     // provider already tested, but description may be the match
                     // if provider didn't match, we already continued; if it did, keep
                     // So only skip when neither provider nor description matches.
@@ -1762,14 +2692,22 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
         }
     }
 
-    let show_connected = !query_active || !connected_rows.is_empty() || matches_query(&q, "connected");
-    let show_recommended = !translation::RECOMMENDED.is_empty() && (!query_active || !recommended_rows.is_empty() || matches_query(&q, "recommended"));
-    let show_available = !query_active || !available_rows.is_empty() || matches_query(&q, "available");
+    let show_connected =
+        !query_active || !connected_rows.is_empty() || matches_query(&q, "connected");
+    let show_recommended = !translation::RECOMMENDED.is_empty()
+        && (!query_active || !recommended_rows.is_empty() || matches_query(&q, "recommended"));
+    let show_available =
+        !query_active || !available_rows.is_empty() || matches_query(&q, "available");
 
     let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
 
     // intro card (hidden when searching and no match)
-    if !query_active || matches_any(&q, &["translation", "service", "connect", "gateway", "provider"]) {
+    if !query_active
+        || matches_any(
+            &q,
+            &["translation", "service", "connect", "gateway", "provider"],
+        )
+    {
         cards.push(
             container(column![
                 text("Translation Service").size(scale::s(14.0)).color(Color::WHITE),
@@ -1788,26 +2726,50 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
         let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
         content.push(
             row![
-                crate::icon::lucide(Icon::PlugZap).size(scale::s(14.0)).color(crate::accent::accent()),
+                crate::icon::lucide(Icon::PlugZap)
+                    .size(scale::s(14.0))
+                    .color(crate::accent::accent()),
                 text("Connected").size(scale::s(13.0)).color(Color::WHITE),
                 space::horizontal(),
-                text(if connected_rows.is_empty() { "—".to_string() } else { format!("{} connected", connected_rows.len()) }).size(scale::s(11.0)).color(MUTED_FG),
-            ].align_y(iced::Alignment::Center).spacing(scale::s(6.0)).into()
+                text(if connected_rows.is_empty() {
+                    "—".to_string()
+                } else {
+                    format!("{} connected", connected_rows.len())
+                })
+                .size(scale::s(11.0))
+                .color(MUTED_FG),
+            ]
+            .align_y(iced::Alignment::Center)
+            .spacing(scale::s(6.0))
+            .into(),
         );
         content.push(item_separator());
         if connected_rows.is_empty() {
             content.push(
-                text(if query_active { format!("No connected providers match “{query}”.") } else { "Nothing connected yet — pick a provider below.".to_string() })
-                    .size(scale::s(11.0)).color(MUTED_FG).into()
+                text(if query_active {
+                    format!("No connected providers match “{query}”.")
+                } else {
+                    "Nothing connected yet — pick a provider below.".to_string()
+                })
+                .size(scale::s(11.0))
+                .color(MUTED_FG)
+                .into(),
             );
         } else {
             let len = connected_rows.len();
             for (idx, el) in connected_rows.into_iter().enumerate() {
                 content.push(el);
-                if idx + 1 < len { content.push(item_separator()); }
+                if idx + 1 < len {
+                    content.push(item_separator());
+                }
             }
         }
-        cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+        cards.push(
+            container(column(content).spacing(scale::s(6.0)))
+                .padding(scale::s(10.0))
+                .style(|_| card_style())
+                .into(),
+        );
     }
 
     // Recommended card
@@ -1815,24 +2777,56 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
         let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
         content.push(
             row![
-                crate::icon::lucide(Icon::Star).size(scale::s(14.0)).color(crate::accent::accent()),
+                crate::icon::lucide(Icon::Star)
+                    .size(scale::s(14.0))
+                    .color(crate::accent::accent()),
                 text("Recommended").size(scale::s(13.0)).color(Color::WHITE),
                 space::horizontal(),
-                text(if recommended_rows.is_empty() { "—".to_string() } else { format!("{} recommended", recommended_rows.len()) }).size(scale::s(11.0)).color(MUTED_FG),
-            ].align_y(iced::Alignment::Center).spacing(scale::s(6.0)).into()
+                text(if recommended_rows.is_empty() {
+                    "—".to_string()
+                } else {
+                    format!("{} recommended", recommended_rows.len())
+                })
+                .size(scale::s(11.0))
+                .color(MUTED_FG),
+            ]
+            .align_y(iced::Alignment::Center)
+            .spacing(scale::s(6.0))
+            .into(),
         );
-        content.push(text("Not sure where to start? Try one of these.").size(scale::s(11.0)).color(MUTED_FG).into());
+        content.push(
+            text("Not sure where to start? Try one of these.")
+                .size(scale::s(11.0))
+                .color(MUTED_FG)
+                .into(),
+        );
         content.push(item_separator());
         if recommended_rows.is_empty() {
-            content.push(text(if query_active { format!("No recommendations match “{query}”.") } else { "You've connected every recommended provider.".to_string() }).size(scale::s(11.0)).color(MUTED_FG).into());
+            content.push(
+                text(if query_active {
+                    format!("No recommendations match “{query}”.")
+                } else {
+                    "You've connected every recommended provider.".to_string()
+                })
+                .size(scale::s(11.0))
+                .color(MUTED_FG)
+                .into(),
+            );
         } else {
             let len = recommended_rows.len();
             for (idx, el) in recommended_rows.into_iter().enumerate() {
                 content.push(el);
-                if idx + 1 < len { content.push(item_separator()); }
+                if idx + 1 < len {
+                    content.push(item_separator());
+                }
             }
         }
-        cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+        cards.push(
+            container(column(content).spacing(scale::s(6.0)))
+                .padding(scale::s(10.0))
+                .style(|_| card_style())
+                .into(),
+        );
     }
 
     // Available card
@@ -1840,29 +2834,62 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
         let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
         content.push(
             row![
-                crate::icon::lucide(Icon::Globe).size(scale::s(14.0)).color(MUTED_FG),
+                crate::icon::lucide(Icon::Globe)
+                    .size(scale::s(14.0))
+                    .color(MUTED_FG),
                 text("Available").size(scale::s(13.0)).color(Color::WHITE),
                 space::horizontal(),
-                text(format!("{} available", available_rows.len())).size(scale::s(11.0)).color(MUTED_FG),
-            ].align_y(iced::Alignment::Center).spacing(scale::s(6.0)).into()
+                text(format!("{} available", available_rows.len()))
+                    .size(scale::s(11.0))
+                    .color(MUTED_FG),
+            ]
+            .align_y(iced::Alignment::Center)
+            .spacing(scale::s(6.0))
+            .into(),
         );
         content.push(item_separator());
         if available_rows.is_empty() {
             content.push(
-                text(if query_active { format!("No available providers match “{query}”.") } else { "You've connected every available provider.".to_string() }).size(scale::s(11.0)).color(MUTED_FG).into()
+                text(if query_active {
+                    format!("No available providers match “{query}”.")
+                } else {
+                    "You've connected every available provider.".to_string()
+                })
+                .size(scale::s(11.0))
+                .color(MUTED_FG)
+                .into(),
             );
         } else {
             let len = available_rows.len();
             for (idx, el) in available_rows.into_iter().enumerate() {
                 content.push(el);
-                if idx + 1 < len { content.push(item_separator()); }
+                if idx + 1 < len {
+                    content.push(item_separator());
+                }
             }
         }
-        cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+        cards.push(
+            container(column(content).spacing(scale::s(6.0)))
+                .padding(scale::s(10.0))
+                .style(|_| card_style())
+                .into(),
+        );
     }
 
     // Options card — only when query matches its keywords or empty
-    if matches_any(&q, &["free", "paid", "filter", "models", "manage", "dropdown", "only show free"]) || !query_active {
+    if matches_any(
+        &q,
+        &[
+            "free",
+            "paid",
+            "filter",
+            "models",
+            "manage",
+            "dropdown",
+            "only show free",
+        ],
+    ) || !query_active
+    {
         let content: Vec<Element<'static, UiEvent>> = vec![
             card_header(Icon::SlidersHorizontal, "Options", Some("Model list and saved connections")),
             item_separator(),
@@ -1908,18 +2935,34 @@ fn translation_tab_filtered(query: String) -> Element<'static, UiEvent> {
                 .color(MUTED_FG)
                 .into(),
         ];
-        cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+        cards.push(
+            container(column(content).spacing(scale::s(6.0)))
+                .padding(scale::s(10.0))
+                .style(|_| card_style())
+                .into(),
+        );
     }
 
     if cards.is_empty() {
         cards.push(
-            container(column![
-                row![
-                    crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG),
-                    text(format!("No translation settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG),
-                ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
-                text("Try a different term — e.g. provider, connect, models.").size(scale::s(11.0)).color(MUTED_FG),
-            ].spacing(scale::s(6.0)))
+            container(
+                column![
+                    row![
+                        crate::icon::lucide(Icon::SearchX)
+                            .size(scale::s(16.0))
+                            .color(MUTED_FG),
+                        text(format!("No translation settings match “{query}”."))
+                            .size(scale::s(12.0))
+                            .color(MUTED_FG),
+                    ]
+                    .spacing(scale::s(6.0))
+                    .align_y(iced::Alignment::Center),
+                    text("Try a different term — e.g. provider, connect, models.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG),
+                ]
+                .spacing(scale::s(6.0)),
+            )
             .padding(scale::s(14.0))
             .style(|_| card_style())
             .into(),
@@ -1938,18 +2981,24 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     let q = query.trim().to_lowercase();
     let query_active = !q.is_empty();
     let provider_matches = |id: &str, name: &str| -> bool {
-        if !query_active { return true; }
+        if !query_active {
+            return true;
+        }
         matches_query(&q, &format!("{id} {name}"))
     };
     let custom_matches = |id: &str, label: &str| -> bool {
-        if !query_active { return true; }
+        if !query_active {
+            return true;
+        }
         matches_query(&q, &format!("{id} {label}"))
     };
     let mut connected_rows: Vec<Element<'static, UiEvent>> = Vec::new();
     let mut available_rows: Vec<Element<'static, UiEvent>> = Vec::new();
     let mut connected_ids: Vec<String> = Vec::new();
     for provider in translation::SUPPORTED_PROVIDERS.iter() {
-        if !provider_matches(&provider.id, &provider.name) { continue; }
+        if !provider_matches(&provider.id, &provider.name) {
+            continue;
+        }
         let conn = connections.get(&provider.id).cloned();
         let el = provider_row_with_connection(provider, conn.clone());
         if conn.is_some() {
@@ -1963,7 +3012,9 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         (CUSTOM_OPENAI, "OpenAI-compatible"),
         (CUSTOM_ANTHROPIC, "Anthropic-compatible"),
     ] {
-        if !custom_matches(id, label) { continue; }
+        if !custom_matches(id, label) {
+            continue;
+        }
         let conn = connections.get(id).cloned();
         let el = custom_row_with_connection(id, label, conn.clone());
         if conn.is_some() {
@@ -1976,18 +3027,30 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     let mut recommended_rows: Vec<Element<'static, UiEvent>> = Vec::new();
     if !translation::RECOMMENDED.is_empty() {
         for info in translation::RECOMMENDED.iter() {
-            if connections.contains_key(info.id) { continue; }
+            if connections.contains_key(info.id) {
+                continue;
+            }
             if let Some(provider) = translation::catalog_provider(info.id) {
-                if !provider_matches(provider.id.as_str(), &provider.name) { continue; }
+                if !provider_matches(provider.id.as_str(), &provider.name) {
+                    continue;
+                }
                 recommended_rows.push(recommended_row(provider, info));
             }
         }
     }
-    let show_connected = !query_active || !connected_rows.is_empty() || matches_query(&q, "connected");
-    let show_recommended = !translation::RECOMMENDED.is_empty() && (!query_active || !recommended_rows.is_empty() || matches_query(&q, "recommended"));
-    let show_available = !query_active || !available_rows.is_empty() || matches_query(&q, "available");
+    let show_connected =
+        !query_active || !connected_rows.is_empty() || matches_query(&q, "connected");
+    let show_recommended = !translation::RECOMMENDED.is_empty()
+        && (!query_active || !recommended_rows.is_empty() || matches_query(&q, "recommended"));
+    let show_available =
+        !query_active || !available_rows.is_empty() || matches_query(&q, "available");
     let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
-    if !query_active || matches_any(&q, &["translation", "service", "connect", "gateway", "provider"]) {
+    if !query_active
+        || matches_any(
+            &q,
+            &["translation", "service", "connect", "gateway", "provider"],
+        )
+    {
         cards.push(
             container(column![
                 text("Translation Service").size(scale::s(14.0)).color(Color::WHITE),
@@ -2004,75 +3067,164 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
         let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
         content.push(
             row![
-                crate::icon::lucide(Icon::PlugZap).size(scale::s(14.0)).color(crate::accent::accent()),
+                crate::icon::lucide(Icon::PlugZap)
+                    .size(scale::s(14.0))
+                    .color(crate::accent::accent()),
                 text("Connected").size(scale::s(13.0)).color(Color::WHITE),
                 space::horizontal(),
-                text(if connected_rows.is_empty() { "—".to_string() } else { format!("{} connected", connected_rows.len()) }).size(scale::s(11.0)).color(MUTED_FG),
-            ].align_y(iced::Alignment::Center).spacing(scale::s(6.0)).into()
+                text(if connected_rows.is_empty() {
+                    "—".to_string()
+                } else {
+                    format!("{} connected", connected_rows.len())
+                })
+                .size(scale::s(11.0))
+                .color(MUTED_FG),
+            ]
+            .align_y(iced::Alignment::Center)
+            .spacing(scale::s(6.0))
+            .into(),
         );
         content.push(item_separator());
         if connected_rows.is_empty() {
             content.push(
-                text(if query_active { format!("No connected providers match “{query}”.") } else { "Nothing connected yet — pick a provider below.".to_string() })
-                    .size(scale::s(11.0)).color(MUTED_FG).into()
+                text(if query_active {
+                    format!("No connected providers match “{query}”.")
+                } else {
+                    "Nothing connected yet — pick a provider below.".to_string()
+                })
+                .size(scale::s(11.0))
+                .color(MUTED_FG)
+                .into(),
             );
         } else {
             let len = connected_rows.len();
             for (idx, el) in connected_rows.into_iter().enumerate() {
                 content.push(el);
-                if idx + 1 < len { content.push(item_separator()); }
+                if idx + 1 < len {
+                    content.push(item_separator());
+                }
             }
         }
-        cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+        cards.push(
+            container(column(content).spacing(scale::s(6.0)))
+                .padding(scale::s(10.0))
+                .style(|_| card_style())
+                .into(),
+        );
     }
     if show_recommended {
         let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
         content.push(
             row![
-                crate::icon::lucide(Icon::Star).size(scale::s(14.0)).color(crate::accent::accent()),
+                crate::icon::lucide(Icon::Star)
+                    .size(scale::s(14.0))
+                    .color(crate::accent::accent()),
                 text("Recommended").size(scale::s(13.0)).color(Color::WHITE),
                 space::horizontal(),
-                text(if recommended_rows.is_empty() { "—".to_string() } else { format!("{} recommended", recommended_rows.len()) }).size(scale::s(11.0)).color(MUTED_FG),
-            ].align_y(iced::Alignment::Center).spacing(scale::s(6.0)).into()
+                text(if recommended_rows.is_empty() {
+                    "—".to_string()
+                } else {
+                    format!("{} recommended", recommended_rows.len())
+                })
+                .size(scale::s(11.0))
+                .color(MUTED_FG),
+            ]
+            .align_y(iced::Alignment::Center)
+            .spacing(scale::s(6.0))
+            .into(),
         );
-        content.push(text("Not sure where to start? Try one of these.").size(scale::s(11.0)).color(MUTED_FG).into());
+        content.push(
+            text("Not sure where to start? Try one of these.")
+                .size(scale::s(11.0))
+                .color(MUTED_FG)
+                .into(),
+        );
         content.push(item_separator());
         if recommended_rows.is_empty() {
-            content.push(text(if query_active { format!("No recommendations match “{query}”.") } else { "You've connected every recommended provider.".to_string() }).size(scale::s(11.0)).color(MUTED_FG).into());
+            content.push(
+                text(if query_active {
+                    format!("No recommendations match “{query}”.")
+                } else {
+                    "You've connected every recommended provider.".to_string()
+                })
+                .size(scale::s(11.0))
+                .color(MUTED_FG)
+                .into(),
+            );
         } else {
             let len = recommended_rows.len();
             for (idx, el) in recommended_rows.into_iter().enumerate() {
                 content.push(el);
-                if idx + 1 < len { content.push(item_separator()); }
+                if idx + 1 < len {
+                    content.push(item_separator());
+                }
             }
         }
-        cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+        cards.push(
+            container(column(content).spacing(scale::s(6.0)))
+                .padding(scale::s(10.0))
+                .style(|_| card_style())
+                .into(),
+        );
     }
     if show_available {
         let mut content: Vec<Element<'static, UiEvent>> = Vec::new();
         content.push(
             row![
-                crate::icon::lucide(Icon::Globe).size(scale::s(14.0)).color(MUTED_FG),
+                crate::icon::lucide(Icon::Globe)
+                    .size(scale::s(14.0))
+                    .color(MUTED_FG),
                 text("Available").size(scale::s(13.0)).color(Color::WHITE),
                 space::horizontal(),
-                text(format!("{} available", available_rows.len())).size(scale::s(11.0)).color(MUTED_FG),
-            ].align_y(iced::Alignment::Center).spacing(scale::s(6.0)).into()
+                text(format!("{} available", available_rows.len()))
+                    .size(scale::s(11.0))
+                    .color(MUTED_FG),
+            ]
+            .align_y(iced::Alignment::Center)
+            .spacing(scale::s(6.0))
+            .into(),
         );
         content.push(item_separator());
         if available_rows.is_empty() {
             content.push(
-                text(if query_active { format!("No available providers match “{query}”.") } else { "You've connected every available provider.".to_string() }).size(scale::s(11.0)).color(MUTED_FG).into()
+                text(if query_active {
+                    format!("No available providers match “{query}”.")
+                } else {
+                    "You've connected every available provider.".to_string()
+                })
+                .size(scale::s(11.0))
+                .color(MUTED_FG)
+                .into(),
             );
         } else {
             let len = available_rows.len();
             for (idx, el) in available_rows.into_iter().enumerate() {
                 content.push(el);
-                if idx + 1 < len { content.push(item_separator()); }
+                if idx + 1 < len {
+                    content.push(item_separator());
+                }
             }
         }
-        cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+        cards.push(
+            container(column(content).spacing(scale::s(6.0)))
+                .padding(scale::s(10.0))
+                .style(|_| card_style())
+                .into(),
+        );
     }
-    if matches_any(&q, &["free", "paid", "filter", "models", "manage", "dropdown", "only show free"]) || !query_active {
+    if matches_any(
+        &q,
+        &[
+            "free",
+            "paid",
+            "filter",
+            "models",
+            "manage",
+            "dropdown",
+            "only show free",
+        ],
+    ) || !query_active
+    {
         let content: Vec<Element<'static, UiEvent>> = vec![
             card_header(Icon::SlidersHorizontal, "Options", Some("Model list and saved connections")),
             item_separator(),
@@ -2118,13 +3270,35 @@ fn translation_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                 .color(MUTED_FG)
                 .into(),
         ];
-        cards.push(container(column(content).spacing(scale::s(6.0))).padding(scale::s(10.0)).style(|_| card_style()).into());
+        cards.push(
+            container(column(content).spacing(scale::s(6.0)))
+                .padding(scale::s(10.0))
+                .style(|_| card_style())
+                .into(),
+        );
     }
     cards
 }
 
 fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'static, UiEvent>> {
-    if !matches_any(query, &["updates", "update", "version", "download", "install", "velopack", "github", "release", "startup", "automatic", "auto", "check"]) && !query.trim().is_empty() {
+    if !matches_any(
+        query,
+        &[
+            "updates",
+            "update",
+            "version",
+            "download",
+            "install",
+            "velopack",
+            "github",
+            "release",
+            "startup",
+            "automatic",
+            "auto",
+            "check",
+        ],
+    ) && !query.trim().is_empty()
+    {
         return Vec::new();
     }
     let current = state.update_current_version();
@@ -2135,7 +3309,11 @@ fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
     let notes = state.update_notes();
 
     let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
-    col.push(card_header(Icon::Download, "Updates", Some("Get the latest version of EasyScanlate")));
+    col.push(card_header(
+        Icon::Download,
+        "Updates",
+        Some("Get the latest version of EasyScanlate"),
+    ));
     let auto_check = easyscanlate_settings::get(|s| s.auto_check_updates);
     col.push(
         column![
@@ -2147,25 +3325,76 @@ fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
         ].spacing(scale::s(4.0)).into()
     );
     col.push(item_separator());
-    col.push(text(format!("Current version: {}", if current.is_empty() { env!("CARGO_PKG_VERSION").to_string() } else { current.clone() })).size(scale::s(11.0)).color(MUTED_FG).into());
+    col.push(
+        text(format!(
+            "Current version: {}",
+            if current.is_empty() {
+                env!("CARGO_PKG_VERSION").to_string()
+            } else {
+                current.clone()
+            }
+        ))
+        .size(scale::s(11.0))
+        .color(MUTED_FG)
+        .into(),
+    );
     col.push(item_separator());
 
     if ready {
-        col.push(text("Update ready — restart to apply.").size(scale::s(12.0)).color(crate::accent::accent()).into());
+        col.push(
+            text("Update ready — restart to apply.")
+                .size(scale::s(12.0))
+                .color(crate::accent::accent())
+                .into(),
+        );
         if let Some(v) = available.clone() {
-            col.push(text(format!("Ready: v{} → v{}", current, v)).size(scale::s(11.0)).color(MUTED_FG).into());
+            col.push(
+                text(format!("Ready: v{} → v{}", current, v))
+                    .size(scale::s(11.0))
+                    .color(MUTED_FG)
+                    .into(),
+            );
         }
         if let Some(n) = notes.clone() {
-            col.push(container(text(n).size(scale::s(11.0)).color(MUTED_FG)).padding(scale::s(6.0)).style(|_| container::Style{ background: Some(Color::from_rgba8(255,255,255,0.04).into()), border: iced::Border::default().rounded(scale::s(6.0)), ..Default::default() }).into());
+            col.push(
+                container(text(n).size(scale::s(11.0)).color(MUTED_FG))
+                    .padding(scale::s(6.0))
+                    .style(|_| container::Style {
+                        background: Some(Color::from_rgba8(255, 255, 255, 0.04).into()),
+                        border: iced::Border::default().rounded(scale::s(6.0)),
+                        ..Default::default()
+                    })
+                    .into(),
+            );
         }
-        col.push(row![
-            button(text("Restart & Update").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateApply),
-            button(text("Later").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateDismiss),
-        ].spacing(scale::s(8.0)).into());
-        col.push(helper_text("The app will restart and install the update — no admin rights needed."));
+        col.push(
+            row![
+                button(text("Restart & Update").size(scale::s(11.0)))
+                    .padding([scale::s(6.0), scale::s(12.0)])
+                    .style(crate::panel::button_style)
+                    .on_press(UiEvent::UpdateApply),
+                button(text("Later").size(scale::s(11.0)))
+                    .padding([scale::s(6.0), scale::s(12.0)])
+                    .style(crate::panel::button_style)
+                    .on_press(UiEvent::UpdateDismiss),
+            ]
+            .spacing(scale::s(8.0))
+            .into(),
+        );
+        col.push(helper_text(
+            "The app will restart and install the update — no admin rights needed.",
+        ));
     } else if downloading {
         let pct = progress.clamp(0, 100);
-        col.push(text(format!("Downloading update — {}%. Please keep the app open.", pct)).size(scale::s(12.0)).color(crate::accent::accent()).into());
+        col.push(
+            text(format!(
+                "Downloading update — {}%. Please keep the app open.",
+                pct
+            ))
+            .size(scale::s(12.0))
+            .color(crate::accent::accent())
+            .into(),
+        );
         col.push(
             progress_bar(0.0..=100.0, pct as f32)
                 .girth(Length::Fixed(scale::s(6.0)))
@@ -2176,43 +3405,128 @@ fn updates_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
                 })
                 .into(),
         );
-        col.push(text(format!("{}% — the app will restart when it's finished.", pct)).size(scale::s(11.0)).color(MUTED_FG).into());
+        col.push(
+            text(format!(
+                "{}% — the app will restart when it's finished.",
+                pct
+            ))
+            .size(scale::s(11.0))
+            .color(MUTED_FG)
+            .into(),
+        );
     } else if let Some(v) = available.clone() {
-        col.push(text(format!("Update available: v{} → v{}", current, v)).size(scale::s(12.0)).color(crate::accent::accent()).into());
+        col.push(
+            text(format!("Update available: v{} → v{}", current, v))
+                .size(scale::s(12.0))
+                .color(crate::accent::accent())
+                .into(),
+        );
         if let Some(n) = notes.clone() {
-            col.push(container(text(n).size(scale::s(11.0)).color(MUTED_FG)).padding(scale::s(6.0)).style(|_| container::Style{ background: Some(Color::from_rgba8(255,255,255,0.04).into()), border: iced::Border::default().rounded(scale::s(6.0)), ..Default::default() }).into());
+            col.push(
+                container(text(n).size(scale::s(11.0)).color(MUTED_FG))
+                    .padding(scale::s(6.0))
+                    .style(|_| container::Style {
+                        background: Some(Color::from_rgba8(255, 255, 255, 0.04).into()),
+                        border: iced::Border::default().rounded(scale::s(6.0)),
+                        ..Default::default()
+                    })
+                    .into(),
+            );
         }
-        col.push(row![
-            button(text("Download").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateDownload),
-            button(text("Dismiss").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateDismiss),
-        ].spacing(scale::s(8.0)).into());
-        col.push(helper_text("We only download what's changed when we can, so it's quick."));
+        col.push(
+            row![
+                button(text("Download").size(scale::s(11.0)))
+                    .padding([scale::s(6.0), scale::s(12.0)])
+                    .style(crate::panel::button_style)
+                    .on_press(UiEvent::UpdateDownload),
+                button(text("Dismiss").size(scale::s(11.0)))
+                    .padding([scale::s(6.0), scale::s(12.0)])
+                    .style(crate::panel::button_style)
+                    .on_press(UiEvent::UpdateDismiss),
+            ]
+            .spacing(scale::s(8.0))
+            .into(),
+        );
+        col.push(helper_text(
+            "We only download what's changed when we can, so it's quick.",
+        ));
     } else {
-        col.push(text("You're up to date.").size(scale::s(12.0)).color(Color::WHITE).into());
-        col.push(text(format!("Current: v{}", current)).size(scale::s(11.0)).color(MUTED_FG).into());
-        col.push(button(text("Check again").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateCheck).into());
+        col.push(
+            text("You're up to date.")
+                .size(scale::s(12.0))
+                .color(Color::WHITE)
+                .into(),
+        );
+        col.push(
+            text(format!("Current: v{}", current))
+                .size(scale::s(11.0))
+                .color(MUTED_FG)
+                .into(),
+        );
+        col.push(
+            button(text("Check again").size(scale::s(11.0)))
+                .padding([scale::s(6.0), scale::s(12.0)])
+                .style(crate::panel::button_style)
+                .on_press(UiEvent::UpdateCheck)
+                .into(),
+        );
         col.push(helper_text("Checks GitHub for new releases."));
     }
 
     if available.is_none() && !ready && !downloading {
         // also offer check when up-to-date already has button; downloading/ready hide extra check
     } else if !downloading && !ready {
-        col.push(space::vertical().height(Length::Fixed(scale::s(6.0))).into());
-        col.push(button(text("Check for updates").size(scale::s(11.0))).padding([scale::s(6.0), scale::s(12.0)]).style(crate::panel::button_style).on_press(UiEvent::UpdateCheck).into());
+        col.push(
+            space::vertical()
+                .height(Length::Fixed(scale::s(6.0)))
+                .into(),
+        );
+        col.push(
+            button(text("Check for updates").size(scale::s(11.0)))
+                .padding([scale::s(6.0), scale::s(12.0)])
+                .style(crate::panel::button_style)
+                .on_press(UiEvent::UpdateCheck)
+                .into(),
+        );
     }
 
-    vec![container(column(col).spacing(scale::s(7.0))).padding(scale::s(10.0)).style(|_| card_style()).into()]
+    vec![
+        container(column(col).spacing(scale::s(7.0)))
+            .padding(scale::s(10.0))
+            .style(|_| card_style())
+            .into(),
+    ]
 }
 
-fn updates_tab_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Element<'static, UiEvent> {
+fn updates_tab_filtered<S: UiState + ?Sized>(
+    state: &S,
+    query: String,
+) -> Element<'static, UiEvent> {
     let cards = updates_cards(state, &query);
     if cards.is_empty() {
-        return scrollable(container(text(format!("No update settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG)).padding(scale::s(14.0)).style(|_| card_style())).spacing(scale::s(crate::scroll::EMBEDDED_SPACING)).height(Length::Fill).into();
+        return scrollable(
+            container(
+                text(format!("No update settings match “{query}”."))
+                    .size(scale::s(12.0))
+                    .color(MUTED_FG),
+            )
+            .padding(scale::s(14.0))
+            .style(|_| card_style()),
+        )
+        .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
+        .height(Length::Fill)
+        .into();
     }
-    scrollable(column(cards).spacing(scale::s(10.0))).spacing(scale::s(crate::scroll::EMBEDDED_SPACING)).height(Length::Fill).into()
+    scrollable(column(cards).spacing(scale::s(10.0)))
+        .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
+        .height(Length::Fill)
+        .into()
 }
 
-fn global_search_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Element<'static, UiEvent> {
+fn global_search_filtered<S: UiState + ?Sized>(
+    state: &S,
+    query: String,
+) -> Element<'static, UiEvent> {
     let q = query.as_str();
     let mut all: Vec<Element<'static, UiEvent>> = Vec::new();
 
@@ -2251,20 +3565,34 @@ fn global_search_filtered<S: UiState + ?Sized>(state: &S, query: String) -> Elem
 
     if all.is_empty() {
         all.push(
-            container(column![
-                row![
-                    crate::icon::lucide(Icon::SearchX).size(scale::s(16.0)).color(MUTED_FG),
-                    text(format!("No settings match “{query}”.")).size(scale::s(12.0)).color(MUTED_FG),
-                ].spacing(scale::s(6.0)).align_y(iced::Alignment::Center),
-                text("Try a different term — e.g. font, OCR, inpaint, translation, project.").size(scale::s(11.0)).color(MUTED_FG),
-            ].spacing(scale::s(6.0)))
+            container(
+                column![
+                    row![
+                        crate::icon::lucide(Icon::SearchX)
+                            .size(scale::s(16.0))
+                            .color(MUTED_FG),
+                        text(format!("No settings match “{query}”."))
+                            .size(scale::s(12.0))
+                            .color(MUTED_FG),
+                    ]
+                    .spacing(scale::s(6.0))
+                    .align_y(iced::Alignment::Center),
+                    text("Try a different term — e.g. font, OCR, inpaint, translation, project.")
+                        .size(scale::s(11.0))
+                        .color(MUTED_FG),
+                ]
+                .spacing(scale::s(6.0)),
+            )
             .padding(scale::s(14.0))
             .style(|_| card_style())
             .into(),
         );
     }
 
-    scrollable(column(all).spacing(scale::s(10.0))).spacing(scale::s(crate::scroll::EMBEDDED_SPACING)).height(Length::Fill).into()
+    scrollable(column(all).spacing(scale::s(10.0)))
+        .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
+        .height(Length::Fill)
+        .into()
 }
 
 /// The field area of the currently selected tab.
@@ -2302,9 +3630,13 @@ pub fn view<'a, S: UiState + ?Sized>(
             // ── Sidebar search — top of sidebar, settings-wide ──────
             column![
                 row![
-                    crate::icon::lucide(Icon::Search).size(scale::s(12.0)).color(MUTED_FG),
+                    crate::icon::lucide(Icon::Search)
+                        .size(scale::s(12.0))
+                        .color(MUTED_FG),
                     text("Search").size(scale::s(11.0)).color(MUTED_FG),
-                ].spacing(scale::s(4.0)).align_y(iced::Alignment::Center),
+                ]
+                .spacing(scale::s(4.0))
+                .align_y(iced::Alignment::Center),
                 text_input("Filter settings…", &query)
                     .on_input(UiEvent::SettingsSearch)
                     .padding([scale::s(6.0), scale::s(8.0)])
@@ -2313,28 +3645,35 @@ pub fn view<'a, S: UiState + ?Sized>(
                 text("Search all settings")
                     .size(scale::s(10.0))
                     .color(MUTED_FG),
-            ].spacing(scale::s(4.0)),
-            rule::horizontal(1)
-                .style(|_| rule::Style {
-                    color: Color::from_rgba8(255, 255, 255, 0.08),
-                    radius: 0.0.into(),
-                    fill_mode: rule::FillMode::Full,
-                    snap: true,
-                }),
+            ]
+            .spacing(scale::s(4.0)),
+            rule::horizontal(1).style(|_| rule::Style {
+                color: Color::from_rgba8(255, 255, 255, 0.08),
+                radius: 0.0.into(),
+                fill_mode: rule::FillMode::Full,
+                snap: true,
+            }),
             column![
                 tab_button(state, SettingsTab::General, Icon::Settings, "General"),
                 tab_button(state, SettingsTab::Project, Icon::Folder, "Project"),
                 tab_button(state, SettingsTab::Appearance, Icon::Palette, "Appearance"),
                 tab_button(state, SettingsTab::Ocr, Icon::ScanSearch, "OCR"),
                 tab_button(state, SettingsTab::Inpaint, Icon::Brush, "Inpaint"),
-                tab_button(state, SettingsTab::Translation, Icon::Languages, "Translation"),
+                tab_button(
+                    state,
+                    SettingsTab::Translation,
+                    Icon::Languages,
+                    "Translation"
+                ),
                 tab_button(state, SettingsTab::Advanced, Icon::Wrench, "Advanced"),
                 tab_button(state, SettingsTab::Updates, Icon::Download, "Updates"),
             ]
             .spacing(scale::s(4.0))
             .width(Length::Fill),
             space::vertical().height(Length::Fill),
-            text("Click outside to close").size(scale::s(10.0)).color(Color::from_rgba8(255,255,255,0.35)),
+            text("Click outside to close")
+                .size(scale::s(10.0))
+                .color(Color::from_rgba8(255, 255, 255, 0.35)),
         ]
         .spacing(scale::s(10.0))
         .height(Length::Fill)
@@ -2349,7 +3688,7 @@ pub fn view<'a, S: UiState + ?Sized>(
                 a: 0.5,
                 ..Color::BLACK
             }
-            .into()
+            .into(),
         ),
         border: iced::Border::default().rounded(iced::border::left(scale::s(8.0))),
         ..container::Style::default()
@@ -2418,7 +3757,7 @@ pub fn view<'a, S: UiState + ?Sized>(
                 a: 0.7,
                 ..Color::BLACK
             }
-            .into()
+            .into(),
         ),
         ..container::Style::default()
     });

@@ -207,7 +207,9 @@ pub fn handle_ready(
         BackdropKind::NewProject => {
             super::new_project::ensure_new_project_state(app);
         }
-        BackdropKind::Loading | BackdropKind::Export | BackdropKind::Update => unreachable!("handled above"),
+        BackdropKind::Loading | BackdropKind::Export | BackdropKind::Update => {
+            unreachable!("handled above")
+        }
     }
     Task::none()
 }

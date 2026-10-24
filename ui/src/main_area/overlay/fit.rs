@@ -3,7 +3,7 @@ use std::collections::{HashMap, VecDeque};
 
 use iced::{Font, Size};
 
-use super::cache::{fit_key_params, FitKey, FIT_CACHE_CAP};
+use super::cache::{FIT_CACHE_CAP, FitKey, fit_key_params};
 use super::text::measure_text;
 
 const MIN_FONT_SIZE: f32 = 1.0;
@@ -90,9 +90,10 @@ pub(crate) fn fit_font_metrics(
     with_fit_cache(|cache| {
         if !cache.entries.contains_key(&key) {
             if cache.entries.len() >= FIT_CACHE_CAP
-                && let Some(evicted) = cache.order.pop_front() {
-                    cache.entries.remove(&evicted);
-                }
+                && let Some(evicted) = cache.order.pop_front()
+            {
+                cache.entries.remove(&evicted);
+            }
             cache.order.push_back(key);
         }
         cache.entries.insert(

@@ -5,6 +5,7 @@ use easyscanlate_model::EntryId;
 use crate::main_area::geometry::order_quad;
 use crate::scale;
 
+use super::TileSpec;
 use super::interaction::{OverlayButton, SaveMenuButton, TopDecorHit};
 use super::layout::tile_layout;
 use super::motion::{
@@ -12,10 +13,12 @@ use super::motion::{
     toolbar_buttons, toolbar_rect, top_decor_geometry,
 };
 use super::state::TileViewState;
-use super::TileSpec;
 
 pub fn local_point(position: Point, bounds: Rectangle) -> Point {
-    Point::new(position.x - bounds.position().x, position.y - bounds.position().y)
+    Point::new(
+        position.x - bounds.position().x,
+        position.y - bounds.position().y,
+    )
 }
 
 pub fn hit_tile(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Option<usize> {
@@ -52,7 +55,11 @@ pub fn point_in_quad(point: Point, quad: [[f32; 2]; 4]) -> bool {
     true
 }
 
-pub fn hit_entry(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Option<(usize, EntryId)> {
+pub fn hit_entry(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    local: Point,
+) -> Option<(usize, EntryId)> {
     let (layout, _) = tile_layout(tiles, state.width);
     let mut hit = None;
     for (index, tile) in tiles.iter().enumerate() {
@@ -74,9 +81,12 @@ pub fn hit_entry(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) ->
             if !rect.contains(local) {
                 continue;
             }
-            let quad = order_quad(entry.quad.points.map(|p| {
-                [p[0] * scale, y + p[1] * scale - state.offset]
-            }));
+            let quad = order_quad(
+                entry
+                    .quad
+                    .points
+                    .map(|p| [p[0] * scale, y + p[1] * scale - state.offset]),
+            );
             if point_in_quad(local, quad) {
                 hit = Some((index, entry.id));
             }
@@ -85,7 +95,12 @@ pub fn hit_entry(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) ->
     hit
 }
 
-pub fn entry_rect(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, id: EntryId) -> Option<Rectangle> {
+pub fn entry_rect(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    index: usize,
+    id: EntryId,
+) -> Option<Rectangle> {
     let tile = tiles.get(index)?;
     let (layout, _) = tile_layout(tiles, state.width);
     let (y, _) = layout.get(index)?;
@@ -104,7 +119,12 @@ pub fn entry_rect(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, i
     ))
 }
 
-pub fn reveal_offset(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize, id: EntryId) -> Option<f32> {
+pub fn reveal_offset(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    index: usize,
+    id: EntryId,
+) -> Option<f32> {
     let tile = tiles.get(index)?;
     let (layout, _) = tile_layout(tiles, state.width);
     let (y, _) = layout.get(index)?;
@@ -132,20 +152,30 @@ pub fn reveal_offset(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize
     (target != state.offset).then_some(target)
 }
 
-pub fn editing_rect(tiles: &[TileSpec<'_>], state: &TileViewState, editing: (usize, EntryId)) -> Option<Rectangle> {
+pub fn editing_rect(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    editing: (usize, EntryId),
+) -> Option<Rectangle> {
     let (index, id) = editing;
     entry_rect(tiles, state, index, id)
 }
 
 pub fn selected_rect(tiles: &[TileSpec<'_>], state: &TileViewState) -> Option<(usize, Rectangle)> {
-    let (index, entry) = tiles
-        .iter()
-        .enumerate()
-        .find_map(|(index, tile)| tile.overlays.iter().find(|e| e.selected).map(|e| (index, e)))?;
+    let (index, entry) = tiles.iter().enumerate().find_map(|(index, tile)| {
+        tile.overlays
+            .iter()
+            .find(|e| e.selected)
+            .map(|e| (index, e))
+    })?;
     Some((index, entry_rect(tiles, state, index, entry.id)?))
 }
 
-pub fn selected_quad_view(tiles: &[TileSpec<'_>], state: &TileViewState, index: usize) -> Option<[[f32; 2]; 4]> {
+pub fn selected_quad_view(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    index: usize,
+) -> Option<[[f32; 2]; 4]> {
     let tile = tiles.get(index)?;
     let (layout, _) = tile_layout(tiles, state.width);
     let (y, _) = layout.get(index)?;
@@ -158,12 +188,19 @@ pub fn selected_quad_view(tiles: &[TileSpec<'_>], state: &TileViewState, index: 
         return None;
     }
     let entry = tile.overlays.iter().find(|e| e.selected)?;
-    Some(order_quad(entry.quad.points.map(|p| {
-        [p[0] * scale, y + p[1] * scale - state.offset]
-    })))
+    Some(order_quad(
+        entry
+            .quad
+            .points
+            .map(|p| [p[0] * scale, y + p[1] * scale - state.offset]),
+    ))
 }
 
-pub fn entry_quad(tiles: &[TileSpec<'_>], index: usize, id: EntryId) -> Option<easyscanlate_model::Quad> {
+pub fn entry_quad(
+    tiles: &[TileSpec<'_>],
+    index: usize,
+    id: EntryId,
+) -> Option<easyscanlate_model::Quad> {
     let tile = tiles.get(index)?;
     tile.overlays.iter().find(|e| e.id == id).map(|e| e.quad)
 }
@@ -180,15 +217,21 @@ pub fn hit_gradient_handle(
     let (y, _) = layout.get(spec.index)?;
     let tile_local = Point::new(local.x, local.y + state.offset - y);
     let box_rect = super::motion::gradient_handle_box(tiles, state, spec.index, spec.id)?;
-    let factor =
-        super::motion::gradient_rest_factor(state, spec.index, spec.id, spec.field);
+    let factor = super::motion::gradient_rest_factor(state, spec.index, spec.id, spec.field);
     super::motion::gradient_handle_hit(box_rect, spec.angle, factor, tile_local)
         .map(|endpoint| (spec.index, spec.id, spec.field, endpoint))
 }
 
-pub fn hit_handle(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Option<(usize, EntryId, super::interaction::ResizeHandle)> {
+pub fn hit_handle(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    local: Point,
+) -> Option<(usize, EntryId, super::interaction::ResizeHandle)> {
     let (index, entry) = tiles.iter().enumerate().find_map(|(index, tile)| {
-        tile.overlays.iter().find(|e| e.selected).map(|e| (index, e))
+        tile.overlays
+            .iter()
+            .find(|e| e.selected)
+            .map(|e| (index, e))
     })?;
     let id = entry.id;
     let quad = selected_quad_view(tiles, state, index)?;
@@ -200,9 +243,16 @@ pub fn hit_handle(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -
     None
 }
 
-pub fn hit_top_decor(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Option<(usize, EntryId, TopDecorHit)> {
+pub fn hit_top_decor(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    local: Point,
+) -> Option<(usize, EntryId, TopDecorHit)> {
     let (index, entry) = tiles.iter().enumerate().find_map(|(index, tile)| {
-        tile.overlays.iter().find(|e| e.selected).map(|e| (index, e))
+        tile.overlays
+            .iter()
+            .find(|e| e.selected)
+            .map(|e| (index, e))
     })?;
     let id = entry.id;
     if state.inpaint_mode() || state.ocr_mode() {
@@ -238,7 +288,11 @@ pub fn hit_toolbar_button(toolbar: Rectangle, local: Point) -> Option<crate::eve
     None
 }
 
-pub fn hit_toolbar(tiles: &[TileSpec<'_>], state: &TileViewState, local: Point) -> Option<(usize, EntryId, crate::event::ToolbarAction)> {
+pub fn hit_toolbar(
+    tiles: &[TileSpec<'_>],
+    state: &TileViewState,
+    local: Point,
+) -> Option<(usize, EntryId, crate::event::ToolbarAction)> {
     let (index, rect) = selected_rect(tiles, state)?;
     let toolbar = toolbar_rect(rect, state.width, state.viewport_height);
     let id = tiles[index].overlays.iter().find(|e| e.selected)?.id;

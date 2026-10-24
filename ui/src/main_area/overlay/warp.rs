@@ -2,12 +2,12 @@ use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 
 use iced::advanced::graphics::geometry::{self, Fill, Path, Stroke, Text};
+use iced::advanced::text::Alignment as TextAlignment;
 use iced::advanced::text::{LineHeight, Wrapping};
 use iced::{Font, Point, Rectangle, Vector};
-use iced::advanced::text::Alignment as TextAlignment;
 
-use super::cache::{FitKey, FIT_CACHE_CAP, font_hash, text_key};
-use super::gradient::{gradient_t_angle, lerp_color, StrokePaint};
+use super::cache::{FIT_CACHE_CAP, FitKey, font_hash, text_key};
+use super::gradient::{StrokePaint, gradient_t_angle, lerp_color};
 use crate::main_area::geometry::{fit_affine, quad_bounds, svd2};
 
 const WARP_THRESHOLD_PX: f32 = 0.5;
@@ -74,15 +74,20 @@ pub(crate) fn shape_warp_layout(
         font_hash(font),
     );
     with_warp_cache(|cache| {
-        if let Some(entry) = cache.entries.get(&key).filter(|entry| entry.content == text) {
+        if let Some(entry) = cache
+            .entries
+            .get(&key)
+            .filter(|entry| entry.content == text)
+        {
             return entry.layout.clone();
         }
         let layout = build_warp_layout(text, font, size, wrap_width, line_height, letter_spacing);
         if !cache.entries.contains_key(&key) {
             if cache.entries.len() >= FIT_CACHE_CAP
-                && let Some(evicted) = cache.order.pop_front() {
-                    cache.entries.remove(&evicted);
-                }
+                && let Some(evicted) = cache.order.pop_front()
+            {
+                cache.entries.remove(&evicted);
+            }
             cache.order.push_back(key);
         }
         cache.entries.insert(
@@ -342,10 +347,7 @@ pub fn draw_warped_text<F>(
             frame.stroke(
                 &glyph.path,
                 Stroke::default()
-                    .with_color(paint.color_at(
-                        box_rect,
-                        Point::new(ax + gw / 2.0, ay + gh / 2.0),
-                    ))
+                    .with_color(paint.color_at(box_rect, Point::new(ax + gw / 2.0, ay + gh / 2.0)))
                     .with_width(stroke_width),
             );
         }

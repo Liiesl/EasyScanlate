@@ -6,14 +6,14 @@
 
 use std::collections::HashMap;
 
-use quick_xml::events::{BytesStart, BytesText, Event};
+use easyscanlate_model::{
+    CapsMode, EntryId, EntrySource, EntryStyle, Extras, ImageId, ImageMeta, InpaintId,
+    InpaintPatch, OcrEntry, OcrResult, Profile, ProfileId, Project, Quad, Shape, ShapeKind,
+    TextAlign, TextGradientDir,
+};
 use quick_xml::Reader;
 use quick_xml::Writer;
-use easyscanlate_model::{
-    EntryId, EntrySource, EntryStyle, Extras, ImageId, ImageMeta, InpaintId, InpaintPatch,
-    OcrEntry, OcrResult, Profile, ProfileId, Project, Quad, Shape, ShapeKind, TextAlign,
-    TextGradientDir, CapsMode,
-};
+use quick_xml::events::{BytesStart, BytesText, Event};
 
 const VERSION: u32 = 1;
 
@@ -36,9 +36,10 @@ fn unesc(s: &str) -> String {
 fn attr(e: &BytesStart, key: &[u8]) -> Option<String> {
     for a in e.attributes().flatten() {
         if a.key.as_ref() == key
-            && let Ok(v) = a.unescape_value() {
-                return Some(v.into_owned());
-            }
+            && let Ok(v) = a.unescape_value()
+        {
+            return Some(v.into_owned());
+        }
     }
     None
 }
@@ -93,7 +94,9 @@ pub fn to_xml_string(project: &Project) -> Result<String, String> {
     // xml decl
     writer
         .write_event(Event::Decl(quick_xml::events::BytesDecl::new(
-            "1.0", Some("UTF-8"), None,
+            "1.0",
+            Some("UTF-8"),
+            None,
         )))
         .map_err(|e| e.to_string())?;
     writer
@@ -118,7 +121,10 @@ pub fn to_xml_string(project: &Project) -> Result<String, String> {
     // images
     {
         let mut el = BytesStart::new("images");
-        el.push_attribute(("next_image_id", project.next_image_id().to_string().as_str()));
+        el.push_attribute((
+            "next_image_id",
+            project.next_image_id().to_string().as_str(),
+        ));
         writer
             .write_event(Event::Start(el))
             .map_err(|e| e.to_string())?;
@@ -231,7 +237,10 @@ pub fn to_xml_string(project: &Project) -> Result<String, String> {
     // profiles
     {
         let mut el = BytesStart::new("profiles");
-        el.push_attribute(("selected", project.profiles.selected_id().0.to_string().as_str()));
+        el.push_attribute((
+            "selected",
+            project.profiles.selected_id().0.to_string().as_str(),
+        ));
         el.push_attribute(("next_id", project.profiles.next_id().to_string().as_str()));
         writer
             .write_event(Event::Start(el))
@@ -328,16 +337,45 @@ pub fn to_xml_string(project: &Project) -> Result<String, String> {
             s.push_attribute(("stroke_width", style.stroke_width.to_string().as_str()));
             s.push_attribute(("bg_radius", style.bg_radius.to_string().as_str()));
             s.push_attribute(("text_align", style.text_align.label()));
-            s.push_attribute(("text_gradient", if style.text_gradient { "true" } else { "false" }));
+            s.push_attribute((
+                "text_gradient",
+                if style.text_gradient { "true" } else { "false" },
+            ));
             s.push_attribute(("gradient_dir", style.gradient_dir.label()));
             s.push_attribute(("gradient_angle", style.gradient_angle.to_string().as_str()));
-            s.push_attribute(("stroke_gradient", if style.stroke_gradient { "true" } else { "false" }));
-            s.push_attribute(("stroke_gradient_angle", style.stroke_gradient_angle.to_string().as_str()));
-            s.push_attribute(("bg_gradient", if style.bg_gradient { "true" } else { "false" }));
-            s.push_attribute(("bg_gradient_angle", style.bg_gradient_angle.to_string().as_str()));
-            s.push_attribute(("shadow_enabled", if style.shadow_enabled { "true" } else { "false" }));
+            s.push_attribute((
+                "stroke_gradient",
+                if style.stroke_gradient {
+                    "true"
+                } else {
+                    "false"
+                },
+            ));
+            s.push_attribute((
+                "stroke_gradient_angle",
+                style.stroke_gradient_angle.to_string().as_str(),
+            ));
+            s.push_attribute((
+                "bg_gradient",
+                if style.bg_gradient { "true" } else { "false" },
+            ));
+            s.push_attribute((
+                "bg_gradient_angle",
+                style.bg_gradient_angle.to_string().as_str(),
+            ));
+            s.push_attribute((
+                "shadow_enabled",
+                if style.shadow_enabled {
+                    "true"
+                } else {
+                    "false"
+                },
+            ));
             s.push_attribute(("shadow_angle", style.shadow_angle.to_string().as_str()));
-            s.push_attribute(("shadow_distance", style.shadow_distance.to_string().as_str()));
+            s.push_attribute((
+                "shadow_distance",
+                style.shadow_distance.to_string().as_str(),
+            ));
             s.push_attribute(("shadow_blur", style.shadow_blur.to_string().as_str()));
             if let Some(fam) = &style.font_family {
                 s.push_attribute(("font_family", esc(fam).as_str()));
@@ -661,12 +699,12 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
     let mut cur_delta_entry: Option<EntryId> = None;
     let mut cur_delta_trans: Option<String> = None;
     let mut cur_style: Option<(EntryId, EntryStyle)> = None;
-    let mut cur_style_colors: HashMap<String, [u8;4]> = HashMap::new();
+    let mut cur_style_colors: HashMap<String, [u8; 4]> = HashMap::new();
     let mut cur_view_quad: Option<(EntryId, Quad)> = None;
-    let mut cur_view_points: Vec<[f32;2]> = Vec::new();
+    let mut cur_view_points: Vec<[f32; 2]> = Vec::new();
     let mut cur_note: Option<(EntryId, String)> = None;
     let mut cur_shape: Option<Shape> = None;
-    let mut cur_shape_points: Vec<[f32;2]> = Vec::new();
+    let mut cur_shape_points: Vec<[f32; 2]> = Vec::new();
     let mut cur_inpaint_patch: Option<InpaintPatch> = None;
     let mut cur_inpaint_quad_points: Vec<[f32; 2]> = Vec::new();
     // accumulate text content
@@ -699,37 +737,62 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                         }
                     }
                     "images" => {
-                        ctx.next_image_id = attr(&e, b"next_image_id").map(|v| parse_u64(&v)).unwrap_or(0);
+                        ctx.next_image_id = attr(&e, b"next_image_id")
+                            .map(|v| parse_u64(&v))
+                            .unwrap_or(0);
                     }
                     "image" => {
                         // empty or start
-                        let id = attr(&e, b"id").map(|v| ImageId(parse_u64(&v))).unwrap_or(ImageId(0));
+                        let id = attr(&e, b"id")
+                            .map(|v| ImageId(parse_u64(&v)))
+                            .unwrap_or(ImageId(0));
                         let path = attr(&e, b"path").map(|v| unesc(&v)).unwrap_or_default();
                         let width = attr(&e, b"width").map(|v| parse_f32(&v)).unwrap_or(0.0);
                         let height = attr(&e, b"height").map(|v| parse_f32(&v)).unwrap_or(0.0);
                         // this is Empty in writer, but if Start we will close on End
                         // To handle both, push immediately; if it's Start we won't duplicate because we treat End as no-op for image
                         // Detect if empty: we are in Start event, but empty was handled as Empty earlier, so this branch only for non-empty (unlikely)
-                        ctx.images.push(ImageMeta { id, path, width, height });
+                        ctx.images.push(ImageMeta {
+                            id,
+                            path,
+                            width,
+                            height,
+                        });
                     }
                     "ocr" => {
                         ctx.ocr_next_id = attr(&e, b"next_id").map(|v| parse_u64(&v)).unwrap_or(0);
                     }
                     "entry" => {
-                        let id = attr(&e, b"id").map(|v| EntryId(parse_u64(&v))).unwrap_or(EntryId(0));
-                        let image_id = attr(&e, b"image_id").map(|v| ImageId(parse_u64(&v))).unwrap_or(ImageId(0));
+                        let id = attr(&e, b"id")
+                            .map(|v| EntryId(parse_u64(&v)))
+                            .unwrap_or(EntryId(0));
+                        let image_id = attr(&e, b"image_id")
+                            .map(|v| ImageId(parse_u64(&v)))
+                            .unwrap_or(ImageId(0));
                         let source = match attr(&e, b"source").as_deref() {
                             Some("Manual") => EntrySource::Manual,
                             _ => EntrySource::AutoOcr,
                         };
                         let score = attr(&e, b"score").map(|v| parse_f32(&v)).unwrap_or(0.0);
-                        let deleted = attr(&e, b"deleted").map(|v| v=="true").unwrap_or(false);
-                        cur_entry = Some(OcrEntry { id, image_id, source, text: String::new(), score, quad: Quad{points:[[0.0;2];4]}, deleted });
+                        let deleted = attr(&e, b"deleted").map(|v| v == "true").unwrap_or(false);
+                        cur_entry = Some(OcrEntry {
+                            id,
+                            image_id,
+                            source,
+                            text: String::new(),
+                            score,
+                            quad: Quad {
+                                points: [[0.0; 2]; 4],
+                            },
+                            deleted,
+                        });
                         cur_quad_points.clear();
                     }
                     "quad" => {
                         // If this quad belongs to an inpaint patch, handle separately
-                        let parent_is_patch = stack.len() >= 2 && stack[stack.len() - 2] == "patch" && cur_inpaint_patch.is_some();
+                        let parent_is_patch = stack.len() >= 2
+                            && stack[stack.len() - 2] == "patch"
+                            && cur_inpaint_patch.is_some();
                         if parent_is_patch {
                             cur_inpaint_quad_points.clear();
                         } else {
@@ -744,23 +807,27 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                         let y = attr(&e, b"y").map(|v| parse_f32(&v)).unwrap_or(0.0);
                         // determine where to push: if inside entry's quad or view_quad or shape or patch quad
                         if stack.len() >= 2 {
-                            let parent = &stack[stack.len()-2];
-                            if parent=="quad" {
+                            let parent = &stack[stack.len() - 2];
+                            if parent == "quad" {
                                 // check if this quad belongs to an inpaint patch
-                                let is_patch_quad = stack.len() >= 3 && stack[stack.len()-3] == "patch" && cur_inpaint_patch.is_some();
+                                let is_patch_quad = stack.len() >= 3
+                                    && stack[stack.len() - 3] == "patch"
+                                    && cur_inpaint_patch.is_some();
                                 if is_patch_quad {
-                                    cur_inpaint_quad_points.push([x,y]);
-                                } else if stack.iter().any(|s| s=="view_quads") && cur_view_quad.is_some() {
-                                    cur_view_points.push([x,y]);
+                                    cur_inpaint_quad_points.push([x, y]);
+                                } else if stack.iter().any(|s| s == "view_quads")
+                                    && cur_view_quad.is_some()
+                                {
+                                    cur_view_points.push([x, y]);
                                 } else if cur_entry.is_some() && cur_shape.is_none() {
-                                    cur_quad_points.push([x,y]);
+                                    cur_quad_points.push([x, y]);
                                 } else if cur_shape.is_some() {
-                                    cur_shape_points.push([x,y]);
+                                    cur_shape_points.push([x, y]);
                                 }
-                            } else if parent=="view_quad" {
-                                cur_view_points.push([x,y]);
-                            } else if parent=="shape" {
-                                cur_shape_points.push([x,y]);
+                            } else if parent == "view_quad" {
+                                cur_view_points.push([x, y]);
+                            } else if parent == "shape" {
+                                cur_shape_points.push([x, y]);
                             }
                         }
                         // empty element, no End
@@ -772,76 +839,174 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                         text_buf.clear();
                     }
                     "profiles" => {
-                        ctx.selected = attr(&e, b"selected").map(|v| ProfileId(parse_u64(&v))).unwrap_or(ProfileId(0));
-                        ctx.profiles_next_id = attr(&e, b"next_id").map(|v| parse_u64(&v)).unwrap_or(1);
+                        ctx.selected = attr(&e, b"selected")
+                            .map(|v| ProfileId(parse_u64(&v)))
+                            .unwrap_or(ProfileId(0));
+                        ctx.profiles_next_id =
+                            attr(&e, b"next_id").map(|v| parse_u64(&v)).unwrap_or(1);
                     }
                     "profile" => {
-                        let id = attr(&e, b"id").map(|v| ProfileId(parse_u64(&v))).unwrap_or(ProfileId(0));
+                        let id = attr(&e, b"id")
+                            .map(|v| ProfileId(parse_u64(&v)))
+                            .unwrap_or(ProfileId(0));
                         let name = attr(&e, b"name").map(|v| unesc(&v)).unwrap_or_default();
                         cur_profile = Some(Profile::from_raw(id, name, HashMap::new()));
                     }
                     "delta" => {
-                        let eid = attr(&e, b"entry_id").map(|v| EntryId(parse_u64(&v))).unwrap_or(EntryId(0));
+                        let eid = attr(&e, b"entry_id")
+                            .map(|v| EntryId(parse_u64(&v)))
+                            .unwrap_or(EntryId(0));
                         cur_delta_entry = Some(eid);
                         cur_delta_trans = None;
                     }
                     "style" => {
-                        let eid = attr(&e, b"entry_id").map(|v| EntryId(parse_u64(&v))).unwrap_or(EntryId(0));
-                        let font_size = attr(&e, b"font_size").map(|v| parse_f32(&v)).unwrap_or(14.0);
-                        let auto_size = attr(&e, b"auto_size").map(|v| v=="true").unwrap_or(true);
-                        let line_height = attr(&e, b"line_height").map(|v| parse_f32(&v)).unwrap_or(1.2);
-                        let letter_spacing = attr(&e, b"letter_spacing").map(|v| parse_f32(&v)).unwrap_or(0.0);
-                        let caps = attr(&e, b"caps").map(|v| CapsMode::from_label(&v)).unwrap_or(CapsMode::None);
-                        let bold = attr(&e, b"bold").map(|v| v=="true").unwrap_or(false);
-                        let italic = attr(&e, b"italic").map(|v| v=="true").unwrap_or(false);
-                        let stroke_width = attr(&e, b"stroke_width").map(|v| parse_f32(&v)).unwrap_or(0.0);
-                        let bg_radius = attr(&e, b"bg_radius").map(|v| parse_f32(&v)).unwrap_or(0.0);
-                        let text_align = attr(&e, b"text_align").map(|v| TextAlign::from_label(&v)).unwrap_or(TextAlign::Circular);
-                        let text_gradient = attr(&e, b"text_gradient").map(|v| v=="true").unwrap_or(false);
-                        let gradient_dir = attr(&e, b"gradient_dir").map(|v| TextGradientDir::from_label(&v)).unwrap_or(TextGradientDir::TopToBottom);
-                        let gradient_angle = attr(&e, b"gradient_angle").map(|v| parse_f32(&v)).unwrap_or(180.0);
-                        let stroke_gradient = attr(&e, b"stroke_gradient").map(|v| v=="true").unwrap_or(false);
-                        let stroke_gradient_angle = attr(&e, b"stroke_gradient_angle").map(|v| parse_f32(&v)).unwrap_or(180.0);
-                        let bg_gradient = attr(&e, b"bg_gradient").map(|v| v=="true").unwrap_or(false);
-                        let bg_gradient_angle = attr(&e, b"bg_gradient_angle").map(|v| parse_f32(&v)).unwrap_or(180.0);
-                        let shadow_enabled = attr(&e, b"shadow_enabled").map(|v| v=="true").unwrap_or(false);
-                        let shadow_angle = attr(&e, b"shadow_angle").map(|v| parse_f32(&v)).unwrap_or(135.0);
-                        let shadow_distance = attr(&e, b"shadow_distance").map(|v| parse_f32(&v)).unwrap_or(0.0);
-                        let shadow_blur = attr(&e, b"shadow_blur").map(|v| parse_f32(&v)).unwrap_or(0.0);
+                        let eid = attr(&e, b"entry_id")
+                            .map(|v| EntryId(parse_u64(&v)))
+                            .unwrap_or(EntryId(0));
+                        let font_size = attr(&e, b"font_size")
+                            .map(|v| parse_f32(&v))
+                            .unwrap_or(14.0);
+                        let auto_size = attr(&e, b"auto_size").map(|v| v == "true").unwrap_or(true);
+                        let line_height = attr(&e, b"line_height")
+                            .map(|v| parse_f32(&v))
+                            .unwrap_or(1.2);
+                        let letter_spacing = attr(&e, b"letter_spacing")
+                            .map(|v| parse_f32(&v))
+                            .unwrap_or(0.0);
+                        let caps = attr(&e, b"caps")
+                            .map(|v| CapsMode::from_label(&v))
+                            .unwrap_or(CapsMode::None);
+                        let bold = attr(&e, b"bold").map(|v| v == "true").unwrap_or(false);
+                        let italic = attr(&e, b"italic").map(|v| v == "true").unwrap_or(false);
+                        let stroke_width = attr(&e, b"stroke_width")
+                            .map(|v| parse_f32(&v))
+                            .unwrap_or(0.0);
+                        let bg_radius =
+                            attr(&e, b"bg_radius").map(|v| parse_f32(&v)).unwrap_or(0.0);
+                        let text_align = attr(&e, b"text_align")
+                            .map(|v| TextAlign::from_label(&v))
+                            .unwrap_or(TextAlign::Circular);
+                        let text_gradient = attr(&e, b"text_gradient")
+                            .map(|v| v == "true")
+                            .unwrap_or(false);
+                        let gradient_dir = attr(&e, b"gradient_dir")
+                            .map(|v| TextGradientDir::from_label(&v))
+                            .unwrap_or(TextGradientDir::TopToBottom);
+                        let gradient_angle = attr(&e, b"gradient_angle")
+                            .map(|v| parse_f32(&v))
+                            .unwrap_or(180.0);
+                        let stroke_gradient = attr(&e, b"stroke_gradient")
+                            .map(|v| v == "true")
+                            .unwrap_or(false);
+                        let stroke_gradient_angle = attr(&e, b"stroke_gradient_angle")
+                            .map(|v| parse_f32(&v))
+                            .unwrap_or(180.0);
+                        let bg_gradient = attr(&e, b"bg_gradient")
+                            .map(|v| v == "true")
+                            .unwrap_or(false);
+                        let bg_gradient_angle = attr(&e, b"bg_gradient_angle")
+                            .map(|v| parse_f32(&v))
+                            .unwrap_or(180.0);
+                        let shadow_enabled = attr(&e, b"shadow_enabled")
+                            .map(|v| v == "true")
+                            .unwrap_or(false);
+                        let shadow_angle = attr(&e, b"shadow_angle")
+                            .map(|v| parse_f32(&v))
+                            .unwrap_or(135.0);
+                        let shadow_distance = attr(&e, b"shadow_distance")
+                            .map(|v| parse_f32(&v))
+                            .unwrap_or(0.0);
+                        let shadow_blur = attr(&e, b"shadow_blur")
+                            .map(|v| parse_f32(&v))
+                            .unwrap_or(0.0);
                         let font_family = attr(&e, b"font_family").map(|v| unesc(&v));
-                        cur_style = Some((eid, EntryStyle{ font_size, auto_size, line_height, letter_spacing, caps, bold, italic, text_color:[0,0,0,255], stroke_color:[0,0,0,255], stroke_width, bg_color:[255,255,255,255], bg_radius, font_family, text_align, text_gradient, gradient_a:[0,0,0,255], gradient_b:[0,0,0,255], gradient_dir, gradient_angle, stroke_gradient, stroke_gradient_a:[0,0,0,255], stroke_gradient_b:[0,0,0,255], stroke_gradient_angle, bg_gradient, bg_gradient_a:[0,0,0,255], bg_gradient_b:[0,0,0,255], bg_gradient_angle, shadow_enabled, shadow_color:[0,0,0,191], shadow_angle, shadow_distance, shadow_blur }));
+                        cur_style = Some((
+                            eid,
+                            EntryStyle {
+                                font_size,
+                                auto_size,
+                                line_height,
+                                letter_spacing,
+                                caps,
+                                bold,
+                                italic,
+                                text_color: [0, 0, 0, 255],
+                                stroke_color: [0, 0, 0, 255],
+                                stroke_width,
+                                bg_color: [255, 255, 255, 255],
+                                bg_radius,
+                                font_family,
+                                text_align,
+                                text_gradient,
+                                gradient_a: [0, 0, 0, 255],
+                                gradient_b: [0, 0, 0, 255],
+                                gradient_dir,
+                                gradient_angle,
+                                stroke_gradient,
+                                stroke_gradient_a: [0, 0, 0, 255],
+                                stroke_gradient_b: [0, 0, 0, 255],
+                                stroke_gradient_angle,
+                                bg_gradient,
+                                bg_gradient_a: [0, 0, 0, 255],
+                                bg_gradient_b: [0, 0, 0, 255],
+                                bg_gradient_angle,
+                                shadow_enabled,
+                                shadow_color: [0, 0, 0, 191],
+                                shadow_angle,
+                                shadow_distance,
+                                shadow_blur,
+                            },
+                        ));
                         cur_style_colors.clear();
                     }
-                    "text_color" | "stroke_color" | "bg_color" | "gradient_a" | "gradient_b" | "stroke_gradient_a" | "stroke_gradient_b" | "bg_gradient_a" | "bg_gradient_b" | "shadow_color" => {
+                    "text_color" | "stroke_color" | "bg_color" | "gradient_a" | "gradient_b"
+                    | "stroke_gradient_a" | "stroke_gradient_b" | "bg_gradient_a"
+                    | "bg_gradient_b" | "shadow_color" => {
                         let r = attr(&e, b"r").map(|v| parse_u8(&v)).unwrap_or(0);
                         let g = attr(&e, b"g").map(|v| parse_u8(&v)).unwrap_or(0);
                         let b = attr(&e, b"b").map(|v| parse_u8(&v)).unwrap_or(0);
                         let a = attr(&e, b"a").map(|v| parse_u8(&v)).unwrap_or(255);
-                        cur_style_colors.insert(name.clone(), [r,g,b,a]);
+                        cur_style_colors.insert(name.clone(), [r, g, b, a]);
                         // empty, pop
                         stack.pop();
                     }
-                    "view_quads" => {},
+                    "view_quads" => {}
                     "view_quad" => {
-                        let eid = attr(&e, b"entry_id").map(|v| EntryId(parse_u64(&v))).unwrap_or(EntryId(0));
-                        cur_view_quad = Some((eid, Quad{points:[[0.0;2];4]}));
+                        let eid = attr(&e, b"entry_id")
+                            .map(|v| EntryId(parse_u64(&v)))
+                            .unwrap_or(EntryId(0));
+                        cur_view_quad = Some((
+                            eid,
+                            Quad {
+                                points: [[0.0; 2]; 4],
+                            },
+                        ));
                         cur_view_points.clear();
                     }
-                    "extras" => {},
-                    "notes" => {},
+                    "extras" => {}
+                    "notes" => {}
                     "note" => {
-                        let eid = attr(&e, b"entry_id").map(|v| EntryId(parse_u64(&v))).unwrap_or(EntryId(0));
+                        let eid = attr(&e, b"entry_id")
+                            .map(|v| EntryId(parse_u64(&v)))
+                            .unwrap_or(EntryId(0));
                         cur_note = Some((eid, String::new()));
                         collecting = Some("note".to_string());
                         text_buf.clear();
                     }
-                    "inpaint_patches" => {},
+                    "inpaint_patches" => {}
                     "patch" => {
                         // could be inpaint patch: distinguish by parent
-                        let parent = stack.get(stack.len().saturating_sub(2)).map(|s| s.as_str()).unwrap_or("");
-                        if parent=="inpaint_patches" {
-                            let id = attr(&e, b"id").map(|v| InpaintId(parse_u64(&v))).unwrap_or(InpaintId(ctx.inpaint_patches.len() as u64));
-                            let image_id = attr(&e, b"image_id").map(|v| ImageId(parse_u64(&v))).unwrap_or(ImageId(0));
+                        let parent = stack
+                            .get(stack.len().saturating_sub(2))
+                            .map(|s| s.as_str())
+                            .unwrap_or("");
+                        if parent == "inpaint_patches" {
+                            let id = attr(&e, b"id")
+                                .map(|v| InpaintId(parse_u64(&v)))
+                                .unwrap_or(InpaintId(ctx.inpaint_patches.len() as u64));
+                            let image_id = attr(&e, b"image_id")
+                                .map(|v| ImageId(parse_u64(&v)))
+                                .unwrap_or(ImageId(0));
                             let x = attr(&e, b"x").map(|v| parse_f32(&v)).unwrap_or(0.0);
                             let y = attr(&e, b"y").map(|v| parse_f32(&v)).unwrap_or(0.0);
                             let w = attr(&e, b"w").map(|v| parse_f32(&v)).unwrap_or(0.0);
@@ -850,18 +1015,26 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                             // To detect empty vs container, we peek if next event is quad start — but in Start event we can't know.
                             // Heuristic: store pending and only push on End. For backward compat, if this Start has no children,
                             // it will be closed via Empty event, not Start. This Start branch only for new container patches.
-                            cur_inpaint_patch = Some(InpaintPatch{ id, image_id, bounds:[x,y,w,h], quad: None});
+                            cur_inpaint_patch = Some(InpaintPatch {
+                                id,
+                                image_id,
+                                bounds: [x, y, w, h],
+                                quad: None,
+                            });
                             cur_inpaint_quad_points.clear();
                             // Do NOT pop stack here — keep patch on stack for child quad
                         }
                     }
-                    "shapes" => {},
+                    "shapes" => {}
                     "shape" => {
                         let kind = match attr(&e, b"kind").as_deref() {
                             Some("Polygon") => ShapeKind::Polygon,
                             _ => ShapeKind::Rect,
                         };
-                        cur_shape = Some(Shape{ kind, points: Vec::new() });
+                        cur_shape = Some(Shape {
+                            kind,
+                            points: Vec::new(),
+                        });
                         cur_shape_points.clear();
                     }
                     _ => {}
@@ -872,11 +1045,18 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                 // handle empty elements that were not handled in Start
                 match name.as_str() {
                     "image" => {
-                        let id = attr(&e, b"id").map(|v| ImageId(parse_u64(&v))).unwrap_or(ImageId(0));
+                        let id = attr(&e, b"id")
+                            .map(|v| ImageId(parse_u64(&v)))
+                            .unwrap_or(ImageId(0));
                         let path = attr(&e, b"path").map(|v| unesc(&v)).unwrap_or_default();
                         let width = attr(&e, b"width").map(|v| parse_f32(&v)).unwrap_or(0.0);
                         let height = attr(&e, b"height").map(|v| parse_f32(&v)).unwrap_or(0.0);
-                        ctx.images.push(ImageMeta { id, path, width, height });
+                        ctx.images.push(ImageMeta {
+                            id,
+                            path,
+                            width,
+                            height,
+                        });
                     }
                     "point" => {
                         // handled above via Start, but Empty also occurs for point in some contexts if we pushed and popped differently
@@ -885,60 +1065,77 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                         let y = attr(&e, b"y").map(|v| parse_f32(&v)).unwrap_or(0.0);
                         // infer parent from current stack top (since Empty doesn't push)
                         if let Some(parent) = stack.last().map(|s| s.as_str()) {
-                            if parent=="quad" {
+                            if parent == "quad" {
                                 // check if this quad belongs to a patch
-                                let is_patch_quad = cur_inpaint_patch.is_some() && !stack.is_empty() && stack.iter().any(|s| s=="patch");
+                                let is_patch_quad = cur_inpaint_patch.is_some()
+                                    && !stack.is_empty()
+                                    && stack.iter().any(|s| s == "patch");
                                 // More precise: if stack contains patch and quad parent is patch quad
                                 if is_patch_quad && cur_inpaint_patch.is_some() {
                                     // Heuristic: if we are inside inpaint_patches/patch/quad, push to patch quad points
                                     // Detect by checking if top of stack before quad was patch
                                     // Since stack is [..., inpaint_patches, patch, quad], the presence of patch indicates patch quad
-                                    cur_inpaint_quad_points.push([x,y]);
-                                } else if stack.iter().any(|s| s=="view_quads") && cur_view_quad.is_some() {
-                                    cur_view_points.push([x,y]);
+                                    cur_inpaint_quad_points.push([x, y]);
+                                } else if stack.iter().any(|s| s == "view_quads")
+                                    && cur_view_quad.is_some()
+                                {
+                                    cur_view_points.push([x, y]);
                                 } else if cur_entry.is_some() && cur_shape.is_none() {
-                                    cur_quad_points.push([x,y]);
+                                    cur_quad_points.push([x, y]);
                                 } else if cur_shape.is_some() {
-                                    cur_shape_points.push([x,y]);
+                                    cur_shape_points.push([x, y]);
                                 } else if cur_inpaint_patch.is_some() {
-                                    cur_inpaint_quad_points.push([x,y]);
+                                    cur_inpaint_quad_points.push([x, y]);
                                 }
-                            } else if parent=="view_quad" {
-                                cur_view_points.push([x,y]);
-                            } else if parent=="shape" {
-                                cur_shape_points.push([x,y]);
+                            } else if parent == "view_quad" {
+                                cur_view_points.push([x, y]);
+                            } else if parent == "shape" {
+                                cur_shape_points.push([x, y]);
                             }
                         } else {
                             // fallback: if cur_entry exists push there
                             if cur_entry.is_some() {
-                                cur_quad_points.push([x,y]);
+                                cur_quad_points.push([x, y]);
                             } else if cur_inpaint_patch.is_some() {
-                                cur_inpaint_quad_points.push([x,y]);
+                                cur_inpaint_quad_points.push([x, y]);
                             }
                         }
                     }
-                    "text_color" | "stroke_color" | "bg_color" | "gradient_a" | "gradient_b" | "stroke_gradient_a" | "stroke_gradient_b" | "bg_gradient_a" | "bg_gradient_b" | "shadow_color" => {
+                    "text_color" | "stroke_color" | "bg_color" | "gradient_a" | "gradient_b"
+                    | "stroke_gradient_a" | "stroke_gradient_b" | "bg_gradient_a"
+                    | "bg_gradient_b" | "shadow_color" => {
                         let r = attr(&e, b"r").map(|v| parse_u8(&v)).unwrap_or(0);
                         let g = attr(&e, b"g").map(|v| parse_u8(&v)).unwrap_or(0);
                         let b = attr(&e, b"b").map(|v| parse_u8(&v)).unwrap_or(0);
                         let a = attr(&e, b"a").map(|v| parse_u8(&v)).unwrap_or(255);
-                        cur_style_colors.insert(name.clone(), [r,g,b,a]);
+                        cur_style_colors.insert(name.clone(), [r, g, b, a]);
                     }
                     "patch" => {
                         let parent = stack.last().map(|s| s.as_str()).unwrap_or("");
-                        if parent=="inpaint_patches" {
-                            let id = attr(&e, b"id").map(|v| InpaintId(parse_u64(&v))).unwrap_or(InpaintId(ctx.inpaint_patches.len() as u64));
-                            let image_id = attr(&e, b"image_id").map(|v| ImageId(parse_u64(&v))).unwrap_or(ImageId(0));
+                        if parent == "inpaint_patches" {
+                            let id = attr(&e, b"id")
+                                .map(|v| InpaintId(parse_u64(&v)))
+                                .unwrap_or(InpaintId(ctx.inpaint_patches.len() as u64));
+                            let image_id = attr(&e, b"image_id")
+                                .map(|v| ImageId(parse_u64(&v)))
+                                .unwrap_or(ImageId(0));
                             let x = attr(&e, b"x").map(|v| parse_f32(&v)).unwrap_or(0.0);
                             let y = attr(&e, b"y").map(|v| parse_f32(&v)).unwrap_or(0.0);
                             let w = attr(&e, b"w").map(|v| parse_f32(&v)).unwrap_or(0.0);
                             let h = attr(&e, b"h").map(|v| parse_f32(&v)).unwrap_or(0.0);
-                            ctx.inpaint_patches.push(InpaintPatch{ id, image_id, bounds:[x,y,w,h], quad: None});
+                            ctx.inpaint_patches.push(InpaintPatch {
+                                id,
+                                image_id,
+                                bounds: [x, y, w, h],
+                                quad: None,
+                            });
                         }
                     }
                     "profile" => {
                         // empty profile with no deltas
-                        let id = attr(&e, b"id").map(|v| ProfileId(parse_u64(&v))).unwrap_or(ProfileId(0));
+                        let id = attr(&e, b"id")
+                            .map(|v| ProfileId(parse_u64(&v)))
+                            .unwrap_or(ProfileId(0));
                         let n = attr(&e, b"name").map(|v| unesc(&v)).unwrap_or_default();
                         ctx.profiles.push(Profile::from_raw(id, n, HashMap::new()));
                     }
@@ -947,15 +1144,17 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
             }
             Ok(Event::Text(e)) => {
                 if collecting.is_some()
-                    && let Ok(txt) = e.unescape() {
-                        text_buf.push_str(&txt);
-                    }
+                    && let Ok(txt) = e.unescape()
+                {
+                    text_buf.push_str(&txt);
+                }
             }
             Ok(Event::CData(e)) => {
                 if collecting.is_some()
-                    && let Ok(txt) = std::str::from_utf8(&e.into_inner()) {
-                        text_buf.push_str(txt);
-                    }
+                    && let Ok(txt) = std::str::from_utf8(&e.into_inner())
+                {
+                    text_buf.push_str(txt);
+                }
             }
             Ok(Event::End(e)) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
@@ -963,14 +1162,15 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                 match name.as_str() {
                     "text" => {
                         if let Some(entry) = cur_entry.as_mut()
-                            && collecting.as_deref()==Some("text") {
-                                entry.text = unesc(&text_buf);
-                                collecting = None;
-                                text_buf.clear();
-                            }
+                            && collecting.as_deref() == Some("text")
+                        {
+                            entry.text = unesc(&text_buf);
+                            collecting = None;
+                            text_buf.clear();
+                        }
                     }
                     "translation" => {
-                        if collecting.as_deref()==Some("translation") {
+                        if collecting.as_deref() == Some("translation") {
                             cur_delta_trans = Some(unesc(&text_buf));
                             collecting = None;
                             text_buf.clear();
@@ -986,16 +1186,31 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                     }
                     "quad" => {
                         // If this quad belongs to an inpaint patch, assign to pending patch
-                        let is_patch_quad = cur_inpaint_patch.is_some() && stack.len() >= 2 && stack[stack.len() - 2] == "patch";
+                        let is_patch_quad = cur_inpaint_patch.is_some()
+                            && stack.len() >= 2
+                            && stack[stack.len() - 2] == "patch";
                         if is_patch_quad {
                             if cur_inpaint_quad_points.len() == 4
-                                && let Some(p) = cur_inpaint_patch.as_mut() {
-                                    p.quad = Some(Quad{ points: [cur_inpaint_quad_points[0], cur_inpaint_quad_points[1], cur_inpaint_quad_points[2], cur_inpaint_quad_points[3]] });
-                                }
+                                && let Some(p) = cur_inpaint_patch.as_mut()
+                            {
+                                p.quad = Some(Quad {
+                                    points: [
+                                        cur_inpaint_quad_points[0],
+                                        cur_inpaint_quad_points[1],
+                                        cur_inpaint_quad_points[2],
+                                        cur_inpaint_quad_points[3],
+                                    ],
+                                });
+                            }
                             cur_inpaint_quad_points.clear();
                         } else if let Some(entry) = cur_entry.as_mut() {
                             if cur_quad_points.len() == 4 {
-                                entry.quad.points = [cur_quad_points[0], cur_quad_points[1], cur_quad_points[2], cur_quad_points[3]];
+                                entry.quad.points = [
+                                    cur_quad_points[0],
+                                    cur_quad_points[1],
+                                    cur_quad_points[2],
+                                    cur_quad_points[3],
+                                ];
                             }
                             cur_quad_points.clear();
                         } else {
@@ -1024,12 +1239,23 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                                 // We'll insert directly via a hack: create new Profile with updated deltas
                                 let mut deltas = prof.deltas().clone();
                                 if let Some(t) = trans {
-                                    deltas.insert(eid, easyscanlate_model::profile::EntryDelta{ translation: Some(t)});
+                                    deltas.insert(
+                                        eid,
+                                        easyscanlate_model::profile::EntryDelta {
+                                            translation: Some(t),
+                                        },
+                                    );
                                 } else {
-                                    deltas.insert(eid, easyscanlate_model::profile::EntryDelta{ translation: None});
+                                    deltas.insert(
+                                        eid,
+                                        easyscanlate_model::profile::EntryDelta {
+                                            translation: None,
+                                        },
+                                    );
                                 }
                                 // reconstruct profile
-                                let new_prof = Profile::from_raw(prof.id, prof.name.clone(), deltas);
+                                let new_prof =
+                                    Profile::from_raw(prof.id, prof.name.clone(), deltas);
                                 *prof = new_prof;
                             }
                         }
@@ -1041,25 +1267,56 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                     }
                     "style" => {
                         if let Some((eid, mut style)) = cur_style.take() {
-                            if let Some(c) = cur_style_colors.get("text_color") { style.text_color = *c; }
-                            if let Some(c) = cur_style_colors.get("stroke_color") { style.stroke_color = *c; }
-                            if let Some(c) = cur_style_colors.get("bg_color") { style.bg_color = *c; }
-                            if let Some(c) = cur_style_colors.get("gradient_a") { style.gradient_a = *c; }
-                            if let Some(c) = cur_style_colors.get("gradient_b") { style.gradient_b = *c; }
-                            if let Some(c) = cur_style_colors.get("stroke_gradient_a") { style.stroke_gradient_a = *c; }
-                            if let Some(c) = cur_style_colors.get("stroke_gradient_b") { style.stroke_gradient_b = *c; }
-                            if let Some(c) = cur_style_colors.get("bg_gradient_a") { style.bg_gradient_a = *c; }
-                            if let Some(c) = cur_style_colors.get("bg_gradient_b") { style.bg_gradient_b = *c; }
-                            if let Some(c) = cur_style_colors.get("shadow_color") { style.shadow_color = *c; }
+                            if let Some(c) = cur_style_colors.get("text_color") {
+                                style.text_color = *c;
+                            }
+                            if let Some(c) = cur_style_colors.get("stroke_color") {
+                                style.stroke_color = *c;
+                            }
+                            if let Some(c) = cur_style_colors.get("bg_color") {
+                                style.bg_color = *c;
+                            }
+                            if let Some(c) = cur_style_colors.get("gradient_a") {
+                                style.gradient_a = *c;
+                            }
+                            if let Some(c) = cur_style_colors.get("gradient_b") {
+                                style.gradient_b = *c;
+                            }
+                            if let Some(c) = cur_style_colors.get("stroke_gradient_a") {
+                                style.stroke_gradient_a = *c;
+                            }
+                            if let Some(c) = cur_style_colors.get("stroke_gradient_b") {
+                                style.stroke_gradient_b = *c;
+                            }
+                            if let Some(c) = cur_style_colors.get("bg_gradient_a") {
+                                style.bg_gradient_a = *c;
+                            }
+                            if let Some(c) = cur_style_colors.get("bg_gradient_b") {
+                                style.bg_gradient_b = *c;
+                            }
+                            if let Some(c) = cur_style_colors.get("shadow_color") {
+                                style.shadow_color = *c;
+                            }
                             ctx.styles.insert(eid, style);
                             cur_style_colors.clear();
                         }
                     }
                     "view_quad" => {
                         if let Some((eid, _)) = cur_view_quad.take() {
-                            let quad = if cur_view_points.len()==4 {
-                                Quad{points:[cur_view_points[0], cur_view_points[1], cur_view_points[2], cur_view_points[3]]}
-                            } else { Quad{points:[[0.0;2];4]} };
+                            let quad = if cur_view_points.len() == 4 {
+                                Quad {
+                                    points: [
+                                        cur_view_points[0],
+                                        cur_view_points[1],
+                                        cur_view_points[2],
+                                        cur_view_points[3],
+                                    ],
+                                }
+                            } else {
+                                Quad {
+                                    points: [[0.0; 2]; 4],
+                                }
+                            };
                             ctx.view_quads.insert(eid, quad);
                             cur_view_points.clear();
                         }
@@ -1081,9 +1338,10 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                 }
                 // pop stack
                 if let Some(top) = stack.last()
-                    && top == &name {
-                        stack.pop();
-                    }
+                    && top == &name
+                {
+                    stack.pop();
+                }
                 if collecting.as_deref() == Some(name.as_str()) {
                     collecting = None;
                     text_buf.clear();
@@ -1099,25 +1357,53 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
         easyscanlate_model::Profiles::default()
     } else {
         // ensure selected exists
-        let selected = if ctx.profiles.iter().any(|p| p.id==ctx.selected) { ctx.selected } else { ctx.profiles[0].id };
-        let next = if ctx.profiles_next_id==0 {
-            ctx.profiles.iter().map(|p| p.id.0+1).max().unwrap_or(1)
-        } else { ctx.profiles_next_id };
+        let selected = if ctx.profiles.iter().any(|p| p.id == ctx.selected) {
+            ctx.selected
+        } else {
+            ctx.profiles[0].id
+        };
+        let next = if ctx.profiles_next_id == 0 {
+            ctx.profiles.iter().map(|p| p.id.0 + 1).max().unwrap_or(1)
+        } else {
+            ctx.profiles_next_id
+        };
         easyscanlate_model::Profiles::from_raw(ctx.profiles, selected, next)
     };
 
-    let ocr_next = if ctx.ocr_next_id==0 {
-        ctx.ocr_entries.iter().map(|e| e.id.0+1).max().unwrap_or(0)
-    } else { ctx.ocr_next_id };
+    let ocr_next = if ctx.ocr_next_id == 0 {
+        ctx.ocr_entries
+            .iter()
+            .map(|e| e.id.0 + 1)
+            .max()
+            .unwrap_or(0)
+    } else {
+        ctx.ocr_next_id
+    };
     let ocr = OcrResult::from_raw(ctx.ocr_entries, ocr_next);
 
-    let next_image_id = if ctx.next_image_id==0 {
-        ctx.images.iter().map(|m| m.id.0+1).max().unwrap_or(0)
-    } else { ctx.next_image_id };
+    let next_image_id = if ctx.next_image_id == 0 {
+        ctx.images.iter().map(|m| m.id.0 + 1).max().unwrap_or(0)
+    } else {
+        ctx.next_image_id
+    };
 
-    let extras = Extras { notes: ctx.notes, inpaint_patches: ctx.inpaint_patches, shapes: ctx.shapes };
+    let extras = Extras {
+        notes: ctx.notes,
+        inpaint_patches: ctx.inpaint_patches,
+        shapes: ctx.shapes,
+    };
 
-    let project = Project::from_raw(ctx.project_id, ctx.series, ctx.images, next_image_id, ocr, profiles, ctx.styles, ctx.view_quads, extras);
+    let project = Project::from_raw(
+        ctx.project_id,
+        ctx.series,
+        ctx.images,
+        next_image_id,
+        ocr,
+        profiles,
+        ctx.styles,
+        ctx.view_quads,
+        extras,
+    );
     Ok(project)
 }
 
@@ -1130,11 +1416,32 @@ mod tests {
     fn roundtrip_basic() {
         let mut project = Project::new();
         let img = project.add_image("a.jpg", 100.0, 200.0);
-        let entry = project.ocr.append_for_image(img, NewEntry{ source: EntrySource::AutoOcr, text:"hello".into(), score:0.9, quad: Quad{points:[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]]}});
-        project.profiles.selected_mut().set_translation(entry, Some("hi".into()));
-        let style = EntryStyle { bold:true, ..EntryStyle::default()};
+        let entry = project.ocr.append_for_image(
+            img,
+            NewEntry {
+                source: EntrySource::AutoOcr,
+                text: "hello".into(),
+                score: 0.9,
+                quad: Quad {
+                    points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+                },
+            },
+        );
+        project
+            .profiles
+            .selected_mut()
+            .set_translation(entry, Some("hi".into()));
+        let style = EntryStyle {
+            bold: true,
+            ..EntryStyle::default()
+        };
         project.set_entry_style(entry, style);
-        project.set_view_quad(entry, Quad{points:[[1.0,1.0],[11.0,1.0],[11.0,11.0],[1.0,11.0]]});
+        project.set_view_quad(
+            entry,
+            Quad {
+                points: [[1.0, 1.0], [11.0, 1.0], [11.0, 11.0], [1.0, 11.0]],
+            },
+        );
         project.extras.set_note(entry, "note".into());
         let xml = to_xml_string(&project).unwrap();
         let back = from_xml_str(&xml).unwrap();
@@ -1149,17 +1456,35 @@ mod tests {
 
     #[test]
     fn gradient_dir_to_angle_axes_are_aspect_independent() {
-        assert!((gradient_dir_to_angle(TextGradientDir::BottomToTop, 200.0, 100.0) - 0.0).abs() < 0.01);
-        assert!((gradient_dir_to_angle(TextGradientDir::LeftToRight, 200.0, 100.0) - 90.0).abs() < 0.01);
-        assert!((gradient_dir_to_angle(TextGradientDir::TopToBottom, 200.0, 100.0) - 180.0).abs() < 0.01);
-        assert!((gradient_dir_to_angle(TextGradientDir::RightToLeft, 200.0, 100.0) - 270.0).abs() < 0.01);
+        assert!(
+            (gradient_dir_to_angle(TextGradientDir::BottomToTop, 200.0, 100.0) - 0.0).abs() < 0.01
+        );
+        assert!(
+            (gradient_dir_to_angle(TextGradientDir::LeftToRight, 200.0, 100.0) - 90.0).abs() < 0.01
+        );
+        assert!(
+            (gradient_dir_to_angle(TextGradientDir::TopToBottom, 200.0, 100.0) - 180.0).abs()
+                < 0.01
+        );
+        assert!(
+            (gradient_dir_to_angle(TextGradientDir::RightToLeft, 200.0, 100.0) - 270.0).abs()
+                < 0.01
+        );
     }
 
     #[test]
     fn gradient_dir_to_angle_diagonals_account_for_ratio() {
         // Square: corner-to-corner at 45° offsets.
-        assert!((gradient_dir_to_angle(TextGradientDir::TopLeftToBottomRight, 100.0, 100.0) - 135.0).abs() < 0.01);
-        assert!((gradient_dir_to_angle(TextGradientDir::BottomRightToTopLeft, 100.0, 100.0) - 315.0).abs() < 0.01);
+        assert!(
+            (gradient_dir_to_angle(TextGradientDir::TopLeftToBottomRight, 100.0, 100.0) - 135.0)
+                .abs()
+                < 0.01
+        );
+        assert!(
+            (gradient_dir_to_angle(TextGradientDir::BottomRightToTopLeft, 100.0, 100.0) - 315.0)
+                .abs()
+                < 0.01
+        );
         // Wide box: slant shallower than 45°.
         let wide = gradient_dir_to_angle(TextGradientDir::TopLeftToBottomRight, 200.0, 100.0);
         assert!((wide - (90.0 + 100.0f32.atan2(200.0).to_degrees())).abs() < 0.01);
@@ -1181,18 +1506,26 @@ mod tests {
     fn roundtrip_inpaint_quad() {
         let mut project = Project::new();
         let img = project.add_image("a.jpg", 100.0, 100.0);
-        let quad = Quad { points: [[10.0,20.0],[80.0,0.0],[90.0,30.0],[20.0,50.0]] };
+        let quad = Quad {
+            points: [[10.0, 20.0], [80.0, 0.0], [90.0, 30.0], [20.0, 50.0]],
+        };
         let ev = project.add_inpaint_patch_with_quad(img, quad);
-        assert!(matches!(ev, easyscanlate_model::ModelEvent::InpaintAdded { quad: Some(_), .. }));
+        assert!(matches!(
+            ev,
+            easyscanlate_model::ModelEvent::InpaintAdded { quad: Some(_), .. }
+        ));
         let xml = to_xml_string(&project).unwrap();
-        assert!(xml.contains("<quad>"), "xml should contain quad for inpaint patch");
+        assert!(
+            xml.contains("<quad>"),
+            "xml should contain quad for inpaint patch"
+        );
         let back = from_xml_str(&xml).unwrap();
         assert_eq!(back.extras.inpaint_patches.len(), 1);
         let patch = &back.extras.inpaint_patches[0];
         assert!(patch.quad.is_some(), "quad should be preserved");
         let q = patch.quad.unwrap();
-        assert_eq!(q.points[0], [10.0,20.0]);
-        assert_eq!(q.points[2], [90.0,30.0]);
+        assert_eq!(q.points[0], [10.0, 20.0]);
+        assert_eq!(q.points[2], [90.0, 30.0]);
         // legacy compat: loading old xml without quad should give None
         let legacy_xml = r#"<?xml version="1.0" encoding="UTF-8"?><project version="1"><images next_image_id="1"><image id="0" path="a.jpg" width="100" height="100"/></images><ocr next_id="0"></ocr><profiles selected="0" next_id="1"><profile id="0" name="Default"/></profiles><styles></styles><view_quads></view_quads><extras><notes></notes><inpaint_patches><patch id="0" image_id="0" x="10" y="20" w="70" h="30"/></inpaint_patches><shapes></shapes></extras></project>"#;
         let legacy = from_xml_str(legacy_xml).unwrap();

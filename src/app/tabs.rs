@@ -18,8 +18,14 @@ pub(crate) fn close_tab_immediate(app: &mut App, id: TabId) -> Task<Message> {
             return Task::none();
         }
         crate::app::export::cancel_export_for_tab(app, id);
-        app.engines.queue.cancel_pending_for_tab(crate::app::queue::owner_of(id));
-        let freed = !app.engines.queue.cancel_running_for_tab(crate::app::queue::owner_of(id)).is_empty();
+        app.engines
+            .queue
+            .cancel_pending_for_tab(crate::app::queue::owner_of(id));
+        let freed = !app
+            .engines
+            .queue
+            .cancel_running_for_tab(crate::app::queue::owner_of(id))
+            .is_empty();
         let promote = if freed {
             crate::app::queue::dispatch_pending(app)
         } else {
@@ -50,8 +56,12 @@ pub(crate) fn close_tab_immediate(app: &mut App, id: TabId) -> Task<Message> {
 
 fn cleanup_queue_for_tabs(app: &mut App, ids: &[TabId]) {
     for rid in ids {
-        app.engines.queue.cancel_pending_for_tab(crate::app::queue::owner_of(*rid));
-        app.engines.queue.cancel_running_for_tab(crate::app::queue::owner_of(*rid));
+        app.engines
+            .queue
+            .cancel_pending_for_tab(crate::app::queue::owner_of(*rid));
+        app.engines
+            .queue
+            .cancel_running_for_tab(crate::app::queue::owner_of(*rid));
     }
 }
 
@@ -89,15 +99,30 @@ pub fn handle_close_confirmed(app: &mut App, raw: u64, save: bool) -> Task<Messa
             let tid = id;
             // Raw clone on the UI thread (no decode); `load_from_memory`
             // runs in the blocking task below so close-with-save never stalls.
-            let raw: Vec<(easyscanlate_model::ImageId, [f32; 4], Option<(u32, u32, Vec<u8>)>, Option<bytes::Bytes>)> = {
+            let raw: Vec<(
+                easyscanlate_model::ImageId,
+                [f32; 4],
+                Option<(u32, u32, Vec<u8>)>,
+                Option<bytes::Bytes>,
+            )> = {
                 let tab = &app.tabs[idx];
                 let mut out = Vec::new();
                 for loaded in &tab.images {
                     let image_id = loaded.image_id;
                     for layer in &loaded.inpaint {
                         match &layer.handle {
-                            iced::widget::image::Handle::Rgba { width, height, pixels, .. } => {
-                                out.push((image_id, layer.bounds, Some((*width, *height, pixels.to_vec())), None));
+                            iced::widget::image::Handle::Rgba {
+                                width,
+                                height,
+                                pixels,
+                                ..
+                            } => {
+                                out.push((
+                                    image_id,
+                                    layer.bounds,
+                                    Some((*width, *height, pixels.to_vec())),
+                                    None,
+                                ));
                             }
                             iced::widget::image::Handle::Bytes(_id, bytes) => {
                                 out.push((image_id, layer.bounds, None, Some(bytes.clone())));
@@ -116,16 +141,33 @@ pub fn handle_close_confirmed(app: &mut App, raw: u64, save: bool) -> Task<Messa
                         let mut inpaint = Vec::with_capacity(raw.len());
                         for (image_id, bounds, rgba_opt, bytes_opt) in raw {
                             if let Some((width, height, rgba)) = rgba_opt {
-                                inpaint.push(easyscanlate_mmtl::InpaintImageData { image_id, bounds, width, height, rgba });
+                                inpaint.push(easyscanlate_mmtl::InpaintImageData {
+                                    image_id,
+                                    bounds,
+                                    width,
+                                    height,
+                                    rgba,
+                                });
                             } else if let Some(b) = bytes_opt
-                                && let Ok(img) = image::load_from_memory(&b) {
-                                    let rgba = img.to_rgba8();
-                                    let (w, h) = (rgba.width(), rgba.height());
-                                    inpaint.push(easyscanlate_mmtl::InpaintImageData { image_id, bounds, width: w, height: h, rgba: rgba.into_raw() });
-                                }
+                                && let Ok(img) = image::load_from_memory(&b)
+                            {
+                                let rgba = img.to_rgba8();
+                                let (w, h) = (rgba.width(), rgba.height());
+                                inpaint.push(easyscanlate_mmtl::InpaintImageData {
+                                    image_id,
+                                    bounds,
+                                    width: w,
+                                    height: h,
+                                    rgba: rgba.into_raw(),
+                                });
+                            }
                         }
-                        easyscanlate_mmtl::save_mmtl(&project, &inpaint, &path).map(|_| path.to_string_lossy().to_string()).map_err(|e| e.to_string())
-                    }).await.unwrap_or_else(|e| Err(format!("save task failed: {e}")))
+                        easyscanlate_mmtl::save_mmtl(&project, &inpaint, &path)
+                            .map(|_| path.to_string_lossy().to_string())
+                            .map_err(|e| e.to_string())
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(format!("save task failed: {e}")))
                 },
                 move |res| Message::Tab(tid, TabMessage::MmtlSaved(res)),
             )
@@ -155,11 +197,21 @@ pub fn handle_close_cancel(app: &mut App) -> Task<Message> {
 
 pub fn handle_close_others(app: &mut App, raw: u64) -> Task<Message> {
     let keep = TabId(raw);
-    if let Some(dirty) = app.tabs.iter().find(|t| t.is_project() && t.id != keep && t.dirty).map(|t| t.id) {
+    if let Some(dirty) = app
+        .tabs
+        .iter()
+        .find(|t| t.is_project() && t.id != keep && t.dirty)
+        .map(|t| t.id)
+    {
         app.pending_close = Some(dirty);
         return Task::none();
     }
-    let remove_ids: Vec<TabId> = app.tabs.iter().filter(|t| t.id != keep && t.is_project()).map(|t| t.id).collect();
+    let remove_ids: Vec<TabId> = app
+        .tabs
+        .iter()
+        .filter(|t| t.id != keep && t.is_project())
+        .map(|t| t.id)
+        .collect();
     for rid in &remove_ids {
         crate::app::export::cancel_export_for_tab(app, *rid);
     }
@@ -169,11 +221,18 @@ pub fn handle_close_others(app: &mut App, raw: u64) -> Task<Message> {
         let mut i = app.tabs.len();
         while i > 0 {
             i -= 1;
-            if i == 0 { continue; }
-            if app.tabs[i].id == keep { continue; }
+            if i == 0 {
+                continue;
+            }
+            if app.tabs[i].id == keep {
+                continue;
+            }
             app.tabs.remove(i);
-            if app.active > i { app.active -= 1; }
-            else if app.active == i { app.active = kidx.min(app.tabs.len().saturating_sub(1)); }
+            if app.active > i {
+                app.active -= 1;
+            } else if app.active == i {
+                app.active = kidx.min(app.tabs.len().saturating_sub(1));
+            }
         }
         if let Some(new_k) = app.tabs.iter().position(|t| t.id == keep) {
             app.active = new_k;
@@ -185,11 +244,21 @@ pub fn handle_close_others(app: &mut App, raw: u64) -> Task<Message> {
 }
 
 pub fn handle_close_all(app: &mut App) -> Task<Message> {
-    if let Some(dirty) = app.tabs.iter().find(|t| t.is_project() && t.dirty).map(|t| t.id) {
+    if let Some(dirty) = app
+        .tabs
+        .iter()
+        .find(|t| t.is_project() && t.dirty)
+        .map(|t| t.id)
+    {
         app.pending_close = Some(dirty);
         return Task::none();
     }
-    let remove_ids: Vec<TabId> = app.tabs.iter().filter(|t| t.is_project()).map(|t| t.id).collect();
+    let remove_ids: Vec<TabId> = app
+        .tabs
+        .iter()
+        .filter(|t| t.is_project())
+        .map(|t| t.id)
+        .collect();
     for rid in &remove_ids {
         crate::app::export::cancel_export_for_tab(app, *rid);
     }

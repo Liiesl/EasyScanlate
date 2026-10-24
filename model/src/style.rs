@@ -221,7 +221,10 @@ pub const ALL_FONTS_LABEL: &str = "All fonts";
 pub fn partition_featured_fonts(installed: &[String]) -> (Vec<usize>, Vec<usize>) {
     let mut featured = Vec::with_capacity(BUNDLED_FONTS.len());
     for bundled in BUNDLED_FONTS {
-        if let Some(index) = installed.iter().position(|n| n.eq_ignore_ascii_case(bundled)) {
+        if let Some(index) = installed
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case(bundled))
+        {
             featured.push(index);
         }
     }
@@ -449,8 +452,14 @@ mod tests {
                 .map(|&i| installed[i].clone())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(names(&featured), vec!["Anime Ace".to_string(), "augie".to_string()]);
-        assert_eq!(names(&rest), vec!["Arial".to_string(), "Verdana".to_string()]);
+        assert_eq!(
+            names(&featured),
+            vec!["Anime Ace".to_string(), "augie".to_string()]
+        );
+        assert_eq!(
+            names(&rest),
+            vec!["Arial".to_string(), "Verdana".to_string()]
+        );
     }
 
     #[test]

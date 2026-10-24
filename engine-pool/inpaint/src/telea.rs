@@ -9,7 +9,7 @@ use image::RgbaImage;
 
 use easyscanlate_model::Quad;
 
-use crate::common::{bbox_crops, build_mask_expanded, crop_spec, InpaintResult};
+use crate::common::{InpaintResult, bbox_crops, build_mask_expanded, crop_spec};
 
 /// Inpaints `rect` of `image` with the Telea algorithm from the [`inpaint`]
 /// crate: the mask is `rect` itself when `quads` is empty, otherwise the
@@ -35,7 +35,15 @@ pub fn telea_inpaint_crop(
     );
     let exp_origin = [ex as f32, ey as f32];
 
-    let mask = build_mask_expanded(exp_w, exp_h, quads, rect, exp_origin, image.width(), image.height());
+    let mask = build_mask_expanded(
+        exp_w,
+        exp_h,
+        quads,
+        rect,
+        exp_origin,
+        image.width(),
+        image.height(),
+    );
     eprintln!(
         "[inpaint::telea] rect={:?} quads={} radius={} pad={} image={}x{} exp=[{},{},{},{}] exp_origin={:?} mask_sum={} quad_bounds={:?} quad_pts={:?}",
         rect,
@@ -63,15 +71,12 @@ pub fn telea_inpaint_crop(
             "[inpaint::telea] quads empty -> returning sub-crop [{},{},{},{}] from exp [{},{},{},{}]",
             ox, oy, ow, oh, ex, ey, exp_w, exp_h
         );
-        let sub = image::imageops::crop_imm(
-            &crop,
-            ox - ex,
-            oy - ey,
-            ow,
-            oh,
-        )
-        .to_image();
-        return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32], None)]);
+        let sub = image::imageops::crop_imm(&crop, ox - ex, oy - ey, ow, oh).to_image();
+        return Ok(vec![(
+            sub,
+            [ox as f32, oy as f32, ow as f32, oh as f32],
+            None,
+        )]);
     }
     let out = bbox_crops(crop, exp_origin, quads);
     eprintln!(
@@ -101,7 +106,12 @@ mod tests {
                 image.put_pixel(x, y, Rgba([255, 255, 255, 255]));
             }
         }
-        let quads = [quad([[20.0, 20.0], [40.0, 20.0], [40.0, 40.0], [20.0, 40.0]])];
+        let quads = [quad([
+            [20.0, 20.0],
+            [40.0, 20.0],
+            [40.0, 40.0],
+            [20.0, 40.0],
+        ])];
         let patches = telea_inpaint_crop(&image, [0.0, 0.0, 64.0, 64.0], &quads, 5).unwrap();
         assert_eq!(patches.len(), 1);
         let (patch, bounds, q) = &patches[0];
@@ -136,7 +146,11 @@ mod tests {
             }
         }
         let patches = telea_inpaint_crop(&image, [0.0, 0.0, 32.0, 32.0], &[], 3).unwrap();
-        assert_eq!(patches.len(), 1, "an empty quad list returns one whole-rect patch");
+        assert_eq!(
+            patches.len(),
+            1,
+            "an empty quad list returns one whole-rect patch"
+        );
         assert_eq!(patches[0].1, [0.0, 0.0, 32.0, 32.0]);
         assert!(patches[0].2.is_none(), "empty quads should have no quad");
     }

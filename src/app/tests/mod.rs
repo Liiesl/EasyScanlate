@@ -3,8 +3,8 @@ pub mod preset_tests;
 pub mod retranslate_tests;
 
 pub use super::*;
-use iced::widget::text_editor;
 use easyscanlate_settings::INITIAL_PRESET_SLOTS;
+use iced::widget::text_editor;
 
 pub(crate) fn app_with_entry() -> (App, EntryId) {
     use easyscanlate_model::{EntrySource, NewEntry, Quad};

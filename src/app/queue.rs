@@ -12,8 +12,7 @@ use iced::Task;
 use super::tab::TabId;
 
 pub use easyscanlate_engine_pool::{
-    AcquireResult, BuiltEngine, EngineOutcome, JobKind, OcrMode, OwnerId, QueuedJob,
-    POOL_CAPACITY,
+    AcquireResult, BuiltEngine, EngineOutcome, JobKind, OcrMode, OwnerId, POOL_CAPACITY, QueuedJob,
 };
 
 /// Build a unified engine-pool completion message for `tid`.
@@ -128,9 +127,7 @@ fn dispatch_ocr(
             let data = app.tabs[idx].pending_manual_multi_ocr.take().unwrap();
             let backend = easyscanlate_settings::get(|s| s.ocr_language.backend());
             let cached = match app.engines.manual_ocr_backend {
-                Some(cached_backend) if cached_backend == backend => {
-                    app.engines.manual_ocr.clone()
-                }
+                Some(cached_backend) if cached_backend == backend => app.engines.manual_ocr.clone(),
                 _ => {
                     app.engines.manual_ocr = None;
                     app.engines.manual_ocr_backend = None;
@@ -160,9 +157,12 @@ fn dispatch_ocr(
                         .await
                         .unwrap_or_else(|e| Err(format!("ocr build task failed: {e}")))
                         {
-                            Ok(engine) => {
-                                engine_ready_msg(tid, job_id, kind, Ok(BuiltEngine::OcrManual(engine)))
-                            }
+                            Ok(engine) => engine_ready_msg(
+                                tid,
+                                job_id,
+                                kind,
+                                Ok(BuiltEngine::OcrManual(engine)),
+                            ),
                             Err(e) => engine_ready_msg(tid, job_id, kind, Err(e)),
                         }
                     },
@@ -187,7 +187,10 @@ fn dispatch_ocr(
     });
     let (fp_workers, fp_score, fp_side, fp_backend) =
         easyscanlate_ocr::pipeline_fingerprint(&cfg, workers, backend);
-    if app.engines.pipeline_matches(fp_workers, fp_score, fp_side, fp_backend) {
+    if app
+        .engines
+        .pipeline_matches(fp_workers, fp_score, fp_side, fp_backend)
+    {
         return crate::app::ocr::maybe_start_ocr(app, tab_id);
     }
     // First build or stale config: drop the old pipeline (if any) so the
@@ -203,7 +206,9 @@ fn dispatch_ocr(
             .await
             .unwrap_or_else(|e| Err(format!("ocr build task failed: {e}")))
             {
-                Ok(engine) => engine_ready_msg(tid, job_id, kind, Ok(BuiltEngine::OcrParallel(engine))),
+                Ok(engine) => {
+                    engine_ready_msg(tid, job_id, kind, Ok(BuiltEngine::OcrParallel(engine)))
+                }
                 Err(e) => engine_ready_msg(tid, job_id, kind, Err(e)),
             }
         },
@@ -262,20 +267,40 @@ fn dispatch_inpaint(
         }
         let idx = idx_opt.unwrap();
         let jobs_opt = match backend {
-            easyscanlate_settings::InpaintBackend::Telea => app.tabs[idx].pending_auto_telea_jobs.clone(),
-            easyscanlate_settings::InpaintBackend::Lama => app.tabs[idx].pending_auto_lama_jobs.clone(),
-            easyscanlate_settings::InpaintBackend::Aot => app.tabs[idx].pending_auto_aot_jobs.clone(),
-            easyscanlate_settings::InpaintBackend::ShiftMap => app.tabs[idx].pending_auto_shiftmap_jobs.clone(),
-            easyscanlate_settings::InpaintBackend::Harmonic => app.tabs[idx].pending_auto_harmonic_jobs.clone(),
+            easyscanlate_settings::InpaintBackend::Telea => {
+                app.tabs[idx].pending_auto_telea_jobs.clone()
+            }
+            easyscanlate_settings::InpaintBackend::Lama => {
+                app.tabs[idx].pending_auto_lama_jobs.clone()
+            }
+            easyscanlate_settings::InpaintBackend::Aot => {
+                app.tabs[idx].pending_auto_aot_jobs.clone()
+            }
+            easyscanlate_settings::InpaintBackend::ShiftMap => {
+                app.tabs[idx].pending_auto_shiftmap_jobs.clone()
+            }
+            easyscanlate_settings::InpaintBackend::Harmonic => {
+                app.tabs[idx].pending_auto_harmonic_jobs.clone()
+            }
         };
         if let Some(jobs) = jobs_opt {
             // Clear tab pending so re-entrance doesn't duplicate; queue holds running
             match backend {
-                easyscanlate_settings::InpaintBackend::Telea => app.tabs[idx].pending_auto_telea_jobs = None,
-                easyscanlate_settings::InpaintBackend::Lama => app.tabs[idx].pending_auto_lama_jobs = None,
-                easyscanlate_settings::InpaintBackend::Aot => app.tabs[idx].pending_auto_aot_jobs = None,
-                easyscanlate_settings::InpaintBackend::ShiftMap => app.tabs[idx].pending_auto_shiftmap_jobs = None,
-                easyscanlate_settings::InpaintBackend::Harmonic => app.tabs[idx].pending_auto_harmonic_jobs = None,
+                easyscanlate_settings::InpaintBackend::Telea => {
+                    app.tabs[idx].pending_auto_telea_jobs = None
+                }
+                easyscanlate_settings::InpaintBackend::Lama => {
+                    app.tabs[idx].pending_auto_lama_jobs = None
+                }
+                easyscanlate_settings::InpaintBackend::Aot => {
+                    app.tabs[idx].pending_auto_aot_jobs = None
+                }
+                easyscanlate_settings::InpaintBackend::ShiftMap => {
+                    app.tabs[idx].pending_auto_shiftmap_jobs = None
+                }
+                easyscanlate_settings::InpaintBackend::Harmonic => {
+                    app.tabs[idx].pending_auto_harmonic_jobs = None
+                }
             }
             return crate::app::inpaint::dispatch_auto(app, tab_id, jobs, backend);
         }
@@ -284,7 +309,8 @@ fn dispatch_inpaint(
             let data = app.tabs[idx].pending_manual_multi.take().unwrap();
             // Need to dispatch manual inpaint now that weight is reserved (queue already popped to running)
             // Check shared per-backend cache (manual+auto); if not cached, build it (weight remains reserved)
-            let radius = easyscanlate_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
+            let radius =
+                easyscanlate_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
             let cached = app.engines.shared_inpaint(backend, radius);
             if let Some(engine) = cached {
                 // use helper that takes tab_id-aware start
@@ -295,11 +321,19 @@ fn dispatch_inpaint(
                 // Model load counts as the run itself so buttons disable during it.
                 app.tabs[idx].inpainting = true;
                 app.tabs[idx].status = match backend {
-                    easyscanlate_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
-                    easyscanlate_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
+                    easyscanlate_settings::InpaintBackend::Lama => {
+                        "Loading LaMa model...".to_string()
+                    }
+                    easyscanlate_settings::InpaintBackend::Aot => {
+                        "Loading AOT-GAN model...".to_string()
+                    }
                     easyscanlate_settings::InpaintBackend::Telea => "Inpainting...".to_string(),
-                    easyscanlate_settings::InpaintBackend::ShiftMap => "Inpainting (ShiftMap)...".to_string(),
-                    easyscanlate_settings::InpaintBackend::Harmonic => "Inpainting (Harmonic)...".to_string(),
+                    easyscanlate_settings::InpaintBackend::ShiftMap => {
+                        "Inpainting (ShiftMap)...".to_string()
+                    }
+                    easyscanlate_settings::InpaintBackend::Harmonic => {
+                        "Inpainting (Harmonic)...".to_string()
+                    }
                 };
                 let tid = tab_id;
                 return Task::perform(
@@ -326,20 +360,33 @@ fn dispatch_inpaint(
         // Also handle background stitch pending (single inpaint queued)
         if app.tabs[idx].pending_background_stitch.is_some() {
             let (job, pad, prev, next) = app.tabs[idx].pending_background_stitch.take().unwrap();
-            let radius = easyscanlate_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
+            let radius =
+                easyscanlate_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
             let cached = app.engines.shared_inpaint(backend, radius);
             if let Some(engine) = cached {
-                return crate::app::inpaint::start_background_stitch(app, tab_id, engine, job, pad, prev, next);
+                return crate::app::inpaint::start_background_stitch(
+                    app, tab_id, engine, job, pad, prev, next,
+                );
             } else {
                 app.tabs[idx].pending_background_stitch = Some((job, pad, prev, next));
                 // Model load counts as the run itself so buttons disable during it.
                 app.tabs[idx].inpainting = true;
                 app.tabs[idx].status = match backend {
-                    easyscanlate_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
-                    easyscanlate_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
-                    easyscanlate_settings::InpaintBackend::Telea => "Inpainting background...".to_string(),
-                    easyscanlate_settings::InpaintBackend::ShiftMap => "Inpainting background (ShiftMap)...".to_string(),
-                    easyscanlate_settings::InpaintBackend::Harmonic => "Inpainting background (Harmonic)...".to_string(),
+                    easyscanlate_settings::InpaintBackend::Lama => {
+                        "Loading LaMa model...".to_string()
+                    }
+                    easyscanlate_settings::InpaintBackend::Aot => {
+                        "Loading AOT-GAN model...".to_string()
+                    }
+                    easyscanlate_settings::InpaintBackend::Telea => {
+                        "Inpainting background...".to_string()
+                    }
+                    easyscanlate_settings::InpaintBackend::ShiftMap => {
+                        "Inpainting background (ShiftMap)...".to_string()
+                    }
+                    easyscanlate_settings::InpaintBackend::Harmonic => {
+                        "Inpainting background (Harmonic)...".to_string()
+                    }
                 };
                 let tid = tab_id;
                 return Task::perform(

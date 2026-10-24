@@ -188,7 +188,13 @@ fn main() -> iced::Result {
     if has("--register") {
         attach_parent_console();
         match assoc::register() {
-            Ok(()) => println!("Registered .mmtl → {} for {}", assoc::PROG_ID, std::env::current_exe().unwrap_or_else(|_| PathBuf::from("this exe")).display()),
+            Ok(()) => println!(
+                "Registered .mmtl → {} for {}",
+                assoc::PROG_ID,
+                std::env::current_exe()
+                    .unwrap_or_else(|_| PathBuf::from("this exe"))
+                    .display()
+            ),
             Err(e) => {
                 eprintln!("Register failed: {e}");
                 std::process::exit(1);
@@ -211,7 +217,14 @@ fn main() -> iced::Result {
     }
     if has("--check-assoc") {
         attach_parent_console();
-        println!("{}", if assoc::is_registered() { "registered" } else { "not-registered" });
+        println!(
+            "{}",
+            if assoc::is_registered() {
+                "registered"
+            } else {
+                "not-registered"
+            }
+        );
         let _ = std::io::Write::flush(&mut std::io::stdout());
         return Ok(());
     }
@@ -282,7 +295,10 @@ fn main() -> iced::Result {
             move || {
                 let listener = ipc_cell.lock().expect("ipc lock").take();
                 let (app, task) = app::boot(frame.clone(), initial.clone(), listener);
-                (app, iced::Task::batch([task, frame.clone().install_latest().discard()]))
+                (
+                    app,
+                    iced::Task::batch([task, frame.clone().install_latest().discard()]),
+                )
             }
         },
         app::update,

@@ -3,7 +3,7 @@ use std::collections::{HashMap, VecDeque};
 
 use iced::{Font, Size};
 
-use super::cache::{fit_key_params, FitKey, FIT_CACHE_CAP};
+use super::cache::{FIT_CACHE_CAP, FitKey, fit_key_params};
 use super::text::{line_fits, measure_text};
 
 /// One laid-out line of a circular bubble.
@@ -49,11 +49,7 @@ const FIT_ITERATIONS: u32 = 14;
 
 pub(crate) fn chord_at(rx: f32, ry: f32, yc: f32) -> f32 {
     let t = 1.0 - ((yc - ry) / ry).powi(2);
-    if t <= 0.0 {
-        0.0
-    } else {
-        2.0 * rx * t.sqrt()
-    }
+    if t <= 0.0 { 0.0 } else { 2.0 * rx * t.sqrt() }
 }
 
 fn chord_at_centered(rx: f32, ry: f32, yc: f32) -> f32 {
@@ -70,7 +66,9 @@ fn circle_tokens(
 ) -> Vec<String> {
     let mut tokens = Vec::new();
     for word in text.split_whitespace() {
-        if measure_text(word, font, size, f32::INFINITY, line_height, letter_spacing).width <= max_width {
+        if measure_text(word, font, size, f32::INFINITY, line_height, letter_spacing).width
+            <= max_width
+        {
             tokens.push(word.to_string());
             continue;
         }
@@ -81,8 +79,15 @@ fn circle_tokens(
                 c.push(ch);
                 c
             };
-            let cand_width =
-                measure_text(&candidate, font, size, f32::INFINITY, line_height, letter_spacing).width;
+            let cand_width = measure_text(
+                &candidate,
+                font,
+                size,
+                f32::INFINITY,
+                line_height,
+                letter_spacing,
+            )
+            .width;
             if !sub.is_empty() && cand_width > max_width {
                 tokens.push(std::mem::take(&mut sub));
                 sub.push(ch);
@@ -247,17 +252,25 @@ pub(crate) fn fit_circle_metrics(
     }
     let size = low;
     let lines = if best.is_empty() {
-        layout_circle_lines(text, font, MIN_FONT_SIZE, bounds, line_height, letter_spacing)
-            .unwrap_or_default()
+        layout_circle_lines(
+            text,
+            font,
+            MIN_FONT_SIZE,
+            bounds,
+            line_height,
+            letter_spacing,
+        )
+        .unwrap_or_default()
     } else {
         best
     };
     with_circle_cache(|cache| {
         if !cache.entries.contains_key(&key) {
             if cache.entries.len() >= FIT_CACHE_CAP
-                && let Some(evicted) = cache.order.pop_front() {
-                    cache.entries.remove(&evicted);
-                }
+                && let Some(evicted) = cache.order.pop_front()
+            {
+                cache.entries.remove(&evicted);
+            }
             cache.order.push_back(key);
         }
         cache.entries.insert(

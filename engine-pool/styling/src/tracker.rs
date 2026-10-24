@@ -104,7 +104,9 @@ mod tests {
             index: 1,
             id: EntryId(2),
             path: "p".to_string(),
-            quad: easyscanlate_model::Quad { points: [[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]] },
+            quad: easyscanlate_model::Quad {
+                points: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            },
         });
         let pending = tracker.take_pending_single().unwrap();
         assert_eq!(pending.index, 1);
@@ -114,7 +116,9 @@ mod tests {
             index: 0,
             id: EntryId(5),
             path: "q".to_string(),
-            quad: easyscanlate_model::Quad { points: [[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]] },
+            quad: easyscanlate_model::Quad {
+                points: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            },
         });
         tracker.clear_pending_single();
         assert!(tracker.take_pending_single().is_none());

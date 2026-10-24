@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use iced::font::{Family as FontFamily, Stretch as FontStretch, Style as FontStyle, Weight as FontWeight};
 use iced::Font;
+use iced::font::{
+    Family as FontFamily, Stretch as FontStretch, Style as FontStyle, Weight as FontWeight,
+};
 
 use easyscanlate_model::EntryStyle;
 
@@ -57,13 +59,9 @@ pub fn font_support(family: Option<&str>) -> FontSupport {
     let Some(family) = family else {
         return FontSupport::full();
     };
-    static SUPPORT: OnceLock<Mutex<HashMap<(Version, String), FontSupport>>> =
-        OnceLock::new();
+    static SUPPORT: OnceLock<Mutex<HashMap<(Version, String), FontSupport>>> = OnceLock::new();
     let cache = SUPPORT.get_or_init(|| Mutex::new(HashMap::new()));
-    let version = font_system()
-        .read()
-        .expect("Read font system")
-        .version();
+    let version = font_system().read().expect("Read font system").version();
     let key = (version, family.to_ascii_lowercase());
     if let Some(&hit) = cache.lock().expect("support cache poisoned").get(&key) {
         return hit;
@@ -230,10 +228,7 @@ fn nearest_available_weight(
     > = OnceLock::new();
 
     let cache = RESOLVED.get_or_init(|| Mutex::new(HashMap::new()));
-    let version = font_system()
-        .read()
-        .expect("Read font system")
-        .version();
+    let version = font_system().read().expect("Read font system").version();
     let key = (version, family.to_owned(), want, style, stretch);
     if let Some(&hit) = cache.lock().expect("weight cache poisoned").get(&key) {
         return hit;

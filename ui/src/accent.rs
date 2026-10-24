@@ -64,7 +64,10 @@ pub fn accent_hover() -> Color {
 /// Accent with custom alpha (e.g. badges, active-dot fills).
 pub fn aurora_accent_translucent(cfg: &AuroraConfig, alpha: f32) -> Color {
     let c = aurora_accent(cfg);
-    Color { a: alpha.clamp(0.0, 1.0), ..c }
+    Color {
+        a: alpha.clamp(0.0, 1.0),
+        ..c
+    }
 }
 
 /// Translucent accent read live from the store.

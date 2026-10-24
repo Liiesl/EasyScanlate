@@ -1,8 +1,8 @@
 use std::ops::Range;
 
+use iced::Rectangle;
 use iced::widget::pane_grid;
 use iced::widget::text_editor;
-use iced::Rectangle;
 use iced::window::screenshot::Screenshot;
 
 use easyscanlate_model::{CapsMode, EntryId, ProfileId, Quad, TextAlign};
@@ -210,7 +210,10 @@ pub enum UiEvent {
     Translate,
     /// The user picked a (provider, model) pair in the merged model dropdown
     /// of the translation bar; both are selected together.
-    TranslateModelSelect { provider: String, model: String },
+    TranslateModelSelect {
+        provider: String,
+        model: String,
+    },
     TranslateLang(String),
     /// The user pressed "Connect" for the translation provider id; the app
     /// opens the API-key entry modal.
@@ -309,9 +312,15 @@ pub enum UiEvent {
     StyleColorCancel(StyleField),
     /// The unified hex input for `field` changed (live: hex typing,
     /// alpha/angle edits, picker drags).
-    StyleColorChanged(StyleField, neverliie_iced_widgets::hex_color_input::HexColorValue),
+    StyleColorChanged(
+        StyleField,
+        neverliie_iced_widgets::hex_color_input::HexColorValue,
+    ),
     /// The user confirmed the value for `field` in its picker (OK button).
-    StyleColorSubmit(StyleField, neverliie_iced_widgets::hex_color_input::HexColorValue),
+    StyleColorSubmit(
+        StyleField,
+        neverliie_iced_widgets::hex_color_input::HexColorValue,
+    ),
     /// The picker's top-level tab (`Color | Gradient | Library`) changed for
     /// `field`. Used to show the gradient angle handle immediately when the
     /// Gradient tab is selected, even before any gradient value edit.

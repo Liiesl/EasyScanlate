@@ -2,7 +2,7 @@
 //! column of tool buttons (inpainting toggle, settings). Unlike the
 //! side panel, it lives outside the pane grid and is never resizable.
 
-use iced::widget::{button, column, container, tooltip, text};
+use iced::widget::{button, column, container, text, tooltip};
 use iced::{Element, Length};
 use lucide_icons::Icon;
 
@@ -37,10 +37,13 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     .padding(scale::s(0.0))
     .style(crate::panel::button_style)
     .on_press_maybe(can_toggle.then_some(UiEvent::ToggleOverlayText));
-    let toggle_text: Element<'_, UiEvent> =
-        tooltip(crate::button::with_disabled_cursor(toggle_text_btn.into()), tip("Toggle text overlay"), tooltip::Position::Right)
-            .gap(scale::s(4.0))
-            .into();
+    let toggle_text: Element<'_, UiEvent> = tooltip(
+        crate::button::with_disabled_cursor(toggle_text_btn.into()),
+        tip("Toggle text overlay"),
+        tooltip::Position::Right,
+    )
+    .gap(scale::s(4.0))
+    .into();
 
     let toggle_inpaint_btn = button(
         crate::icon::lucide(if state.show_inpaint() {
@@ -56,22 +59,21 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     .padding(scale::s(0.0))
     .style(crate::panel::button_style)
     .on_press_maybe(can_toggle.then_some(UiEvent::ToggleInpaintLayer));
-    let toggle_inpaint: Element<'_, UiEvent> =
-        tooltip(crate::button::with_disabled_cursor(toggle_inpaint_btn.into()), tip("Toggle inpaint layer"), tooltip::Position::Right)
-            .gap(scale::s(4.0))
-            .into();
+    let toggle_inpaint: Element<'_, UiEvent> = tooltip(
+        crate::button::with_disabled_cursor(toggle_inpaint_btn.into()),
+        tip("Toggle inpaint layer"),
+        tooltip::Position::Right,
+    )
+    .gap(scale::s(4.0))
+    .into();
 
     let inpaint_active = state.manual_mode() == crate::event::ManualMode::Inpaint;
     let busy = state.is_bulk_busy();
     // legacy inpaint_mode is now only used when not in manual mode; toolbar reflects manual
     let inpaint_btn = button(
-        crate::icon::lucide(if inpaint_active {
-            Icon::X
-        } else {
-            Icon::Brush
-        })
-        .size(scale::s(16.0))
-        .center(),
+        crate::icon::lucide(if inpaint_active { Icon::X } else { Icon::Brush })
+            .size(scale::s(16.0))
+            .center(),
     )
     .width(Length::Fixed(btn_size))
     .height(Length::Fixed(btn_size))
@@ -84,10 +86,17 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     } else {
         None
     });
-    let inpaint: Element<'_, UiEvent> =
-        tooltip(crate::button::with_disabled_cursor(inpaint_btn.into()), tip(if inpaint_active { "Exit inpaint" } else { "Inpaint (multi-select)" }), tooltip::Position::Right)
-            .gap(scale::s(4.0))
-            .into();
+    let inpaint: Element<'_, UiEvent> = tooltip(
+        crate::button::with_disabled_cursor(inpaint_btn.into()),
+        tip(if inpaint_active {
+            "Exit inpaint"
+        } else {
+            "Inpaint (multi-select)"
+        }),
+        tooltip::Position::Right,
+    )
+    .gap(scale::s(4.0))
+    .into();
 
     let ocr_active = state.manual_mode() == crate::event::ManualMode::Ocr;
     let ocr_btn = button(
@@ -110,30 +119,43 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     } else {
         None
     });
-    let manual_ocr: Element<'_, UiEvent> =
-        tooltip(crate::button::with_disabled_cursor(ocr_btn.into()), tip(if ocr_active { "Exit manual OCR" } else { "Manual OCR (multi-select)" }), tooltip::Position::Right)
-            .gap(scale::s(4.0))
-            .into();
+    let manual_ocr: Element<'_, UiEvent> = tooltip(
+        crate::button::with_disabled_cursor(ocr_btn.into()),
+        tip(if ocr_active {
+            "Exit manual OCR"
+        } else {
+            "Manual OCR (multi-select)"
+        }),
+        tooltip::Position::Right,
+    )
+    .gap(scale::s(4.0))
+    .into();
 
-    let settings_btn = button(crate::icon::lucide(Icon::Settings).size(scale::s(16.0)).center())
-        .width(Length::Fixed(btn_size))
-        .height(Length::Fixed(btn_size))
-        .padding(scale::s(0.0))
-        .style(crate::panel::button_style)
-        .on_press(UiEvent::SettingsOpen);
+    let settings_btn = button(
+        crate::icon::lucide(Icon::Settings)
+            .size(scale::s(16.0))
+            .center(),
+    )
+    .width(Length::Fixed(btn_size))
+    .height(Length::Fixed(btn_size))
+    .padding(scale::s(0.0))
+    .style(crate::panel::button_style)
+    .on_press(UiEvent::SettingsOpen);
     let settings: Element<'_, UiEvent> =
         tooltip(settings_btn, tip("Settings"), tooltip::Position::Right)
             .gap(scale::s(4.0))
             .into();
 
-    container(column![toggle_text, toggle_inpaint, inpaint, manual_ocr, settings]
-        .spacing(scale::s(6.0))
-        .align_x(iced::Alignment::Center))
-        .width(Length::Fixed(btn_size))
-        .height(Length::Fill)
-        .style(|_theme| container::Style {
-            background: None,
-            ..container::Style::default()
-        })
-        .into()
+    container(
+        column![toggle_text, toggle_inpaint, inpaint, manual_ocr, settings]
+            .spacing(scale::s(6.0))
+            .align_x(iced::Alignment::Center),
+    )
+    .width(Length::Fixed(btn_size))
+    .height(Length::Fill)
+    .style(|_theme| container::Style {
+        background: None,
+        ..container::Style::default()
+    })
+    .into()
 }

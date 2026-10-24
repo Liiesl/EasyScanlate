@@ -1,8 +1,8 @@
 use std::ops::Range;
 use std::time::Instant;
 
-use iced::keyboard;
 use iced::Rectangle;
+use iced::keyboard;
 
 use easyscanlate_model::EntryId;
 

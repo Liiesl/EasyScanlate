@@ -37,7 +37,13 @@ pub struct RunSession {
 }
 
 impl RunSession {
-    pub fn new(total: usize, workers: usize, merge_cfg: MergeConfig, min_h: f32, max_h: f32) -> Self {
+    pub fn new(
+        total: usize,
+        workers: usize,
+        merge_cfg: MergeConfig,
+        min_h: f32,
+        max_h: f32,
+    ) -> Self {
         Self {
             merge_cfg,
             min_h,
@@ -90,9 +96,7 @@ impl RunSession {
         build: &mut dyn FnMut(usize) -> Result<(RgbImage, u32, u32), String>,
     ) -> Result<Option<RunEvent>, String> {
         // Allow early cancellation check before building canvases
-        token
-            .checkpoint()
-            .map_err(|_| "cancelled".to_string())?;
+        token.checkpoint().map_err(|_| "cancelled".to_string())?;
         loop {
             // Fill the submission window with app-built canvases first.
             if let Some(index) = self.next_needed() {
@@ -132,10 +136,7 @@ impl RunSession {
                 .iter()
                 .position(|(i, _, _)| *i == idx)
                 .expect("canvas metadata for idx must exist");
-            let (_, width, margin_top) = self
-                .canvas_meta
-                .remove(pos)
-                .expect("position was valid");
+            let (_, width, margin_top) = self.canvas_meta.remove(pos).expect("position was valid");
             debug_assert!(
                 self.canvas_meta.iter().all(|(i, _, _)| *i != idx),
                 "duplicate metadata for idx {idx}"

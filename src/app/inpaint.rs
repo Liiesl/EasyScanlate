@@ -1,21 +1,21 @@
-use iced::Task;
-#[cfg(feature = "inpaint")]
-use iced::futures::{SinkExt, StreamExt};
-use easyscanlate_model::Quad;
 #[cfg(feature = "inpaint")]
 use easyscanlate_inpaint::Engine as InpaintEngine;
+use easyscanlate_model::Quad;
 #[cfg(feature = "inpaint")]
 use easyscanlate_settings::InpaintBackend;
 #[cfg(feature = "inpaint")]
 use easyscanlate_ui::loaded::InpaintLayer;
+use iced::Task;
+#[cfg(feature = "inpaint")]
+use iced::futures::{SinkExt, StreamExt};
 #[cfg(feature = "inpaint")]
 use image::RgbaImage;
 
 use easyscanlate_ui::UiState;
 
-use super::{App, Message};
 #[cfg(feature = "inpaint")]
-use super::{AutoInpaintJob};
+use super::AutoInpaintJob;
+use super::{App, Message};
 use crate::app::queue::owner_of;
 #[cfg(feature = "inpaint")]
 use easyscanlate_engine_pool::{inpaint_pad_for as pool_pad_for, run_auto_inpaint_job};
@@ -89,11 +89,10 @@ pub fn start_inpaint(
     app.active_tab_mut().status = "inpainting...".to_string();
     Task::perform(
         async move {
-            let result = tokio::task::spawn_blocking(move || {
-                engine.run_blocking(&path, rect, &quads)
-            })
-            .await
-            .unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")));
+            let result =
+                tokio::task::spawn_blocking(move || engine.run_blocking(&path, rect, &quads))
+                    .await
+                    .unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")));
             // Convert single-index result into multi payload grouping
             let grouped: GroupedInpaintResult = result.map(|v| {
                 let mut map: PatchMap = std::collections::HashMap::new();
@@ -109,7 +108,6 @@ pub fn start_inpaint(
         move |res| Message::Tab(tid, crate::app::TabMessage::ManualMultiInpaintFinished(res)),
     )
 }
-
 
 #[cfg(feature = "inpaint")]
 fn auto_pad_for(backend: InpaintBackend, radius: i32) -> f32 {
@@ -166,7 +164,12 @@ pub(crate) fn split_quad_global(
     let gy0 = owner_g0 + vy0;
     let gy1 = owner_g0 + vy1;
     let mut out = Vec::new();
-    for (i, ((w, h), g0)) in page_ws.iter().zip(page_hs.iter()).zip(offsets.iter()).enumerate() {
+    for (i, ((w, h), g0)) in page_ws
+        .iter()
+        .zip(page_hs.iter())
+        .zip(offsets.iter())
+        .enumerate()
+    {
         if i >= n {
             break;
         }
@@ -232,8 +235,7 @@ pub(crate) fn anchor_quad_global(
 /// Commits one auto job's patches to `tabs[idx]`. Returns number of patches applied.
 #[cfg(feature = "inpaint")]
 fn commit_auto_patches(app: &mut App, idx: usize, patches: Vec<AutoPatch>) -> usize {
-    let mut pending_evs: Vec<(easyscanlate_model::ImageId, [f32; 4], Option<Quad>)> =
-        Vec::new();
+    let mut pending_evs: Vec<(easyscanlate_model::ImageId, [f32; 4], Option<Quad>)> = Vec::new();
     let mut affected = std::collections::HashSet::new();
     let mut applied = 0usize;
     for (target_idx, patch, bounds, quad) in patches {
@@ -275,19 +277,59 @@ fn commit_auto_patches(app: &mut App, idx: usize, patches: Vec<AutoPatch>) -> us
 #[cfg(feature = "inpaint")]
 fn free_auto_queue(app: &mut App, tab_id: super::tab::TabId) -> bool {
     let mut freed = false;
-    if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea)).is_some() {
+    if app
+        .engines
+        .queue
+        .complete(
+            owner_of(tab_id),
+            crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
+        )
+        .is_some()
+    {
         freed = true;
     }
-    if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama)).is_some() {
+    if app
+        .engines
+        .queue
+        .complete(
+            owner_of(tab_id),
+            crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
+        )
+        .is_some()
+    {
         freed = true;
     }
-    if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot)).is_some() {
+    if app
+        .engines
+        .queue
+        .complete(
+            owner_of(tab_id),
+            crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
+        )
+        .is_some()
+    {
         freed = true;
     }
-    if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::ShiftMap)).is_some() {
+    if app
+        .engines
+        .queue
+        .complete(
+            owner_of(tab_id),
+            crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::ShiftMap),
+        )
+        .is_some()
+    {
         freed = true;
     }
-    if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic)).is_some() {
+    if app
+        .engines
+        .queue
+        .complete(
+            owner_of(tab_id),
+            crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic),
+        )
+        .is_some()
+    {
         freed = true;
     }
     freed
@@ -306,7 +348,10 @@ fn finish_auto_stream(
     {
         app.tabs[idx].pipeline_active = false;
     }
-    let (total, failed) = (app.tabs[idx].auto_inpaint_total, app.tabs[idx].auto_inpaint_failed);
+    let (total, failed) = (
+        app.tabs[idx].auto_inpaint_total,
+        app.tabs[idx].auto_inpaint_failed,
+    );
     let done = total.saturating_sub(failed);
     app.tabs[idx].status = if failed > 0 {
         format!("Auto-inpaint ({label}) done: {done} of {total} region(s), {failed} failed.")
@@ -366,19 +411,59 @@ fn commit_manual_patches(app: &mut App, idx: usize, per_image_patches: GroupedIn
 #[cfg(feature = "inpaint")]
 fn free_manual_queue(app: &mut App, tab_id: super::tab::TabId) -> bool {
     let mut freed = false;
-    if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea)).is_some() {
+    if app
+        .engines
+        .queue
+        .complete(
+            owner_of(tab_id),
+            crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
+        )
+        .is_some()
+    {
         freed = true;
     }
-    if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama)).is_some() {
+    if app
+        .engines
+        .queue
+        .complete(
+            owner_of(tab_id),
+            crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
+        )
+        .is_some()
+    {
         freed = true;
     }
-    if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot)).is_some() {
+    if app
+        .engines
+        .queue
+        .complete(
+            owner_of(tab_id),
+            crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
+        )
+        .is_some()
+    {
         freed = true;
     }
-    if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::ShiftMap)).is_some() {
+    if app
+        .engines
+        .queue
+        .complete(
+            owner_of(tab_id),
+            crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::ShiftMap),
+        )
+        .is_some()
+    {
         freed = true;
     }
-    if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic)).is_some() {
+    if app
+        .engines
+        .queue
+        .complete(
+            owner_of(tab_id),
+            crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic),
+        )
+        .is_some()
+    {
         freed = true;
     }
     freed
@@ -392,7 +477,10 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
     }
     #[cfg(feature = "inpaint")]
     {
-        if app.active_tab_mut().inpainting || app.active_tab_mut().running || app.active_tab_mut().translating {
+        if app.active_tab_mut().inpainting
+            || app.active_tab_mut().running
+            || app.active_tab_mut().translating
+        {
             return Task::none();
         }
         let Some((index, id)) = app.active_tab_mut().selected else {
@@ -406,12 +494,18 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
             let Some(entry) = tab.project.entry(id) else {
                 return Task::none();
             };
-            let Some(img) = tab.images.get(index) else { return Task::none(); };
+            let Some(img) = tab.images.get(index) else {
+                return Task::none();
+            };
             let image_id = img.image_id;
             if entry.image_id != image_id {
                 return Task::none();
             }
-            let path = tab.project.image(image_id).map(|m| m.path.clone()).unwrap_or_default();
+            let path = tab
+                .project
+                .image(image_id)
+                .map(|m| m.path.clone())
+                .unwrap_or_default();
             let q = tab.project.view_quad(entry);
             (path, q)
         };
@@ -425,14 +519,18 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
             // Apply using cloned style to avoid double borrow
             let style_clone = app.active_tab().style_working.clone();
             if app.active_tab().project.entry(id).is_some() {
-                let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style_clone);
+                let ev = app
+                    .active_tab_mut()
+                    .project
+                    .set_entry_style_with_event(id, style_clone);
                 crate::app::handle_model_event(app.active_tab_mut(), ev);
             }
         }
         let [x0, y0, x1, y1] = quad.bounds();
         let rect = [x0, y0, x1 - x0, y1 - y0];
         if rect[2] <= 0.0 || rect[3] <= 0.0 {
-            app.active_tab_mut().status = "Inpaint Background: selected box is degenerate.".to_string();
+            app.active_tab_mut().status =
+                "Inpaint Background: selected box is degenerate.".to_string();
             return Task::none();
         }
         // Single stays 1 job: reanchor beyond-quad / straddling entries to the
@@ -482,24 +580,48 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
                 }
             }
         };
-        let (backend, radius) = easyscanlate_settings::get(|s| (s.inpaint_backend, s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1)));
+        let (backend, radius) = easyscanlate_settings::get(|s| {
+            (
+                s.inpaint_backend,
+                s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1),
+            )
+        });
         // queue gate for background stitch (single inpaint)
         {
             use crate::app::queue::{AcquireResult, JobKind, owner_of};
             let kind = JobKind::Inpaint(backend);
             let tab_id = app.active_tab().id;
-            let already_running = app.engines.queue.running_for(owner_of(tab_id), kind).is_some();
-            let already_queued = app.engines.queue.pending_for_tab(owner_of(tab_id)).iter().any(|j| j.kind == kind);
+            let already_running = app
+                .engines
+                .queue
+                .running_for(owner_of(tab_id), kind)
+                .is_some();
+            let already_queued = app
+                .engines
+                .queue
+                .pending_for_tab(owner_of(tab_id))
+                .iter()
+                .any(|j| j.kind == kind);
             if !already_running && !already_queued {
-                match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), kind) {
-                    AcquireResult::Acquired(_) => {},
+                match app
+                    .engines
+                    .queue
+                    .try_acquire_or_enqueue(owner_of(tab_id), kind)
+                {
+                    AcquireResult::Acquired(_) => {}
                     AcquireResult::Queued(_, pos) => {
                         let used = app.engines.queue.used_weight();
                         // store pending for later dispatch (use pending_background_stitch)
                         let pad_tmp = auto_pad_for(backend, radius);
                         let (prev_tmp, next_tmp) = neighbor_paths(app, index);
-                        let job_tmp = AutoInpaintJob { index, id, path: path.clone(), quad };
-                        app.active_tab_mut().pending_background_stitch = Some((job_tmp, pad_tmp, prev_tmp, next_tmp));
+                        let job_tmp = AutoInpaintJob {
+                            index,
+                            id,
+                            path: path.clone(),
+                            quad,
+                        };
+                        app.active_tab_mut().pending_background_stitch =
+                            Some((job_tmp, pad_tmp, prev_tmp, next_tmp));
                         app.active_tab_mut().status = format!(
                             "Queued {} (pos {}, pool {}/{}) ...",
                             kind.label(),
@@ -517,7 +639,12 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
         }
         let pad = auto_pad_for(backend, radius);
         let (prev, next) = neighbor_paths(app, index);
-        let job = AutoInpaintJob { index, id, path: path.clone(), quad };
+        let job = AutoInpaintJob {
+            index,
+            id,
+            path: path.clone(),
+            quad,
+        };
         let cached = app.engines.shared_inpaint(backend, radius);
         let tid = app.active_tab().id;
         match cached {
@@ -544,7 +671,12 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
                     async move {
                         use crate::app::queue::engine_ready_msg;
                         use easyscanlate_engine_pool::BuiltEngine;
-                        match tokio::task::spawn_blocking(move || easyscanlate_inpaint::Engine::build(backend, radius)).await.unwrap_or_else(|e| Err(format!("inpaint build task failed: {e}"))) {
+                        match tokio::task::spawn_blocking(move || {
+                            easyscanlate_inpaint::Engine::build(backend, radius)
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(format!("inpaint build task failed: {e}")))
+                        {
                             Ok(engine) => engine_ready_msg(
                                 tid,
                                 job_id,
@@ -567,10 +699,14 @@ pub fn handle_style_inpaint_background(app: &mut App) -> Task<Message> {
         app.active_tab_mut().style_working.bg_color = [0, 0, 0, 0];
         let style_clone = app.active_tab().style_working.clone();
         if app.active_tab().project.entry(id).is_some() {
-            let ev = app.active_tab_mut().project.set_entry_style_with_event(id, style_clone);
+            let ev = app
+                .active_tab_mut()
+                .project
+                .set_entry_style_with_event(id, style_clone);
             crate::app::handle_model_event(app.active_tab_mut(), ev);
         }
-        app.active_tab_mut().status = "Background made transparent (inpaint not available in this build).".to_string();
+        app.active_tab_mut().status =
+            "Background made transparent (inpaint not available in this build).".to_string();
         return Task::none();
     }
 }
@@ -607,7 +743,8 @@ pub fn handle_inpaint_clicked(app: &mut App, selection: Option<(usize, usize)>) 
                 let tab = app.active_tab();
                 let Some(img) = tab.images.get(image_index) else {
                     let _ = tab;
-                    app.active_tab_mut().status = "That inpaint layer no longer exists.".to_string();
+                    app.active_tab_mut().status =
+                        "That inpaint layer no longer exists.".to_string();
                     return Task::none();
                 };
                 (img.image_id, img.inpaint.len())
@@ -627,14 +764,22 @@ pub fn handle_inpaint_clicked(app: &mut App, selection: Option<(usize, usize)>) 
             }
             app.active_tab_mut().selected = None;
             app.active_tab_mut().selected_inpaint = Some((image_index, patch_idx));
-            app.active_tab_mut().status = format!("Inpaint {patch_idx} selected – overlays hidden.");
+            app.active_tab_mut().status =
+                format!("Inpaint {patch_idx} selected – overlays hidden.");
             let needs_settle = {
                 let len = app.active_tab().images.len();
-                app.active_tab_mut().scheduler.needs_settle(image_index, len)
+                app.active_tab_mut()
+                    .scheduler
+                    .needs_settle(image_index, len)
             };
             if needs_settle {
                 let tid = app.active_tab().id;
-                return app.active_tab_mut().scheduler.schedule(image_index..image_index+1, move |seq| Message::Tab(tid, crate::app::TabMessage::SettleElapsed(seq)));
+                return app
+                    .active_tab_mut()
+                    .scheduler
+                    .schedule(image_index..image_index + 1, move |seq| {
+                        Message::Tab(tid, crate::app::TabMessage::SettleElapsed(seq))
+                    });
             }
             Task::none()
         }
@@ -670,34 +815,58 @@ pub fn handle_inpaint_delete(app: &mut App, image_index: usize, patch_idx: usize
         return Task::none();
     }
     if let Some(img) = app.active_tab_mut().images.get_mut(image_index)
-        && patch_idx < img.inpaint.len() {
-            img.inpaint.remove(patch_idx);
-        }
-    let patch_id = app.active_tab().project.extras.inpaint_patches.iter().filter(|p| p.image_id == image_id).nth(patch_idx).map(|p| p.id);
+        && patch_idx < img.inpaint.len()
+    {
+        img.inpaint.remove(patch_idx);
+    }
+    let patch_id = app
+        .active_tab()
+        .project
+        .extras
+        .inpaint_patches
+        .iter()
+        .filter(|p| p.image_id == image_id)
+        .nth(patch_idx)
+        .map(|p| p.id);
     if let Some(id) = patch_id
-        && let Some(ev) = app.active_tab_mut().project.remove_inpaint_patch(id) {
-            crate::app::handle_model_event(app.active_tab_mut(), ev);
-        }
+        && let Some(ev) = app.active_tab_mut().project.remove_inpaint_patch(id)
+    {
+        crate::app::handle_model_event(app.active_tab_mut(), ev);
+    }
     if app.active_tab_mut().selected_inpaint == Some((image_index, patch_idx)) {
         app.active_tab_mut().selected_inpaint = None;
     } else if let Some((sel_img, sel_patch)) = app.active_tab_mut().selected_inpaint
-        && sel_img == image_index && sel_patch > patch_idx {
-            app.active_tab_mut().selected_inpaint = Some((sel_img, sel_patch - 1));
-        }
+        && sel_img == image_index
+        && sel_patch > patch_idx
+    {
+        app.active_tab_mut().selected_inpaint = Some((sel_img, sel_patch - 1));
+    }
     app.active_tab_mut().status = "Deleted inpaint patch.".to_string();
     Task::none()
 }
 
-pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usize) -> Task<Message> {
+pub fn handle_inpaint_repaint(
+    app: &mut App,
+    image_index: usize,
+    patch_idx: usize,
+) -> Task<Message> {
     if app.active_state().is_bulk_busy() {
         app.active_tab_mut().status = "Wait for current task to finish.".to_string();
         return Task::none();
     }
-    if app.active_tab_mut().inpainting || app.active_tab_mut().running || app.active_tab_mut().translating {
+    if app.active_tab_mut().inpainting
+        || app.active_tab_mut().running
+        || app.active_tab_mut().translating
+    {
         return Task::none();
     }
     let (path, rect, quads) = {
-        let image = app.active_tab().images.get(image_index).cloned().unwrap_or_else(|| panic!("inpaint repaint missing image"));
+        let image = app
+            .active_tab()
+            .images
+            .get(image_index)
+            .cloned()
+            .unwrap_or_else(|| panic!("inpaint repaint missing image"));
         // Use cloned image to avoid borrow across project access
         let image_id = image.image_id;
         let bounds_opt = if patch_idx < image.inpaint.len() {
@@ -752,22 +921,34 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
     {
         let image_id_opt = app.active_tab().images.get(image_index).map(|i| i.image_id);
         if let Some(image_id) = image_id_opt {
-            let patch_id = app.active_tab().project.extras.inpaint_patches.iter().filter(|p| p.image_id == image_id).nth(patch_idx).map(|p| p.id);
+            let patch_id = app
+                .active_tab()
+                .project
+                .extras
+                .inpaint_patches
+                .iter()
+                .filter(|p| p.image_id == image_id)
+                .nth(patch_idx)
+                .map(|p| p.id);
             if let Some(image) = app.active_tab_mut().images.get_mut(image_index)
-                && patch_idx < image.inpaint.len() {
-                    image.inpaint.remove(patch_idx);
-                }
+                && patch_idx < image.inpaint.len()
+            {
+                image.inpaint.remove(patch_idx);
+            }
             if let Some(id) = patch_id
-                && let Some(ev) = app.active_tab_mut().project.remove_inpaint_patch(id) {
-                    crate::app::handle_model_event(app.active_tab_mut(), ev);
-                }
+                && let Some(ev) = app.active_tab_mut().project.remove_inpaint_patch(id)
+            {
+                crate::app::handle_model_event(app.active_tab_mut(), ev);
+            }
             let sel = app.active_tab().selected_inpaint;
             if sel == Some((image_index, patch_idx)) {
                 app.active_tab_mut().selected_inpaint = None;
             } else if let Some((sel_img, sel_patch)) = sel
-                && sel_img == image_index && sel_patch > patch_idx {
-                    app.active_tab_mut().selected_inpaint = Some((sel_img, sel_patch - 1));
-                }
+                && sel_img == image_index
+                && sel_patch > patch_idx
+            {
+                app.active_tab_mut().selected_inpaint = Some((sel_img, sel_patch - 1));
+            }
         }
     }
     #[cfg(feature = "inpaint")]
@@ -783,14 +964,28 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
             use crate::app::queue::{AcquireResult, JobKind, owner_of};
             let kind = JobKind::Inpaint(backend);
             let tab_id = app.active_tab().id;
-            let already_running = app.engines.queue.running_for(owner_of(tab_id), kind).is_some();
-            let already_queued = app.engines.queue.pending_for_tab(owner_of(tab_id)).iter().any(|j| j.kind == kind);
+            let already_running = app
+                .engines
+                .queue
+                .running_for(owner_of(tab_id), kind)
+                .is_some();
+            let already_queued = app
+                .engines
+                .queue
+                .pending_for_tab(owner_of(tab_id))
+                .iter()
+                .any(|j| j.kind == kind);
             if !already_running && !already_queued {
-                match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), kind) {
-                    AcquireResult::Acquired(_) => {},
+                match app
+                    .engines
+                    .queue
+                    .try_acquire_or_enqueue(owner_of(tab_id), kind)
+                {
+                    AcquireResult::Acquired(_) => {}
                     AcquireResult::Queued(_, pos) => {
                         let used = app.engines.queue.used_weight();
-                        app.active_tab_mut().pending_manual_multi = Some(vec![(image_index, path.clone(), rect, quads.clone())]);
+                        app.active_tab_mut().pending_manual_multi =
+                            Some(vec![(image_index, path.clone(), rect, quads.clone())]);
                         app.active_tab_mut().status = format!(
                             "Queued {} (pos {}, pool {}/{}) ...",
                             kind.label(),
@@ -811,15 +1006,24 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
         match cached {
             Some(engine) => start_inpaint(app, engine, image_index, path, rect, quads),
             None => {
-                app.active_tab_mut().pending_manual_multi = Some(vec![(image_index, path, rect, quads)]);
+                app.active_tab_mut().pending_manual_multi =
+                    Some(vec![(image_index, path, rect, quads)]);
                 // Model load counts as the run itself so buttons disable during it.
                 app.active_tab_mut().inpainting = true;
                 app.active_tab_mut().status = match backend {
-                    easyscanlate_settings::InpaintBackend::Lama => "Loading LaMa model...".to_string(),
-                    easyscanlate_settings::InpaintBackend::Aot => "Loading AOT-GAN model...".to_string(),
+                    easyscanlate_settings::InpaintBackend::Lama => {
+                        "Loading LaMa model...".to_string()
+                    }
+                    easyscanlate_settings::InpaintBackend::Aot => {
+                        "Loading AOT-GAN model...".to_string()
+                    }
                     easyscanlate_settings::InpaintBackend::Telea => "Inpainting...".to_string(),
-                    easyscanlate_settings::InpaintBackend::ShiftMap => "Inpainting (ShiftMap)...".to_string(),
-                    easyscanlate_settings::InpaintBackend::Harmonic => "Inpainting (Harmonic)...".to_string(),
+                    easyscanlate_settings::InpaintBackend::ShiftMap => {
+                        "Inpainting (ShiftMap)...".to_string()
+                    }
+                    easyscanlate_settings::InpaintBackend::Harmonic => {
+                        "Inpainting (Harmonic)...".to_string()
+                    }
                 };
                 let kind = crate::app::queue::JobKind::Inpaint(backend);
                 let job_id = app
@@ -832,7 +1036,12 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
                     async move {
                         use crate::app::queue::engine_ready_msg;
                         use easyscanlate_engine_pool::BuiltEngine;
-                        match tokio::task::spawn_blocking(move || easyscanlate_inpaint::Engine::build(backend, radius)).await.unwrap_or_else(|e| Err(format!("inpaint build task failed: {e}"))) {
+                        match tokio::task::spawn_blocking(move || {
+                            easyscanlate_inpaint::Engine::build(backend, radius)
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(format!("inpaint build task failed: {e}")))
+                        {
                             Ok(engine) => engine_ready_msg(
                                 tid,
                                 job_id,
@@ -855,7 +1064,12 @@ pub fn handle_inpaint_repaint(app: &mut App, image_index: usize, patch_idx: usiz
     }
 }
 
-pub fn handle_inpaint_toolbar(app: &mut App, image_index: usize, patch_idx: usize, action: easyscanlate_ui::event::InpaintToolbarAction) -> Task<Message> {
+pub fn handle_inpaint_toolbar(
+    app: &mut App,
+    image_index: usize,
+    patch_idx: usize,
+    action: easyscanlate_ui::event::InpaintToolbarAction,
+) -> Task<Message> {
     match action {
         easyscanlate_ui::event::InpaintToolbarAction::Delete => {
             handle_inpaint_delete(app, image_index, patch_idx)
@@ -866,15 +1080,27 @@ pub fn handle_inpaint_toolbar(app: &mut App, image_index: usize, patch_idx: usiz
     }
 }
 
-
 #[cfg(feature = "inpaint")]
-pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rectangle)>) -> Task<Message> {
+pub fn handle_inpaint_selection(
+    app: &mut App,
+    selections: Vec<(usize, iced::Rectangle)>,
+) -> Task<Message> {
     {
         let tab = app.active_tab();
-        eprintln!("[manual::inpaint] handle_inpaint_selection selections={} cached_any={} running={} translating={} inpainting={}", selections.len(), app.engines.has_any_shared_inpaint(), tab.running, tab.translating, tab.inpainting);
+        eprintln!(
+            "[manual::inpaint] handle_inpaint_selection selections={} cached_any={} running={} translating={} inpainting={}",
+            selections.len(),
+            app.engines.has_any_shared_inpaint(),
+            tab.running,
+            tab.translating,
+            tab.inpainting
+        );
     }
     for (i, (idx, r)) in selections.iter().enumerate() {
-        eprintln!("[manual::inpaint]   sel {}: idx={} rect=[{:.1},{:.1},{:.1},{:.1}] w={:.1} h={:.1}", i, idx, r.x, r.y, r.width, r.height, r.width, r.height);
+        eprintln!(
+            "[manual::inpaint]   sel {}: idx={} rect=[{:.1},{:.1},{:.1},{:.1}] w={:.1} h={:.1}",
+            i, idx, r.x, r.y, r.width, r.height, r.width, r.height
+        );
     }
     if selections.is_empty() {
         eprintln!("[manual::inpaint] no selections -> none");
@@ -884,10 +1110,16 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
         eprintln!("[manual::inpaint] bulk busy -> none");
         return Task::none();
     }
-    if app.active_tab_mut().inpainting || app.active_tab_mut().running || app.active_tab_mut().translating {
+    if app.active_tab_mut().inpainting
+        || app.active_tab_mut().running
+        || app.active_tab_mut().translating
+    {
         {
             let tab = app.active_tab();
-            eprintln!("[manual::inpaint] busy -> none (inpainting={} running={} translating={})", tab.inpainting, tab.running, tab.translating);
+            eprintln!(
+                "[manual::inpaint] busy -> none (inpainting={} running={} translating={})",
+                tab.inpainting, tab.running, tab.translating
+            );
         }
         return Task::none();
     }
@@ -901,10 +1133,19 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
     for (idx, rect) in selections {
         let image_id_opt = app.active_tab().images.get(idx).map(|i| i.image_id);
         let Some(image_id) = image_id_opt else {
-            eprintln!("[manual::inpaint] skip idx={} out of range images.len={}", idx, app.active_tab().images.len());
+            eprintln!(
+                "[manual::inpaint] skip idx={} out of range images.len={}",
+                idx,
+                app.active_tab().images.len()
+            );
             continue;
         };
-        let path = app.active_tab().project.image(image_id).map(|m| m.path.clone()).unwrap_or_default();
+        let path = app
+            .active_tab()
+            .project
+            .image(image_id)
+            .map(|m| m.path.clone())
+            .unwrap_or_default();
         if path.is_empty() {
             eprintln!("[manual::inpaint] skip idx={} empty path", idx);
             continue;
@@ -913,12 +1154,21 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
         let all_count = app.active_tab().project.all_for(image_id).count();
         let quads: Vec<Quad> = {
             let tab = app.active_tab();
-            tab.project.all_for(image_id)
-            .map(|e| tab.project.view_quad(e))
-            .filter(|q| q.intersects_rect(rect_arr))
-            .collect()
+            tab.project
+                .all_for(image_id)
+                .map(|e| tab.project.view_quad(e))
+                .filter(|q| q.intersects_rect(rect_arr))
+                .collect()
         };
-        eprintln!("[manual::inpaint] idx={} path={} rect={:?} all_for={} quads_intersect={} quad_bounds={:?}", idx, path, rect_arr, all_count, quads.len(), quads.iter().map(|q| q.bounds()).collect::<Vec<_>>());
+        eprintln!(
+            "[manual::inpaint] idx={} path={} rect={:?} all_for={} quads_intersect={} quad_bounds={:?}",
+            idx,
+            path,
+            rect_arr,
+            all_count,
+            quads.len(),
+            quads.iter().map(|q| q.bounds()).collect::<Vec<_>>()
+        );
         // keep even empty (will synthesize later if mixed)
         data.push((idx, path, rect_arr, quads));
     }
@@ -928,19 +1178,47 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
         return Task::none();
     }
     data.sort_by_key(|(idx, _, _, _)| *idx);
-    eprintln!("[manual::inpaint] data sorted len={} idxs={:?} rects={:?}", data.len(), data.iter().map(|(idx,_,_,_)| *idx).collect::<Vec<_>>(), data.iter().map(|(_,_,r,_)| *r).collect::<Vec<_>>());
-    let (backend, radius) = easyscanlate_settings::get(|s| (s.inpaint_backend, s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1)));
-    eprintln!("[manual::inpaint] backend={:?} radius={} cached_match={}", backend, radius, app.engines.has_shared_inpaint(backend, radius));
+    eprintln!(
+        "[manual::inpaint] data sorted len={} idxs={:?} rects={:?}",
+        data.len(),
+        data.iter().map(|(idx, _, _, _)| *idx).collect::<Vec<_>>(),
+        data.iter().map(|(_, _, r, _)| *r).collect::<Vec<_>>()
+    );
+    let (backend, radius) = easyscanlate_settings::get(|s| {
+        (
+            s.inpaint_backend,
+            s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1),
+        )
+    });
+    eprintln!(
+        "[manual::inpaint] backend={:?} radius={} cached_match={}",
+        backend,
+        radius,
+        app.engines.has_shared_inpaint(backend, radius)
+    );
     // queue gate — manual inpaint uses same backend weight/priority as auto
     {
         use crate::app::queue::{AcquireResult, JobKind, owner_of};
         let kind = JobKind::Inpaint(backend);
         let tab_id = app.active_tab().id;
         // Avoid duplicate queue if already running/queued for this tab+kind
-        let already_running = app.engines.queue.running_for(owner_of(tab_id), kind).is_some();
-        let already_queued = app.engines.queue.pending_for_tab(owner_of(tab_id)).iter().any(|j| j.kind == kind);
+        let already_running = app
+            .engines
+            .queue
+            .running_for(owner_of(tab_id), kind)
+            .is_some();
+        let already_queued = app
+            .engines
+            .queue
+            .pending_for_tab(owner_of(tab_id))
+            .iter()
+            .any(|j| j.kind == kind);
         if !already_running && !already_queued {
-            match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), kind) {
+            match app
+                .engines
+                .queue
+                .try_acquire_or_enqueue(owner_of(tab_id), kind)
+            {
                 AcquireResult::Acquired(_) => {
                     // weight reserved, proceed to engine/start
                 }
@@ -970,7 +1248,10 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
         let tid = app.active_tab().id;
         start_inpaint_selection(app, tid, engine, data)
     } else {
-        eprintln!("[manual::inpaint] no cached engine -> pending_manual_multi len={} status loading", data.len());
+        eprintln!(
+            "[manual::inpaint] no cached engine -> pending_manual_multi len={} status loading",
+            data.len()
+        );
         let tid = app.active_tab().id;
         app.active_tab_mut().pending_manual_multi = Some(data);
         // Model load counts as the run itself so buttons disable during it.
@@ -1008,17 +1289,34 @@ pub fn handle_inpaint_selection(app: &mut App, selections: Vec<(usize, iced::Rec
     }
 }
 
-
 #[cfg(feature = "inpaint")]
-fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelection>) -> Result<ManualStreamPatches, String> {
-    eprintln!("[manual::multi] run_inpaint_selection enter data={} backend={:?} radius={}", data.len(), engine.backend(), engine.radius());
+fn run_inpaint_selection(
+    engine: &InpaintEngine,
+    data: Vec<ManualInpaintSelection>,
+) -> Result<ManualStreamPatches, String> {
+    eprintln!(
+        "[manual::multi] run_inpaint_selection enter data={} backend={:?} radius={}",
+        data.len(),
+        engine.backend(),
+        engine.radius()
+    );
     for (i, (idx, path, rect, quads)) in data.iter().enumerate() {
-        eprintln!("[manual::multi]   data {}: idx={} path={} rect={:?} quads={} bounds={:?}", i, idx, path, rect, quads.len(), quads.iter().map(|q| q.bounds()).collect::<Vec<_>>());
+        eprintln!(
+            "[manual::multi]   data {}: idx={} path={} rect={:?} quads={} bounds={:?}",
+            i,
+            idx,
+            path,
+            rect,
+            quads.len(),
+            quads.iter().map(|q| q.bounds()).collect::<Vec<_>>()
+        );
         for (qi, q) in quads.iter().enumerate() {
             eprintln!("[manual::multi]     quad {}: {:?}", qi, q.points);
         }
     }
-    if data.is_empty() { return Err("no selections".to_string()); }
+    if data.is_empty() {
+        return Err("no selections".to_string());
+    }
     use std::collections::HashMap;
     // Per-spec: selection as mask, drop OCR quads entirely (q2)
     // Sel holds raw selection in image pixels, with image dims
@@ -1026,7 +1324,7 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
     struct Sel {
         idx: usize,
         path: String,
-        rect: [f32;4],
+        rect: [f32; 4],
         x0: u32,
         y0: u32,
         w: u32,
@@ -1042,62 +1340,99 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
             eprintln!("[manual::multi] decode path={}", path);
             let rgba = image::ImageReader::open(&path)
                 .map_err(|e| format!("Failed to open {path}: {e}"))?
-                .with_guessed_format().map_err(|e| format!("Failed to decode {path}: {e}"))?
-                .decode().map_err(|e| format!("Failed to decode {path}: {e}"))?
+                .with_guessed_format()
+                .map_err(|e| format!("Failed to decode {path}: {e}"))?
+                .decode()
+                .map_err(|e| format!("Failed to decode {path}: {e}"))?
                 .into_rgba8();
-            let (w,h)=rgba.dimensions();
+            let (w, h) = rgba.dimensions();
             eprintln!("[manual::multi]   decoded {}x{}", w, h);
-            image_cache.insert(path.clone(), (rgba,w,h));
+            image_cache.insert(path.clone(), (rgba, w, h));
         }
         let (_full, img_w, img_h) = image_cache.get(&path).unwrap();
         let [rx, ry, rw, rh] = rect_arr;
-        eprintln!("[manual::multi] rect_arr idx={} [{:.1},{:.1},{:.1},{:.1}] img={}x{}", idx, rx, ry, rw, rh, img_w, img_h);
-        let x0 = rx.floor().clamp(0.0, *img_w as f32 -1.0) as u32;
-        let y0 = ry.floor().clamp(0.0, *img_h as f32 -1.0) as u32;
-        let x1 = (rx+rw).ceil().clamp(x0 as f32 +1.0, *img_w as f32) as u32;
-        let y1 = (ry+rh).ceil().clamp(y0 as f32 +1.0, *img_h as f32) as u32;
+        eprintln!(
+            "[manual::multi] rect_arr idx={} [{:.1},{:.1},{:.1},{:.1}] img={}x{}",
+            idx, rx, ry, rw, rh, img_w, img_h
+        );
+        let x0 = rx.floor().clamp(0.0, *img_w as f32 - 1.0) as u32;
+        let y0 = ry.floor().clamp(0.0, *img_h as f32 - 1.0) as u32;
+        let x1 = (rx + rw).ceil().clamp(x0 as f32 + 1.0, *img_w as f32) as u32;
+        let y1 = (ry + rh).ceil().clamp(y0 as f32 + 1.0, *img_h as f32) as u32;
         let cw = x1.saturating_sub(x0);
         let ch = y1.saturating_sub(y0);
-        eprintln!("[manual::multi]   -> x0={} y0={} x1={} y1={} cw={} ch={} ", x0, y0, x1, y1, cw, ch);
-        if cw==0 || ch==0 {
+        eprintln!(
+            "[manual::multi]   -> x0={} y0={} x1={} y1={} cw={} ch={} ",
+            x0, y0, x1, y1, cw, ch
+        );
+        if cw == 0 || ch == 0 {
             eprintln!("[manual::multi]   skip zero cw/ch");
             continue;
         }
-        sels.push(Sel { idx, path: path.clone(), rect: rect_arr, x0, y0, w: cw, h: ch, img_w: *img_w, img_h: *img_h });
+        sels.push(Sel {
+            idx,
+            path: path.clone(),
+            rect: rect_arr,
+            x0,
+            y0,
+            w: cw,
+            h: ch,
+            img_w: *img_w,
+            img_h: *img_h,
+        });
     }
     eprintln!("[manual::multi] sels built len={}", sels.len());
     for (i, s) in sels.iter().enumerate() {
-        eprintln!("[manual::multi]   sel {}: idx={} x0={} y0={} w={} h={} img={}x{} rect={:?}", i, s.idx, s.x0, s.y0, s.w, s.h, s.img_w, s.img_h, s.rect);
+        eprintln!(
+            "[manual::multi]   sel {}: idx={} x0={} y0={} w={} h={} img={}x{} rect={:?}",
+            i, s.idx, s.x0, s.y0, s.w, s.h, s.img_w, s.img_h, s.rect
+        );
     }
-    if sels.is_empty() { return Err("no valid pieces".to_string()); }
+    if sels.is_empty() {
+        return Err("no valid pieces".to_string());
+    }
     // sort by image idx then y then x deterministically
-    sels.sort_by(|a,b| a.idx.cmp(&b.idx).then(a.y0.cmp(&b.y0)).then(a.x0.cmp(&b.x0)));
+    sels.sort_by(|a, b| {
+        a.idx
+            .cmp(&b.idx)
+            .then(a.y0.cmp(&b.y0))
+            .then(a.x0.cmp(&b.x0))
+    });
     eprintln!("[manual::multi] sels sorted");
     for (i, s) in sels.iter().enumerate() {
-        eprintln!("[manual::multi]   sorted {}: idx={} x0={} y0={} w={} h={}", i, s.idx, s.x0, s.y0, s.w, s.h);
+        eprintln!(
+            "[manual::multi]   sorted {}: idx={} x0={} y0={} w={} h={}",
+            i, s.idx, s.x0, s.y0, s.w, s.h
+        );
     }
     const CANVAS: u32 = 512;
     // Helper to compute group metrics: per-image bbox and total stitched height
     // Returns (max_w_span, total_h_span, oversized_present)
     let metrics = |group: &[Sel]| -> (u32, u32, bool) {
         use std::collections::HashMap;
-        let mut per: HashMap<usize, (u32,u32,u32,u32)> = HashMap::new(); // minX,maxX,minY,maxY per idx
+        let mut per: HashMap<usize, (u32, u32, u32, u32)> = HashMap::new(); // minX,maxX,minY,maxY per idx
         let mut oversized = false;
         for s in group {
             // individual oversized already flagged, but also check combined
-            if s.w > CANVAS || s.h > CANVAS { oversized = true; }
-            let e = per.entry(s.idx).or_insert((s.x0, s.x0+s.w, s.y0, s.y0+s.h));
+            if s.w > CANVAS || s.h > CANVAS {
+                oversized = true;
+            }
+            let e = per
+                .entry(s.idx)
+                .or_insert((s.x0, s.x0 + s.w, s.y0, s.y0 + s.h));
             e.0 = e.0.min(s.x0);
-            e.1 = e.1.max(s.x0+s.w);
+            e.1 = e.1.max(s.x0 + s.w);
             e.2 = e.2.min(s.y0);
-            e.3 = e.3.max(s.y0+s.h);
+            e.3 = e.3.max(s.y0 + s.h);
         }
         let mut max_w = 0u32;
         let mut total_h = 0u32;
         for (_idx, (minx, maxx, miny, maxy)) in per {
             let w = maxx - minx;
             let h = maxy - miny;
-            if w > CANVAS || h > CANVAS { oversized = true; }
+            if w > CANVAS || h > CANVAS {
+                oversized = true;
+            }
             max_w = max_w.max(w);
             total_h = total_h.saturating_add(h);
         }
@@ -1109,8 +1444,13 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
     let mut cur: Vec<Sel> = Vec::new();
     for s in sels {
         if s.w > CANVAS || s.h > CANVAS {
-            eprintln!("[manual::multi] grouping sel idx={} {}x{} > 512 -> solo oversized group", s.idx, s.w, s.h);
-            if !cur.is_empty() { groups.push(std::mem::take(&mut cur)); }
+            eprintln!(
+                "[manual::multi] grouping sel idx={} {}x{} > 512 -> solo oversized group",
+                s.idx, s.w, s.h
+            );
+            if !cur.is_empty() {
+                groups.push(std::mem::take(&mut cur));
+            }
             groups.push(vec![s]);
             continue;
         }
@@ -1121,9 +1461,21 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
         let mut hypo = cur.clone();
         hypo.push(s.clone());
         let (max_w, total_h, oversized) = metrics(&hypo);
-        eprintln!("[manual::multi] grouping try add idx={} w={} h={} to cur len={} -> hypo max_w={} total_h={} oversized={}", s.idx, s.w, s.h, cur.len(), max_w, total_h, oversized);
+        eprintln!(
+            "[manual::multi] grouping try add idx={} w={} h={} to cur len={} -> hypo max_w={} total_h={} oversized={}",
+            s.idx,
+            s.w,
+            s.h,
+            cur.len(),
+            max_w,
+            total_h,
+            oversized
+        );
         if oversized || max_w > CANVAS || total_h > CANVAS {
-            eprintln!("[manual::multi]   would exceed 512 -> flush cur len={} and start new", cur.len());
+            eprintln!(
+                "[manual::multi]   would exceed 512 -> flush cur len={} and start new",
+                cur.len()
+            );
             groups.push(std::mem::take(&mut cur));
             cur.push(s);
         } else {
@@ -1131,11 +1483,22 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
             cur = hypo;
         }
     }
-    if !cur.is_empty() { groups.push(cur); }
+    if !cur.is_empty() {
+        groups.push(cur);
+    }
     eprintln!("[manual::multi] groups built len={}", groups.len());
     for (gi, g) in groups.iter().enumerate() {
         let (max_w, total_h, _) = metrics(g);
-        eprintln!("[manual::multi]   group {}: sels={} max_w={} total_h={} member={:?}", gi, g.len(), max_w, total_h, g.iter().map(|s| (s.idx, s.x0, s.y0, s.w, s.h)).collect::<Vec<_>>());
+        eprintln!(
+            "[manual::multi]   group {}: sels={} max_w={} total_h={} member={:?}",
+            gi,
+            g.len(),
+            max_w,
+            total_h,
+            g.iter()
+                .map(|s| (s.idx, s.x0, s.y0, s.w, s.h))
+                .collect::<Vec<_>>()
+        );
     }
     let mut per_image: PatchMap = HashMap::new();
     // Granular (OCR-style): one group's inference failure counts as one failed
@@ -1144,46 +1507,86 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
     let mut failed_groups: usize = 0;
     // helpers
     let reflect_index = |x: i64, len: i64| -> i64 {
-        let period = len*2;
+        let period = len * 2;
         let mut v = x % period;
-        if v < 0 { v += period; }
-        if v >= len { period - v -1 } else { v }
+        if v < 0 {
+            v += period;
+        }
+        if v >= len { period - v - 1 } else { v }
     };
     for (group_idx, group) in groups.into_iter().enumerate() {
-        if group.is_empty() { continue; }
-        eprintln!("[manual::multi] group {} processing sels={} ", group_idx, group.len());
+        if group.is_empty() {
+            continue;
+        }
+        eprintln!(
+            "[manual::multi] group {} processing sels={} ",
+            group_idx,
+            group.len()
+        );
         // Oversized solo: square crop + resize to 512 (spec q3)
-        if group.len()==1 && (group[0].w > CANVAS || group[0].h > CANVAS) {
+        if group.len() == 1 && (group[0].w > CANVAS || group[0].h > CANVAS) {
             let s = &group[0];
-            eprintln!("[manual::multi] group {} oversized solo idx={} {}x{} img={}x{} rect={:?}", group_idx, s.idx, s.w, s.h, s.img_w, s.img_h, s.rect);
+            eprintln!(
+                "[manual::multi] group {} oversized solo idx={} {}x{} img={}x{} rect={:?}",
+                group_idx, s.idx, s.w, s.h, s.img_w, s.img_h, s.rect
+            );
             // per spec: take full width or height based on larger side, crop square, resize to 512 (q3)
             // Use shared helper from inpaint crate for consistency with tests
-            let (side, sx_u, sy_u) = easyscanlate_inpaint::manual_square_params(s.x0, s.y0, s.w, s.h, s.img_w, s.img_h);
+            let (side, sx_u, sy_u) =
+                easyscanlate_inpaint::manual_square_params(s.x0, s.y0, s.w, s.h, s.img_w, s.img_h);
             let sx = sx_u as i32;
             let sy = sy_u as i32;
             let larger_is_w = s.w >= s.h;
             let side_full = if larger_is_w { s.img_w } else { s.img_h };
             let min_dim = s.img_w.min(s.img_h);
-            eprintln!("[manual::multi]   oversized side computed larger_is_w={} side_full={} side={} min_dim={} sx={} sy={}", larger_is_w, side_full, side, min_dim, sx, sy);
+            eprintln!(
+                "[manual::multi]   oversized side computed larger_is_w={} side_full={} side={} min_dim={} sx={} sy={}",
+                larger_is_w, side_full, side, min_dim, sx, sy
+            );
             let full = &image_cache.get(&s.path).unwrap().0;
-            let square_rgba = image::imageops::crop_imm(full, sx as u32, sy as u32, side, side).to_image();
-            let canvas_rgba = image::DynamicImage::ImageRgba8(square_rgba).resize(CANVAS, CANVAS, image::imageops::FilterType::Lanczos3).to_rgba8();
+            let square_rgba =
+                image::imageops::crop_imm(full, sx as u32, sy as u32, side, side).to_image();
+            let canvas_rgba = image::DynamicImage::ImageRgba8(square_rgba)
+                .resize(CANVAS, CANVAS, image::imageops::FilterType::Lanczos3)
+                .to_rgba8();
             let scale = CANVAS as f32 / side as f32;
             // mask quad in canvas coords (selection rect scaled)
             let qx = (s.x0 as i32 - sx) as f32 * scale;
             let qy = (s.y0 as i32 - sy) as f32 * scale;
             let qw = s.w as f32 * scale;
             let qh = s.h as f32 * scale;
-            let quad = Quad { points: [[qx, qy], [qx+qw, qy], [qx+qw, qy+qh], [qx, qy+qh]] };
-            eprintln!("[manual::multi]   canvas 512 mask quad {:?} scale={:.4} sx,sy={},{} side={}", quad.points, scale, sx, sy, side);
+            let quad = Quad {
+                points: [[qx, qy], [qx + qw, qy], [qx + qw, qy + qh], [qx, qy + qh]],
+            };
+            eprintln!(
+                "[manual::multi]   canvas 512 mask quad {:?} scale={:.4} sx,sy={},{} side={}",
+                quad.points, scale, sx, sy, side
+            );
             let rect = [0.0, 0.0, CANVAS as f32, CANVAS as f32];
             let patches = match engine.run_on_image(&canvas_rgba, rect, &[quad]) {
-                Ok(v) => { eprintln!("[manual::multi]   oversized patches={}", v.len()); v },
-                Err(e) => { eprintln!("[manual::multi]   oversized run_on_image failed: {}", e); failed_groups += 1; continue; }
+                Ok(v) => {
+                    eprintln!("[manual::multi]   oversized patches={}", v.len());
+                    v
+                }
+                Err(e) => {
+                    eprintln!("[manual::multi]   oversized run_on_image failed: {}", e);
+                    failed_groups += 1;
+                    continue;
+                }
             };
             for (pi, (patch_img, bounds_canvas, quad_opt)) in patches.into_iter().enumerate() {
                 let [bx, by, bw, bh] = bounds_canvas;
-                eprintln!("[manual::multi]   oversized patch {}: bounds_canvas=[{:.1},{:.1},{:.1},{:.1}] patch={}x{} quad={:?}", pi, bx, by, bw, bh, patch_img.width(), patch_img.height(), quad_opt.map(|q| q.points));
+                eprintln!(
+                    "[manual::multi]   oversized patch {}: bounds_canvas=[{:.1},{:.1},{:.1},{:.1}] patch={}x{} quad={:?}",
+                    pi,
+                    bx,
+                    by,
+                    bw,
+                    bh,
+                    patch_img.width(),
+                    patch_img.height(),
+                    quad_opt.map(|q| q.points)
+                );
                 // map bounds back to original image coords via inverse scale
                 let orig_x = sx as f32 + bx / scale;
                 let orig_y = sy as f32 + by / scale;
@@ -1193,12 +1596,25 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
                 let _pw = (orig_w.round() as u32).max(1).min(patch_img.width());
                 let _ph = (orig_h.round() as u32).max(1).min(patch_img.height());
                 // patch_img is bounds size in canvas coords; resize to orig_w/h
-                let resized = if (orig_w as u32) != patch_img.width() || (orig_h as u32) != patch_img.height() {
+                let resized = if (orig_w as u32) != patch_img.width()
+                    || (orig_h as u32) != patch_img.height()
+                {
                     let ow = orig_w.round().clamp(1.0, 5000.0) as u32;
                     let oh = orig_h.round().clamp(1.0, 5000.0) as u32;
-                    eprintln!("[manual::multi]     resizing patch {}x{} -> {}x{} (scale 1/{:.4})", patch_img.width(), patch_img.height(), ow, oh, scale);
-                    image::DynamicImage::ImageRgba8(patch_img).resize(ow, oh, image::imageops::FilterType::Lanczos3).to_rgba8()
-                } else { patch_img };
+                    eprintln!(
+                        "[manual::multi]     resizing patch {}x{} -> {}x{} (scale 1/{:.4})",
+                        patch_img.width(),
+                        patch_img.height(),
+                        ow,
+                        oh,
+                        scale
+                    );
+                    image::DynamicImage::ImageRgba8(patch_img)
+                        .resize(ow, oh, image::imageops::FilterType::Lanczos3)
+                        .to_rgba8()
+                } else {
+                    patch_img
+                };
                 let bounds = [orig_x, orig_y, orig_w, orig_h];
                 let orig_quad = quad_opt.map(|q| {
                     let mut nq = q;
@@ -1208,8 +1624,17 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
                     }
                     nq
                 });
-                eprintln!("[manual::multi]     -> orig_bounds={:?} quad={:?} resized_patch={}x{}", bounds, orig_quad.map(|q| q.points), resized.width(), resized.height());
-                per_image.entry(s.idx).or_default().push((resized, bounds, orig_quad));
+                eprintln!(
+                    "[manual::multi]     -> orig_bounds={:?} quad={:?} resized_patch={}x{}",
+                    bounds,
+                    orig_quad.map(|q| q.points),
+                    resized.width(),
+                    resized.height()
+                );
+                per_image
+                    .entry(s.idx)
+                    .or_default()
+                    .push((resized, bounds, orig_quad));
             }
             continue;
         }
@@ -1218,10 +1643,20 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
         // We need distinct images sorted by idx (and for same idx, aggregated bbox already)
         // Build map distinct idx -> list of sels for that idx
         let mut per_idx_sels: HashMap<usize, Vec<&Sel>> = HashMap::new();
-        for s in &group { per_idx_sels.entry(s.idx).or_default().push(s); }
+        for s in &group {
+            per_idx_sels.entry(s.idx).or_default().push(s);
+        }
         let mut distinct: Vec<usize> = per_idx_sels.keys().cloned().collect();
         distinct.sort();
-        eprintln!("[manual::multi] group {} distinct images {:?} per_idx_counts {:?}", group_idx, distinct, per_idx_sels.iter().map(|(k,v)| (*k, v.len())).collect::<Vec<_>>());
+        eprintln!(
+            "[manual::multi] group {} distinct images {:?} per_idx_counts {:?}",
+            group_idx,
+            distinct,
+            per_idx_sels
+                .iter()
+                .map(|(k, v)| (*k, v.len()))
+                .collect::<Vec<_>>()
+        );
         // For each distinct, compute bbox
         struct ImgGroup {
             idx: usize,
@@ -1242,42 +1677,67 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
             let min_y = list.iter().map(|s| s.y0).min().unwrap();
             let max_y = list.iter().map(|s| s.y0 + s.h).max().unwrap();
             let h_span = max_y - min_y;
-            let cx = (min_x as f32 + max_x as f32)*0.5;
-            let cy = (min_y as f32 + max_y as f32)*0.5;
+            let cx = (min_x as f32 + max_x as f32) * 0.5;
+            let cy = (min_y as f32 + max_y as f32) * 0.5;
             let img_w = list[0].img_w;
             let img_h = list[0].img_h;
             let path = list[0].path.clone();
-            img_groups.push(ImgGroup { idx:*didx, path, img_w, img_h, min_y, max_y, h_span, cx, cy });
-            eprintln!("[manual::multi]   img_group idx={} bbox [{},{},{},{}] h_span={} cx={:.1} cy={:.1} img={}x{}", didx, min_x, min_y, max_x, max_y, h_span, cx, cy, img_w, img_h);
+            img_groups.push(ImgGroup {
+                idx: *didx,
+                path,
+                img_w,
+                img_h,
+                min_y,
+                max_y,
+                h_span,
+                cx,
+                cy,
+            });
+            eprintln!(
+                "[manual::multi]   img_group idx={} bbox [{},{},{},{}] h_span={} cx={:.1} cy={:.1} img={}x{}",
+                didx, min_x, min_y, max_x, max_y, h_span, cx, cy, img_w, img_h
+            );
         }
         // Allocate window heights to fill 512 if stitch multiple
         // For single distinct, window is single 512 window centered on bbox
         // For multiple, need to allocate h_src per image
         // Use strategy: sum h_span = total_h, extra = 512 - total_h
         // Distribute extra based on avail_top/bottom per image
-        if img_groups.len()==1 {
+        if img_groups.len() == 1 {
             let ig = &img_groups[0];
             let w_src = CANVAS.min(ig.img_w);
             let h_src = CANVAS.min(ig.img_h);
-            let mut x_src = (ig.cx - w_src as f32 *0.5).round() as i32;
-            let mut y_src = (ig.cy - h_src as f32 *0.5).round() as i32;
+            let mut x_src = (ig.cx - w_src as f32 * 0.5).round() as i32;
+            let mut y_src = (ig.cy - h_src as f32 * 0.5).round() as i32;
             x_src = x_src.clamp(0, ig.img_w as i32 - w_src as i32).max(0);
             y_src = y_src.clamp(0, ig.img_h as i32 - h_src as i32).max(0);
-            eprintln!("[manual::multi]   single-img window x_src={} y_src={} w_src={} h_src={} cx={:.1} cy={:.1}", x_src, y_src, w_src, h_src, ig.cx, ig.cy);
+            eprintln!(
+                "[manual::multi]   single-img window x_src={} y_src={} w_src={} h_src={} cx={:.1} cy={:.1}",
+                x_src, y_src, w_src, h_src, ig.cx, ig.cy
+            );
             let full = &image_cache.get(&ig.path).unwrap().0;
-            let region = image::imageops::crop_imm(full, x_src as u32, y_src as u32, w_src, h_src).to_image();
+            let region = image::imageops::crop_imm(full, x_src as u32, y_src as u32, w_src, h_src)
+                .to_image();
             // Build canvas 512x512 with region centered and mirror pad
             let mut canvas = image::RgbaImage::new(CANVAS, CANVAS);
             // compute dx, dy to center small region (when img smaller than 512)
-            let dx = if w_src < CANVAS { (CANVAS - w_src)/2 } else { 0 };
-            let dy = if h_src < CANVAS { (CANVAS - h_src)/2 } else { 0 };
+            let dx = if w_src < CANVAS {
+                (CANVAS - w_src) / 2
+            } else {
+                0
+            };
+            let dy = if h_src < CANVAS {
+                (CANVAS - h_src) / 2
+            } else {
+                0
+            };
             // dx/dy placement for centering; but if w_src==512 then dx 0 (x_src already centered)
             // For w_src==512 case, dx 0 and region exactly fills width
             // For w_src<512 (narrow image), region centered, mirror both sides via reflect
             // Use reflect logic to fill canvas:
             // If w_src==CANVAS && h_src==CANVAS => canvas = region
             // Else reflect
-            if w_src==CANVAS && h_src==CANVAS {
+            if w_src == CANVAS && h_src == CANVAS {
                 canvas = region.clone();
             } else {
                 // Place region at dx,dy then reflect
@@ -1291,24 +1751,61 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
                     }
                 }
             }
-            eprintln!("[manual::multi]   canvas built {}x{} region {}x{} at dx={},dy={} x_src={},y_src={}", canvas.width(), canvas.height(), region.width(), region.height(), dx, dy, x_src, y_src);
+            eprintln!(
+                "[manual::multi]   canvas built {}x{} region {}x{} at dx={},dy={} x_src={},y_src={}",
+                canvas.width(),
+                canvas.height(),
+                region.width(),
+                region.height(),
+                dx,
+                dy,
+                x_src,
+                y_src
+            );
             // Build mask quads: each sel in group as quad in canvas coords
             let mut quads_canvas: Vec<Quad> = Vec::new();
             for s in &group {
                 let qx = s.x0 as f32 - x_src as f32 + dx as f32;
                 let qy = s.y0 as f32 - y_src as f32 + dy as f32;
-                let quad = Quad { points: [[qx, qy],[qx+s.w as f32, qy],[qx+s.w as f32, qy+s.h as f32],[qx, qy+s.h as f32]] };
-                eprintln!("[manual::multi]   sel idx={} orig [{},{},{}x{}] -> canvas quad {:?}", s.idx, s.x0, s.y0, s.w, s.h, quad.points);
+                let quad = Quad {
+                    points: [
+                        [qx, qy],
+                        [qx + s.w as f32, qy],
+                        [qx + s.w as f32, qy + s.h as f32],
+                        [qx, qy + s.h as f32],
+                    ],
+                };
+                eprintln!(
+                    "[manual::multi]   sel idx={} orig [{},{},{}x{}] -> canvas quad {:?}",
+                    s.idx, s.x0, s.y0, s.w, s.h, quad.points
+                );
                 quads_canvas.push(quad);
             }
-            let rect = [0.0,0.0,CANVAS as f32, CANVAS as f32];
+            let rect = [0.0, 0.0, CANVAS as f32, CANVAS as f32];
             let patches = match engine.run_on_image(&canvas, rect, &quads_canvas) {
-                Ok(v) => { eprintln!("[manual::multi]   single window patches={}", v.len()); v },
-                Err(e) => { eprintln!("[manual::multi]   single window run_on_image failed: {}", e); failed_groups += 1; continue; }
+                Ok(v) => {
+                    eprintln!("[manual::multi]   single window patches={}", v.len());
+                    v
+                }
+                Err(e) => {
+                    eprintln!("[manual::multi]   single window run_on_image failed: {}", e);
+                    failed_groups += 1;
+                    continue;
+                }
             };
             for (pi, (patch_img, bounds_canvas, quad_opt)) in patches.into_iter().enumerate() {
-                let [bx,by,bw,bh] = bounds_canvas;
-                eprintln!("[manual::multi]   patch {}: bounds_canvas [{:.1},{:.1},{:.1},{:.1}] patch {}x{} quad={:?}", pi, bx,by,bw,bh, patch_img.width(), patch_img.height(), quad_opt.map(|q| q.points));
+                let [bx, by, bw, bh] = bounds_canvas;
+                eprintln!(
+                    "[manual::multi]   patch {}: bounds_canvas [{:.1},{:.1},{:.1},{:.1}] patch {}x{} quad={:?}",
+                    pi,
+                    bx,
+                    by,
+                    bw,
+                    bh,
+                    patch_img.width(),
+                    patch_img.height(),
+                    quad_opt.map(|q| q.points)
+                );
                 // Map canvas bounds back to image coords
                 let orig_x = bx - dx as f32 + x_src as f32;
                 let orig_y = by - dy as f32 + y_src as f32;
@@ -1319,28 +1816,52 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
                 let clip_y0 = orig_y.max(0.0);
                 let clip_x1 = (orig_x + bw).min(img_w_f);
                 let clip_y1 = (orig_y + bh).min(img_h_f);
-                if clip_x1 <= clip_x0 || clip_y1 <= clip_y0 { eprintln!("[manual::multi]     skip zero clip"); continue; }
+                if clip_x1 <= clip_x0 || clip_y1 <= clip_y0 {
+                    eprintln!("[manual::multi]     skip zero clip");
+                    continue;
+                }
                 let new_w = clip_x1 - clip_x0;
                 let new_h = clip_y1 - clip_y0;
                 let crop_x = (clip_x0 - orig_x).round().max(0.0) as u32;
                 let crop_y = (clip_y0 - orig_y).round().max(0.0) as u32;
-                let clipped = if crop_x!=0 || crop_y!=0 || new_w as u32 != patch_img.width() || new_h as u32 != patch_img.height() {
+                let clipped = if crop_x != 0
+                    || crop_y != 0
+                    || new_w as u32 != patch_img.width()
+                    || new_h as u32 != patch_img.height()
+                {
                     let cw = (new_w as u32).min(patch_img.width().saturating_sub(crop_x));
                     let ch = (new_h as u32).min(patch_img.height().saturating_sub(crop_y));
-                    if cw==0||ch==0 { continue; }
+                    if cw == 0 || ch == 0 {
+                        continue;
+                    }
                     image::imageops::crop_imm(&patch_img, crop_x, crop_y, cw, ch).to_image()
-                } else { patch_img };
+                } else {
+                    patch_img
+                };
                 let bounds = [clip_x0, clip_y0, new_w, new_h];
                 let orig_quad = quad_opt.map(|q| {
                     let mut nq = q;
-                    for pt in &mut nq.points { pt[0] += x_src as f32 - dx as f32; pt[1] += y_src as f32 - dy as f32; }
+                    for pt in &mut nq.points {
+                        pt[0] += x_src as f32 - dx as f32;
+                        pt[1] += y_src as f32 - dy as f32;
+                    }
                     nq
                 });
-                eprintln!("[manual::multi]     -> per_image idx={} bounds={:?} quad={:?} clipped {}x{}", ig.idx, bounds, orig_quad.map(|q| q.points), clipped.width(), clipped.height());
+                eprintln!(
+                    "[manual::multi]     -> per_image idx={} bounds={:?} quad={:?} clipped {}x{}",
+                    ig.idx,
+                    bounds,
+                    orig_quad.map(|q| q.points),
+                    clipped.width(),
+                    clipped.height()
+                );
                 // For single distinct, all sels share same idx, but we push per patch with that idx
                 // Use bounds to decide which sel? Actually per_image should be per distinct idx, but patches may correspond to each sel quad
                 // We'll assign to ig.idx (since all same)
-                per_image.entry(ig.idx).or_default().push((clipped, bounds, orig_quad));
+                per_image
+                    .entry(ig.idx)
+                    .or_default()
+                    .push((clipped, bounds, orig_quad));
             }
         } else {
             // Multi-image stitch arbitrary N
@@ -1348,21 +1869,35 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
             // Compute per-image h_span already, sum = total_h
             let total_span: u32 = img_groups.iter().map(|g| g.h_span).sum();
             let extra_needed = CANVAS.saturating_sub(total_span);
-            eprintln!("[manual::multi]   total_span={} extra_needed={}", total_span, extra_needed);
+            eprintln!(
+                "[manual::multi]   total_span={} extra_needed={}",
+                total_span, extra_needed
+            );
             // Distribute extra_needed based on avail per image
             // avail per image: top = min_y, bottom = img_h - max_y
             let mut extra_alloc: Vec<u32> = vec![0; img_groups.len()];
             if extra_needed > 0 {
                 // Simple distribution: split extra_needed equally, capped by avail
                 // First compute total avail
-                let avails: Vec<u32> = img_groups.iter().map(|g| g.min_y + (g.img_h - g.max_y) ).collect();
+                let avails: Vec<u32> = img_groups
+                    .iter()
+                    .map(|g| g.min_y + (g.img_h - g.max_y))
+                    .collect();
                 let total_avail: u32 = avails.iter().sum();
-                eprintln!("[manual::multi]   avails {:?} total_avail {}", avails, total_avail);
+                eprintln!(
+                    "[manual::multi]   avails {:?} total_avail {}",
+                    avails, total_avail
+                );
                 if total_avail >= extra_needed {
                     // Proportional to avail
                     let mut remaining = extra_needed;
                     for (i, avail) in avails.iter().enumerate() {
-                        let share = if i == avails.len()-1 { remaining } else { (extra_needed as f32 * *avail as f32 / total_avail as f32).round() as u32 };
+                        let share = if i == avails.len() - 1 {
+                            remaining
+                        } else {
+                            (extra_needed as f32 * *avail as f32 / total_avail as f32).round()
+                                as u32
+                        };
                         let take = share.min(*avail).min(remaining);
                         extra_alloc[i] = take;
                         remaining = remaining.saturating_sub(take);
@@ -1376,8 +1911,10 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
                             extra_alloc[idx] += take;
                             remaining -= take;
                         }
-                        idx = (idx+1)%avails.len();
-                        if idx==0 && extra_alloc.iter().zip(&avails).all(|(a, av)| *a==*av) { break; }
+                        idx = (idx + 1) % avails.len();
+                        if idx == 0 && extra_alloc.iter().zip(&avails).all(|(a, av)| *a == *av) {
+                            break;
+                        }
                     }
                 } else {
                     // Not enough avail to fill, will need mirror gap after
@@ -1406,21 +1943,21 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
                 let extra = extra_alloc[i];
                 let h_src = ig.h_span + extra;
                 // split extra into top/bottom: for first image, extra comes from top (min_y), for last from bottom, middle split
-                let (top_extra, bottom_extra) = if img_groups.len()==1 {
+                let (top_extra, bottom_extra) = if img_groups.len() == 1 {
                     // already handled
-                    (0,0)
-                } else if i==0 {
+                    (0, 0)
+                } else if i == 0 {
                     // first: expand upward as much as possible (up to min_y)
                     let top = extra.min(ig.min_y);
                     let bottom = extra - top; // should be 0 but if top capped, remainder from bottom? but first bottom is at seam, shouldn't expand downward beyond max_y? Actually extra for first should be top only, so bottom stays 0. If avail_top insufficient, we already limited extra to avail, so bottom 0.
                     (top, bottom)
-                } else if i==img_groups.len()-1 {
+                } else if i == img_groups.len() - 1 {
                     let bottom = extra.min(ig.img_h - ig.max_y);
                     let top = extra - bottom;
                     (top, bottom)
                 } else {
                     // middle: split equally
-                    let top = (extra/2).min(ig.min_y);
+                    let top = (extra / 2).min(ig.min_y);
                     let bottom = (extra - top).min(ig.img_h - ig.max_y);
                     let top2 = extra - bottom; // adjust if bottom capped
                     let top2 = top2.min(ig.min_y);
@@ -1430,26 +1967,69 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
                 // Ensure y_src + h_src <= img_h
                 let y_src = y_src.clamp(0, ig.img_h as i32 - h_src as i32).max(0);
                 let w_src = CANVAS.min(ig.img_w);
-                let mut x_src = (ig.cx - w_src as f32*0.5).round() as i32;
+                let mut x_src = (ig.cx - w_src as f32 * 0.5).round() as i32;
                 x_src = x_src.clamp(0, ig.img_w as i32 - w_src as i32).max(0);
-                eprintln!("[manual::multi]   piece win idx={} h_span={} extra={} top={} bottom={} y_src={} h_src={} x_src={} w_src={} off_y={} [{},{}]", ig.idx, ig.h_span, extra, top_extra, bottom_extra, y_src, h_src, x_src, w_src, off_y, ig.min_y, ig.max_y);
-                pieces_win.push(PieceWin { idx: ig.idx, path: ig.path.clone(), img_w: ig.img_w, img_h: ig.img_h, x_src, y_src, w_src, h_src, off_y });
+                eprintln!(
+                    "[manual::multi]   piece win idx={} h_span={} extra={} top={} bottom={} y_src={} h_src={} x_src={} w_src={} off_y={} [{},{}]",
+                    ig.idx,
+                    ig.h_span,
+                    extra,
+                    top_extra,
+                    bottom_extra,
+                    y_src,
+                    h_src,
+                    x_src,
+                    w_src,
+                    off_y,
+                    ig.min_y,
+                    ig.max_y
+                );
+                pieces_win.push(PieceWin {
+                    idx: ig.idx,
+                    path: ig.path.clone(),
+                    img_w: ig.img_w,
+                    img_h: ig.img_h,
+                    x_src,
+                    y_src,
+                    w_src,
+                    h_src,
+                    off_y,
+                });
                 off_y += h_src;
             }
             let total_h_stitched: u32 = pieces_win.iter().map(|p| p.h_src).sum();
-            eprintln!("[manual::multi]   total_h_stitched={} off_y final {}", total_h_stitched, off_y);
+            eprintln!(
+                "[manual::multi]   total_h_stitched={} off_y final {}",
+                total_h_stitched, off_y
+            );
             // Build stitched canvas 512x512
             let mut stitched = image::RgbaImage::new(CANVAS, CANVAS);
             // Vertical offset to center if total <512 (mirror pad needed)
-            let vert_offset = if total_h_stitched < CANVAS { (CANVAS - total_h_stitched)/2 } else { 0 };
-            eprintln!("[manual::multi]   vert_offset for centering stitched block {} total {} <512 {}", vert_offset, total_h_stitched, total_h_stitched < CANVAS);
+            let vert_offset = if total_h_stitched < CANVAS {
+                (CANVAS - total_h_stitched) / 2
+            } else {
+                0
+            };
+            eprintln!(
+                "[manual::multi]   vert_offset for centering stitched block {} total {} <512 {}",
+                vert_offset,
+                total_h_stitched,
+                total_h_stitched < CANVAS
+            );
             for pw in &pieces_win {
                 let full = &image_cache.get(&pw.path).unwrap().0;
-                let region = image::imageops::crop_imm(full, pw.x_src as u32, pw.y_src as u32, pw.w_src, pw.h_src).to_image();
+                let region = image::imageops::crop_imm(
+                    full,
+                    pw.x_src as u32,
+                    pw.y_src as u32,
+                    pw.w_src,
+                    pw.h_src,
+                )
+                .to_image();
                 // Horizontal pad to 512 if w_src <512 via reflect both sides centered
                 let mut region_padded = image::RgbaImage::new(CANVAS, pw.h_src);
                 if pw.w_src < CANVAS {
-                    let dx = (CANVAS - pw.w_src)/2;
+                    let dx = (CANVAS - pw.w_src) / 2;
                     // reflect fill
                     for y in 0..pw.h_src as i64 {
                         for x in 0..CANVAS as i64 {
@@ -1463,7 +2043,10 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
                 }
                 let dst_y = vert_offset + pw.off_y;
                 image::imageops::replace(&mut stitched, &region_padded, 0, dst_y as i64);
-                eprintln!("[manual::multi]   placed piece idx={} w_src={} h_src={} x_src={} y_src={} off_y={} dst_y={} -> stitched", pw.idx, pw.w_src, pw.h_src, pw.x_src, pw.y_src, pw.off_y, dst_y);
+                eprintln!(
+                    "[manual::multi]   placed piece idx={} w_src={} h_src={} x_src={} y_src={} off_y={} dst_y={} -> stitched",
+                    pw.idx, pw.w_src, pw.h_src, pw.x_src, pw.y_src, pw.off_y, dst_y
+                );
             }
             if total_h_stitched < CANVAS {
                 // Create a temporary copy of the stitched block region for reflection
@@ -1481,7 +2064,10 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
                     }
                 }
                 stitched = filled;
-                eprintln!("[manual::multi]   vertical mirror filled gaps total {} vert_offset {}", total_h_stitched, vert_offset);
+                eprintln!(
+                    "[manual::multi]   vertical mirror filled gaps total {} vert_offset {}",
+                    total_h_stitched, vert_offset
+                );
             }
             // Build mask quads: each sel in group as quad in stitched coords
             let mut quads_canvas: Vec<Quad> = Vec::new();
@@ -1490,88 +2076,178 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
                 // find piece win for this sel's idx
                 let pw = pieces_win.iter().find(|p| p.idx == s.idx).unwrap();
                 // For x: sel x0 - pw.x_src + dx where dx = (512 - pw.w_src)/2 if w_src<512 else 0
-                let dx = if pw.w_src < CANVAS { (CANVAS - pw.w_src)/2 } else { 0 };
+                let dx = if pw.w_src < CANVAS {
+                    (CANVAS - pw.w_src) / 2
+                } else {
+                    0
+                };
                 let qx = s.x0 as f32 - pw.x_src as f32 + dx as f32;
                 let qy = s.y0 as f32 - pw.y_src as f32 + vert_offset as f32 + pw.off_y as f32;
-                let quad = Quad { points: [[qx, qy],[qx+s.w as f32, qy],[qx+s.w as f32, qy+s.h as f32],[qx, qy+s.h as f32]] };
-                eprintln!("[manual::multi]   sel idx={} [{},{},{}x{}] -> canvas quad {:?} (x_src {}, y_src {}, off_y {}, dx {}, vert_offset {})", s.idx, s.x0, s.y0, s.w, s.h, quad.points, pw.x_src, pw.y_src, pw.off_y, dx, vert_offset);
+                let quad = Quad {
+                    points: [
+                        [qx, qy],
+                        [qx + s.w as f32, qy],
+                        [qx + s.w as f32, qy + s.h as f32],
+                        [qx, qy + s.h as f32],
+                    ],
+                };
+                eprintln!(
+                    "[manual::multi]   sel idx={} [{},{},{}x{}] -> canvas quad {:?} (x_src {}, y_src {}, off_y {}, dx {}, vert_offset {})",
+                    s.idx,
+                    s.x0,
+                    s.y0,
+                    s.w,
+                    s.h,
+                    quad.points,
+                    pw.x_src,
+                    pw.y_src,
+                    pw.off_y,
+                    dx,
+                    vert_offset
+                );
                 quads_canvas.push(quad);
             }
-            let rect = [0.0,0.0,CANVAS as f32, CANVAS as f32];
+            let rect = [0.0, 0.0, CANVAS as f32, CANVAS as f32];
             let patches = match engine.run_on_image(&stitched, rect, &quads_canvas) {
-                Ok(v) => { eprintln!("[manual::multi]   stitch patches={}", v.len()); v },
-                Err(e) => { eprintln!("[manual::multi]   stitch run_on_image failed: {}", e); failed_groups += 1; continue; }
+                Ok(v) => {
+                    eprintln!("[manual::multi]   stitch patches={}", v.len());
+                    v
+                }
+                Err(e) => {
+                    eprintln!("[manual::multi]   stitch run_on_image failed: {}", e);
+                    failed_groups += 1;
+                    continue;
+                }
             };
             for (pi, (patch_img, bounds_canvas, quad_opt)) in patches.into_iter().enumerate() {
-                let [bx,by,bw,bh] = bounds_canvas;
-                eprintln!("[manual::multi]   patch {}: bounds_canvas [{:.1},{:.1},{:.1},{:.1}] patch {}x{} quad={:?}", pi, bx,by,bw,bh, patch_img.width(), patch_img.height(), quad_opt.map(|q| q.points));
+                let [bx, by, bw, bh] = bounds_canvas;
+                eprintln!(
+                    "[manual::multi]   patch {}: bounds_canvas [{:.1},{:.1},{:.1},{:.1}] patch {}x{} quad={:?}",
+                    pi,
+                    bx,
+                    by,
+                    bw,
+                    bh,
+                    patch_img.width(),
+                    patch_img.height(),
+                    quad_opt.map(|q| q.points)
+                );
                 // Map bounds_canvas back to original image: find which piece win contains the patch center or overlap
                 // Use quad_piece mapping via pi index if available, else by center
                 // Since we built quads_canvas in group order (same as group sels order), pi corresponds to group[pi] sel
-                let s_opt = if pi < group.len() { Some(&group[pi]) } else { None };
+                let s_opt = if pi < group.len() {
+                    Some(&group[pi])
+                } else {
+                    None
+                };
                 let target_pw: &PieceWin = if let Some(s) = s_opt {
                     pieces_win.iter().find(|p| p.idx == s.idx).unwrap()
                 } else {
                     // fallback by cy
-                    let cy = by + bh*0.5;
+                    let cy = by + bh * 0.5;
                     let mut found: Option<&PieceWin> = None;
                     for pw in &pieces_win {
                         let y0 = vert_offset as f32 + pw.off_y as f32;
                         let y1 = y0 + pw.h_src as f32;
-                        if cy >= y0 && cy < y1 { found = Some(pw); break; }
+                        if cy >= y0 && cy < y1 {
+                            found = Some(pw);
+                            break;
+                        }
                     }
                     match found {
-                        Some(v)=>v,
-                        None=> {
-                            let mut best: Option<&PieceWin>=None;
-                            let mut best_overlap=0.0;
+                        Some(v) => v,
+                        None => {
+                            let mut best: Option<&PieceWin> = None;
+                            let mut best_overlap = 0.0;
                             for pw in &pieces_win {
                                 let y0 = vert_offset as f32 + pw.off_y as f32;
                                 let y1 = y0 + pw.h_src as f32;
-                                let overlap = (by+bh).min(y1) - by.max(y0);
-                                if overlap > best_overlap { best_overlap=overlap; best=Some(pw); }
+                                let overlap = (by + bh).min(y1) - by.max(y0);
+                                if overlap > best_overlap {
+                                    best_overlap = overlap;
+                                    best = Some(pw);
+                                }
                             }
-                            match best { Some(v)=>v, None=>continue }
+                            match best {
+                                Some(v) => v,
+                                None => continue,
+                            }
                         }
                     }
                 };
-                let dx = if target_pw.w_src < CANVAS { (CANVAS - target_pw.w_src)/2 } else { 0 };
+                let dx = if target_pw.w_src < CANVAS {
+                    (CANVAS - target_pw.w_src) / 2
+                } else {
+                    0
+                };
                 let orig_x = bx - dx as f32 + target_pw.x_src as f32;
-                let orig_y = by - vert_offset as f32 - target_pw.off_y as f32 + target_pw.y_src as f32;
+                let orig_y =
+                    by - vert_offset as f32 - target_pw.off_y as f32 + target_pw.y_src as f32;
                 let img_w_f = target_pw.img_w as f32;
                 let img_h_f = target_pw.img_h as f32;
                 let clip_x0 = orig_x.max(0.0);
                 let clip_y0 = orig_y.max(0.0);
                 let clip_x1 = (orig_x + bw).min(img_w_f);
                 let clip_y1 = (orig_y + bh).min(img_h_f);
-                if clip_x1 <= clip_x0 || clip_y1 <= clip_y0 { eprintln!("[manual::multi]     skip zero clip orig [{:.1},{:.1}] clip [{:.1},{:.1}]-[{:.1},{:.1}]", orig_x, orig_y, clip_x0, clip_y0, clip_x1, clip_y1); continue; }
+                if clip_x1 <= clip_x0 || clip_y1 <= clip_y0 {
+                    eprintln!(
+                        "[manual::multi]     skip zero clip orig [{:.1},{:.1}] clip [{:.1},{:.1}]-[{:.1},{:.1}]",
+                        orig_x, orig_y, clip_x0, clip_y0, clip_x1, clip_y1
+                    );
+                    continue;
+                }
                 let new_w = clip_x1 - clip_x0;
                 let new_h = clip_y1 - clip_y0;
                 let crop_x = (clip_x0 - orig_x).round().max(0.0) as u32;
                 let crop_y = (clip_y0 - orig_y).round().max(0.0) as u32;
-                let clipped = if crop_x!=0 || crop_y!=0 || new_w as u32 != patch_img.width() || new_h as u32 != patch_img.height() {
+                let clipped = if crop_x != 0
+                    || crop_y != 0
+                    || new_w as u32 != patch_img.width()
+                    || new_h as u32 != patch_img.height()
+                {
                     let cw = (new_w as u32).min(patch_img.width().saturating_sub(crop_x));
                     let ch = (new_h as u32).min(patch_img.height().saturating_sub(crop_y));
-                    if cw==0||ch==0 { continue; }
+                    if cw == 0 || ch == 0 {
+                        continue;
+                    }
                     image::imageops::crop_imm(&patch_img, crop_x, crop_y, cw, ch).to_image()
-                } else { patch_img };
+                } else {
+                    patch_img
+                };
                 let bounds = [clip_x0, clip_y0, new_w, new_h];
                 let orig_quad = quad_opt.map(|q| {
                     let mut nq = q;
                     for pt in &mut nq.points {
                         pt[0] = pt[0] - dx as f32 + target_pw.x_src as f32;
-                        pt[1] = pt[1] - vert_offset as f32 - target_pw.off_y as f32 + target_pw.y_src as f32;
+                        pt[1] = pt[1] - vert_offset as f32 - target_pw.off_y as f32
+                            + target_pw.y_src as f32;
                     }
                     nq
                 });
-                eprintln!("[manual::multi]     -> per_image idx={} bounds={:?} quad={:?} clipped {}x{} (orig_x {:.1} orig_y {:.1} dx {} vert_offset {})", target_pw.idx, bounds, orig_quad.map(|q| q.points), clipped.width(), clipped.height(), orig_x, orig_y, dx, vert_offset);
-                per_image.entry(target_pw.idx).or_default().push((clipped, bounds, orig_quad));
+                eprintln!(
+                    "[manual::multi]     -> per_image idx={} bounds={:?} quad={:?} clipped {}x{} (orig_x {:.1} orig_y {:.1} dx {} vert_offset {})",
+                    target_pw.idx,
+                    bounds,
+                    orig_quad.map(|q| q.points),
+                    clipped.width(),
+                    clipped.height(),
+                    orig_x,
+                    orig_y,
+                    dx,
+                    vert_offset
+                );
+                per_image
+                    .entry(target_pw.idx)
+                    .or_default()
+                    .push((clipped, bounds, orig_quad));
             }
         }
     }
     let mut out: GroupedInpaint = Vec::new();
-    for (idx, v) in per_image { out.push((idx, v)); }
-    out.sort_by_key(|(idx,_)| *idx);
+    for (idx, v) in per_image {
+        out.push((idx, v));
+    }
+    out.sort_by_key(|(idx, _)| *idx);
     if out.is_empty() && failed_groups > 0 {
         return Err(format!("all {failed_groups} inpaint group(s) failed"));
     }
@@ -1579,15 +2255,27 @@ fn run_inpaint_selection(engine: &InpaintEngine, data: Vec<ManualInpaintSelectio
 }
 
 #[cfg(feature = "inpaint")]
-pub fn handle_inpaint_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<InpaintEngine, String>) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+pub fn handle_inpaint_engine_ready(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    result: Result<InpaintEngine, String>,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     match result {
         Ok(engine) => {
-            app.engines.set_shared_inpaint(engine.backend(), engine.clone());
+            app.engines
+                .set_shared_inpaint(engine.backend(), engine.clone());
             let data = app.tabs[idx].pending_manual_multi.take();
-            if let Some(d) = data { return start_inpaint_selection(app, tab_id, engine, d); }
+            if let Some(d) = data {
+                return start_inpaint_selection(app, tab_id, engine, d);
+            }
             let bg = app.tabs[idx].pending_background_stitch.take();
-            if let Some((job, pad, prev, next)) = bg { return start_background_stitch(app, tab_id, engine, job, pad, prev, next); }
+            if let Some((job, pad, prev, next)) = bg {
+                return start_background_stitch(app, tab_id, engine, job, pad, prev, next);
+            }
             app.tabs[idx].inpainting = false;
             Task::none()
         }
@@ -1598,11 +2286,69 @@ pub fn handle_inpaint_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId
             app.tabs[idx].status = e.clone();
             // free queue weight for manual inpaint (any backend) on build failure
             let mut freed = false;
-            if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea)).is_some() { freed = true; }
-            if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama)).is_some() { freed = true; }
-            if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot)).is_some() { freed = true; }
-            if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::ShiftMap)).is_some() { freed = true; }
-            if app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic)).is_some() { freed = true; }
+            if app
+                .engines
+                .queue
+                .complete(
+                    owner_of(tab_id),
+                    crate::app::queue::JobKind::Inpaint(
+                        easyscanlate_settings::InpaintBackend::Telea,
+                    ),
+                )
+                .is_some()
+            {
+                freed = true;
+            }
+            if app
+                .engines
+                .queue
+                .complete(
+                    owner_of(tab_id),
+                    crate::app::queue::JobKind::Inpaint(
+                        easyscanlate_settings::InpaintBackend::Lama,
+                    ),
+                )
+                .is_some()
+            {
+                freed = true;
+            }
+            if app
+                .engines
+                .queue
+                .complete(
+                    owner_of(tab_id),
+                    crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
+                )
+                .is_some()
+            {
+                freed = true;
+            }
+            if app
+                .engines
+                .queue
+                .complete(
+                    owner_of(tab_id),
+                    crate::app::queue::JobKind::Inpaint(
+                        easyscanlate_settings::InpaintBackend::ShiftMap,
+                    ),
+                )
+                .is_some()
+            {
+                freed = true;
+            }
+            if app
+                .engines
+                .queue
+                .complete(
+                    owner_of(tab_id),
+                    crate::app::queue::JobKind::Inpaint(
+                        easyscanlate_settings::InpaintBackend::Harmonic,
+                    ),
+                )
+                .is_some()
+            {
+                freed = true;
+            }
             if freed {
                 let promote = crate::app::queue::dispatch_pending(app);
                 crate::app::queue::refresh_queued_statuses(app);
@@ -1613,8 +2359,16 @@ pub fn handle_inpaint_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId
     }
 }
 #[cfg(feature = "inpaint")]
-pub fn handle_auto_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, backend: InpaintBackend, result: Result<InpaintEngine, String>) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+pub fn handle_auto_engine_ready(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    backend: InpaintBackend,
+    result: Result<InpaintEngine, String>,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     match result {
         Ok(engine) => {
             app.tabs[idx].auto_inpaint_loading = false;
@@ -1622,17 +2376,23 @@ pub fn handle_auto_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, b
                 InpaintBackend::Telea => {
                     app.engines.auto_telea = Some(engine.clone());
                     let jobs = app.tabs[idx].pending_auto_telea_jobs.take();
-                    if let Some(j) = jobs { return dispatch_auto(app, tab_id, j, InpaintBackend::Telea); }
+                    if let Some(j) = jobs {
+                        return dispatch_auto(app, tab_id, j, InpaintBackend::Telea);
+                    }
                 }
                 InpaintBackend::Lama => {
                     app.engines.auto_lama = Some(engine.clone());
                     let jobs = app.tabs[idx].pending_auto_lama_jobs.take();
-                    if let Some(j) = jobs { return dispatch_auto(app, tab_id, j, InpaintBackend::Lama); }
+                    if let Some(j) = jobs {
+                        return dispatch_auto(app, tab_id, j, InpaintBackend::Lama);
+                    }
                 }
                 InpaintBackend::Aot => {
                     app.engines.auto_aot = Some(engine.clone());
                     let jobs = app.tabs[idx].pending_auto_aot_jobs.take();
-                    if let Some(j) = jobs { return dispatch_auto(app, tab_id, j, InpaintBackend::Aot); }
+                    if let Some(j) = jobs {
+                        return dispatch_auto(app, tab_id, j, InpaintBackend::Aot);
+                    }
                 }
                 // ShiftMap is manual-only: cached like the other auto
                 // engines so the match stays exhaustive; the auto pipeline
@@ -1640,12 +2400,16 @@ pub fn handle_auto_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, b
                 InpaintBackend::ShiftMap => {
                     app.engines.auto_shiftmap = Some(engine.clone());
                     let jobs = app.tabs[idx].pending_auto_shiftmap_jobs.take();
-                    if let Some(j) = jobs { return dispatch_auto(app, tab_id, j, InpaintBackend::ShiftMap); }
+                    if let Some(j) = jobs {
+                        return dispatch_auto(app, tab_id, j, InpaintBackend::ShiftMap);
+                    }
                 }
                 InpaintBackend::Harmonic => {
                     app.engines.auto_harmonic = Some(engine.clone());
                     let jobs = app.tabs[idx].pending_auto_harmonic_jobs.take();
-                    if let Some(j) = jobs { return dispatch_auto(app, tab_id, j, InpaintBackend::Harmonic); }
+                    if let Some(j) = jobs {
+                        return dispatch_auto(app, tab_id, j, InpaintBackend::Harmonic);
+                    }
                 }
             }
             Task::none()
@@ -1661,19 +2425,33 @@ pub fn handle_auto_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, b
             app.tabs[idx].auto_inpaint_loading = false;
             app.tabs[idx].status = format!("Auto-inpaint engine failed: {e}");
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-            { app.tabs[idx].pipeline_active = false; }
+            {
+                app.tabs[idx].pipeline_active = false;
+            }
             // free queue weight (build failed) and promote
             let kind = crate::app::queue::JobKind::Inpaint(backend);
             app.engines.queue.complete(owner_of(tab_id), kind);
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
-            return Task::batch([promote, super::error::show("Auto-inpainting couldn't start", e)]);
+            return Task::batch([
+                promote,
+                super::error::show("Auto-inpainting couldn't start", e),
+            ]);
         }
     }
 }
 #[cfg(feature = "inpaint")]
-pub fn handle_auto_finished(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, id: easyscanlate_model::EntryId, result: AutoResult) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+pub fn handle_auto_finished(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    index: usize,
+    id: easyscanlate_model::EntryId,
+    result: AutoResult,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     app.tabs[idx].auto_inpaint_pending = app.tabs[idx].auto_inpaint_pending.saturating_sub(1);
     let pending = app.tabs[idx].auto_inpaint_pending;
     let total = app.tabs[idx].auto_inpaint_total;
@@ -1686,7 +2464,9 @@ pub fn handle_auto_finished(app: &mut App, tab_id: crate::app::tab::TabId, index
                 let done = total.saturating_sub(pending);
                 let failed = app.tabs[idx].auto_inpaint_failed;
                 app.tabs[idx].status = if failed > 0 {
-                    format!("Auto-inpaint (Telea): {done} of {total} done, {failed} failed ({pending} remaining).")
+                    format!(
+                        "Auto-inpaint (Telea): {done} of {total} done, {failed} failed ({pending} remaining)."
+                    )
                 } else {
                     format!("Auto-inpaint (Telea): {done} of {total} done ({pending} remaining).")
                 };
@@ -1699,7 +2479,9 @@ pub fn handle_auto_finished(app: &mut App, tab_id: crate::app::tab::TabId, index
                 return finish_auto_stream(app, tab_id, idx, "Telea");
             } else {
                 let done = total.saturating_sub(pending);
-                app.tabs[idx].status = format!("Auto-inpaint (Telea): {done} of {total} done, {failed} failed ({pending} remaining; last: {index}:{id:?}: {e}).");
+                app.tabs[idx].status = format!(
+                    "Auto-inpaint (Telea): {done} of {total} done, {failed} failed ({pending} remaining; last: {index}:{id:?}: {e})."
+                );
             }
         }
     }
@@ -1716,18 +2498,53 @@ pub fn handle_auto_stream_run(
     tab_id: crate::app::tab::TabId,
     result: Result<AutoStreamItem, String>,
 ) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     app.tabs[idx].auto_inpaint_pending = app.tabs[idx].auto_inpaint_pending.saturating_sub(1);
     let pending = app.tabs[idx].auto_inpaint_pending;
     let total = app.tabs[idx].auto_inpaint_total;
     // Backend label for status: infer from which queue weight is held.
-    let label = if app.engines.queue.running_for(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama)).is_some() {
+    let label = if app
+        .engines
+        .queue
+        .running_for(
+            owner_of(tab_id),
+            crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
+        )
+        .is_some()
+    {
         "LaMa"
-    } else if app.engines.queue.running_for(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot)).is_some() {
+    } else if app
+        .engines
+        .queue
+        .running_for(
+            owner_of(tab_id),
+            crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
+        )
+        .is_some()
+    {
         "AOT-GAN"
-    } else if app.engines.queue.running_for(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::ShiftMap)).is_some() {
+    } else if app
+        .engines
+        .queue
+        .running_for(
+            owner_of(tab_id),
+            crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::ShiftMap),
+        )
+        .is_some()
+    {
         "ShiftMap"
-    } else if app.engines.queue.running_for(owner_of(tab_id), crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic)).is_some() {
+    } else if app
+        .engines
+        .queue
+        .running_for(
+            owner_of(tab_id),
+            crate::app::queue::JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic),
+        )
+        .is_some()
+    {
         "Harmonic"
     } else {
         "Telea"
@@ -1742,7 +2559,9 @@ pub fn handle_auto_stream_run(
                 let done = total.saturating_sub(pending);
                 let failed = app.tabs[idx].auto_inpaint_failed;
                 app.tabs[idx].status = if failed > 0 {
-                    format!("Auto-inpaint ({label}): {done} of {total} done, {failed} failed ({pending} remaining).")
+                    format!(
+                        "Auto-inpaint ({label}): {done} of {total} done, {failed} failed ({pending} remaining)."
+                    )
                 } else {
                     format!("Auto-inpaint ({label}): {done} of {total} done ({pending} remaining).")
                 };
@@ -1754,7 +2573,9 @@ pub fn handle_auto_stream_run(
                     return finish_auto_stream(app, tab_id, idx, label);
                 }
                 let done = total.saturating_sub(pending);
-                app.tabs[idx].status = format!("Auto-inpaint ({label}): {done} of {total} done, {failed} failed ({pending} remaining; last: {e}).");
+                app.tabs[idx].status = format!(
+                    "Auto-inpaint ({label}): {done} of {total} done, {failed} failed ({pending} remaining; last: {e})."
+                );
             }
         },
         Err(e) => {
@@ -1764,7 +2585,9 @@ pub fn handle_auto_stream_run(
                 return finish_auto_stream(app, tab_id, idx, label);
             }
             let done = total.saturating_sub(pending);
-            app.tabs[idx].status = format!("Auto-inpaint ({label}): {done} of {total} done, {failed} failed ({pending} remaining; dispatch: {e}).");
+            app.tabs[idx].status = format!(
+                "Auto-inpaint ({label}): {done} of {total} done, {failed} failed ({pending} remaining; dispatch: {e})."
+            );
         }
     }
     Task::none()
@@ -1778,12 +2601,18 @@ pub fn handle_auto_stream_failed(
     tab_id: crate::app::tab::TabId,
     e: String,
 ) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     if app.tabs[idx].auto_inpaint_pending > 0 {
         let remaining = app.tabs[idx].auto_inpaint_pending;
         app.tabs[idx].auto_inpaint_failed += remaining;
         app.tabs[idx].auto_inpaint_pending = 0;
-        let (total, failed) = (app.tabs[idx].auto_inpaint_total, app.tabs[idx].auto_inpaint_failed);
+        let (total, failed) = (
+            app.tabs[idx].auto_inpaint_total,
+            app.tabs[idx].auto_inpaint_failed,
+        );
         #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
         {
             app.tabs[idx].pipeline_active = false;
@@ -1812,7 +2641,10 @@ fn start_auto_stream(
     label: &str,
     _backend: InpaintBackend,
 ) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     let total = jobs.len();
     app.tabs[idx].status = format!("Auto-inpaint ({label}) 0 of {total} done...");
     let tab = &app.tabs[idx];
@@ -1820,12 +2652,16 @@ fn start_auto_stream(
         .into_iter()
         .map(|job| {
             let prev = if job.index > 0 {
-                tab.images.get(job.index - 1).and_then(|img| tab.project.image(img.image_id).map(|m| m.path.clone()))
+                tab.images
+                    .get(job.index - 1)
+                    .and_then(|img| tab.project.image(img.image_id).map(|m| m.path.clone()))
             } else {
                 None
             };
             let next = if job.index + 1 < tab.images.len() {
-                tab.images.get(job.index + 1).and_then(|img| tab.project.image(img.image_id).map(|m| m.path.clone()))
+                tab.images
+                    .get(job.index + 1)
+                    .and_then(|img| tab.project.image(img.image_id).map(|m| m.path.clone()))
             } else {
                 None
             };
@@ -1834,45 +2670,66 @@ fn start_auto_stream(
         .collect();
     let tid = tab_id;
     Task::stream(
-        iced::stream::try_channel(1, move |mut sender: iced::futures::channel::mpsc::Sender<Message>| async move {
-            for (job, prev_path, next_path) in enriched {
-                let engine_clone = engine.clone();
-                let jidx = job.index;
-                let jid = job.id;
-                let res = tokio::task::spawn_blocking(move || {
-                    run_auto_inpaint_job(&engine_clone, &job, pad, prev_path.as_deref(), next_path.as_deref())
-                })
-                .await
-                .unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")));
-                if sender
-                    .send(Message::Tab(
-                        tid,
-                        crate::app::TabMessage::AutoInpaintStreamRun(Ok((jidx, jid, res))),
-                    ))
+        iced::stream::try_channel(
+            1,
+            move |mut sender: iced::futures::channel::mpsc::Sender<Message>| async move {
+                for (job, prev_path, next_path) in enriched {
+                    let engine_clone = engine.clone();
+                    let jidx = job.index;
+                    let jid = job.id;
+                    let res = tokio::task::spawn_blocking(move || {
+                        run_auto_inpaint_job(
+                            &engine_clone,
+                            &job,
+                            pad,
+                            prev_path.as_deref(),
+                            next_path.as_deref(),
+                        )
+                    })
                     .await
-                    .is_err()
-                {
-                    return Ok::<(), String>(());
+                    .unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")));
+                    if sender
+                        .send(Message::Tab(
+                            tid,
+                            crate::app::TabMessage::AutoInpaintStreamRun(Ok((jidx, jid, res))),
+                        ))
+                        .await
+                        .is_err()
+                    {
+                        return Ok::<(), String>(());
+                    }
                 }
-            }
-            Ok::<(), String>(())
-        })
+                Ok::<(), String>(())
+            },
+        )
         .map(move |item: Result<Message, String>| match item {
             Ok(message) => message,
-            Err(e) => Message::Tab(tid, crate::app::TabMessage::AutoInpaintStreamFailed(e.to_string())),
+            Err(e) => Message::Tab(
+                tid,
+                crate::app::TabMessage::AutoInpaintStreamFailed(e.to_string()),
+            ),
         }),
     )
 }
 #[cfg(feature = "inpaint")]
-pub fn handle_inpaint_finished(app: &mut App, tab_id: crate::app::tab::TabId, result: GroupedInpaintResult) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+pub fn handle_inpaint_finished(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    result: GroupedInpaintResult,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     app.tabs[idx].inpainting = false;
     match result {
         Ok(per_image_patches) => {
             let total = commit_manual_patches(app, idx, per_image_patches);
             app.tabs[idx].status = format!("Inpainted {total} region(s) (multi).");
         }
-        Err(e) => { app.tabs[idx].status = format!("Multi inpaint failed: {e}"); }
+        Err(e) => {
+            app.tabs[idx].status = format!("Multi inpaint failed: {e}");
+        }
     }
     // Free queue weight for manual inpaint (any backend) and promote via backfill
     if free_manual_queue(app, tab_id) {
@@ -1893,7 +2750,10 @@ pub fn handle_manual_stream_run(
     tab_id: crate::app::tab::TabId,
     result: Result<ManualStreamPatches, String>,
 ) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     app.tabs[idx].manual_inpaint_pending = app.tabs[idx].manual_inpaint_pending.saturating_sub(1);
     let pending = app.tabs[idx].manual_inpaint_pending;
     let total = app.tabs[idx].manual_inpaint_total;
@@ -1918,7 +2778,9 @@ pub fn handle_manual_stream_run(
             }
             let done = total.saturating_sub(pending);
             app.tabs[idx].status = if failed > 0 {
-                format!("Inpainting: {done} of {total} done, {failed} failed ({pending} remaining).")
+                format!(
+                    "Inpainting: {done} of {total} done, {failed} failed ({pending} remaining)."
+                )
             } else {
                 format!("Inpainting: {done} of {total} done ({pending} remaining).")
             };
@@ -1928,7 +2790,8 @@ pub fn handle_manual_stream_run(
             let failed = app.tabs[idx].manual_inpaint_failed;
             if pending == 0 {
                 app.tabs[idx].inpainting = false;
-                app.tabs[idx].status = format!("Inpaint failed ({e}); {failed} of {total} unit(s) failed.");
+                app.tabs[idx].status =
+                    format!("Inpaint failed ({e}); {failed} of {total} unit(s) failed.");
                 if free_manual_queue(app, tab_id) {
                     let promote = crate::app::queue::dispatch_pending(app);
                     crate::app::queue::refresh_queued_statuses(app);
@@ -1937,43 +2800,80 @@ pub fn handle_manual_stream_run(
                 return Task::none();
             }
             let done = total.saturating_sub(pending);
-            app.tabs[idx].status =
-                format!("Inpainting: {done} of {total} done, {failed} failed ({pending} remaining; last: {e}).");
+            app.tabs[idx].status = format!(
+                "Inpainting: {done} of {total} done, {failed} failed ({pending} remaining; last: {e})."
+            );
         }
     }
     Task::none()
 }
 
 #[cfg(feature = "inpaint")]
-pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<AutoInpaintJob>, backend: InpaintBackend) -> Task<Message> {
-    if jobs.is_empty() { return Task::none(); }
+pub fn dispatch_auto(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    jobs: Vec<AutoInpaintJob>,
+    backend: InpaintBackend,
+) -> Task<Message> {
+    if jobs.is_empty() {
+        return Task::none();
+    }
     // queue gate — weights 1/4/3/4 backfill + priority (cap 5)
     {
         use crate::app::queue::{AcquireResult, JobKind, owner_of};
         let kind = JobKind::Inpaint(backend);
-        let already_reserved = app.engines.queue.running_for(owner_of(tab_id), kind).is_some();
+        let already_reserved = app
+            .engines
+            .queue
+            .running_for(owner_of(tab_id), kind)
+            .is_some();
         if !already_reserved {
-            match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), kind) {
-                AcquireResult::Acquired(_) => {},
+            match app
+                .engines
+                .queue
+                .try_acquire_or_enqueue(owner_of(tab_id), kind)
+            {
+                AcquireResult::Acquired(_) => {}
                 AcquireResult::Queued(_, pos) => {
-                    let idx_tmp = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none() };
+                    let idx_tmp = match app.tabs.iter().position(|t| t.id == tab_id) {
+                        Some(i) => i,
+                        None => return Task::none(),
+                    };
                     // store pending for later dispatch_pending
                     match backend {
-                        InpaintBackend::Telea => app.tabs[idx_tmp].pending_auto_telea_jobs = Some(jobs),
-                        InpaintBackend::Lama => app.tabs[idx_tmp].pending_auto_lama_jobs = Some(jobs),
+                        InpaintBackend::Telea => {
+                            app.tabs[idx_tmp].pending_auto_telea_jobs = Some(jobs)
+                        }
+                        InpaintBackend::Lama => {
+                            app.tabs[idx_tmp].pending_auto_lama_jobs = Some(jobs)
+                        }
                         InpaintBackend::Aot => app.tabs[idx_tmp].pending_auto_aot_jobs = Some(jobs),
-                        InpaintBackend::ShiftMap => app.tabs[idx_tmp].pending_auto_shiftmap_jobs = Some(jobs),
-                        InpaintBackend::Harmonic => app.tabs[idx_tmp].pending_auto_harmonic_jobs = Some(jobs),
+                        InpaintBackend::ShiftMap => {
+                            app.tabs[idx_tmp].pending_auto_shiftmap_jobs = Some(jobs)
+                        }
+                        InpaintBackend::Harmonic => {
+                            app.tabs[idx_tmp].pending_auto_harmonic_jobs = Some(jobs)
+                        }
                     }
-                    app.tabs[idx_tmp].status = format!("Queued {} (pos {}, pool {}/{}) ...", kind.label(), pos, app.engines.queue.used_weight(), crate::app::queue::POOL_CAPACITY);
+                    app.tabs[idx_tmp].status = format!(
+                        "Queued {} (pos {}, pool {}/{}) ...",
+                        kind.label(),
+                        pos,
+                        app.engines.queue.used_weight(),
+                        crate::app::queue::POOL_CAPACITY
+                    );
                     return Task::none();
                 }
             }
         }
     }
-    let radius = easyscanlate_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
+    let radius =
+        easyscanlate_settings::get(|s| s.inpaint_radius.parse::<i32>().unwrap_or(5).max(1));
     let pad = auto_pad_for(backend, radius);
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     let cached: Option<InpaintEngine> = app.engines.shared_inpaint(backend, radius);
     if let Some(engine) = cached {
         // Fresh run resets totals; queue guarantees no concurrent same-tab run.
@@ -1990,31 +2890,70 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
                     InpaintBackend::Harmonic => "Harmonic",
                     _ => unreachable!("parallel arm is Telea/Harmonic only"),
                 };
-                app.tabs[idx].status = format!("Auto-inpaint ({label}) {} regions in parallel...", jobs.len());
-                let neighbor_map: std::collections::HashMap<usize, (Option<String>, Option<String>)> = {
+                app.tabs[idx].status = format!(
+                    "Auto-inpaint ({label}) {} regions in parallel...",
+                    jobs.len()
+                );
+                let neighbor_map: std::collections::HashMap<
+                    usize,
+                    (Option<String>, Option<String>),
+                > = {
                     let mut map = std::collections::HashMap::new();
                     let tab = &app.tabs[idx];
                     for job in &jobs {
-                        let prev = if job.index>0 { tab.images.get(job.index-1).and_then(|img| tab.project.image(img.image_id).map(|m| m.path.clone())) } else { None };
-                        let next = if job.index+1 < tab.images.len() { tab.images.get(job.index+1).and_then(|img| tab.project.image(img.image_id).map(|m| m.path.clone())) } else { None };
+                        let prev = if job.index > 0 {
+                            tab.images.get(job.index - 1).and_then(|img| {
+                                tab.project.image(img.image_id).map(|m| m.path.clone())
+                            })
+                        } else {
+                            None
+                        };
+                        let next = if job.index + 1 < tab.images.len() {
+                            tab.images.get(job.index + 1).and_then(|img| {
+                                tab.project.image(img.image_id).map(|m| m.path.clone())
+                            })
+                        } else {
+                            None
+                        };
                         map.insert(job.index, (prev, next));
                     }
                     map
                 };
-                let tasks: Vec<Task<Message>> = jobs.into_iter().map(|job| {
-                    let engine = engine.clone();
-                    let (prev_path, next_path) = neighbor_map.get(&job.index).cloned().unwrap_or((None, None));
-                    let tid = tab_id;
-                    let jidx = job.index;
-                    let jid = job.id;
-                    Task::perform(
-                        async move {
-                            let res = tokio::task::spawn_blocking(move || run_auto_inpaint_job(&engine, &job, pad, prev_path.as_deref(), next_path.as_deref())).await.unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")));
-                            (jidx, jid, res)
-                        },
-                        move |(jidx, jid, res)| Message::Tab(tid, crate::app::TabMessage::AutoInpaintFinished(jidx, jid, res)),
-                    )
-                }).collect();
+                let tasks: Vec<Task<Message>> = jobs
+                    .into_iter()
+                    .map(|job| {
+                        let engine = engine.clone();
+                        let (prev_path, next_path) = neighbor_map
+                            .get(&job.index)
+                            .cloned()
+                            .unwrap_or((None, None));
+                        let tid = tab_id;
+                        let jidx = job.index;
+                        let jid = job.id;
+                        Task::perform(
+                            async move {
+                                let res = tokio::task::spawn_blocking(move || {
+                                    run_auto_inpaint_job(
+                                        &engine,
+                                        &job,
+                                        pad,
+                                        prev_path.as_deref(),
+                                        next_path.as_deref(),
+                                    )
+                                })
+                                .await
+                                .unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")));
+                                (jidx, jid, res)
+                            },
+                            move |(jidx, jid, res)| {
+                                Message::Tab(
+                                    tid,
+                                    crate::app::TabMessage::AutoInpaintFinished(jidx, jid, res),
+                                )
+                            },
+                        )
+                    })
+                    .collect();
                 Task::batch(tasks)
             }
             _ => {
@@ -2022,7 +2961,14 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
                 // AOT-GAN, ShiftMap); Telea/Harmonic fan out in parallel
                 // above. ShiftMap never reaches the auto path via pipeline
                 // routing today.
-                let label = match backend { InpaintBackend::Lama => "LaMa", InpaintBackend::Aot => "AOT-GAN", InpaintBackend::ShiftMap => "ShiftMap", InpaintBackend::Harmonic | InpaintBackend::Telea => unreachable!("telea/harmonic take the parallel arm")};
+                let label = match backend {
+                    InpaintBackend::Lama => "LaMa",
+                    InpaintBackend::Aot => "AOT-GAN",
+                    InpaintBackend::ShiftMap => "ShiftMap",
+                    InpaintBackend::Harmonic | InpaintBackend::Telea => {
+                        unreachable!("telea/harmonic take the parallel arm")
+                    }
+                };
                 return start_auto_stream(app, tab_id, engine, jobs, pad, label, backend);
             }
         }
@@ -2037,7 +2983,13 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
         // Model load counts as the run itself so buttons disable during it.
         // (Queued stash above intentionally leaves this unset.)
         app.tabs[idx].auto_inpaint_loading = true;
-        app.tabs[idx].status = match backend { InpaintBackend::Telea => "Loading Telea for auto-inpaint...".to_string(), InpaintBackend::Lama => "Loading LaMa for auto-inpaint...".to_string(), InpaintBackend::Aot => "Loading AOT-GAN for auto-inpaint...".to_string(), InpaintBackend::ShiftMap => "Loading ShiftMap for auto-inpaint...".to_string(), InpaintBackend::Harmonic => "Loading Harmonic for auto-inpaint...".to_string()};
+        app.tabs[idx].status = match backend {
+            InpaintBackend::Telea => "Loading Telea for auto-inpaint...".to_string(),
+            InpaintBackend::Lama => "Loading LaMa for auto-inpaint...".to_string(),
+            InpaintBackend::Aot => "Loading AOT-GAN for auto-inpaint...".to_string(),
+            InpaintBackend::ShiftMap => "Loading ShiftMap for auto-inpaint...".to_string(),
+            InpaintBackend::Harmonic => "Loading Harmonic for auto-inpaint...".to_string(),
+        };
         let kind = crate::app::queue::JobKind::Inpaint(backend);
         let job_id = app
             .engines
@@ -2050,7 +3002,10 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
             async move {
                 use crate::app::queue::engine_ready_msg;
                 use easyscanlate_engine_pool::BuiltEngine;
-                match tokio::task::spawn_blocking(move || InpaintEngine::build(backend, radius)).await.unwrap_or_else(|e| Err(format!("inpaint build task failed: {e}"))) {
+                match tokio::task::spawn_blocking(move || InpaintEngine::build(backend, radius))
+                    .await
+                    .unwrap_or_else(|e| Err(format!("inpaint build task failed: {e}")))
+                {
                     Ok(engine) => engine_ready_msg(
                         tid,
                         job_id,
@@ -2065,8 +3020,15 @@ pub fn dispatch_auto(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<Au
     }
 }
 #[cfg(feature = "inpaint")]
-pub fn dispatch_auto_solo(app: &mut App, tab_id: crate::app::tab::TabId, effective_model: easyscanlate_settings::AutoInpaintModel) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+pub fn dispatch_auto_solo(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    effective_model: easyscanlate_settings::AutoInpaintModel,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     let mut jobs: Vec<AutoInpaintJob> = Vec::new();
     {
         let tab = &app.tabs[idx];
@@ -2089,9 +3051,7 @@ pub fn dispatch_auto_solo(app: &mut App, tab_id: crate::app::tab::TabId, effecti
         for (index, image) in tab.images.iter().enumerate() {
             let image_id = image.image_id;
             let ocr_quad_of = |id: easyscanlate_model::EntryId| {
-                tab.project
-                    .entry_including_deleted(id)
-                    .map(|e| e.quad)
+                tab.project.entry_including_deleted(id).map(|e| e.quad)
             };
             for entry in tab.project.visible_for(image_id).collect::<Vec<_>>() {
                 let vquad = tab.project.view_quad(entry);
@@ -2125,24 +3085,47 @@ pub fn dispatch_auto_solo(app: &mut App, tab_id: crate::app::tab::TabId, effecti
                             tquad.bounds(),
                         );
                     }
-                    jobs.push(AutoInpaintJob { index: page_idx, id: entry.id, path, quad: tquad });
+                    jobs.push(AutoInpaintJob {
+                        index: page_idx,
+                        id: entry.id,
+                        path,
+                        quad: tquad,
+                    });
                 }
             }
         }
     }
-    if jobs.is_empty() { return Task::none(); }
+    if jobs.is_empty() {
+        return Task::none();
+    }
     for job in &jobs {
         let mut style = app.tabs[idx].project.entry_style(job.id);
-        style.bg_color = [0,0,0,0];
-        let ev = app.tabs[idx].project.set_entry_style_with_event(job.id, style);
+        style.bg_color = [0, 0, 0, 0];
+        let ev = app.tabs[idx]
+            .project
+            .set_entry_style_with_event(job.id, style);
         crate::app::handle_model_event(&mut app.tabs[idx], ev);
     }
-    let backend = match effective_model { easyscanlate_settings::AutoInpaintModel::Telea=>InpaintBackend::Telea, easyscanlate_settings::AutoInpaintModel::Harmonic=>InpaintBackend::Harmonic, easyscanlate_settings::AutoInpaintModel::Lama=>InpaintBackend::Lama, easyscanlate_settings::AutoInpaintModel::Aot=>InpaintBackend::Aot, easyscanlate_settings::AutoInpaintModel::Mixed=>InpaintBackend::Harmonic };
+    let backend = match effective_model {
+        easyscanlate_settings::AutoInpaintModel::Telea => InpaintBackend::Telea,
+        easyscanlate_settings::AutoInpaintModel::Harmonic => InpaintBackend::Harmonic,
+        easyscanlate_settings::AutoInpaintModel::Lama => InpaintBackend::Lama,
+        easyscanlate_settings::AutoInpaintModel::Aot => InpaintBackend::Aot,
+        easyscanlate_settings::AutoInpaintModel::Mixed => InpaintBackend::Harmonic,
+    };
     dispatch_auto(app, tab_id, jobs, backend)
 }
 #[cfg(feature = "inpaint")]
-pub(crate) fn start_inpaint_selection(app: &mut App, tab_id: crate::app::tab::TabId, engine: InpaintEngine, data: Vec<ManualInpaintSelection>) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+pub(crate) fn start_inpaint_selection(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    engine: InpaintEngine,
+    data: Vec<ManualInpaintSelection>,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     app.tabs[idx].inpainting = true;
     // Granular counters (OCR-style): one batch unit; per-group failures are
     // counted inside the worker and reported with the patches.
@@ -2164,19 +3147,36 @@ pub(crate) fn start_inpaint_selection(app: &mut App, tab_id: crate::app::tab::Ta
     )
 }
 #[cfg(feature = "inpaint")]
-pub(crate) fn start_background_stitch(app: &mut App, tab_id: crate::app::tab::TabId, engine: InpaintEngine, job: AutoInpaintJob, pad: f32, prev: Option<String>, next: Option<String>) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+pub(crate) fn start_background_stitch(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    engine: InpaintEngine,
+    job: AutoInpaintJob,
+    pad: f32,
+    prev: Option<String>,
+    next: Option<String>,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     app.tabs[idx].inpainting = true;
     app.tabs[idx].status = "inpainting background (stitched)...".to_string();
     let tid = tab_id;
     Task::perform(
         async move {
-            let result = tokio::task::spawn_blocking(move || run_auto_inpaint_job(&engine, &job, pad, prev.as_deref(), next.as_deref())).await.unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")));
+            let result = tokio::task::spawn_blocking(move || {
+                run_auto_inpaint_job(&engine, &job, pad, prev.as_deref(), next.as_deref())
+            })
+            .await
+            .unwrap_or_else(|e| Err(format!("inpaint task cancelled: {e}")));
             let grouped: GroupedInpaintResult = result.map(|v| {
                 let mut map: PatchMap = std::collections::HashMap::new();
-                for (idx, img,b,q) in v { map.entry(idx).or_default().push((img,b,q)); }
+                for (idx, img, b, q) in v {
+                    map.entry(idx).or_default().push((img, b, q));
+                }
                 let mut out: Vec<_> = map.into_iter().collect();
-                out.sort_by_key(|(idx,_)| *idx);
+                out.sort_by_key(|(idx, _)| *idx);
                 out
             });
             grouped
@@ -2213,7 +3213,13 @@ mod split_tests {
         let ws = vec![800.0, 800.0];
         let hs = vec![2600.0, 2600.0];
         let offsets = inpaint_global_offsets(&hs);
-        let parts = split_quad_global(quad_xyxy(111.6, 2816.7, 258.5, 2915.3), 0, &ws, &hs, &offsets);
+        let parts = split_quad_global(
+            quad_xyxy(111.6, 2816.7, 258.5, 2915.3),
+            0,
+            &ws,
+            &hs,
+            &offsets,
+        );
         assert_eq!(parts.len(), 1);
         assert_eq!(parts[0].0, 1);
         let [x0, y0, x1, y1] = parts[0].1.bounds();
@@ -2228,7 +3234,13 @@ mod split_tests {
         let ws = vec![800.0, 800.0];
         let hs = vec![2600.0, 2600.0];
         let offsets = inpaint_global_offsets(&hs);
-        let parts = split_quad_global(quad_xyxy(100.0, 2550.0, 200.0, 2650.0), 0, &ws, &hs, &offsets);
+        let parts = split_quad_global(
+            quad_xyxy(100.0, 2550.0, 200.0, 2650.0),
+            0,
+            &ws,
+            &hs,
+            &offsets,
+        );
         assert_eq!(parts.len(), 2);
         assert_eq!(parts[0].0, 0);
         assert_eq!(parts[1].0, 1);
@@ -2251,12 +3263,29 @@ mod split_tests {
         let hs = vec![2600.0, 2600.0];
         let offsets = inpaint_global_offsets(&hs);
         // Fully-outside owner reanchors to neighbor as 1 job.
-        let anchored = anchor_quad_global(quad_xyxy(111.6, 2816.7, 258.5, 2915.3), 0, &ws, &hs, &offsets).unwrap();
+        let anchored = anchor_quad_global(
+            quad_xyxy(111.6, 2816.7, 258.5, 2915.3),
+            0,
+            &ws,
+            &hs,
+            &offsets,
+        )
+        .unwrap();
         assert_eq!(anchored.0, 1);
         // Straddle anchors to the page holding more of the quad (page 0: 50px vs page 1: 50px tie -> first max wins).
-        let anchored = anchor_quad_global(quad_xyxy(100.0, 2550.0, 200.0, 2650.0), 0, &ws, &hs, &offsets).unwrap();
+        let anchored = anchor_quad_global(
+            quad_xyxy(100.0, 2550.0, 200.0, 2650.0),
+            0,
+            &ws,
+            &hs,
+            &offsets,
+        )
+        .unwrap();
         assert_eq!(anchored.0, 0);
         // Outside everything anchors to nothing.
-        assert!(anchor_quad_global(quad_xyxy(10.0, 5000.0, 50.0, 5100.0), 0, &ws, &hs, &offsets).is_none());
+        assert!(
+            anchor_quad_global(quad_xyxy(10.0, 5000.0, 50.0, 5100.0), 0, &ws, &hs, &offsets)
+                .is_none()
+        );
     }
 }

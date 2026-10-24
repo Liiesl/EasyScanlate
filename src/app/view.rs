@@ -1,7 +1,9 @@
-use iced::{Color, Element, Length};
-use iced::widget::{button, center, column, container, image, opaque, progress_bar, row, space, stack, text};
 use easyscanlate_ui::panel;
 use easyscanlate_ui::scale;
+use iced::widget::{
+    button, center, column, container, image, opaque, progress_bar, row, space, stack, text,
+};
+use iced::{Color, Element, Length};
 
 use super::{App, Message};
 
@@ -13,10 +15,18 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let framed: Element<'_, Message> = if let Some(window_id) = app.frame.primary_window() {
         if app.onboarding.is_some() {
             // Onboarding page hides tab bar (blocking, like Home/Editor page spec) — no tabs while setup is mandatory
-            app.frame.view(window_id, "", None, None, inner_mapped, Message::Frame)
+            app.frame
+                .view(window_id, "", None, None, inner_mapped, Message::Frame)
         } else {
             let tab_bar = crate::app::tabs::titlebar_view(app);
-            app.frame.view(window_id, "", None, Some(tab_bar), inner_mapped, Message::Frame)
+            app.frame.view(
+                window_id,
+                "",
+                None,
+                Some(tab_bar),
+                inner_mapped,
+                Message::Frame,
+            )
         }
     } else {
         inner_mapped
@@ -47,8 +57,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     // Loading splash overlay: Photoshop-style — centered "Opening project…" with
     // top-left cycling status (Unpacking / Parsing / Decoding…). Active tab is
     // already the placeholder (titlebar chip exists), underlying editor is empty until hydrate.
-    let is_loading = !app.active_is_home()
-        && app.tabs.get(app.active).is_some_and(|t| t.loading);
+    let is_loading = !app.active_is_home() && app.tabs.get(app.active).is_some_and(|t| t.loading);
     let with_loading: Element<'_, Message> = if is_loading {
         loading_overlay(app, with_autosave)
     } else {
@@ -112,9 +121,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             with_export,
             column![
                 title_dim,
-                space::vertical()
-                    .width(Length::Fill)
-                    .height(Length::Fill)
+                space::vertical().width(Length::Fill).height(Length::Fill)
             ]
             .width(Length::Fill)
             .height(Length::Fill)

@@ -83,10 +83,7 @@ impl EngineQueue {
 
     /// 1-indexed position of `id` in pending, or None if not pending (maybe running).
     pub fn position(&self, id: u64) -> Option<usize> {
-        self.pending
-            .iter()
-            .position(|j| j.id == id)
-            .map(|p| p + 1)
+        self.pending.iter().position(|j| j.id == id).map(|p| p + 1)
     }
 
     /// Backfill pop: scan pending in priority order (lower priority value first,
@@ -178,7 +175,9 @@ impl EngineQueue {
 
     /// Running job for `owner` + `kind`, if any.
     pub fn running_for(&self, owner: OwnerId, kind: JobKind) -> Option<&QueuedJob> {
-        self.running.iter().find(|j| j.owner == owner && j.kind == kind)
+        self.running
+            .iter()
+            .find(|j| j.owner == owner && j.kind == kind)
     }
 
     /// Any running OCR job (either mode) for `owner`?
@@ -477,7 +476,8 @@ mod tests {
         let d2 = q.try_pop_dispatchable().unwrap();
         assert_eq!(d2.id, lama.id);
         assert!(
-            q.running_for(oid(1), JobKind::Inpaint(InpaintBackend::Lama)).is_some()
+            q.running_for(oid(1), JobKind::Inpaint(InpaintBackend::Lama))
+                .is_some()
         );
         let _ = lama;
     }
@@ -490,25 +490,21 @@ mod tests {
         assert!(matches!(a, AcquireResult::Acquired(_)));
         assert_eq!(q.used_weight(), 2);
         // Enqueue Lama w4 (doesn't fit 2+4=6>5) -> Queued.
-        let lama_res =
-            q.try_acquire_or_enqueue(oid(2), JobKind::Inpaint(InpaintBackend::Lama));
+        let lama_res = q.try_acquire_or_enqueue(oid(2), JobKind::Inpaint(InpaintBackend::Lama));
         assert!(matches!(lama_res, AcquireResult::Queued(_, _)));
         assert_eq!(q.pending_len(), 1);
         // Telea w1 fits 2+1<=5 -> backfill Acquired even though pending non-empty.
-        let telea_res =
-            q.try_acquire_or_enqueue(oid(3), JobKind::Inpaint(InpaintBackend::Telea));
+        let telea_res = q.try_acquire_or_enqueue(oid(3), JobKind::Inpaint(InpaintBackend::Telea));
         assert!(
             matches!(telea_res, AcquireResult::Acquired(_)),
             "telea should backfill when lama head blocked"
         );
         assert_eq!(q.used_weight(), 3);
         assert_eq!(q.pending_len(), 1); // lama still pending
-        let telea2 =
-            q.try_acquire_or_enqueue(oid(4), JobKind::Inpaint(InpaintBackend::Telea));
+        let telea2 = q.try_acquire_or_enqueue(oid(4), JobKind::Inpaint(InpaintBackend::Telea));
         assert!(matches!(telea2, AcquireResult::Acquired(_)));
         assert_eq!(q.used_weight(), 4);
-        let telea3 =
-            q.try_acquire_or_enqueue(oid(5), JobKind::Inpaint(InpaintBackend::Telea));
+        let telea3 = q.try_acquire_or_enqueue(oid(5), JobKind::Inpaint(InpaintBackend::Telea));
         assert!(matches!(telea3, AcquireResult::Acquired(_)));
         assert_eq!(q.used_weight(), 5);
         // Next Style w2 would not fit 5+2>5.
@@ -530,15 +526,13 @@ mod tests {
         let _ = q3.enqueue(oid(20), JobKind::Styling); // pending style prio1 w2
         // used 0, remaining 5, style fits. Lama prio5 also fits but is lower
         // priority than pending style, so it must queue, not acquire.
-        let lama_q =
-            q3.try_acquire_or_enqueue(oid(21), JobKind::Inpaint(InpaintBackend::Lama));
+        let lama_q = q3.try_acquire_or_enqueue(oid(21), JobKind::Inpaint(InpaintBackend::Lama));
         assert!(
             matches!(lama_q, AcquireResult::Queued(_, _)),
             "lama lower priority than pending style should be queued"
         );
         // Telea prio0 outranks pending style prio1, so it backfills.
-        let telea_a =
-            q3.try_acquire_or_enqueue(oid(22), JobKind::Inpaint(InpaintBackend::Telea));
+        let telea_a = q3.try_acquire_or_enqueue(oid(22), JobKind::Inpaint(InpaintBackend::Telea));
         assert!(
             matches!(telea_a, AcquireResult::Acquired(_)),
             "higher priority telea should backfill ahead of style"

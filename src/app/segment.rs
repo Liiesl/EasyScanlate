@@ -1,9 +1,9 @@
-use iced::Task;
-#[cfg(feature = "segment")]
-use iced::futures::{SinkExt, StreamExt};
 use easyscanlate_model::EntryId;
 #[cfg(feature = "segment")]
 use easyscanlate_segment::Engine as SegmentEngine;
+use iced::Task;
+#[cfg(feature = "segment")]
+use iced::futures::{SinkExt, StreamExt};
 
 use super::{App, Message};
 use crate::app::queue::owner_of;
@@ -19,22 +19,46 @@ pub type SegmentStreamItem = (usize, Vec<(usize, EntryId)>);
 pub fn start_segment_filter(app: &mut App, tab_id: crate::app::tab::TabId) -> Task<Message> {
     #[cfg(feature = "segment")]
     {
-        let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none() };
+        let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+            Some(i) => i,
+            None => return Task::none(),
+        };
         // queue gate — weight 4, backfill + priority (cap 5)
         {
             use crate::app::queue::{AcquireResult, JobKind, owner_of};
             // Only gate if not already running — if already running, we are in dispatch chain, so allow
-            let already_reserved = app.engines.queue.running_for(owner_of(tab_id), JobKind::Segment).is_some();
+            let already_reserved = app
+                .engines
+                .queue
+                .running_for(owner_of(tab_id), JobKind::Segment)
+                .is_some();
             if !already_reserved {
                 // if this tab is already queued/running for segment, don't duplicate
-                if app.engines.queue.is_tab_queued(owner_of(tab_id)) || app.engines.queue.is_tab_running(owner_of(tab_id)) {
+                if app.engines.queue.is_tab_queued(owner_of(tab_id))
+                    || app.engines.queue.is_tab_running(owner_of(tab_id))
+                {
                     // already queued, avoid duplicate enqueue
                     // check if pending for this exact kind
-                    if app.engines.queue.pending_for_tab(owner_of(tab_id)).iter().any(|j| j.kind == JobKind::Segment) || app.engines.queue.running_for(owner_of(tab_id), JobKind::Segment).is_some() {
+                    if app
+                        .engines
+                        .queue
+                        .pending_for_tab(owner_of(tab_id))
+                        .iter()
+                        .any(|j| j.kind == JobKind::Segment)
+                        || app
+                            .engines
+                            .queue
+                            .running_for(owner_of(tab_id), JobKind::Segment)
+                            .is_some()
+                    {
                         return Task::none();
                     }
                 }
-                match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), JobKind::Segment) {
+                match app
+                    .engines
+                    .queue
+                    .try_acquire_or_enqueue(owner_of(tab_id), JobKind::Segment)
+                {
                     AcquireResult::Acquired(_) => {
                         // fall through to spawn
                     }
@@ -55,26 +79,51 @@ pub fn start_segment_filter(app: &mut App, tab_id: crate::app::tab::TabId) -> Ta
         let tab = &app.tabs[idx];
         if tab.images.is_empty() {
             // release reservation if we acquired
-            app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
+            app.engines
+                .queue
+                .complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
             return Task::none();
         }
         if !easyscanlate_settings::get(|s| s.auto_sfx_filter) {
-            app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
+            app.engines
+                .queue
+                .complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
             return Task::none();
         }
         match &app.engines.segment {
             Some(engine) => {
                 let engine = engine.clone();
-                let dims: Vec<(u32, u32)> = tab.images.iter().map(|img| {
-                    tab.project.image(img.image_id).map(|m| (m.width as u32, m.height as u32)).unwrap_or((0, 0))
-                }).collect();
-                let paths: Vec<String> = tab.images.iter().map(|img| {
-                    tab.project.image(img.image_id).map(|m| m.path.clone()).unwrap_or_default()
-                }).collect();
-                let ocr_boxes: Vec<Vec<([f32; 4], EntryId)>> = tab.images.iter().map(|img| {
-                    let image_id = img.image_id;
-                    tab.project.visible_for(image_id).map(|e| (tab.project.view_quad(e).bounds(), e.id)).collect()
-                }).collect();
+                let dims: Vec<(u32, u32)> = tab
+                    .images
+                    .iter()
+                    .map(|img| {
+                        tab.project
+                            .image(img.image_id)
+                            .map(|m| (m.width as u32, m.height as u32))
+                            .unwrap_or((0, 0))
+                    })
+                    .collect();
+                let paths: Vec<String> = tab
+                    .images
+                    .iter()
+                    .map(|img| {
+                        tab.project
+                            .image(img.image_id)
+                            .map(|m| m.path.clone())
+                            .unwrap_or_default()
+                    })
+                    .collect();
+                let ocr_boxes: Vec<Vec<([f32; 4], EntryId)>> = tab
+                    .images
+                    .iter()
+                    .map(|img| {
+                        let image_id = img.image_id;
+                        tab.project
+                            .visible_for(image_id)
+                            .map(|e| (tab.project.view_quad(e).bounds(), e.id))
+                            .collect()
+                    })
+                    .collect();
                 start_segment_stream(app, tab_id, engine, dims, paths, ocr_boxes)
             }
             None => {
@@ -134,14 +183,21 @@ fn start_segment_stream(
     ocr_boxes: Vec<Vec<([f32; 4], EntryId)>>,
 ) -> Task<Message> {
     use easyscanlate_segment::grid::plan_grids;
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     if dims.is_empty() {
-        app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
+        app.engines
+            .queue
+            .complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
         return Task::none();
     }
     let runs = plan_grids(&dims);
     if runs.is_empty() {
-        app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
+        app.engines
+            .queue
+            .complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
         return Task::none();
     }
     let total = runs.len();
@@ -162,37 +218,43 @@ fn start_segment_stream(
     );
     let tid = tab_id;
     Task::stream(
-        iced::stream::try_channel(1, move |mut sender: iced::futures::channel::mpsc::Sender<Message>| async move {
-            for (grid_idx, run) in runs.into_iter().enumerate() {
-                let engine_clone = engine.clone();
-                // Clone per-grid inputs for the blocking thread (grids borrow
-                // `dims` by value here; each iteration owns its copies).
-                let dims_c = dims.clone();
-                let paths_c = paths.clone();
-                let boxes_c = ocr_boxes.clone();
-                let res = tokio::task::spawn_blocking(move || {
-                    run_segment_grid(&engine_clone, &run, &dims_c, &paths_c, &boxes_c)
-                })
-                .await
-                .unwrap_or_else(|e| Err(format!("segment task cancelled: {e}")));
-                let payload: Result<SegmentStreamItem, String> =
-                    res.map(|deletes| (grid_idx, deletes));
-                if sender
-                    .send(Message::Tab(
-                        tid,
-                        crate::app::TabMessage::SegmentStreamRun(payload),
-                    ))
+        iced::stream::try_channel(
+            1,
+            move |mut sender: iced::futures::channel::mpsc::Sender<Message>| async move {
+                for (grid_idx, run) in runs.into_iter().enumerate() {
+                    let engine_clone = engine.clone();
+                    // Clone per-grid inputs for the blocking thread (grids borrow
+                    // `dims` by value here; each iteration owns its copies).
+                    let dims_c = dims.clone();
+                    let paths_c = paths.clone();
+                    let boxes_c = ocr_boxes.clone();
+                    let res = tokio::task::spawn_blocking(move || {
+                        run_segment_grid(&engine_clone, &run, &dims_c, &paths_c, &boxes_c)
+                    })
                     .await
-                    .is_err()
-                {
-                    return Ok::<(), String>(());
+                    .unwrap_or_else(|e| Err(format!("segment task cancelled: {e}")));
+                    let payload: Result<SegmentStreamItem, String> =
+                        res.map(|deletes| (grid_idx, deletes));
+                    if sender
+                        .send(Message::Tab(
+                            tid,
+                            crate::app::TabMessage::SegmentStreamRun(payload),
+                        ))
+                        .await
+                        .is_err()
+                    {
+                        return Ok::<(), String>(());
+                    }
                 }
-            }
-            Ok::<(), String>(())
-        })
+                Ok::<(), String>(())
+            },
+        )
         .map(move |item: Result<Message, String>| match item {
             Ok(message) => message,
-            Err(e) => Message::Tab(tid, crate::app::TabMessage::SegmentStreamFailed(e.to_string())),
+            Err(e) => Message::Tab(
+                tid,
+                crate::app::TabMessage::SegmentStreamFailed(e.to_string()),
+            ),
         }),
     )
 }
@@ -201,7 +263,11 @@ fn start_segment_stream(
 /// (`easyscanlate_engine_pool::run_segment_grid`); this module only streams it.
 
 #[cfg(feature = "segment")]
-pub fn handle_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, result: Result<SegmentEngine, String>) -> Task<Message> {
+pub fn handle_engine_ready(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    result: Result<SegmentEngine, String>,
+) -> Task<Message> {
     match result {
         Ok(engine) => {
             app.engines.segment = Some(engine);
@@ -211,14 +277,22 @@ pub fn handle_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, result
             start_segment_filter(app, tab_id)
         }
         Err(e) => {
-            let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i)=>i, None=>return Task::none()};
+            let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+                Some(i) => i,
+                None => return Task::none(),
+            };
             app.tabs[idx].segment_filtering = false;
             app.tabs[idx].status = e.clone();
             // free queue weight (build failed) and promote
-            app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
+            app.engines
+                .queue
+                .complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
-            return Task::batch([promote, super::error::show("Segmentation couldn't start", e)]);
+            return Task::batch([
+                promote,
+                super::error::show("Segmentation couldn't start", e),
+            ]);
         }
     }
 }
@@ -226,7 +300,13 @@ pub fn handle_engine_ready(app: &mut App, tab_id: crate::app::tab::TabId, result
 /// Chains the pipeline stages after segment finishes (style → inpaint-solo).
 /// Shared by the granular stream finalize paths.
 #[cfg(feature = "segment")]
-fn chain_segment_next(app: &mut App, tab_id: crate::app::tab::TabId, idx: usize, is_pipeline: bool, tasks: &mut Vec<Task<Message>>) {
+fn chain_segment_next(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    idx: usize,
+    is_pipeline: bool,
+    tasks: &mut Vec<Task<Message>>,
+) {
     if !is_pipeline {
         return;
     }
@@ -239,12 +319,22 @@ fn chain_segment_next(app: &mut App, tab_id: crate::app::tab::TabId, idx: usize,
         #[cfg(all(feature = "styling", feature = "inpaint"))]
         {
             use crate::app::queue::{AcquireResult, JobKind, owner_of};
-            match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), JobKind::Styling) {
+            match app
+                .engines
+                .queue
+                .try_acquire_or_enqueue(owner_of(tab_id), JobKind::Styling)
+            {
                 AcquireResult::Acquired(_) => tasks.push(super::styling::classify(app, tab_id)),
                 AcquireResult::Queued(_, pos) => {
                     let used = app.engines.queue.used_weight();
                     if let Some(t) = app.tab_by_id_mut(tab_id) {
-                        t.status = format!("Queued {} (pos {}, pool {}/{}) ...", JobKind::Styling.label(), pos, used, crate::app::queue::POOL_CAPACITY);
+                        t.status = format!(
+                            "Queued {} (pos {}, pool {}/{}) ...",
+                            JobKind::Styling.label(),
+                            pos,
+                            used,
+                            crate::app::queue::POOL_CAPACITY
+                        );
                     }
                 }
             }
@@ -255,18 +345,40 @@ fn chain_segment_next(app: &mut App, tab_id: crate::app::tab::TabId, idx: usize,
         {
             use crate::app::queue::{AcquireResult, JobKind, owner_of};
             let kind = match eff {
-                easyscanlate_settings::AutoInpaintModel::Telea => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea),
-                easyscanlate_settings::AutoInpaintModel::Harmonic => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic),
-                easyscanlate_settings::AutoInpaintModel::Lama => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama),
-                easyscanlate_settings::AutoInpaintModel::Aot => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot),
-                easyscanlate_settings::AutoInpaintModel::Mixed => JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic),
+                easyscanlate_settings::AutoInpaintModel::Telea => {
+                    JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Telea)
+                }
+                easyscanlate_settings::AutoInpaintModel::Harmonic => {
+                    JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic)
+                }
+                easyscanlate_settings::AutoInpaintModel::Lama => {
+                    JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Lama)
+                }
+                easyscanlate_settings::AutoInpaintModel::Aot => {
+                    JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Aot)
+                }
+                easyscanlate_settings::AutoInpaintModel::Mixed => {
+                    JobKind::Inpaint(easyscanlate_settings::InpaintBackend::Harmonic)
+                }
             };
-            match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), kind) {
-                AcquireResult::Acquired(_) => tasks.push(super::inpaint::dispatch_auto_solo(app, tab_id, eff)),
+            match app
+                .engines
+                .queue
+                .try_acquire_or_enqueue(owner_of(tab_id), kind)
+            {
+                AcquireResult::Acquired(_) => {
+                    tasks.push(super::inpaint::dispatch_auto_solo(app, tab_id, eff))
+                }
                 AcquireResult::Queued(_, pos) => {
                     let used = app.engines.queue.used_weight();
                     if let Some(t) = app.tab_by_id_mut(tab_id) {
-                        t.status = format!("Queued {} (pos {}, pool {}/{}) ...", kind.label(), pos, used, crate::app::queue::POOL_CAPACITY);
+                        t.status = format!(
+                            "Queued {} (pos {}, pool {}/{}) ...",
+                            kind.label(),
+                            pos,
+                            used,
+                            crate::app::queue::POOL_CAPACITY
+                        );
                     }
                 }
             }
@@ -276,19 +388,30 @@ fn chain_segment_next(app: &mut App, tab_id: crate::app::tab::TabId, idx: usize,
         {
             app.tabs[idx].pipeline_active = false;
         }
-        let need_style_only = easyscanlate_settings::get(|s| s.auto_style_detect && !s.auto_inpaint);
+        let need_style_only =
+            easyscanlate_settings::get(|s| s.auto_style_detect && !s.auto_inpaint);
         if need_style_only {
             #[cfg(feature = "styling")]
             {
                 use crate::app::queue::{AcquireResult, JobKind, owner_of};
-                match app.engines.queue.try_acquire_or_enqueue(owner_of(tab_id), JobKind::Styling) {
+                match app
+                    .engines
+                    .queue
+                    .try_acquire_or_enqueue(owner_of(tab_id), JobKind::Styling)
+                {
                     AcquireResult::Acquired(_) => tasks.push(super::styling::classify(app, tab_id)),
                     AcquireResult::Queued(_, pos) => {
-                    let used = app.engines.queue.used_weight();
-                    if let Some(t) = app.tab_by_id_mut(tab_id) {
-                        t.status = format!("Queued {} (pos {}, pool {}/{}) ...", JobKind::Styling.label(), pos, used, crate::app::queue::POOL_CAPACITY);
+                        let used = app.engines.queue.used_weight();
+                        if let Some(t) = app.tab_by_id_mut(tab_id) {
+                            t.status = format!(
+                                "Queued {} (pos {}, pool {}/{}) ...",
+                                JobKind::Styling.label(),
+                                pos,
+                                used,
+                                crate::app::queue::POOL_CAPACITY
+                            );
+                        }
                     }
-                }
                 }
             }
         }
@@ -305,7 +428,10 @@ pub fn handle_stream_run(
     tab_id: crate::app::tab::TabId,
     result: Result<SegmentStreamItem, String>,
 ) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     app.tabs[idx].segment_pending = app.tabs[idx].segment_pending.saturating_sub(1);
     let pending = app.tabs[idx].segment_pending;
     let total = app.tabs[idx].segment_total;
@@ -325,16 +451,28 @@ pub fn handle_stream_run(
             if pending == 0 {
                 app.tabs[idx].segment_filtering = false;
                 app.tabs[idx].pipeline_seg_done = true;
-                app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
+                app.engines
+                    .queue
+                    .complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
                 crate::app::queue::refresh_queued_statuses(app);
                 let is_pipeline = {
                     #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-                    { app.tabs[idx].pipeline_active }
-                    #[cfg(not(all(feature = "styling", feature = "inpaint", feature = "segment")))]
-                    { false }
+                    {
+                        app.tabs[idx].pipeline_active
+                    }
+                    #[cfg(not(all(
+                        feature = "styling",
+                        feature = "inpaint",
+                        feature = "segment"
+                    )))]
+                    {
+                        false
+                    }
                 };
                 if failed > 0 {
-                    app.tabs[idx].status = format!("SFX filter: {removed} removed, {failed} of {total} grid(s) failed.");
+                    app.tabs[idx].status = format!(
+                        "SFX filter: {removed} removed, {failed} of {total} grid(s) failed."
+                    );
                 } else if removed > 0 {
                     app.tabs[idx].status = format!("SFX filter removed {removed} entry(s).");
                 } else {
@@ -343,11 +481,17 @@ pub fn handle_stream_run(
                 let mut tasks: Vec<Task<Message>> = Vec::new();
                 chain_segment_next(app, tab_id, idx, is_pipeline, &mut tasks);
                 tasks.push(crate::app::queue::dispatch_pending(app));
-                return if tasks.is_empty() { Task::none() } else { Task::batch(tasks) };
+                return if tasks.is_empty() {
+                    Task::none()
+                } else {
+                    Task::batch(tasks)
+                };
             }
             let done = total.saturating_sub(pending);
             app.tabs[idx].status = if failed > 0 {
-                format!("Filtering SFX: {done} of {total} grid(s) done, {removed} removed, {failed} failed.")
+                format!(
+                    "Filtering SFX: {done} of {total} grid(s) done, {removed} removed, {failed} failed."
+                )
             } else {
                 format!("Filtering SFX: {done} of {total} grid(s) done, {removed} removed.")
             };
@@ -358,24 +502,40 @@ pub fn handle_stream_run(
             if pending == 0 {
                 app.tabs[idx].segment_filtering = false;
                 app.tabs[idx].pipeline_seg_done = true;
-                app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
+                app.engines
+                    .queue
+                    .complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
                 crate::app::queue::refresh_queued_statuses(app);
                 let is_pipeline = {
                     #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-                    { app.tabs[idx].pipeline_active }
-                    #[cfg(not(all(feature = "styling", feature = "inpaint", feature = "segment")))]
-                    { false }
+                    {
+                        app.tabs[idx].pipeline_active
+                    }
+                    #[cfg(not(all(
+                        feature = "styling",
+                        feature = "inpaint",
+                        feature = "segment"
+                    )))]
+                    {
+                        false
+                    }
                 };
-                app.tabs[idx].status =
-                    format!("SFX filter: {removed} removed, {failed} of {total} grid(s) failed (last: {e}).");
+                app.tabs[idx].status = format!(
+                    "SFX filter: {removed} removed, {failed} of {total} grid(s) failed (last: {e})."
+                );
                 let mut tasks: Vec<Task<Message>> = Vec::new();
                 chain_segment_next(app, tab_id, idx, is_pipeline, &mut tasks);
                 tasks.push(crate::app::queue::dispatch_pending(app));
-                return if tasks.is_empty() { Task::none() } else { Task::batch(tasks) };
+                return if tasks.is_empty() {
+                    Task::none()
+                } else {
+                    Task::batch(tasks)
+                };
             }
             let done = total.saturating_sub(pending);
-            app.tabs[idx].status =
-                format!("Filtering SFX: {done} of {total} grid(s) done, {removed} removed, {failed} failed (last: {e}).");
+            app.tabs[idx].status = format!(
+                "Filtering SFX: {done} of {total} grid(s) done, {removed} removed, {failed} failed (last: {e})."
+            );
         }
     }
     Task::none()
@@ -389,29 +549,46 @@ pub fn handle_stream_failed(
     tab_id: crate::app::tab::TabId,
     e: String,
 ) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     if app.tabs[idx].segment_pending > 0 {
         let remaining = app.tabs[idx].segment_pending;
         app.tabs[idx].segment_failed += remaining;
         app.tabs[idx].segment_pending = 0;
         app.tabs[idx].segment_filtering = false;
         app.tabs[idx].pipeline_seg_done = true;
-        app.engines.queue.complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
+        app.engines
+            .queue
+            .complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
         crate::app::queue::refresh_queued_statuses(app);
-        let (total, removed, failed) =
-            (app.tabs[idx].segment_total, app.tabs[idx].segment_removed, app.tabs[idx].segment_failed);
+        let (total, removed, failed) = (
+            app.tabs[idx].segment_total,
+            app.tabs[idx].segment_removed,
+            app.tabs[idx].segment_failed,
+        );
         let is_pipeline = {
             #[cfg(all(feature = "styling", feature = "inpaint", feature = "segment"))]
-            { app.tabs[idx].pipeline_active }
+            {
+                app.tabs[idx].pipeline_active
+            }
             #[cfg(not(all(feature = "styling", feature = "inpaint", feature = "segment")))]
-            { false }
+            {
+                false
+            }
         };
-        app.tabs[idx].status =
-            format!("SFX filter stream failed ({e}): {removed} removed, {failed} of {total} grid(s) failed.");
+        app.tabs[idx].status = format!(
+            "SFX filter stream failed ({e}): {removed} removed, {failed} of {total} grid(s) failed."
+        );
         let mut tasks: Vec<Task<Message>> = Vec::new();
         chain_segment_next(app, tab_id, idx, is_pipeline, &mut tasks);
         tasks.push(crate::app::queue::dispatch_pending(app));
-        return if tasks.is_empty() { Task::none() } else { Task::batch(tasks) };
+        return if tasks.is_empty() {
+            Task::none()
+        } else {
+            Task::batch(tasks)
+        };
     }
     Task::none()
 }

@@ -184,7 +184,11 @@ pub fn pack_cols_to_grids(dims: &[(u32, u32)], col_partitions: Vec<Vec<usize>>) 
                 col_w_native: tc.col_w_native,
                 col_h_native: tc.col_h_native,
                 new_w: tc.new_w,
-                x_off: if run_cols.is_empty() { 0 } else { cur_w + GAP_COL },
+                x_off: if run_cols.is_empty() {
+                    0
+                } else {
+                    cur_w + GAP_COL
+                },
                 scale: tc.scale,
                 y_offsets: tc.y_offsets.clone(),
             };
@@ -269,7 +273,9 @@ where
             let is_last = pi + 1 == col.pages.len();
             // Same scale as original: IMG_SIZE / col_h_native
             let scale = col.scale;
-            let scaled_w = ((img.width() as f32 * scale).round() as u32).max(1).min(col.new_w);
+            let scaled_w = ((img.width() as f32 * scale).round() as u32)
+                .max(1)
+                .min(col.new_w);
             // Last page absorbs rounding remainder so sum == IMG_SIZE
             let mut scaled_h = ((img.height() as f32 * scale).round() as u32).max(1);
             if is_last {
@@ -410,7 +416,11 @@ pub fn grid_det_to_page(
 }
 
 /// Helper: map a canvas point back to page space (for testing).
-pub fn grid_point_to_page(point: [f32; 2], run: &GridRun, dims: &[(u32, u32)]) -> Option<(usize, [f32; 2])> {
+pub fn grid_point_to_page(
+    point: [f32; 2],
+    run: &GridRun,
+    dims: &[(u32, u32)],
+) -> Option<(usize, [f32; 2])> {
     let box4 = [point[0], point[1], point[0] + 1.0, point[1] + 1.0];
     grid_det_to_page(box4, run, dims).map(|(p, b)| (p, [b[0], b[1]]))
 }
@@ -442,7 +452,13 @@ mod tests {
     #[test]
     fn partition_n_minus_one_on_exceed() {
         // Four 800x1200 (1.5) => 4 together 4800/800=6.0 fits, 5 would be 6000/800=7.5 -> so first col 4
-        let dims = dims(&[(800, 1200), (800, 1200), (800, 1200), (800, 1200), (800, 1200)]);
+        let dims = dims(&[
+            (800, 1200),
+            (800, 1200),
+            (800, 1200),
+            (800, 1200),
+            (800, 1200),
+        ]);
         let cols = partition_cols(&dims);
         assert_eq!(cols, vec![vec![0, 1, 2, 3], vec![4]]);
     }

@@ -8,9 +8,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use fast_down_api::{
-    create_cancellation_token, create_channel, download, Event, PartialConfig,
-};
+use fast_down_api::{Event, PartialConfig, create_cancellation_token, create_channel, download};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
@@ -68,13 +66,17 @@ fn config_for(spec: &ModelSpec, overwrite: bool) -> PartialConfig {
 
 /// Ensure `models_dir()` exists.
 fn ensure_dir() -> Result<PathBuf, String> {
-    easyscanlate_settings::ensure_models_dir().map_err(|e| format!("failed to create models dir: {e}"))
+    easyscanlate_settings::ensure_models_dir()
+        .map_err(|e| format!("failed to create models dir: {e}"))
 }
 
 /// Check preconditions for a download. Returns the Url on success.
 fn prepare_download(spec: &ModelSpec) -> Result<Url, String> {
     if !spec.available {
-        return Err(format!("model '{}' is not yet available (deferred)", spec.id));
+        return Err(format!(
+            "model '{}' is not yet available (deferred)",
+            spec.id
+        ));
     }
     if spec.url.is_empty() {
         return Err(format!("model '{}' has no URL", spec.id));
@@ -108,7 +110,10 @@ pub async fn download_model(spec: &ModelSpec) -> Result<PathBuf, String> {
 }
 
 /// Like `download_model` but with explicit `overwrite` control.
-pub async fn download_model_with_overwrite(spec: &ModelSpec, overwrite: bool) -> Result<PathBuf, String> {
+pub async fn download_model_with_overwrite(
+    spec: &ModelSpec,
+    overwrite: bool,
+) -> Result<PathBuf, String> {
     let url = prepare_download(spec)?;
     let _dir = ensure_dir()?;
 
@@ -127,14 +132,21 @@ pub async fn download_model_with_overwrite(spec: &ModelSpec, overwrite: bool) ->
     download(url, cfg, tx, token.clone());
 
     loop {
-        let event = rx.recv().await.map_err(|_| "download channel closed without completion".to_string())?;
+        let event = rx
+            .recv()
+            .await
+            .map_err(|_| "download channel closed without completion".to_string())?;
         match event {
             Event::Renamed(p) => return Ok(p),
             Event::RenameFailed(e) => return Err(format!("rename failed for {}: {e}", spec.id)),
             Event::PrefetchError(e) => return Err(format!("prefetch failed for {}: {e}", spec.id)),
             Event::GenPathError(e) => return Err(format!("gen path failed for {}: {e}", spec.id)),
-            Event::BuildClientError(e) => return Err(format!("client build failed for {}: {e}", spec.id)),
-            Event::BuildPusherError(e) => return Err(format!("pusher build failed for {}: {e}", spec.id)),
+            Event::BuildClientError(e) => {
+                return Err(format!("client build failed for {}: {e}", spec.id));
+            }
+            Event::BuildPusherError(e) => {
+                return Err(format!("pusher build failed for {}: {e}", spec.id));
+            }
             Event::ResumeError(e) => return Err(format!("resume failed for {}: {e:?}", spec.id)),
             // Progress and worker events are ignored in the simple helper; use the
             // `*_with_progress` variant to observe them.
@@ -157,7 +169,10 @@ pub fn download_model_with_progress(spec: &ModelSpec) -> Result<DownloadHandle, 
 }
 
 /// Like `download_model_with_progress` with explicit `overwrite`.
-pub fn download_model_with_progress_overwrite(spec: &ModelSpec, overwrite: bool) -> Result<DownloadHandle, String> {
+pub fn download_model_with_progress_overwrite(
+    spec: &ModelSpec,
+    overwrite: bool,
+) -> Result<DownloadHandle, String> {
     let url = prepare_download(spec)?;
     let _dir = ensure_dir()?;
 
@@ -237,8 +252,12 @@ pub async fn download_model_with_sender(
             Event::RenameFailed(e) => return Err(format!("rename failed for {}: {e}", spec.id)),
             Event::PrefetchError(e) => return Err(format!("prefetch failed for {}: {e}", spec.id)),
             Event::GenPathError(e) => return Err(format!("gen path failed for {}: {e}", spec.id)),
-            Event::BuildClientError(e) => return Err(format!("client build failed for {}: {e}", spec.id)),
-            Event::BuildPusherError(e) => return Err(format!("pusher build failed for {}: {e}", spec.id)),
+            Event::BuildClientError(e) => {
+                return Err(format!("client build failed for {}: {e}", spec.id));
+            }
+            Event::BuildPusherError(e) => {
+                return Err(format!("pusher build failed for {}: {e}", spec.id));
+            }
             Event::ResumeError(e) => return Err(format!("resume failed for {}: {e:?}", spec.id)),
             _ => continue,
         }
@@ -258,7 +277,11 @@ pub async fn ensure_model_with_sender(
 }
 
 /// Helper to map a `fast_down_api::event::ProgressSample` + spec into our `DownloadProgress`.
-pub fn progress_from_sample(id: &str, filename: &str, sample: &fast_down_api::ProgressSample) -> DownloadProgress {
+pub fn progress_from_sample(
+    id: &str,
+    filename: &str,
+    sample: &fast_down_api::ProgressSample,
+) -> DownloadProgress {
     DownloadProgress {
         id: id.to_string(),
         filename: filename.to_string(),

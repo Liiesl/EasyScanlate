@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use super::{
-    EntryId, EntryStyle, Extras, ImageId, ImageMeta, InpaintId, InpaintPatch, ModelEvent,
-    NewEntry, OcrEntry, OcrResult, ProfileId, Profiles, Quad,
+    EntryId, EntryStyle, Extras, ImageId, ImageMeta, InpaintId, InpaintPatch, ModelEvent, NewEntry,
+    OcrEntry, OcrResult, ProfileId, Profiles, Quad,
 };
 
 /// The whole document model for one chapter (session): immutable OCR results
@@ -197,13 +197,21 @@ impl Project {
     }
 
     /// Like `display_text_for` but for an explicit profile (not selected).
-    pub fn display_text_for_profile(&self, profile_id: ProfileId, entry_id: EntryId) -> Option<String> {
-        self.resolved_text_for(profile_id, entry_id).map(|s| s.to_string())
+    pub fn display_text_for_profile(
+        &self,
+        profile_id: ProfileId,
+        entry_id: EntryId,
+    ) -> Option<String> {
+        self.resolved_text_for(profile_id, entry_id)
+            .map(|s| s.to_string())
     }
 
     /// Inpaint patches for `image_id`.
     pub fn inpaint_for(&self, image_id: ImageId) -> impl Iterator<Item = &InpaintPatch> {
-        self.extras.inpaint_patches.iter().filter(move |p| p.image_id == image_id)
+        self.extras
+            .inpaint_patches
+            .iter()
+            .filter(move |p| p.image_id == image_id)
     }
 
     pub fn inpaint_patches(&self) -> &[InpaintPatch] {
@@ -244,7 +252,18 @@ impl Project {
             let t = s.trim().to_string();
             if t.is_empty() { None } else { Some(t) }
         });
-        Self { project_id, series, images, next_image_id, ocr, profiles, styles, view_quads, extras, next_inpaint_id }
+        Self {
+            project_id,
+            series,
+            images,
+            next_image_id,
+            ocr,
+            profiles,
+            styles,
+            view_quads,
+            extras,
+            next_inpaint_id,
+        }
     }
 
     /// Append entries for `image_id`. `EntryId` remains globally unique.
@@ -252,7 +271,11 @@ impl Project {
         self.ocr.append_many_for_image(image_id, entries)
     }
 
-    pub fn append_ocr_for_image_with_event(&mut self, image_id: ImageId, entries: Vec<NewEntry>) -> Option<ModelEvent> {
+    pub fn append_ocr_for_image_with_event(
+        &mut self,
+        image_id: ImageId,
+        entries: Vec<NewEntry>,
+    ) -> Option<ModelEvent> {
         if entries.is_empty() {
             return None;
         }
@@ -265,7 +288,12 @@ impl Project {
         Some(ModelEvent::EntriesAdded { image_id, ids })
     }
 
-    pub fn add_image_with_event(&mut self, path: impl Into<String>, width: f32, height: f32) -> (ImageId, ModelEvent) {
+    pub fn add_image_with_event(
+        &mut self,
+        path: impl Into<String>,
+        width: f32,
+        height: f32,
+    ) -> (ImageId, ModelEvent) {
         let id = self.add_image(path, width, height);
         (id, ModelEvent::ImageAdded { image_id: id })
     }
@@ -273,7 +301,10 @@ impl Project {
     /// The text the UI should show for an entry: the selected profile's
     /// translation when present, otherwise the raw OCR text.
     pub fn display_text<'a>(&'a self, entry: &'a OcrEntry) -> &'a str {
-        self.profiles.selected().translation_of(entry.id).unwrap_or(&entry.text)
+        self.profiles
+            .selected()
+            .translation_of(entry.id)
+            .unwrap_or(&entry.text)
     }
 
     /// The overlay/export style for an entry, identical across all profiles.
@@ -291,7 +322,11 @@ impl Project {
         }
     }
 
-    pub fn set_entry_style_with_event(&mut self, entry_id: EntryId, style: EntryStyle) -> ModelEvent {
+    pub fn set_entry_style_with_event(
+        &mut self,
+        entry_id: EntryId,
+        style: EntryStyle,
+    ) -> ModelEvent {
         self.set_entry_style(entry_id, style);
         ModelEvent::EntryStyleUpdated { id: entry_id }
     }
@@ -300,7 +335,10 @@ impl Project {
     /// present, otherwise the OCR quad itself (which may be rotated or
     /// skewed).
     pub fn view_quad<'a>(&'a self, entry: &'a OcrEntry) -> Quad {
-        self.view_quads.get(&entry.id).copied().unwrap_or(entry.quad)
+        self.view_quads
+            .get(&entry.id)
+            .copied()
+            .unwrap_or(entry.quad)
     }
 
     /// Set the overlay box shown in the view for an entry, in image pixels.
@@ -415,16 +453,8 @@ impl Project {
             let b_is_target = b.image_id == image_id;
             match (a_is_target, b_is_target) {
                 (true, true) => {
-                    let qa = view_quads
-                        .get(&a.id)
-                        .copied()
-                        .unwrap_or(a.quad)
-                        .bounds();
-                    let qb = view_quads
-                        .get(&b.id)
-                        .copied()
-                        .unwrap_or(b.quad)
-                        .bounds();
+                    let qa = view_quads.get(&a.id).copied().unwrap_or(a.quad).bounds();
+                    let qb = view_quads.get(&b.id).copied().unwrap_or(b.quad).bounds();
                     qa[1]
                         .partial_cmp(&qb[1])
                         .unwrap_or(std::cmp::Ordering::Equal)
@@ -439,7 +469,9 @@ impl Project {
                     // Keep chapter image order stable; do not intermix.
                     let ai = image_order.get(&a.image_id).copied().unwrap_or(usize::MAX);
                     let bi = image_order.get(&b.image_id).copied().unwrap_or(usize::MAX);
-                    ai.cmp(&bi).then_with(|| a.image_id.cmp(&b.image_id)).then_with(|| a.id.cmp(&b.id))
+                    ai.cmp(&bi)
+                        .then_with(|| a.image_id.cmp(&b.image_id))
+                        .then_with(|| a.id.cmp(&b.id))
                 }
                 (false, false) => std::cmp::Ordering::Equal, // keep original
             }
@@ -473,7 +505,10 @@ impl Project {
         let existed = self.profiles.find_by_name(profile_name);
         let id = existed.unwrap_or_else(|| {
             let new_id = self.profiles.add(profile_name);
-            events.push(ModelEvent::ProfileCreated { id: new_id, name: profile_name.to_string() });
+            events.push(ModelEvent::ProfileCreated {
+                id: new_id,
+                name: profile_name.to_string(),
+            });
             new_id
         });
         if self.profiles.selected_id() != id {
@@ -481,14 +516,20 @@ impl Project {
             events.push(ModelEvent::ProfileSelected { id });
         }
         self.profiles.selected_mut().set_translation(entry_id, text);
-        events.push(ModelEvent::EntryTextUpdated { id: entry_id, profile: id });
+        events.push(ModelEvent::EntryTextUpdated {
+            id: entry_id,
+            profile: id,
+        });
         (id, events)
     }
 
     // -----------------------------------------------------------------------
     // Profile helpers with events (wrappers around `self.profiles`)
     // -----------------------------------------------------------------------
-    pub fn create_profile_with_event(&mut self, name: impl Into<String>) -> (ProfileId, ModelEvent) {
+    pub fn create_profile_with_event(
+        &mut self,
+        name: impl Into<String>,
+    ) -> (ProfileId, ModelEvent) {
         let name = name.into();
         let id = self.profiles.add(name.clone());
         (id, ModelEvent::ProfileCreated { id, name })
@@ -502,10 +543,17 @@ impl Project {
         }
     }
 
-    pub fn set_translation_with_event(&mut self, entry_id: EntryId, text: Option<String>) -> ModelEvent {
+    pub fn set_translation_with_event(
+        &mut self,
+        entry_id: EntryId,
+        text: Option<String>,
+    ) -> ModelEvent {
         let pid = self.profiles.selected_id();
         self.profiles.selected_mut().set_translation(entry_id, text);
-        ModelEvent::EntryTextUpdated { id: entry_id, profile: pid }
+        ModelEvent::EntryTextUpdated {
+            id: entry_id,
+            profile: pid,
+        }
     }
 
     /// Remove a profile (cannot be selected or last remaining). Emits `ProfileRemoved`.
@@ -518,7 +566,11 @@ impl Project {
     }
 
     /// Rename a profile. Emits `ProfileRenamed`.
-    pub fn rename_profile_with_event(&mut self, id: ProfileId, new_name: impl Into<String>) -> Option<ModelEvent> {
+    pub fn rename_profile_with_event(
+        &mut self,
+        id: ProfileId,
+        new_name: impl Into<String>,
+    ) -> Option<ModelEvent> {
         let new_name = new_name.into();
         if self.profiles.rename(id, new_name.clone()) {
             Some(ModelEvent::ProfileRenamed { id, name: new_name })
@@ -541,7 +593,10 @@ impl Project {
         Some((
             name.clone(),
             vec![
-                ModelEvent::ProfileCreated { id, name: name.clone() },
+                ModelEvent::ProfileCreated {
+                    id,
+                    name: name.clone(),
+                },
                 ModelEvent::ProfileSelected { id },
             ],
         ))
@@ -554,10 +609,18 @@ impl Project {
         // Legacy path: no quad, derive quad None. Prefer add_inpaint_patch_with_quad.
         let id = InpaintId(self.next_inpaint_id);
         self.next_inpaint_id += 1;
-        self.extras
-            .inpaint_patches
-            .push(InpaintPatch { id, image_id, bounds, quad: None });
-        ModelEvent::InpaintAdded { id, image_id, bounds, quad: None }
+        self.extras.inpaint_patches.push(InpaintPatch {
+            id,
+            image_id,
+            bounds,
+            quad: None,
+        });
+        ModelEvent::InpaintAdded {
+            id,
+            image_id,
+            bounds,
+            quad: None,
+        }
     }
 
     /// Add a patch with its actual quad (rotated/skewed). `bounds` must be
@@ -573,7 +636,12 @@ impl Project {
             bounds,
             quad: Some(quad),
         });
-        ModelEvent::InpaintAdded { id, image_id, bounds, quad: Some(quad) }
+        ModelEvent::InpaintAdded {
+            id,
+            image_id,
+            bounds,
+            quad: Some(quad),
+        }
     }
 
     /// Add a patch where both bounds and quad are known (e.g. from engine that
@@ -587,12 +655,26 @@ impl Project {
     ) -> ModelEvent {
         let id = InpaintId(self.next_inpaint_id);
         self.next_inpaint_id += 1;
-        self.extras.inpaint_patches.push(InpaintPatch { id, image_id, bounds, quad });
-        ModelEvent::InpaintAdded { id, image_id, bounds, quad }
+        self.extras.inpaint_patches.push(InpaintPatch {
+            id,
+            image_id,
+            bounds,
+            quad,
+        });
+        ModelEvent::InpaintAdded {
+            id,
+            image_id,
+            bounds,
+            quad,
+        }
     }
 
     pub fn remove_inpaint_patch(&mut self, id: InpaintId) -> Option<ModelEvent> {
-        let pos = self.extras.inpaint_patches.iter().position(|p| p.id == id)?;
+        let pos = self
+            .extras
+            .inpaint_patches
+            .iter()
+            .position(|p| p.id == id)?;
         self.extras.inpaint_patches.remove(pos);
         Some(ModelEvent::InpaintRemoved { id })
     }
@@ -602,7 +684,11 @@ impl Project {
     /// helper exists only because `ui::LoadedImage::inpaint` is a per-image `Vec`
     /// cache; the live DB order is `extras.inpaint_patches`.
     #[deprecated(note = "use remove_inpaint_patch(InpaintId) — stable id, single source in model")]
-    pub fn remove_inpaint_patch_by_image_index(&mut self, image_id: ImageId, per_image_idx: usize) -> Option<ModelEvent> {
+    pub fn remove_inpaint_patch_by_image_index(
+        &mut self,
+        image_id: ImageId,
+        per_image_idx: usize,
+    ) -> Option<ModelEvent> {
         let mut count = 0;
         let pos = self.extras.inpaint_patches.iter().position(|p| {
             if p.image_id == image_id {
@@ -638,25 +724,34 @@ mod tests {
     #[test]
     fn display_text_prefers_selected_profile_translation() {
         let mut project = Project::new();
-        let id = project.ocr.append_for_image(ImageId(0), NewEntry {
-            source: crate::EntrySource::AutoOcr,
-            text: "안녕".to_string(),
-            score: 0.9,
-            quad: Quad {
-                points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+        let id = project.ocr.append_for_image(
+            ImageId(0),
+            NewEntry {
+                source: crate::EntrySource::AutoOcr,
+                text: "안녕".to_string(),
+                score: 0.9,
+                quad: Quad {
+                    points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+                },
             },
-        });
+        );
         let entry = project.ocr.get(id).unwrap();
 
         assert_eq!(project.display_text(entry), "안녕");
-        project.profiles.selected_mut().set_translation(id, Some("Hello".to_string()));
+        project
+            .profiles
+            .selected_mut()
+            .set_translation(id, Some("Hello".to_string()));
         assert_eq!(project.display_text(entry), "Hello");
     }
 
     #[test]
     fn entry_style_is_shared_across_profiles() {
         let mut project = Project::new();
-        let style = EntryStyle { font_size: 30.0, ..EntryStyle::default() };
+        let style = EntryStyle {
+            font_size: 30.0,
+            ..EntryStyle::default()
+        };
 
         project.set_entry_style(EntryId(7), style.clone());
         assert_eq!(project.entry_style(EntryId(7)), style);
@@ -664,7 +759,11 @@ mod tests {
 
         let jp = project.profiles.add("JP");
         project.profiles.select(jp);
-        assert_eq!(project.entry_style(EntryId(7)), style, "style must survive profile switch");
+        assert_eq!(
+            project.entry_style(EntryId(7)),
+            style,
+            "style must survive profile switch"
+        );
 
         project.set_entry_style(EntryId(7), EntryStyle::default());
         assert_eq!(project.entry_style(EntryId(7)), EntryStyle::default());
@@ -673,14 +772,17 @@ mod tests {
     #[test]
     fn view_quad_falls_back_to_quad_then_override_then_reset() {
         let mut project = Project::new();
-        let id = project.ocr.append_for_image(ImageId(0), NewEntry {
-            source: crate::EntrySource::AutoOcr,
-            text: "hi".to_string(),
-            score: 0.9,
-            quad: Quad {
-                points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+        let id = project.ocr.append_for_image(
+            ImageId(0),
+            NewEntry {
+                source: crate::EntrySource::AutoOcr,
+                text: "hi".to_string(),
+                score: 0.9,
+                quad: Quad {
+                    points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+                },
             },
-        });
+        );
         let entry = project.ocr.get(id).unwrap();
 
         assert_eq!(project.view_quad(entry), entry.quad);
@@ -709,14 +811,17 @@ mod tests {
         let mut project = Project::new();
         let jp = project.profiles.add("JP");
 
-        let id = project.ocr.append_for_image(ImageId(0), NewEntry {
-            source: crate::EntrySource::AutoOcr,
-            text: "hi".to_string(),
-            score: 0.9,
-            quad: Quad {
-                points: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        let id = project.ocr.append_for_image(
+            ImageId(0),
+            NewEntry {
+                source: crate::EntrySource::AutoOcr,
+                text: "hi".to_string(),
+                score: 0.9,
+                quad: Quad {
+                    points: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                },
             },
-        });
+        );
         let distorted = Quad {
             points: [[5.0, 5.0], [25.0, 6.0], [24.0, 20.0], [6.0, 19.0]],
         };
@@ -737,15 +842,21 @@ mod tests {
     #[test]
     fn delete_entry_hides_it_but_keeps_its_overrides() {
         let mut project = Project::new();
-        let style = EntryStyle { bold: true, ..EntryStyle::default() };
-        let id = project.ocr.append_for_image(ImageId(0), NewEntry {
-            source: crate::EntrySource::AutoOcr,
-            text: "bye".to_string(),
-            score: 0.9,
-            quad: Quad {
-                points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+        let style = EntryStyle {
+            bold: true,
+            ..EntryStyle::default()
+        };
+        let id = project.ocr.append_for_image(
+            ImageId(0),
+            NewEntry {
+                source: crate::EntrySource::AutoOcr,
+                text: "bye".to_string(),
+                score: 0.9,
+                quad: Quad {
+                    points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+                },
             },
-        });
+        );
         project.set_entry_style(id, style.clone());
         let distorted = Quad {
             points: [[1.0, 2.0], [11.0, 3.0], [10.0, 12.0], [2.0, 11.0]],
@@ -771,22 +882,39 @@ mod tests {
     #[test]
     fn store_translation_creates_and_selects_a_profile_by_name() {
         let mut project = Project::new();
-        let id = project.ocr.append_for_image(ImageId(0), NewEntry {
-            source: crate::EntrySource::AutoOcr,
-            text: "raw".to_string(),
-            score: 0.9,
-            quad: Quad {
-                points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+        let id = project.ocr.append_for_image(
+            ImageId(0),
+            NewEntry {
+                source: crate::EntrySource::AutoOcr,
+                text: "raw".to_string(),
+                score: 0.9,
+                quad: Quad {
+                    points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+                },
             },
-        });
+        );
 
         let profile_id = project.store_translation("english(auto)", id, Some("Hello".into()));
 
         assert_eq!(project.profiles.len(), 2, "one new profile");
-        assert_eq!(project.profiles.find_by_name("english(auto)"), Some(profile_id));
-        assert_eq!(project.profiles.selected_id(), profile_id, "new profile selected");
-        assert_eq!(project.profiles.selected().translation_of(id), Some("Hello"));
-        assert_eq!(project.ocr.get(id).unwrap().text, "raw", "OCR text untouched");
+        assert_eq!(
+            project.profiles.find_by_name("english(auto)"),
+            Some(profile_id)
+        );
+        assert_eq!(
+            project.profiles.selected_id(),
+            profile_id,
+            "new profile selected"
+        );
+        assert_eq!(
+            project.profiles.selected().translation_of(id),
+            Some("Hello")
+        );
+        assert_eq!(
+            project.ocr.get(id).unwrap().text,
+            "raw",
+            "OCR text untouched"
+        );
     }
 
     #[test]
@@ -797,21 +925,30 @@ mod tests {
 
         assert_eq!(again, first, "existing profile reused");
         assert_eq!(project.profiles.len(), 2, "no duplicate profile");
-        assert_eq!(project.profiles.selected().translation_of(EntryId(1)), Some("Hello"));
-        assert_eq!(project.profiles.selected().translation_of(EntryId(2)), Some("Hi"));
+        assert_eq!(
+            project.profiles.selected().translation_of(EntryId(1)),
+            Some("Hello")
+        );
+        assert_eq!(
+            project.profiles.selected().translation_of(EntryId(2)),
+            Some("Hi")
+        );
     }
 
     #[test]
     fn revert_transform_keeps_position_and_restores_ocr_shape() {
         let mut project = Project::new();
-        let id = project.ocr.append_for_image(ImageId(0), NewEntry {
-            source: crate::EntrySource::AutoOcr,
-            text: "hi".to_string(),
-            score: 0.9,
-            quad: Quad {
-                points: [[0.0, 0.0], [100.0, 0.0], [100.0, 30.0], [0.0, 30.0]],
+        let id = project.ocr.append_for_image(
+            ImageId(0),
+            NewEntry {
+                source: crate::EntrySource::AutoOcr,
+                text: "hi".to_string(),
+                score: 0.9,
+                quad: Quad {
+                    points: [[0.0, 0.0], [100.0, 0.0], [100.0, 30.0], [0.0, 30.0]],
+                },
             },
-        });
+        );
         let ocr = project.ocr.get(id).unwrap().quad;
         let view = ocr.translate(20.0, 10.0).rotate([50.0, 15.0], 0.6);
         project.set_view_quad(id, view);
@@ -832,14 +969,17 @@ mod tests {
     #[test]
     fn revert_transform_without_override_is_a_noop() {
         let mut project = Project::new();
-        let id = project.ocr.append_for_image(ImageId(0), NewEntry {
-            source: crate::EntrySource::AutoOcr,
-            text: "hi".to_string(),
-            score: 0.9,
-            quad: Quad {
-                points: [[0.0, 0.0], [10.0, 0.0], [10.0, 5.0], [0.0, 5.0]],
+        let id = project.ocr.append_for_image(
+            ImageId(0),
+            NewEntry {
+                source: crate::EntrySource::AutoOcr,
+                text: "hi".to_string(),
+                score: 0.9,
+                quad: Quad {
+                    points: [[0.0, 0.0], [10.0, 0.0], [10.0, 5.0], [0.0, 5.0]],
+                },
             },
-        });
+        );
         project.revert_transform(id);
         let entry = project.ocr.get(id).unwrap();
         assert_eq!(project.view_quad(entry), entry.quad);
@@ -859,80 +999,120 @@ mod tests {
     #[test]
     fn reorder_entries_by_position_sorts_by_y_then_x() {
         let mut project = Project::new();
-        project.ocr.append_for_image(ImageId(0), NewEntry {
-            source: crate::EntrySource::AutoOcr,
-            text: "bottom".into(),
-            score: 0.9,
-            quad: quad_at(0.0, 100.0),
-        });
-        project.ocr.append_for_image(ImageId(0), NewEntry {
-            source: crate::EntrySource::AutoOcr,
-            text: "top".into(),
-            score: 0.9,
-            quad: quad_at(0.0, 10.0),
-        });
-        project.ocr.append_for_image(ImageId(0), NewEntry {
-            source: crate::EntrySource::AutoOcr,
-            text: "middle".into(),
-            score: 0.9,
-            quad: quad_at(0.0, 50.0),
-        });
+        project.ocr.append_for_image(
+            ImageId(0),
+            NewEntry {
+                source: crate::EntrySource::AutoOcr,
+                text: "bottom".into(),
+                score: 0.9,
+                quad: quad_at(0.0, 100.0),
+            },
+        );
+        project.ocr.append_for_image(
+            ImageId(0),
+            NewEntry {
+                source: crate::EntrySource::AutoOcr,
+                text: "top".into(),
+                score: 0.9,
+                quad: quad_at(0.0, 10.0),
+            },
+        );
+        project.ocr.append_for_image(
+            ImageId(0),
+            NewEntry {
+                source: crate::EntrySource::AutoOcr,
+                text: "middle".into(),
+                score: 0.9,
+                quad: quad_at(0.0, 50.0),
+            },
+        );
         project.reorder_entries_for_image(ImageId(0));
-        let texts: Vec<&str> = project.ocr.visible_for(ImageId(0)).map(|e| e.text.as_str()).collect();
+        let texts: Vec<&str> = project
+            .ocr
+            .visible_for(ImageId(0))
+            .map(|e| e.text.as_str())
+            .collect();
         assert_eq!(texts, vec!["top", "middle", "bottom"]);
     }
 
     #[test]
     fn reorder_entries_by_position_tie_breaks_by_x_left_to_right() {
         let mut project = Project::new();
-        project.ocr.append_for_image(ImageId(0), NewEntry {
-            source: crate::EntrySource::AutoOcr,
-            text: "right".into(),
-            score: 0.9,
-            quad: quad_at(100.0, 10.0),
-        });
-        project.ocr.append_for_image(ImageId(0), NewEntry {
-            source: crate::EntrySource::AutoOcr,
-            text: "left".into(),
-            score: 0.9,
-            quad: quad_at(10.0, 10.0),
-        });
-        project.ocr.append_for_image(ImageId(0), NewEntry {
-            source: crate::EntrySource::AutoOcr,
-            text: "center".into(),
-            score: 0.9,
-            quad: quad_at(50.0, 10.0),
-        });
+        project.ocr.append_for_image(
+            ImageId(0),
+            NewEntry {
+                source: crate::EntrySource::AutoOcr,
+                text: "right".into(),
+                score: 0.9,
+                quad: quad_at(100.0, 10.0),
+            },
+        );
+        project.ocr.append_for_image(
+            ImageId(0),
+            NewEntry {
+                source: crate::EntrySource::AutoOcr,
+                text: "left".into(),
+                score: 0.9,
+                quad: quad_at(10.0, 10.0),
+            },
+        );
+        project.ocr.append_for_image(
+            ImageId(0),
+            NewEntry {
+                source: crate::EntrySource::AutoOcr,
+                text: "center".into(),
+                score: 0.9,
+                quad: quad_at(50.0, 10.0),
+            },
+        );
         project.reorder_entries_for_image(ImageId(0));
-        let texts: Vec<&str> = project.ocr.visible_for(ImageId(0)).map(|e| e.text.as_str()).collect();
+        let texts: Vec<&str> = project
+            .ocr
+            .visible_for(ImageId(0))
+            .map(|e| e.text.as_str())
+            .collect();
         assert_eq!(texts, vec!["left", "center", "right"]);
     }
 
     #[test]
     fn reorder_entries_by_position_uses_view_quad_when_overridden() {
         let mut project = Project::new();
-        let low_id = project.ocr.append_for_image(ImageId(0), NewEntry {
-            source: crate::EntrySource::AutoOcr,
-            text: "low".into(),
-            score: 0.9,
-            quad: quad_at(0.0, 100.0),
-        });
-        let high_id = project.ocr.append_for_image(ImageId(0), NewEntry {
-            source: crate::EntrySource::AutoOcr,
-            text: "high".into(),
-            score: 0.9,
-            quad: quad_at(0.0, 10.0),
-        });
+        let low_id = project.ocr.append_for_image(
+            ImageId(0),
+            NewEntry {
+                source: crate::EntrySource::AutoOcr,
+                text: "low".into(),
+                score: 0.9,
+                quad: quad_at(0.0, 100.0),
+            },
+        );
+        let high_id = project.ocr.append_for_image(
+            ImageId(0),
+            NewEntry {
+                source: crate::EntrySource::AutoOcr,
+                text: "high".into(),
+                score: 0.9,
+                quad: quad_at(0.0, 10.0),
+            },
+        );
         // drag "low" to the top via view_quad
         project.set_view_quad(low_id, quad_at(0.0, 5.0));
         // visible before reorder is insertion order [low, high]
         assert_eq!(
-            project.ocr.visible_for(ImageId(0)).map(|e| e.text.as_str()).collect::<Vec<_>>(),
+            project
+                .ocr
+                .visible_for(ImageId(0))
+                .map(|e| e.text.as_str())
+                .collect::<Vec<_>>(),
             vec!["low", "high"]
         );
         project.reorder_entries_for_image(ImageId(0));
         // after reorder, "low" (now at y=5 via view_quad) should be first
-        let texts: Vec<&str> = project.ocr.visible_for(ImageId(0)).map(|e| e.text.as_str()).collect();
+        let texts: Vec<&str> = project
+            .ocr
+            .visible_for(ImageId(0))
+            .map(|e| e.text.as_str())
+            .collect();
         assert_eq!(texts, vec!["low", "high"]);
         // ensure view_quad is still respected
         assert!(project.has_view_quad(low_id));
@@ -942,23 +1122,37 @@ mod tests {
     #[test]
     fn reorder_entries_by_position_keeps_deleted_but_sorts_them() {
         let mut project = Project::new();
-        let bottom = project.ocr.append_for_image(ImageId(0), NewEntry {
-            source: crate::EntrySource::AutoOcr,
-            text: "bottom".into(),
-            score: 0.9,
-            quad: quad_at(0.0, 100.0),
-        });
-        let top = project.ocr.append_for_image(ImageId(0), NewEntry {
-            source: crate::EntrySource::AutoOcr,
-            text: "top".into(),
-            score: 0.9,
-            quad: quad_at(0.0, 10.0),
-        });
+        let bottom = project.ocr.append_for_image(
+            ImageId(0),
+            NewEntry {
+                source: crate::EntrySource::AutoOcr,
+                text: "bottom".into(),
+                score: 0.9,
+                quad: quad_at(0.0, 100.0),
+            },
+        );
+        let top = project.ocr.append_for_image(
+            ImageId(0),
+            NewEntry {
+                source: crate::EntrySource::AutoOcr,
+                text: "top".into(),
+                score: 0.9,
+                quad: quad_at(0.0, 10.0),
+            },
+        );
         project.delete_entry(top);
         project.reorder_entries_for_image(ImageId(0));
-        let all: Vec<&str> = project.ocr.all_for(ImageId(0)).map(|e| e.text.as_str()).collect();
+        let all: Vec<&str> = project
+            .ocr
+            .all_for(ImageId(0))
+            .map(|e| e.text.as_str())
+            .collect();
         assert_eq!(all, vec!["top", "bottom"]);
-        let visible: Vec<&str> = project.ocr.visible_for(ImageId(0)).map(|e| e.text.as_str()).collect();
+        let visible: Vec<&str> = project
+            .ocr
+            .visible_for(ImageId(0))
+            .map(|e| e.text.as_str())
+            .collect();
         assert_eq!(visible, vec!["bottom"]);
         assert!(project.ocr.get(top).unwrap().deleted);
         assert!(!project.ocr.get(bottom).unwrap().deleted);

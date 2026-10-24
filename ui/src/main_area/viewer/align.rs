@@ -7,9 +7,9 @@
 
 use easyscanlate_model::Quad;
 
+use super::TileSpec;
 use super::constants::ALIGN_SNAP_THRESHOLD;
 use super::state::TileViewState;
-use super::TileSpec;
 
 /// Left / center / right of an image-space box converted to view px.
 pub fn image_box_view_xs(min_x: f32, width: f32, scale: f32) -> [f32; 3] {
@@ -31,11 +31,7 @@ pub fn snap_threshold() -> f32 {
 /// Best canvas snap for already view-space dragged lines.
 /// Returns `(delta_view, guide_x_view)` where
 /// `delta_view = dragged_line - guide_x` (subtract to snap).
-pub fn best_canvas_snap(
-    dragged: [f32; 3],
-    content_w: f32,
-    threshold: f32,
-) -> Option<(f32, f32)> {
+pub fn best_canvas_snap(dragged: [f32; 3], content_w: f32, threshold: f32) -> Option<(f32, f32)> {
     if !content_w.is_finite() || content_w <= 0.0 {
         return None;
     }

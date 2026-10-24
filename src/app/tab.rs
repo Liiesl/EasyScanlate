@@ -7,19 +7,24 @@
 
 use std::sync::Arc;
 
-use iced::widget::{pane_grid, text_editor};
 use iced::Rectangle;
+use iced::widget::{pane_grid, text_editor};
 
 use easyscanlate_model::{EntryId, EntryStyle, ProfileId, Project, Quad};
 #[cfg(feature = "ocr")]
 use easyscanlate_ocr::{self as ocr_engine, OcrCancellationToken};
 #[cfg(feature = "styling")]
 use easyscanlate_styling::{JobTracker, StylePrediction};
-use easyscanlate_ui::event::{EditOrigin, MainAreaMode, ManualMode, StyleField, TargetProfileSelection, TranslationPanelMode};
-use easyscanlate_ui::main_area::decode::Scheduler;
 use easyscanlate_ui::LoadedImage;
+use easyscanlate_ui::event::{
+    EditOrigin, MainAreaMode, ManualMode, StyleField, TargetProfileSelection, TranslationPanelMode,
+};
+use easyscanlate_ui::main_area::decode::Scheduler;
 
-use easyscanlate_ui::layout::{PaneKind, ResultsPaneKind, EditorPaneKind, EDITOR_LEFT_DEFAULT_RATIO, MAIN_AREA_DEFAULT_RATIO, RESULTS_TOP_RATIO};
+use easyscanlate_ui::layout::{
+    EDITOR_LEFT_DEFAULT_RATIO, EditorPaneKind, MAIN_AREA_DEFAULT_RATIO, PaneKind,
+    RESULTS_TOP_RATIO, ResultsPaneKind,
+};
 
 // ---------------------------------------------------------------------------
 // Tab identity
@@ -262,7 +267,11 @@ impl Tab {
         let results_panes = {
             let (mut panes, translation) = pane_grid::State::new(ResultsPaneKind::Translation);
             let (_, split) = panes
-                .split(pane_grid::Axis::Horizontal, translation, ResultsPaneKind::Layers)
+                .split(
+                    pane_grid::Axis::Horizontal,
+                    translation,
+                    ResultsPaneKind::Layers,
+                )
                 .expect("results pane split must succeed");
             panes.resize(split, RESULTS_TOP_RATIO);
             panes
@@ -438,11 +447,7 @@ impl Tab {
 
     /// Instant placeholder shown while the `.mmtl` is being extracted off the UI thread.
     /// Title is file_stem, `loading_path` is canonical for dedup/spam guard.
-    pub fn loading_placeholder(
-        id: TabId,
-        title: String,
-        path: std::path::PathBuf,
-    ) -> Self {
+    pub fn loading_placeholder(id: TabId, title: String, path: std::path::PathBuf) -> Self {
         let mut tab = Self::home(id);
         tab.kind = TabKind::Project;
         tab.title = title;

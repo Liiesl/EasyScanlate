@@ -1,18 +1,18 @@
-use std::collections::HashMap;
-use iced::Task;
 use easyscanlate_model::EntryId;
 use easyscanlate_ui::UiState;
-use easyscanlate_ui::translation as translation;
-#[allow(unused_imports)]
-pub use easyscanlate_ui::translation::{
-    catalog_provider, default_hidden_ids, default_hidden_ids_for_models, fetch_local_provider,
-    fetch_local_providers, fetch_providers, file_tag, is_custom, is_local, profile_name,
-    provider_name, usable_models, validate_connection_for, Connection, Model, Provider,
-    Session, LANGUAGES,
-};
-pub use easyscanlate_ui::translation::cache;
+use easyscanlate_ui::translation;
 #[cfg(not(feature = "translation"))]
 pub use easyscanlate_ui::translation::FAKE_PROVIDER;
+pub use easyscanlate_ui::translation::cache;
+#[allow(unused_imports)]
+pub use easyscanlate_ui::translation::{
+    Connection, LANGUAGES, Model, Provider, Session, catalog_provider, default_hidden_ids,
+    default_hidden_ids_for_models, fetch_local_provider, fetch_local_providers, fetch_providers,
+    file_tag, is_custom, is_local, profile_name, provider_name, usable_models,
+    validate_connection_for,
+};
+use iced::Task;
+use std::collections::HashMap;
 
 use super::{App, Message};
 
@@ -32,8 +32,7 @@ pub fn sync_tx_from_store(app: &mut App) -> Task<Message> {
     // Listing-cache JSON reads go to the blocking pool; merge on completion
     // so `SettingsChanged`/onboarding never stalls the UI thread.
     let fetch_ids = app.tx.fetch_ids();
-    let known: std::collections::HashSet<String> =
-        app.tx.fetched.keys().cloned().collect();
+    let known: std::collections::HashSet<String> = app.tx.fetched.keys().cloned().collect();
     if fetch_ids.is_empty() {
         return Task::none();
     }
@@ -66,7 +65,10 @@ pub fn handle_fetch_models(app: &mut App) -> Task<Message> {
 /// Deferred on-disk listing cache (loaded via `spawn_blocking` after the
 /// first frame). Merges without persisting back to disk — the network
 /// mirror delta (`handle_models_fetched`) owns persistence.
-pub fn handle_cache_loaded(app: &mut App, providers: HashMap<String, translation::Provider>) -> Task<Message> {
+pub fn handle_cache_loaded(
+    app: &mut App,
+    providers: HashMap<String, translation::Provider>,
+) -> Task<Message> {
     if providers.is_empty() {
         return Task::none();
     }
@@ -75,7 +77,10 @@ pub fn handle_cache_loaded(app: &mut App, providers: HashMap<String, translation
     Task::none()
 }
 
-pub fn handle_models_fetched(app: &mut App, providers: HashMap<String, translation::Provider>) -> Task<Message> {
+pub fn handle_models_fetched(
+    app: &mut App,
+    providers: HashMap<String, translation::Provider>,
+) -> Task<Message> {
     // Delta-persist the fresh listings (per-provider files, only when
     // changed) so the next boot can paint from disk when the mirror is
     // unreachable or its DB is stale.
@@ -120,9 +125,10 @@ fn capitalized_profile_name(lang: &str) -> String {
 fn resolve_base_id(app: &App) -> Option<easyscanlate_model::ProfileId> {
     let tab = app.active_tab();
     if let Some(id) = tab.translate_base
-        && tab.project.profiles.iter().any(|p| p.id == id) {
-            return Some(id);
-        }
+        && tab.project.profiles.iter().any(|p| p.id == id)
+    {
+        return Some(id);
+    }
     if tab.images.is_empty() {
         return None;
     }
@@ -135,21 +141,33 @@ pub fn handle_translate(app: &mut App) -> Task<Message> {
         return Task::none();
     }
     if !app.tx.is_connected() {
-        app.active_tab_mut().status = "Connect a translation service in Settings first.".to_string();
+        app.active_tab_mut().status =
+            "Connect a translation service in Settings first.".to_string();
         return Task::none();
     }
     // Ensure base/target initialized when entering translate without prior selection
-    if app.active_tab_mut().translation_panel_mode == easyscanlate_ui::event::TranslationPanelMode::Translate && !app.active_tab_mut().images.is_empty() {
+    if app.active_tab_mut().translation_panel_mode
+        == easyscanlate_ui::event::TranslationPanelMode::Translate
+        && !app.active_tab_mut().images.is_empty()
+    {
         if app.active_tab_mut().translate_base.is_none() {
-            app.active_tab_mut().translate_base = Some(app.active_tab_mut().project.profiles.selected_id());
+            app.active_tab_mut().translate_base =
+                Some(app.active_tab_mut().project.profiles.selected_id());
         }
-        if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.active_tab_mut().translate_target.clone()
-            && name != capitalized_profile_name(&app.active_tab_mut().translate_lang) {
-                // keep as is; lang change handler already syncs
-            }
+        if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) =
+            app.active_tab_mut().translate_target.clone()
+            && name != capitalized_profile_name(&app.active_tab_mut().translate_lang)
+        {
+            // keep as is; lang change handler already syncs
+        }
     }
-    let is_translate_mode = app.active_tab().translation_panel_mode == easyscanlate_ui::event::TranslationPanelMode::Translate;
-    let base_id = if is_translate_mode { resolve_base_id(app) } else { None };
+    let is_translate_mode = app.active_tab().translation_panel_mode
+        == easyscanlate_ui::event::TranslationPanelMode::Translate;
+    let base_id = if is_translate_mode {
+        resolve_base_id(app)
+    } else {
+        None
+    };
     let mut jobs: Vec<(usize, EntryId, String, String)> = Vec::new();
     {
         let tab = app.active_tab();
@@ -207,11 +225,12 @@ pub fn handle_translate(app: &mut App) -> Task<Message> {
     Task::perform(
         async move {
             let result =
-                translation::translate_all(&items, &target, &provider, &model, api_key)
-                    .await;
+                translation::translate_all(&items, &target, &provider, &model, api_key).await;
             (jobs, result)
         },
-        move |(jobs, result)| Message::Tab(tid, crate::app::TabMessage::TranslateFinished(jobs, result)),
+        move |(jobs, result)| {
+            Message::Tab(tid, crate::app::TabMessage::TranslateFinished(jobs, result))
+        },
     )
 }
 
@@ -242,18 +261,21 @@ pub fn handle_retranslate_entry(app: &mut App, index: usize, entry_id: EntryId) 
             return Task::none();
         }
         if !app.tx.is_connected() {
-            app.active_tab_mut().status = "Connect a translation service in Settings first.".to_string();
+            app.active_tab_mut().status =
+                "Connect a translation service in Settings first.".to_string();
             return Task::none();
         }
         let filename = {
             let tab = app.active_tab();
             tab.project
-            .image(image_id)
-            .map(|m| translation::file_tag(&m.path))
-            .unwrap_or_default()
+                .image(image_id)
+                .map(|m| translation::file_tag(&m.path))
+                .unwrap_or_default()
         };
         // In Translate mode, base profile's text is the source, with context from base as well
-        let (text, context_items) = if app.active_tab().translation_panel_mode == easyscanlate_ui::event::TranslationPanelMode::Translate {
+        let (text, context_items) = if app.active_tab().translation_panel_mode
+            == easyscanlate_ui::event::TranslationPanelMode::Translate
+        {
             let base_id = resolve_base_id(app);
             let (txt, ctx) = {
                 let tab = app.active_tab();
@@ -269,7 +291,11 @@ pub fn handle_retranslate_entry(app: &mut App, index: usize, entry_id: EntryId) 
                             .and_then(|pid| tab.project.resolved_text_for(pid, e.id))
                             .map(|s| s.to_string())
                             .unwrap_or_else(|| e.text.clone());
-                        translation::TranslateItem { filename: filename.clone(), id: e.id.0, text: t }
+                        translation::TranslateItem {
+                            filename: filename.clone(),
+                            id: e.id.0,
+                            text: t,
+                        }
                     })
                     .collect();
                 (txt, ctx)
@@ -278,15 +304,14 @@ pub fn handle_retranslate_entry(app: &mut App, index: usize, entry_id: EntryId) 
         } else {
             let ctx: Vec<translation::TranslateItem> = {
                 let tab = app.active_tab();
-                tab
-                .project
-                .visible_for(image_id)
-                .map(|e| translation::TranslateItem {
-                    filename: filename.clone(),
-                    id: e.id.0,
-                    text: e.text.clone(),
-                })
-                .collect()
+                tab.project
+                    .visible_for(image_id)
+                    .map(|e| translation::TranslateItem {
+                        filename: filename.clone(),
+                        id: e.id.0,
+                        text: e.text.clone(),
+                    })
+                    .collect()
             };
             (entry_text.clone(), ctx)
         };
@@ -305,7 +330,8 @@ pub fn handle_retranslate_entry(app: &mut App, index: usize, entry_id: EntryId) 
     app.active_tab_mut().translate_anim_phase = 0.0;
     app.active_tab_mut().status = format!(
         "Retranslating 1 line to {} via {model} ({})...",
-        app.active_tab_mut().translate_lang, provider.name
+        app.active_tab_mut().translate_lang,
+        provider.name
     );
     let tid = app.active_tab().id;
     Task::perform(
@@ -323,7 +349,12 @@ pub fn handle_retranslate_entry(app: &mut App, index: usize, entry_id: EntryId) 
             .await;
             ((index, entry_id), result)
         },
-        move |(job, result)| Message::Tab(tid, crate::app::TabMessage::RetranslateFinished(job, result)),
+        move |(job, result)| {
+            Message::Tab(
+                tid,
+                crate::app::TabMessage::RetranslateFinished(job, result),
+            )
+        },
     )
 }
 
@@ -433,7 +464,8 @@ pub fn handle_connect_modal_submit(app: &mut App) -> Task<Message> {
     app.tx.connect(id.clone(), connection);
     // Instant paint from the on-disk cache for newly connected cloud
     // gateways; the fetch below is the delta that refreshes it.
-    if !is_custom && !is_local
+    if !is_custom
+        && !is_local
         && let Some(cached) = translation::cache::load_cached_provider(&id)
     {
         app.tx.on_fetched(HashMap::from([(id.clone(), cached)]));
@@ -442,12 +474,12 @@ pub fn handle_connect_modal_submit(app: &mut App) -> Task<Message> {
     app.active_tab_mut().status = format!("Connected {}.", translation::provider_name(&id));
     if is_custom {
         Task::none()
-    } else if is_local {        let base = base_url.clone();
+    } else if is_local {
+        let base = base_url.clone();
         let fetch_id = id.clone();
         Task::perform(
             async move {
-                let provider =
-                    translation::fetch_local_provider(&fetch_id, &base).await;
+                let provider = translation::fetch_local_provider(&fetch_id, &base).await;
                 let mut map = HashMap::new();
                 map.insert(fetch_id, provider);
                 map
@@ -477,33 +509,64 @@ pub fn handle_panel_scroll(app: &mut App, anchor: f32) -> Task<Message> {
     Task::none()
 }
 
-pub fn handle_panel_mode(app: &mut App, mode: easyscanlate_ui::event::TranslationPanelMode) -> Task<Message> {
+pub fn handle_panel_mode(
+    app: &mut App,
+    mode: easyscanlate_ui::event::TranslationPanelMode,
+) -> Task<Message> {
     let prev = app.active_tab().translation_panel_mode;
-    if mode == easyscanlate_ui::event::TranslationPanelMode::Translate && app.active_tab_mut().translation_panel_mode != easyscanlate_ui::event::TranslationPanelMode::Translate {
-        if app.active_tab_mut().translate_base.is_none() && !app.active_tab_mut().images.is_empty() {
-            app.active_tab_mut().translate_base = Some(app.active_tab_mut().project.profiles.selected_id());
+    if mode == easyscanlate_ui::event::TranslationPanelMode::Translate
+        && app.active_tab_mut().translation_panel_mode
+            != easyscanlate_ui::event::TranslationPanelMode::Translate
+    {
+        if app.active_tab_mut().translate_base.is_none() && !app.active_tab_mut().images.is_empty()
+        {
+            app.active_tab_mut().translate_base =
+                Some(app.active_tab_mut().project.profiles.selected_id());
         }
-        if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(_) = app.active_tab_mut().translate_target.clone() {
-            app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(placeholder_name(&app.active_tab_mut().translate_lang));
+        if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(_) =
+            app.active_tab_mut().translate_target.clone()
+        {
+            app.active_tab_mut().translate_target =
+                easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(placeholder_name(
+                    &app.active_tab_mut().translate_lang,
+                ));
         }
-        if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.active_tab_mut().translate_target.clone()
-            && let Some(id) = app.active_tab_mut().project.profiles.find_by_name(&name) {
-                let base = app.active_tab_mut().translate_base.or_else(|| Some(app.active_tab_mut().project.profiles.selected_id()));
-                if Some(id) != base {
-                    app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::Existing(id);
-                }
+        if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) =
+            app.active_tab_mut().translate_target.clone()
+            && let Some(id) = app.active_tab_mut().project.profiles.find_by_name(&name)
+        {
+            let base = app
+                .active_tab_mut()
+                .translate_base
+                .or_else(|| Some(app.active_tab_mut().project.profiles.selected_id()));
+            if Some(id) != base {
+                app.active_tab_mut().translate_target =
+                    easyscanlate_ui::event::TargetProfileSelection::Existing(id);
             }
-        if let (Some(base), easyscanlate_ui::event::TargetProfileSelection::Existing(tid)) = (app.active_tab_mut().translate_base, app.active_tab_mut().translate_target.clone())
-            && base == tid {
-                app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(placeholder_name(&app.active_tab_mut().translate_lang));
-            }
+        }
+        if let (Some(base), easyscanlate_ui::event::TargetProfileSelection::Existing(tid)) = (
+            app.active_tab_mut().translate_base,
+            app.active_tab_mut().translate_target.clone(),
+        ) && base == tid
+        {
+            app.active_tab_mut().translate_target =
+                easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(placeholder_name(
+                    &app.active_tab_mut().translate_lang,
+                ));
+        }
     }
     app.active_tab_mut().translation_panel_mode = mode;
     app.active_tab_mut().status = match mode {
-        easyscanlate_ui::event::TranslationPanelMode::Edit => "Edit mode: single profile.".to_string(),
-        easyscanlate_ui::event::TranslationPanelMode::Translate => "Translate mode: base → target.".to_string(),
+        easyscanlate_ui::event::TranslationPanelMode::Edit => {
+            "Edit mode: single profile.".to_string()
+        }
+        easyscanlate_ui::event::TranslationPanelMode::Translate => {
+            "Translate mode: base → target.".to_string()
+        }
     };
-    if app.active_tab_mut().editing.is_some() && app.active_tab_mut().editing_origin == easyscanlate_ui::event::EditOrigin::Panel {
+    if app.active_tab_mut().editing.is_some()
+        && app.active_tab_mut().editing_origin == easyscanlate_ui::event::EditOrigin::Panel
+    {
         crate::app::edit::clear_editing(app);
     }
     if prev == mode {
@@ -517,32 +580,63 @@ pub fn handle_base_select(app: &mut App, id: easyscanlate_model::ProfileId) -> T
     if app.active_tab_mut().images.is_empty() {
         return Task::none();
     }
-    let exists = app.active_tab_mut().project.profiles.iter().any(|p| p.id == id);
+    let exists = app
+        .active_tab_mut()
+        .project
+        .profiles
+        .iter()
+        .any(|p| p.id == id);
     if !exists {
         return Task::none();
     }
-    if let easyscanlate_ui::event::TargetProfileSelection::Existing(tid) = app.active_tab_mut().translate_target.clone()
-        && tid == id {
+    if let easyscanlate_ui::event::TargetProfileSelection::Existing(tid) =
+        app.active_tab_mut().translate_target.clone()
+        && tid == id
+    {
+        app.active_tab_mut().status = "Base and target must differ.".to_string();
+        return Task::none();
+    }
+    if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) =
+        app.active_tab().translate_target.clone()
+    {
+        let bprof_name = app
+            .active_tab()
+            .project
+            .profiles
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.name.clone());
+        if let Some(bname) = bprof_name
+            && bname == name
+        {
             app.active_tab_mut().status = "Base and target must differ.".to_string();
             return Task::none();
         }
-    if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.active_tab().translate_target.clone() {
-        let bprof_name = app.active_tab().project.profiles.iter().find(|p| p.id == id).map(|p| p.name.clone());
-        if let Some(bname) = bprof_name && bname == name { app.active_tab_mut().status = "Base and target must differ.".to_string(); return Task::none(); }
     }
     app.active_tab_mut().translate_base = Some(id);
-    let name = app.active_tab_mut().project.profiles.iter().find(|p| p.id == id).map(|p| p.name.clone()).unwrap_or_default();
+    let name = app
+        .active_tab_mut()
+        .project
+        .profiles
+        .iter()
+        .find(|p| p.id == id)
+        .map(|p| p.name.clone())
+        .unwrap_or_default();
     app.active_tab_mut().status = format!("Base: {name}");
     Task::none()
 }
 
-pub fn handle_target_select(app: &mut App, sel: easyscanlate_ui::event::TargetProfileSelection) -> Task<Message> {
+pub fn handle_target_select(
+    app: &mut App,
+    sel: easyscanlate_ui::event::TargetProfileSelection,
+) -> Task<Message> {
     if app.active_tab().images.is_empty() {
         return Task::none();
     }
     let base = {
         let tab = app.active_tab();
-        tab.translate_base.or_else(|| Some(tab.project.profiles.selected_id()))
+        tab.translate_base
+            .or_else(|| Some(tab.project.profiles.selected_id()))
     };
     match &sel {
         easyscanlate_ui::event::TargetProfileSelection::Existing(id) => {
@@ -550,26 +644,59 @@ pub fn handle_target_select(app: &mut App, sel: easyscanlate_ui::event::TargetPr
                 app.active_tab_mut().status = "Base and target must differ.".to_string();
                 return Task::none();
             }
-            let exists = app.active_tab().project.profiles.iter().any(|p| p.id == *id);
-            if !exists { return Task::none(); }
+            let exists = app
+                .active_tab()
+                .project
+                .profiles
+                .iter()
+                .any(|p| p.id == *id);
+            if !exists {
+                return Task::none();
+            }
         }
         easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) => {
             if let Some(b) = base {
-                let bprof_name = app.active_tab().project.profiles.iter().find(|p| p.id == b).map(|p| p.name.clone());
-                if let Some(bname) = bprof_name && &bname == name { app.active_tab_mut().status = "Base and target must differ.".to_string(); return Task::none(); }
+                let bprof_name = app
+                    .active_tab()
+                    .project
+                    .profiles
+                    .iter()
+                    .find(|p| p.id == b)
+                    .map(|p| p.name.clone());
+                if let Some(bname) = bprof_name
+                    && &bname == name
+                {
+                    app.active_tab_mut().status = "Base and target must differ.".to_string();
+                    return Task::none();
+                }
             }
         }
     }
     let resolved = match sel.clone() {
         easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) => {
             let found = app.active_tab().project.profiles.find_by_name(&name);
-            if let Some(id) = found { if Some(id) != base { easyscanlate_ui::event::TargetProfileSelection::Existing(id) } else { easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) } } else { easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) }
+            if let Some(id) = found {
+                if Some(id) != base {
+                    easyscanlate_ui::event::TargetProfileSelection::Existing(id)
+                } else {
+                    easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name)
+                }
+            } else {
+                easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name)
+            }
         }
         other => other,
     };
     app.active_tab_mut().translate_target = resolved.clone();
     let label = match resolved {
-        easyscanlate_ui::event::TargetProfileSelection::Existing(id) => app.active_tab().project.profiles.iter().find(|p| p.id == id).map(|p| p.name.clone()).unwrap_or_default(),
+        easyscanlate_ui::event::TargetProfileSelection::Existing(id) => app
+            .active_tab()
+            .project
+            .profiles
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.name.clone())
+            .unwrap_or_default(),
         easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(n) => n,
     };
     app.active_tab_mut().status = format!("Target: {label}");
@@ -578,38 +705,69 @@ pub fn handle_target_select(app: &mut App, sel: easyscanlate_ui::event::TargetPr
 
 pub fn handle_lang(app: &mut App, lang: String) -> Task<Message> {
     app.active_tab_mut().translate_lang = lang.clone();
-    if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(_) = app.active_tab_mut().translate_target.clone() {
+    if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(_) =
+        app.active_tab_mut().translate_target.clone()
+    {
         let new_name = placeholder_name(&lang);
         if !app.active_tab_mut().images.is_empty() {
-            if let Some(id) = app.active_tab_mut().project.profiles.find_by_name(&new_name) {
-                let base = app.active_tab_mut().translate_base.or_else(|| Some(app.active_tab_mut().project.profiles.selected_id()));
+            if let Some(id) = app
+                .active_tab_mut()
+                .project
+                .profiles
+                .find_by_name(&new_name)
+            {
+                let base = app
+                    .active_tab_mut()
+                    .translate_base
+                    .or_else(|| Some(app.active_tab_mut().project.profiles.selected_id()));
                 if Some(id) != base {
-                    app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::Existing(id);
+                    app.active_tab_mut().translate_target =
+                        easyscanlate_ui::event::TargetProfileSelection::Existing(id);
                 } else {
-                    app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(new_name);
+                    app.active_tab_mut().translate_target =
+                        easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(new_name);
                 }
             } else {
-                app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(new_name);
+                app.active_tab_mut().translate_target =
+                    easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(new_name);
             }
         } else {
-            app.active_tab_mut().translate_target = easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(new_name);
+            app.active_tab_mut().translate_target =
+                easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(new_name);
         }
     }
     Task::none()
 }
 
-pub fn handle_translate_finished(app: &mut App, tab_id: crate::app::tab::TabId, jobs: Vec<(usize, EntryId, String, String)>, result: Result<Vec<String>, String>) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+pub fn handle_translate_finished(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    jobs: Vec<(usize, EntryId, String, String)>,
+    result: Result<Vec<String>, String>,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     app.tabs[idx].translating = false;
     app.tabs[idx].translate_anim_phase = 0.0;
     match result {
         Ok(translations) => {
-            let is_translate_mode = app.tabs[idx].translation_panel_mode == easyscanlate_ui::event::TranslationPanelMode::Translate;
+            let is_translate_mode = app.tabs[idx].translation_panel_mode
+                == easyscanlate_ui::event::TranslationPanelMode::Translate;
             let profile_name = if is_translate_mode {
                 let tab = &app.tabs[idx];
                 match &tab.translate_target {
-                    easyscanlate_ui::event::TargetProfileSelection::Existing(id) => tab.project.profiles.iter().find(|p| &p.id == id).map(|p| p.name.clone()).unwrap_or_else(|| format!("{}(auto)", tab.translate_lang)),
-                    easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) => name.clone(),
+                    easyscanlate_ui::event::TargetProfileSelection::Existing(id) => tab
+                        .project
+                        .profiles
+                        .iter()
+                        .find(|p| &p.id == id)
+                        .map(|p| p.name.clone())
+                        .unwrap_or_else(|| format!("{}(auto)", tab.translate_lang)),
+                    easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) => {
+                        name.clone()
+                    }
                 }
             } else {
                 let lang = app.tabs[idx].translate_lang.clone();
@@ -617,46 +775,79 @@ pub fn handle_translate_finished(app: &mut App, tab_id: crate::app::tab::TabId, 
             };
             if translations.len() != jobs.len() {
                 let mut saved = 0usize;
-                for ((_, entry_id, _path, _text), translation) in jobs.iter().zip(translations.iter()) {
-                    if translation.is_empty() { continue; }
+                for ((_, entry_id, _path, _text), translation) in
+                    jobs.iter().zip(translations.iter())
+                {
+                    if translation.is_empty() {
+                        continue;
+                    }
                     let evs = {
                         let tab = &mut app.tabs[idx];
-                        let (_, evs) = tab.project.store_translation_with_event(&profile_name, *entry_id, Some(translation.clone()));
+                        let (_, evs) = tab.project.store_translation_with_event(
+                            &profile_name,
+                            *entry_id,
+                            Some(translation.clone()),
+                        );
                         evs
                     };
-                    for ev in evs { crate::app::handle_model_event(&mut app.tabs[idx], ev); }
+                    for ev in evs {
+                        crate::app::handle_model_event(&mut app.tabs[idx], ev);
+                    }
                     saved += 1;
                 }
-                app.tabs[idx].status = format!("Translated {saved} of {} line(s) into '{profile_name}' (count mismatch, partial).", jobs.len());
+                app.tabs[idx].status = format!(
+                    "Translated {saved} of {} line(s) into '{profile_name}' (count mismatch, partial).",
+                    jobs.len()
+                );
             } else {
                 let mut saved = 0usize;
                 let mut skipped = 0usize;
-                for ((_, entry_id, _path, _text), translation) in jobs.iter().zip(translations.iter()) {
-                    if translation.is_empty() { skipped += 1; continue; }
+                for ((_, entry_id, _path, _text), translation) in
+                    jobs.iter().zip(translations.iter())
+                {
+                    if translation.is_empty() {
+                        skipped += 1;
+                        continue;
+                    }
                     let evs = {
                         let tab = &mut app.tabs[idx];
-                        let (_, evs) = tab.project.store_translation_with_event(&profile_name, *entry_id, Some(translation.clone()));
+                        let (_, evs) = tab.project.store_translation_with_event(
+                            &profile_name,
+                            *entry_id,
+                            Some(translation.clone()),
+                        );
                         evs
                     };
-                    for ev in evs { crate::app::handle_model_event(&mut app.tabs[idx], ev); }
+                    for ev in evs {
+                        crate::app::handle_model_event(&mut app.tabs[idx], ev);
+                    }
                     saved += 1;
                 }
                 if skipped > 0 {
-                    app.tabs[idx].status = format!("Translated {saved} of {} line(s) into '{profile_name}' ({skipped} still missing after retry, skipped).", jobs.len());
+                    app.tabs[idx].status = format!(
+                        "Translated {saved} of {} line(s) into '{profile_name}' ({skipped} still missing after retry, skipped).",
+                        jobs.len()
+                    );
                 } else {
-                    app.tabs[idx].status = format!("Translated {saved} line(s) into '{profile_name}'.");
+                    app.tabs[idx].status =
+                        format!("Translated {saved} line(s) into '{profile_name}'.");
                 }
             }
             if is_translate_mode {
                 let target_name = profile_name.clone();
-                if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.tabs[idx].translate_target.clone()
+                if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) =
+                    app.tabs[idx].translate_target.clone()
                     && name == target_name
-                        && let Some(id) = app.tabs[idx].project.profiles.find_by_name(&name) {
-                            let base = app.tabs[idx].translate_base.or_else(|| Some(app.tabs[idx].project.profiles.selected_id()));
-                            if Some(id) != base {
-                                app.tabs[idx].translate_target = easyscanlate_ui::event::TargetProfileSelection::Existing(id);
-                            }
-                        }
+                    && let Some(id) = app.tabs[idx].project.profiles.find_by_name(&name)
+                {
+                    let base = app.tabs[idx]
+                        .translate_base
+                        .or_else(|| Some(app.tabs[idx].project.profiles.selected_id()));
+                    if Some(id) != base {
+                        app.tabs[idx].translate_target =
+                            easyscanlate_ui::event::TargetProfileSelection::Existing(id);
+                    }
+                }
             }
         }
         Err(e) => {
@@ -666,44 +857,80 @@ pub fn handle_translate_finished(app: &mut App, tab_id: crate::app::tab::TabId, 
     }
     Task::none()
 }
-pub fn handle_retranslate_finished(app: &mut App, tab_id: crate::app::tab::TabId, index: usize, entry_id: EntryId, result: Result<String, String>) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) { Some(i) => i, None => return Task::none() };
+pub fn handle_retranslate_finished(
+    app: &mut App,
+    tab_id: crate::app::tab::TabId,
+    index: usize,
+    entry_id: EntryId,
+    result: Result<String, String>,
+) -> Task<Message> {
+    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
+        Some(i) => i,
+        None => return Task::none(),
+    };
     app.tabs[idx].translating = false;
     app.tabs[idx].translate_anim_phase = 0.0;
     match result {
         Ok(mut text) => {
             if text.len() >= 2 {
-                let quoted = (text.starts_with('"') && text.ends_with('"')) || (text.starts_with('\'') && text.ends_with('\''));
-                if quoted { text = text[1..text.len()-1].to_string(); }
+                let quoted = (text.starts_with('"') && text.ends_with('"'))
+                    || (text.starts_with('\'') && text.ends_with('\''));
+                if quoted {
+                    text = text[1..text.len() - 1].to_string();
+                }
             }
-            if app.tabs[idx].translation_panel_mode == easyscanlate_ui::event::TranslationPanelMode::Translate {
+            if app.tabs[idx].translation_panel_mode
+                == easyscanlate_ui::event::TranslationPanelMode::Translate
+            {
                 let target_name = {
                     let tab = &app.tabs[idx];
                     match &tab.translate_target {
-                        easyscanlate_ui::event::TargetProfileSelection::Existing(id) => tab.project.profiles.iter().find(|p| &p.id == id).map(|p| p.name.clone()).unwrap_or_else(|| format!("{}(auto)", tab.translate_lang)),
-                        easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) => name.clone(),
+                        easyscanlate_ui::event::TargetProfileSelection::Existing(id) => tab
+                            .project
+                            .profiles
+                            .iter()
+                            .find(|p| &p.id == id)
+                            .map(|p| p.name.clone())
+                            .unwrap_or_else(|| format!("{}(auto)", tab.translate_lang)),
+                        easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) => {
+                            name.clone()
+                        }
                     }
                 };
                 if index >= app.tabs[idx].images.len() {
                     app.tabs[idx].status = "Retranslated, but that image is gone.".to_string();
                     return Task::none();
                 }
-                let equals_original = app.tabs[idx].project.entry_including_deleted(entry_id).is_some_and(|entry| entry.text == text);
+                let equals_original = app.tabs[idx]
+                    .project
+                    .entry_including_deleted(entry_id)
+                    .is_some_and(|entry| entry.text == text);
                 let stored = if equals_original { None } else { Some(text) };
                 let evs = {
                     let tab = &mut app.tabs[idx];
-                    let (_target_id, evs) = tab.project.store_translation_with_event(&target_name, entry_id, stored.clone());
+                    let (_target_id, evs) = tab.project.store_translation_with_event(
+                        &target_name,
+                        entry_id,
+                        stored.clone(),
+                    );
                     evs
                 };
-                for ev in evs { crate::app::handle_model_event(&mut app.tabs[idx], ev); }
-                if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) = app.tabs[idx].translate_target.clone()
+                for ev in evs {
+                    crate::app::handle_model_event(&mut app.tabs[idx], ev);
+                }
+                if let easyscanlate_ui::event::TargetProfileSelection::AutoPlaceholder(name) =
+                    app.tabs[idx].translate_target.clone()
                     && name == target_name
-                        && let Some(id) = app.tabs[idx].project.profiles.find_by_name(&name) {
-                            let base = app.tabs[idx].translate_base.or_else(|| Some(app.tabs[idx].project.profiles.selected_id()));
-                            if Some(id) != base {
-                                app.tabs[idx].translate_target = easyscanlate_ui::event::TargetProfileSelection::Existing(id);
-                            }
-                        }
+                    && let Some(id) = app.tabs[idx].project.profiles.find_by_name(&name)
+                {
+                    let base = app.tabs[idx]
+                        .translate_base
+                        .or_else(|| Some(app.tabs[idx].project.profiles.selected_id()));
+                    if Some(id) != base {
+                        app.tabs[idx].translate_target =
+                            easyscanlate_ui::event::TargetProfileSelection::Existing(id);
+                    }
+                }
                 app.tabs[idx].status = format!("Retranslated 1 line into '{target_name}'.");
                 return Task::none();
             }
@@ -711,20 +938,30 @@ pub fn handle_retranslate_finished(app: &mut App, tab_id: crate::app::tab::TabId
                 app.tabs[idx].status = "Retranslated, but that image is gone.".to_string();
                 return Task::none();
             }
-            let equals_original = app.tabs[idx].project.entry_including_deleted(entry_id).is_some_and(|entry| entry.text == text);
+            let equals_original = app.tabs[idx]
+                .project
+                .entry_including_deleted(entry_id)
+                .is_some_and(|entry| entry.text == text);
             let stored = if equals_original { None } else { Some(text) };
             let forked = {
                 let tab = &mut app.tabs[idx];
-                let (name_opt, evs) = match tab.project.fork_for_edit_with_event() { Some((n, evs)) => (Some(n), evs), None => (None, Vec::new()) };
-                for ev in evs { crate::app::handle_model_event(tab, ev); }
+                let (name_opt, evs) = match tab.project.fork_for_edit_with_event() {
+                    Some((n, evs)) => (Some(n), evs),
+                    None => (None, Vec::new()),
+                };
+                for ev in evs {
+                    crate::app::handle_model_event(tab, ev);
+                }
                 name_opt
             };
             let ev = {
                 let tab = &mut app.tabs[idx];
-                tab.project.set_translation_with_event(entry_id, stored.clone())
+                tab.project
+                    .set_translation_with_event(entry_id, stored.clone())
             };
             crate::app::handle_model_event(&mut app.tabs[idx], ev);
-            let label = forked.unwrap_or_else(|| app.tabs[idx].project.profiles.selected().name.clone());
+            let label =
+                forked.unwrap_or_else(|| app.tabs[idx].project.profiles.selected().name.clone());
             app.tabs[idx].status = format!("Retranslated 1 line into '{label}'.");
         }
         Err(e) => {

@@ -7,8 +7,8 @@
 //! `Later` only hides the popup; the update stays offered in Settings.
 
 use iced::widget::{
-    button, center, column, container, image, opaque, progress_bar, row, scrollable, space,
-    stack, text,
+    button, center, column, container, image, opaque, progress_bar, row, scrollable, space, stack,
+    text,
 };
 use iced::{Color, Element, Length};
 
@@ -104,10 +104,12 @@ fn card<'a, S: UiState + ?Sized>(state: &'a S, available: &str) -> Element<'a, U
     } else if downloading {
         let frac = (progress as f32 / 100.0).clamp(0.0, 1.0);
         items.push(
-            text(format!("Downloading update {progress}% — please don't close"))
-                .size(scale::s(12.0))
-                .color(crate::accent::accent())
-                .into(),
+            text(format!(
+                "Downloading update {progress}% — please don't close"
+            ))
+            .size(scale::s(12.0))
+            .color(crate::accent::accent())
+            .into(),
         );
         items.push(
             row![

@@ -383,22 +383,46 @@ pub fn format_relative(last_opened: i64) -> String {
         "just now".to_string()
     } else if diff < HOUR {
         let m = diff / MIN;
-        if m == 1 { "1 minute ago".to_string() } else { format!("{m} minutes ago") }
+        if m == 1 {
+            "1 minute ago".to_string()
+        } else {
+            format!("{m} minutes ago")
+        }
     } else if diff < DAY {
         let h = diff / HOUR;
-        if h == 1 { "1 hour ago".to_string() } else { format!("{h} hours ago") }
+        if h == 1 {
+            "1 hour ago".to_string()
+        } else {
+            format!("{h} hours ago")
+        }
     } else if diff < WEEK {
         let d = diff / DAY;
-        if d == 1 { "1 day ago".to_string() } else { format!("{d} days ago") }
+        if d == 1 {
+            "1 day ago".to_string()
+        } else {
+            format!("{d} days ago")
+        }
     } else if diff < MONTH {
         let w = diff / WEEK;
-        if w == 1 { "1 week ago".to_string() } else { format!("{w} weeks ago") }
+        if w == 1 {
+            "1 week ago".to_string()
+        } else {
+            format!("{w} weeks ago")
+        }
     } else if diff < YEAR {
         let mo = diff / MONTH;
-        if mo == 1 { "1 month ago".to_string() } else { format!("{mo} months ago") }
+        if mo == 1 {
+            "1 month ago".to_string()
+        } else {
+            format!("{mo} months ago")
+        }
     } else {
         let y = diff / YEAR;
-        if y == 1 { "1 year ago".to_string() } else { format!("{y} years ago") }
+        if y == 1 {
+            "1 year ago".to_string()
+        } else {
+            format!("{y} years ago")
+        }
     }
 }
 
@@ -781,7 +805,10 @@ pub fn resolve_model_path(filename: &str) -> std::path::PathBuf {
 
 /// Variant of `resolve_model_path` that also checks a legacy filename (e.g.
 /// `yolo26s-seg.onnx` replaced by `koharu-yolo26s-seg.onnx`).
-pub fn resolve_model_path_with_legacy(filename: &str, legacy_filename: Option<&str>) -> std::path::PathBuf {
+pub fn resolve_model_path_with_legacy(
+    filename: &str,
+    legacy_filename: Option<&str>,
+) -> std::path::PathBuf {
     let p = resolve_model_path(filename);
     if p.exists() {
         return p;
@@ -824,9 +851,9 @@ pub fn touch_recent(path: String) {
 /// Skips the disk write when nothing is stale.
 pub fn prune_missing_recents() {
     let has_missing = get(|s| {
-        s.recent_projects.iter().any(|r| {
-            r.path.trim().is_empty() || !std::path::Path::new(&r.path).exists()
-        })
+        s.recent_projects
+            .iter()
+            .any(|r| r.path.trim().is_empty() || !std::path::Path::new(&r.path).exists())
     });
     if has_missing {
         let _ = modify(|s| {

@@ -2,7 +2,9 @@
 //! Reuses `ui/src/connect.rs` overlay pattern (`stack![base, opaque(mouse_area(center(window)))])`)
 //! and panel colors (`PANEL_BG`). Shown when `pending_close.is_some()`.
 
-use iced::widget::{button, center, column, container, mouse_area, opaque, row, space, stack, text};
+use iced::widget::{
+    button, center, column, container, mouse_area, opaque, row, space, stack, text,
+};
 use iced::{Color, Element, Length};
 
 use crate::event::UiEvent;
@@ -111,43 +113,52 @@ pub fn window<'a, S: UiState + ?Sized>(state: &S) -> Option<Element<'a, UiEvent>
 
 /// Overlay that asks `Save changes to {title}?` with `Save / Don't Save / Cancel`.
 /// Returns `base` unchanged when `state.pending_close()` is `None`.
-pub fn view<'a, S: UiState + ?Sized>(state: &S, base: Element<'a, UiEvent>) -> Element<'a, UiEvent> {
+pub fn view<'a, S: UiState + ?Sized>(
+    state: &S,
+    base: Element<'a, UiEvent>,
+) -> Element<'a, UiEvent> {
     let Some(window) = window(state) else {
         return base;
     };
     let h = state.titlebar_height();
-    let title_dim = container(space::horizontal().width(Length::Fill).height(Length::Fixed(h)))
-        .width(Length::Fill)
-        .height(Length::Fixed(h))
-        .style(|_| container::Style {
-            background: Some(
-                Color {
-                    a: 0.45,
-                    ..Color::BLACK
-                }
-                .into(),
-            ),
-            ..container::Style::default()
-        });
-
-    let content_dim = opaque(mouse_area(
-        container(center(opaque(window)))
+    let title_dim = container(
+        space::horizontal()
             .width(Length::Fill)
-            .height(Length::Fill)
-            .style(|_| container::Style {
-                background: Some(
-                    Color {
-                        a: 0.45,
-                        ..Color::BLACK
-                    }
-                    .into(),
-                ),
-                ..container::Style::default()
-            })
-            .center_x(Length::Fill)
-            .center_y(Length::Fill),
+            .height(Length::Fixed(h)),
     )
-    .on_press(UiEvent::TabCloseCancel));
+    .width(Length::Fill)
+    .height(Length::Fixed(h))
+    .style(|_| container::Style {
+        background: Some(
+            Color {
+                a: 0.45,
+                ..Color::BLACK
+            }
+            .into(),
+        ),
+        ..container::Style::default()
+    });
+
+    let content_dim = opaque(
+        mouse_area(
+            container(center(opaque(window)))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(|_| container::Style {
+                    background: Some(
+                        Color {
+                            a: 0.45,
+                            ..Color::BLACK
+                        }
+                        .into(),
+                    ),
+                    ..container::Style::default()
+                })
+                .center_x(Length::Fill)
+                .center_y(Length::Fill),
+        )
+        .on_press(UiEvent::TabCloseCancel),
+    );
 
     stack![
         base,

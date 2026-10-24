@@ -16,7 +16,7 @@ pub mod tile_view {
     pub use crate::main_area::viewer::{GradientHandleSpec, TileSpec, TileView};
 }
 
-pub use view::view;
-pub use tiles::tiles;
-pub use edit::{edit_overlay, EDIT_INPUT_ID};
+pub use edit::{EDIT_INPUT_ID, edit_overlay};
 pub use mode::mode_switcher;
+pub use tiles::tiles;
+pub use view::view;

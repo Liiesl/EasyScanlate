@@ -1,7 +1,7 @@
 // Thin Message wrapper — widget construction lives in `easyscanlate-ui::dialog::update`.
+use super::{App, Message};
 use iced::widget::{center, column, container, opaque, space, stack};
 use iced::{Color, Element, Length};
-use super::{App, Message};
 
 /// Blocking update-available popup over `base` with dim + blurred card
 /// backdrop. Returns `base` unchanged when the popup should stay hidden
@@ -16,20 +16,36 @@ pub fn view<'a>(app: &'a App, base: Element<'a, Message>) -> Element<'a, Message
     };
     let window_mapped = window.map(Message::from);
     let h = app.frame.config().title_bar_height;
-    let title_dim = container(space::horizontal().width(Length::Fill).height(Length::Fixed(h)))
-        .width(Length::Fill)
-        .height(Length::Fixed(h))
-        .style(|_| container::Style {
-            background: Some(Color { a: 0.45, ..Color::BLACK }.into()),
-            ..container::Style::default()
-        });
+    let title_dim = container(
+        space::horizontal()
+            .width(Length::Fill)
+            .height(Length::Fixed(h)),
+    )
+    .width(Length::Fill)
+    .height(Length::Fixed(h))
+    .style(|_| container::Style {
+        background: Some(
+            Color {
+                a: 0.45,
+                ..Color::BLACK
+            }
+            .into(),
+        ),
+        ..container::Style::default()
+    });
     // Blocking: opaque with no backdrop-click dismiss (use Later button).
     let content_dim = opaque(
         container(center(opaque(window_mapped)))
             .width(Length::Fill)
             .height(Length::Fill)
             .style(|_| container::Style {
-                background: Some(Color { a: 0.45, ..Color::BLACK }.into()),
+                background: Some(
+                    Color {
+                        a: 0.45,
+                        ..Color::BLACK
+                    }
+                    .into(),
+                ),
                 ..container::Style::default()
             })
             .center_x(Length::Fill)
@@ -61,13 +77,13 @@ fn should_show(app: &App) -> bool {
     {
         return false;
     }
-    let is_loading =
-        !app.active_is_home() && app.tabs.get(app.active).is_some_and(|t| t.loading);
+    let is_loading = !app.active_is_home() && app.tabs.get(app.active).is_some_and(|t| t.loading);
     if is_loading {
         return false;
     }
-    let is_exporting =
-        !is_loading && !app.active_is_home() && app.tabs.get(app.active).is_some_and(|t| t.exporting);
+    let is_exporting = !is_loading
+        && !app.active_is_home()
+        && app.tabs.get(app.active).is_some_and(|t| t.exporting);
     if is_exporting {
         return false;
     }

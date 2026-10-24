@@ -19,27 +19,28 @@
 use iced::widget::button::Status;
 use iced::widget::image::{self, Handle};
 use iced::widget::{
-    button, checkbox, column, container, row, scrollable, space::Space, text, text_input,
-    tooltip,
+    button, checkbox, column, container, row, scrollable, space::Space, text, text_input, tooltip,
 };
-use iced::{
-    Background, Border, Color, Element, Fill as FillLength, Font, Length, Padding, Shadow,
-};
+use iced::{Background, Border, Color, Element, Fill as FillLength, Font, Length, Padding, Shadow};
 
-use neverliie_iced_widgets::advanced_dropdown::{advanced_dropdown, Item, MenuItem};
-use neverliie_iced_widgets::number_input::{NumberInput, Status as NumberStatus, Style as NumberStyle};
-use neverliie_iced_widgets::split_button::split_button;
-use neverliie_iced_widgets::hex_color_input::{HexColorInput, HexColorValue};
+use neverliie_iced_widgets::advanced_dropdown::{Item, MenuItem, advanced_dropdown};
 use neverliie_iced_widgets::context_menu::{ContextMenu, Menu};
+use neverliie_iced_widgets::hex_color_input::{HexColorInput, HexColorValue};
+use neverliie_iced_widgets::number_input::{
+    NumberInput, Status as NumberStatus, Style as NumberStyle,
+};
 use neverliie_iced_widgets::overlay::Position;
+use neverliie_iced_widgets::split_button::split_button;
 
 use easyscanlate_model::{CapsMode, EntryStyle, TextAlign};
 use easyscanlate_settings::InpaintBackend;
 
 use crate::event::{StyleField, UiEvent};
 use crate::main_area::overlay::{font_support, preview_font, styled_font};
-use crate::segmented::{segment_compact, segment_icon, segmented_group, BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
 use crate::scale;
+use crate::segmented::{
+    BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN, segment_compact, segment_icon, segmented_group,
+};
 use crate::state::UiState;
 use lucide_icons::Icon;
 
@@ -89,9 +90,7 @@ fn unified_field<'a, S: UiState + ?Sized>(
     )
     .on_submit(move |v| UiEvent::StyleColorSubmit(field, v))
     .on_tab_change(move |tab| UiEvent::StyleColorTabChanged(field, tab))
-    .on_library_change(|sets, recents, active| {
-        UiEvent::StyleLibraryChanged(sets, recents, active)
-    })
+    .on_library_change(|sets, recents, active| UiEvent::StyleLibraryChanged(sets, recents, active))
     .swatches(state.color_swatches().to_vec())
     .recent_colors(state.color_recents().to_vec())
     .active_swatch_tab(state.color_active_tab())
@@ -183,7 +182,9 @@ fn header_row<'a, S: UiState + ?Sized>(state: &'a S, selected: bool) -> Element<
     let can_auto = selected && !state.is_bulk_busy();
     let auto_btn = button(
         row![
-            crate::icon::lucide(Icon::Sparkles).size(scale::s(14.0)).center(),
+            crate::icon::lucide(Icon::Sparkles)
+                .size(scale::s(14.0))
+                .center(),
             text("Auto Detect").size(scale::s(11.0))
         ]
         .spacing(scale::s(4.0))
@@ -192,16 +193,28 @@ fn header_row<'a, S: UiState + ?Sized>(state: &'a S, selected: bool) -> Element<
     .style(crate::panel::button_style)
     .on_press_maybe(can_auto.then_some(UiEvent::StyleAutoDetect))
     .padding(scale::s(6.0));
-    let auto: Element<'_, UiEvent> = tooltip(crate::button::with_disabled_cursor(auto_btn.into()), tip("Auto detect style"), tooltip::Position::Top)
-        .gap(scale::s(4.0))
-        .into();
-    let reset_btn = button(crate::icon::lucide(Icon::RotateCcw).size(scale::s(14.0)).center())
-        .style(crate::panel::button_style)
-        .on_press_maybe(None::<UiEvent>)
-        .padding(scale::s(6.0));
-    let reset: Element<'_, UiEvent> = tooltip(crate::button::with_disabled_cursor(reset_btn.into()), tip("Reset style"), tooltip::Position::Top)
-        .gap(scale::s(4.0))
-        .into();
+    let auto: Element<'_, UiEvent> = tooltip(
+        crate::button::with_disabled_cursor(auto_btn.into()),
+        tip("Auto detect style"),
+        tooltip::Position::Top,
+    )
+    .gap(scale::s(4.0))
+    .into();
+    let reset_btn = button(
+        crate::icon::lucide(Icon::RotateCcw)
+            .size(scale::s(14.0))
+            .center(),
+    )
+    .style(crate::panel::button_style)
+    .on_press_maybe(None::<UiEvent>)
+    .padding(scale::s(6.0));
+    let reset: Element<'_, UiEvent> = tooltip(
+        crate::button::with_disabled_cursor(reset_btn.into()),
+        tip("Reset style"),
+        tooltip::Position::Top,
+    )
+    .gap(scale::s(4.0))
+    .into();
     row![
         text("Typography").size(scale::s(12.0)).color(MUTED_FG),
         Space::new().width(FillLength),
@@ -270,10 +283,7 @@ fn font_field<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
 /// (accent on disabled fill, see `segment_icon`) with a tooltip explaining
 /// the missing face. Families with Bold + Italic but no BoldItalic act as an
 /// exclusive switcher — enforced in `handle_bold`/`handle_italic`.
-fn format_align_row<'a>(
-    style: &EntryStyle,
-    selected: bool,
-) -> Element<'a, UiEvent> {
+fn format_align_row<'a>(style: &EntryStyle, selected: bool) -> Element<'a, UiEvent> {
     let support = font_support(style.font_family.as_deref());
     let family = style.font_family.as_deref().unwrap_or("Default font");
     let can_bold = selected && support.has_bold;
@@ -328,8 +338,7 @@ fn format_align_row<'a>(
         italic_btn
     };
     row![
-        container(segmented_group(vec![bold_btn, italic_btn]))
-        .width(Length::FillPortion(1)),
+        container(segmented_group(vec![bold_btn, italic_btn])).width(Length::FillPortion(1)),
         container(segmented_group(vec![
             segment_icon(
                 style.text_align == TextAlign::Left,
@@ -411,17 +420,11 @@ fn typography_section<'a, S: UiState + ?Sized>(
     column![
         row![
             container(auto).width(Length::FillPortion(1)),
+            container(column![caption("Size"), fixed_input,].spacing(scale::s(4.0)))
+                .width(Length::FillPortion(1)),
             container(
-                column![caption("Size"), fixed_input,]
+                column![caption("Case"), segmented_group(vec![caps_aa, caps_sc]),]
                     .spacing(scale::s(4.0))
-            )
-            .width(Length::FillPortion(1)),
-            container(
-                column![
-                    caption("Case"),
-                    segmented_group(vec![caps_aa, caps_sc]),
-                ]
-                .spacing(scale::s(4.0))
             )
             .width(Length::FillPortion(1)),
         ]
@@ -481,10 +484,7 @@ fn fill_section<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
 }
 
 /// The "Stroke" section: unified solid-or-gradient input plus width.
-fn stroke_section<'a, S: UiState + ?Sized>(
-    state: &'a S,
-    selected: bool,
-) -> Element<'a, UiEvent> {
+fn stroke_section<'a, S: UiState + ?Sized>(state: &'a S, selected: bool) -> Element<'a, UiEvent> {
     column![
         section_title("Stroke"),
         row![
@@ -633,27 +633,37 @@ fn background_section<'a, S: UiState + ?Sized>(
         let options = [
             MenuItem::Item(
                 Item::new(PanelBackend(InpaintBackend::Harmonic), "Harmonic").icon(
-                    crate::icon::lucide(Icon::Eraser).size(scale::s(14.0)).center(),
+                    crate::icon::lucide(Icon::Eraser)
+                        .size(scale::s(14.0))
+                        .center(),
                 ),
             ),
             MenuItem::Item(
                 Item::new(PanelBackend(InpaintBackend::Telea), "Telea").icon(
-                    crate::icon::lucide(Icon::Eraser).size(scale::s(14.0)).center(),
+                    crate::icon::lucide(Icon::Eraser)
+                        .size(scale::s(14.0))
+                        .center(),
                 ),
             ),
             MenuItem::Item(
                 Item::new(PanelBackend(InpaintBackend::Lama), "LaMa").icon(
-                    crate::icon::lucide(Icon::Eraser).size(scale::s(14.0)).center(),
+                    crate::icon::lucide(Icon::Eraser)
+                        .size(scale::s(14.0))
+                        .center(),
                 ),
             ),
             MenuItem::Item(
                 Item::new(PanelBackend(InpaintBackend::Aot), "AOT-GAN").icon(
-                    crate::icon::lucide(Icon::Eraser).size(scale::s(14.0)).center(),
+                    crate::icon::lucide(Icon::Eraser)
+                        .size(scale::s(14.0))
+                        .center(),
                 ),
             ),
             MenuItem::Item(
                 Item::new(PanelBackend(InpaintBackend::ShiftMap), "ShiftMap").icon(
-                    crate::icon::lucide(Icon::Eraser).size(scale::s(14.0)).center(),
+                    crate::icon::lucide(Icon::Eraser)
+                        .size(scale::s(14.0))
+                        .center(),
                 ),
             ),
         ];
@@ -662,49 +672,45 @@ fn background_section<'a, S: UiState + ?Sized>(
             Some(PanelBackend(backend)),
             |pick: PanelBackend| UiEvent::StyleInpaintBackendSelected(pick.0),
         )
-            .on_press(|_| UiEvent::StyleInpaintBackground)
-            .width(FillLength)
-            .padding(scale::s(6.0))
-            .text_size(scale::s(11.0))
-            .style(
-                |_theme, status: neverliie_iced_widgets::split_button::Status| {
-                    use neverliie_iced_widgets::split_button::Status as SplitStatus;
-                    let (bg, txt) = match status {
-                        SplitStatus::Active => (crate::panel::PANEL_BG, TEXT_MAIN),
-                        SplitStatus::Hovered => {
-                            (Color::from_rgba8(46, 48, 62, 0.82), TEXT_MAIN)
-                        }
-                        SplitStatus::Opened { .. } => {
-                            (Color::from_rgba8(55, 57, 72, 0.87), TEXT_MAIN)
-                        }
-                        SplitStatus::Disabled => {
-                            (Color::from_rgba8(34, 36, 44, 0.35), MUTED_FG)
-                        }
-                    };
-                    neverliie_iced_widgets::split_button::Style {
-                        text_color: txt,
-                        placeholder_color: txt,
-                        handle_color: txt,
-                        background: Background::Color(bg),
-                        border: Border {
-                            radius: scale::s(4.0).into(),
-                            // Width stays 0 (no outline drawn), but the color
-                            // must be visible: SplitButton reuses it as the
-                            // source for the main|arrow divider (0.35 alpha)
-                            // and the per-zone hover tints (0.10 main, 0.25
-                            // arrow). TRANSPARENT here would hide both.
-                            width: 0.0,
-                            color: TEXT_MAIN,
-                        },
-                        shadow: Shadow::default(),
-                    }
-                },
-            )
-            .into()
+        .on_press(|_| UiEvent::StyleInpaintBackground)
+        .width(FillLength)
+        .padding(scale::s(6.0))
+        .text_size(scale::s(11.0))
+        .style(
+            |_theme, status: neverliie_iced_widgets::split_button::Status| {
+                use neverliie_iced_widgets::split_button::Status as SplitStatus;
+                let (bg, txt) = match status {
+                    SplitStatus::Active => (crate::panel::PANEL_BG, TEXT_MAIN),
+                    SplitStatus::Hovered => (Color::from_rgba8(46, 48, 62, 0.82), TEXT_MAIN),
+                    SplitStatus::Opened { .. } => (Color::from_rgba8(55, 57, 72, 0.87), TEXT_MAIN),
+                    SplitStatus::Disabled => (Color::from_rgba8(34, 36, 44, 0.35), MUTED_FG),
+                };
+                neverliie_iced_widgets::split_button::Style {
+                    text_color: txt,
+                    placeholder_color: txt,
+                    handle_color: txt,
+                    background: Background::Color(bg),
+                    border: Border {
+                        radius: scale::s(4.0).into(),
+                        // Width stays 0 (no outline drawn), but the color
+                        // must be visible: SplitButton reuses it as the
+                        // source for the main|arrow divider (0.35 alpha)
+                        // and the per-zone hover tints (0.10 main, 0.25
+                        // arrow). TRANSPARENT here would hide both.
+                        width: 0.0,
+                        color: TEXT_MAIN,
+                    },
+                    shadow: Shadow::default(),
+                }
+            },
+        )
+        .into()
     } else {
         button(
             row![
-                crate::icon::lucide(Icon::Eraser).size(scale::s(14.0)).center(),
+                crate::icon::lucide(Icon::Eraser)
+                    .size(scale::s(14.0))
+                    .center(),
                 text(PanelBackend(backend).to_string()).size(scale::s(11.0))
             ]
             .spacing(scale::s(4.0))
@@ -721,11 +727,7 @@ fn background_section<'a, S: UiState + ?Sized>(
             container(
                 column![
                     caption("Background"),
-                    unified_field(
-                        state,
-                        StyleField::Background,
-                        state.style_bg_value(),
-                    ),
+                    unified_field(state, StyleField::Background, state.style_bg_value(),),
                 ]
                 .spacing(scale::s(4.0))
             )
@@ -882,11 +884,11 @@ fn empty_square<'a>() -> Element<'a, UiEvent> {
 
 /// The right-click menu for preset slot `index`: filled slots offer
 /// replacing the style or removing the preset; empty slots only fill.
-fn preset_menu<'a>(
-    index: usize,
-    filled: bool,
-) -> Menu<'a, UiEvent, iced::Theme, iced::Renderer> {
-    let mut menu = Menu::new().item("Replace with current style", UiEvent::StylePresetReplace(index));
+fn preset_menu<'a>(index: usize, filled: bool) -> Menu<'a, UiEvent, iced::Theme, iced::Renderer> {
+    let mut menu = Menu::new().item(
+        "Replace with current style",
+        UiEvent::StylePresetReplace(index),
+    );
     if filled {
         menu = menu.item("Remove preset", UiEvent::StylePresetRemove(index));
     }
@@ -912,7 +914,10 @@ fn presets_grid<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
                     .text_size(scale::s(12.0))
                     .into();
             };
-            let tile = preset_square(preset.clone(), can_apply.then_some(UiEvent::StylePresetApply(index)));
+            let tile = preset_square(
+                preset.clone(),
+                can_apply.then_some(UiEvent::StylePresetApply(index)),
+            );
             ContextMenu::new(tile, preset_menu(index, true))
                 .on_dismiss(UiEvent::StylePresetMenuDismiss)
                 .text_size(scale::s(12.0))
@@ -936,31 +941,30 @@ fn presets_grid<'a, S: UiState + ?Sized>(state: &'a S) -> Element<'a, UiEvent> {
     )
     .width(FillLength)
     .height(scale::s(PRESET_SIDE * 2.0 + 4.0 + 10.0));
-    column![
-        text("Presets").size(scale::s(12.0)).color(MUTED_FG),
-        strip,
-    ]
-    .spacing(scale::s(4.0))
-    .into()
+    column![text("Presets").size(scale::s(12.0)).color(MUTED_FG), strip,]
+        .spacing(scale::s(4.0))
+        .into()
 }
 
 pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
     let style = state.style_working();
     let selected = state.selected().is_some();
 
-    scrollable(column![
-        header_row(state, selected),
-        font_field(state),
-        format_align_row(style, selected),
-        typography_section(state, style, selected),
-        fill_section(state),
-        stroke_section(state, selected),
-        shadow_section(state, style, selected),
-        background_section(state, selected),
-        presets_grid(state),
-        text(HINT).size(scale::s(12.0)).color(MUTED_FG),
-    ]
-    .spacing(scale::s(10.0)))
+    scrollable(
+        column![
+            header_row(state, selected),
+            font_field(state),
+            format_align_row(style, selected),
+            typography_section(state, style, selected),
+            fill_section(state),
+            stroke_section(state, selected),
+            shadow_section(state, style, selected),
+            background_section(state, selected),
+            presets_grid(state),
+            text(HINT).size(scale::s(12.0)).color(MUTED_FG),
+        ]
+        .spacing(scale::s(10.0)),
+    )
     .spacing(scale::s(crate::scroll::EMBEDDED_SPACING))
     .width(FillLength)
     .height(FillLength)

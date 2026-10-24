@@ -213,25 +213,151 @@ fn entry(
 /// fallback; the rest (e.g. `nvidia`, `kilo`, `opencode`) stay OpenAI-compat.
 pub static SUPPORTED_PROVIDERS: LazyLock<Vec<Provider>> = LazyLock::new(|| {
     vec![
-        entry("openai", "OpenAI", "https://api.openai.com/v1", CompatKind::OpenAI, "OPENAI_API_KEY", &["gpt-4o-mini", "gpt-5-nano"]),
-        entry("anthropic", "Anthropic", "https://api.anthropic.com", CompatKind::Anthropic, "ANTHROPIC_API_KEY", &["claude-sonnet-4-5", "claude-haiku-4-5"]),
-        entry("google", "Google (Gemini AI Studio)", "https://generativelanguage.googleapis.com", CompatKind::Gemini, "GOOGLE_API_KEY", &["gemini-flash-latest", "gemini-flash-lite-latest"]),
-        entry("xai", "xAI (Grok)", "https://api.x.ai", CompatKind::Xai, "XAI_API_KEY", &["grok-4.3", "grok-4.5"]),
-        entry("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", CompatKind::OpenRouter, "OPENROUTER_API_KEY", &["openai/gpt-4o-mini"]),
-        entry("nvidia", "NVIDIA", "https://integrate.api.nvidia.com/v1", CompatKind::OpenAI, "NVIDIA_API_KEY", &["nvidia/llama-3.1-nemotron-nano-8b-v1"]),
-        entry("deepseek", "DeepSeek", "https://api.deepseek.com", CompatKind::DeepSeek, "DEEPSEEK_API_KEY", &["deepseek-chat", "deepseek-reasoner"]),
-        entry("kilo", "Kilo", "https://api.kilo.ai/api/gateway", CompatKind::OpenAI, "KILO_API_KEY", &["deepseek-v4-flash", "mimo-v2.5"]),
-        entry("moonshotai", "Moonshot AI", "https://api.moonshot.ai/v1", CompatKind::Moonshot, "MOONSHOT_API_KEY", &["kimi-k2.5", "kimi-k3"]),
-        entry("zai", "Z.AI", "https://api.z.ai/api/paas/v4", CompatKind::Zai, "ZHIPU_API_KEY", &["glm-4.5-flash", "glm-4.6"]),
-        entry("minimax", "MiniMax", "https://api.minimax.io/anthropic", CompatKind::MiniMax, "MINIMAX_API_KEY", &["MiniMax-M2.1", "MiniMax-M2.5"]),
-        entry("opencode", "OpenCode", "https://opencode.ai/zen/v1", CompatKind::OpenAI, "OPENCODE_API_KEY", &["deepseek-v4-flash", "mimo-v2.5-free"]),
-        entry("opencode-go", "OpenCode Go", "https://opencode.ai/zen/go/v1", CompatKind::OpenAI, "OPENCODE_API_KEY", &["deepseek-v4-flash", "mimo-v2.5"]),
-        entry("mistral", "Mistral", "https://api.mistral.ai", CompatKind::Mistral, "MISTRAL_API_KEY", &["mistral-small-latest", "mistral-medium-2508"]),
-        entry("ollama-cloud", "Ollama Cloud", "https://ollama.com/v1", CompatKind::OpenAI, "OLLAMA_API_KEY", &["deepseek-v4-flash", "kimi-k3"]),
+        entry(
+            "openai",
+            "OpenAI",
+            "https://api.openai.com/v1",
+            CompatKind::OpenAI,
+            "OPENAI_API_KEY",
+            &["gpt-4o-mini", "gpt-5-nano"],
+        ),
+        entry(
+            "anthropic",
+            "Anthropic",
+            "https://api.anthropic.com",
+            CompatKind::Anthropic,
+            "ANTHROPIC_API_KEY",
+            &["claude-sonnet-4-5", "claude-haiku-4-5"],
+        ),
+        entry(
+            "google",
+            "Google (Gemini AI Studio)",
+            "https://generativelanguage.googleapis.com",
+            CompatKind::Gemini,
+            "GOOGLE_API_KEY",
+            &["gemini-flash-latest", "gemini-flash-lite-latest"],
+        ),
+        entry(
+            "xai",
+            "xAI (Grok)",
+            "https://api.x.ai",
+            CompatKind::Xai,
+            "XAI_API_KEY",
+            &["grok-4.3", "grok-4.5"],
+        ),
+        entry(
+            "openrouter",
+            "OpenRouter",
+            "https://openrouter.ai/api/v1",
+            CompatKind::OpenRouter,
+            "OPENROUTER_API_KEY",
+            &["openai/gpt-4o-mini"],
+        ),
+        entry(
+            "nvidia",
+            "NVIDIA",
+            "https://integrate.api.nvidia.com/v1",
+            CompatKind::OpenAI,
+            "NVIDIA_API_KEY",
+            &["nvidia/llama-3.1-nemotron-nano-8b-v1"],
+        ),
+        entry(
+            "deepseek",
+            "DeepSeek",
+            "https://api.deepseek.com",
+            CompatKind::DeepSeek,
+            "DEEPSEEK_API_KEY",
+            &["deepseek-chat", "deepseek-reasoner"],
+        ),
+        entry(
+            "kilo",
+            "Kilo",
+            "https://api.kilo.ai/api/gateway",
+            CompatKind::OpenAI,
+            "KILO_API_KEY",
+            &["deepseek-v4-flash", "mimo-v2.5"],
+        ),
+        entry(
+            "moonshotai",
+            "Moonshot AI",
+            "https://api.moonshot.ai/v1",
+            CompatKind::Moonshot,
+            "MOONSHOT_API_KEY",
+            &["kimi-k2.5", "kimi-k3"],
+        ),
+        entry(
+            "zai",
+            "Z.AI",
+            "https://api.z.ai/api/paas/v4",
+            CompatKind::Zai,
+            "ZHIPU_API_KEY",
+            &["glm-4.5-flash", "glm-4.6"],
+        ),
+        entry(
+            "minimax",
+            "MiniMax",
+            "https://api.minimax.io/anthropic",
+            CompatKind::MiniMax,
+            "MINIMAX_API_KEY",
+            &["MiniMax-M2.1", "MiniMax-M2.5"],
+        ),
+        entry(
+            "opencode",
+            "OpenCode",
+            "https://opencode.ai/zen/v1",
+            CompatKind::OpenAI,
+            "OPENCODE_API_KEY",
+            &["deepseek-v4-flash", "mimo-v2.5-free"],
+        ),
+        entry(
+            "opencode-go",
+            "OpenCode Go",
+            "https://opencode.ai/zen/go/v1",
+            CompatKind::OpenAI,
+            "OPENCODE_API_KEY",
+            &["deepseek-v4-flash", "mimo-v2.5"],
+        ),
+        entry(
+            "mistral",
+            "Mistral",
+            "https://api.mistral.ai",
+            CompatKind::Mistral,
+            "MISTRAL_API_KEY",
+            &["mistral-small-latest", "mistral-medium-2508"],
+        ),
+        entry(
+            "ollama-cloud",
+            "Ollama Cloud",
+            "https://ollama.com/v1",
+            CompatKind::OpenAI,
+            "OLLAMA_API_KEY",
+            &["deepseek-v4-flash", "kimi-k3"],
+        ),
         // Local providers — no API key, models discovered from endpoint
-        entry(LOCAL_OLLAMA, "Ollama", "http://localhost:11434", CompatKind::Ollama, "", &[]),
-        entry(LOCAL_VLLM, "vLLM", "http://localhost:8000/v1", CompatKind::OpenAI, "", &[]),
-        entry(LOCAL_LLAMA_CPP, "llama.cpp", "http://localhost:8080/v1", CompatKind::OpenAI, "", &[]),
+        entry(
+            LOCAL_OLLAMA,
+            "Ollama",
+            "http://localhost:11434",
+            CompatKind::Ollama,
+            "",
+            &[],
+        ),
+        entry(
+            LOCAL_VLLM,
+            "vLLM",
+            "http://localhost:8000/v1",
+            CompatKind::OpenAI,
+            "",
+            &[],
+        ),
+        entry(
+            LOCAL_LLAMA_CPP,
+            "llama.cpp",
+            "http://localhost:8080/v1",
+            CompatKind::OpenAI,
+            "",
+            &[],
+        ),
     ]
 });
 
@@ -509,14 +635,20 @@ fn canonical_base_url(kind: CompatKind, base: &str) -> String {
     match kind {
         CompatKind::Xai | CompatKind::Mistral | CompatKind::Ollama => {
             if base.ends_with("/v1") {
-                return base.trim_end_matches("/v1").trim_end_matches('/').to_string();
+                return base
+                    .trim_end_matches("/v1")
+                    .trim_end_matches('/')
+                    .to_string();
             }
             base
         }
         CompatKind::MiniMax => {
             // mirror used ".../anthropic/v1" — native expects ".../anthropic"
             if base.ends_with("/anthropic/v1") {
-                return base.trim_end_matches("/v1").trim_end_matches('/').to_string();
+                return base
+                    .trim_end_matches("/v1")
+                    .trim_end_matches('/')
+                    .to_string();
             }
             base
         }
@@ -537,7 +669,10 @@ fn openai_models_urls(base: &str) -> Vec<String> {
     let mut urls = Vec::new();
     if base.ends_with("/v1") {
         urls.push(format!("{base}/models"));
-        let root = base.trim_end_matches("/v1").trim_end_matches('/').to_string();
+        let root = base
+            .trim_end_matches("/v1")
+            .trim_end_matches('/')
+            .to_string();
         if !root.is_empty() {
             urls.push(format!("{root}/v1/models"));
             urls.push(format!("{root}/models"));
@@ -565,7 +700,14 @@ pub async fn fetch_local_models(base_url: &str, id: &str) -> Result<Vec<Model>, 
                         .data
                         .into_iter()
                         .filter(|m| !m.id.trim().is_empty())
-                        .map(|m| Model { id: m.id.clone(), name: m.id, free: false, family: None, release_date: None, last_updated: None })
+                        .map(|m| Model {
+                            id: m.id.clone(),
+                            name: m.id,
+                            free: false,
+                            family: None,
+                            release_date: None,
+                            last_updated: None,
+                        })
                         .collect();
                     if !ids.is_empty() {
                         ids.sort_by(|a, b| a.id.cmp(&b.id));
@@ -586,7 +728,9 @@ pub async fn fetch_local_models(base_url: &str, id: &str) -> Result<Vec<Model>, 
     // Ollama native fallback
     if id == LOCAL_OLLAMA {
         let root = if base.ends_with("/v1") {
-            base.trim_end_matches("/v1").trim_end_matches('/').to_string()
+            base.trim_end_matches("/v1")
+                .trim_end_matches('/')
+                .to_string()
         } else {
             base.clone()
         };
@@ -598,8 +742,19 @@ pub async fn fetch_local_models(base_url: &str, id: &str) -> Result<Vec<Model>, 
                         .models
                         .into_iter()
                         .map(|m| {
-                            let name = if !m.name.trim().is_empty() { m.name } else { m.model };
-                            Model { id: name.clone(), name, free: false, family: None, release_date: None, last_updated: None }
+                            let name = if !m.name.trim().is_empty() {
+                                m.name
+                            } else {
+                                m.model
+                            };
+                            Model {
+                                id: name.clone(),
+                                name,
+                                free: false,
+                                family: None,
+                                release_date: None,
+                                last_updated: None,
+                            }
                         })
                         .filter(|m| !m.id.trim().is_empty())
                         .collect();
@@ -653,7 +808,9 @@ pub async fn fetch_local_provider(id: &str, base_url: &str) -> Provider {
 }
 
 /// Fetches all requested local providers keyed by id, each using its own `base_url`.
-pub async fn fetch_local_providers(endpoints: HashMap<String, String>) -> HashMap<String, Provider> {
+pub async fn fetch_local_providers(
+    endpoints: HashMap<String, String>,
+) -> HashMap<String, Provider> {
     let mut out = HashMap::new();
     for (id, base) in endpoints {
         out.insert(id.clone(), fetch_local_provider(&id, &base).await);
@@ -802,16 +959,30 @@ pub fn provider_for_connection(id: &str, connection: &Connection) -> Provider {
         if let Some(model) = connection.model.clone().filter(|m| !m.trim().is_empty())
             && provider.models.is_empty()
         {
-            provider.models = vec![Model { id: model.clone(), name: model.clone(), free: false, family: None, release_date: None, last_updated: None }];
+            provider.models = vec![Model {
+                id: model.clone(),
+                name: model.clone(),
+                free: false,
+                family: None,
+                release_date: None,
+                last_updated: None,
+            }];
         }
         return provider;
     }
     if is_custom(id) {
-        provider.api = connection.base_url.clone().map(|u| normalize_base_url(&u)).unwrap_or_default();
-        let model = connection
-            .model
+        provider.api = connection
+            .base_url
             .clone()
-            .unwrap_or_else(|| provider.models.first().map(|m| m.id.clone()).unwrap_or_default());
+            .map(|u| normalize_base_url(&u))
+            .unwrap_or_default();
+        let model = connection.model.clone().unwrap_or_else(|| {
+            provider
+                .models
+                .first()
+                .map(|m| m.id.clone())
+                .unwrap_or_default()
+        });
         provider.models = vec![Model {
             id: model.clone(),
             name: model,
@@ -960,13 +1131,19 @@ fn outputs_text_only(info: &ModelInfo) -> bool {
 /// then last-updated. Ties keep the existing entry.
 #[allow(dead_code)]
 fn is_newer(info: &ModelInfo, current: &ModelInfo) -> bool {
-    match (info.release_date.as_deref(), current.release_date.as_deref()) {
+    match (
+        info.release_date.as_deref(),
+        current.release_date.as_deref(),
+    ) {
         (Some(a), Some(b)) if a != b => return a > b,
         (Some(_), None) => return true,
         (None, Some(_)) => return false,
         _ => {}
     }
-    match (info.last_updated.as_deref(), current.last_updated.as_deref()) {
+    match (
+        info.last_updated.as_deref(),
+        current.last_updated.as_deref(),
+    ) {
         (Some(a), Some(b)) => a > b,
         (Some(_), None) => true,
         _ => false,
@@ -1032,10 +1209,8 @@ pub async fn translate_all(
             missing_ids
         );
         // Build retranslate content for all missing, grouped by proximity like ManhwaOCR
-        let selected: Vec<(String, u64)> = missing
-            .iter()
-            .map(|m| (m.filename.clone(), m.id))
-            .collect();
+        let selected: Vec<(String, u64)> =
+            missing.iter().map(|m| (m.filename.clone(), m.id)).collect();
         let retry_content = build_retranslate_content(items, &selected, RETRANSLATE_CONTEXT);
         if !retry_content.trim().is_empty() {
             let retry_prompt = format!(
@@ -1079,11 +1254,17 @@ translation, no explanation.\n\nText: {}",
                                     let t = single_out.trim().to_string();
                                     if !t.is_empty() {
                                         parsed.insert((miss.filename.clone(), miss.id), t);
-                                        eprintln!("[translation] single retry recovered {}", miss.id);
+                                        eprintln!(
+                                            "[translation] single retry recovered {}",
+                                            miss.id
+                                        );
                                     }
                                 }
                                 Err(e) => {
-                                    eprintln!("[translation] single retry for {} failed: {}", miss.id, e);
+                                    eprintln!(
+                                        "[translation] single retry for {} failed: {}",
+                                        miss.id, e
+                                    );
                                 }
                             }
                         }
@@ -1109,7 +1290,10 @@ translation, no explanation.\n\nText: {}",
         }
     }
     if still_missing_ids.is_empty() {
-        eprintln!("[translation] OK ({} lines, after retry if any)", translations.len());
+        eprintln!(
+            "[translation] OK ({} lines, after retry if any)",
+            translations.len()
+        );
         Ok(translations)
     } else {
         eprintln!(
@@ -1213,10 +1397,7 @@ pub async fn translate_one(
 /// dummy `provider.id` is used when none is supplied. For native Ollama
 /// (`CompatKind::Ollama`) an empty key is valid and returned as-is so the
 /// caller can build the client without auth.
-fn resolve_credentials(
-    api_key: Option<String>,
-    provider: &Provider,
-) -> Result<String, String> {
+fn resolve_credentials(api_key: Option<String>, provider: &Provider) -> Result<String, String> {
     if is_local(&provider.id) {
         let key = api_key
             .filter(|key| !key.is_empty())
@@ -1311,12 +1492,10 @@ async fn complete(
             choice_text(&response)
         }
         CompatKind::Xai => {
-            let client = rig::providers::openai::OpenAIConfig::with_key(
-                &rig::providers::xai::DIALECT,
-                key,
-            )
-            .with_base_url(api)
-            .client();
+            let client =
+                rig::providers::openai::OpenAIConfig::with_key(&rig::providers::xai::DIALECT, key)
+                    .with_base_url(api)
+                    .client();
             let m = client.completion(model);
             let response = m
                 .call(
@@ -1445,8 +1624,7 @@ async fn complete(
             // Auth is optional (bare `ollama` daemon needs no key); a dummy
             // `provider.id` key from `resolve_credentials` is treated as no-auth.
             let is_dummy = key.is_empty() || key == provider.id;
-            let config =
-                rig::providers::ollama::OllamaConfig::new().with_base_url(api);
+            let config = rig::providers::ollama::OllamaConfig::new().with_base_url(api);
             let config = if is_dummy {
                 config
             } else {
@@ -1526,7 +1704,10 @@ pub fn build_retranslate_content(
     // Organize selected by filename
     let mut selected_by_file: HashMap<String, Vec<u64>> = HashMap::new();
     for (filename, id) in selected {
-        selected_by_file.entry(filename.clone()).or_default().push(*id);
+        selected_by_file
+            .entry(filename.clone())
+            .or_default()
+            .push(*id);
     }
 
     let mut filenames: Vec<String> = selected_by_file.keys().cloned().collect();
@@ -1574,15 +1755,15 @@ pub fn build_retranslate_content(
             let min_idx = group[0].saturating_sub(context_size);
             let max_idx = (group[group.len() - 1] + context_size).min(file_results.len() - 1);
             let selected_set: HashSet<usize> = group.into_iter().collect();
-            for (idx, it) in file_results.iter().enumerate().take(max_idx + 1).skip(min_idx) {
+            for (idx, it) in file_results
+                .iter()
+                .enumerate()
+                .take(max_idx + 1)
+                .skip(min_idx)
+            {
                 let text = it.text.replace(['\r', '\n'], " ");
                 if selected_set.contains(&idx) {
-                    content.push_str(&format!(
-                        "<{}>{}</{}>\n",
-                        it.id,
-                        escape(&text),
-                        it.id
-                    ));
+                    content.push_str(&format!("<{}>{}</{}>\n", it.id, escape(&text), it.id));
                 } else {
                     content.push_str(&format!("<context>{}</context>\n", escape(&text)));
                 }
@@ -1683,7 +1864,10 @@ fn unescape(text: &str) -> String {
 /// the model dropped or renamed any row. Extra rows in the answer are
 /// ignored, matching the ManhwaOCR import behaviour.
 #[allow(dead_code)]
-fn align(items: &[TranslateItem], parsed: HashMap<(String, u64), String>) -> Result<Vec<String>, String> {
+fn align(
+    items: &[TranslateItem],
+    parsed: HashMap<(String, u64), String>,
+) -> Result<Vec<String>, String> {
     let mut missing = Vec::new();
     let mut translations = Vec::with_capacity(items.len());
     for item in items {
@@ -1726,7 +1910,10 @@ mod tests {
     #[test]
     fn profile_name_is_lowercase_with_auto_suffix() {
         assert_eq!(profile_name("English"), "english(auto)");
-        assert_eq!(profile_name("Chinese (Simplified)"), "chinese (simplified)(auto)");
+        assert_eq!(
+            profile_name("Chinese (Simplified)"),
+            "chinese (simplified)(auto)"
+        );
     }
 
     #[test]
@@ -1789,7 +1976,10 @@ mod tests {
              &apos;s&apos;</1>\n</a&amp;b.png>\n</translations>\n"
         );
         let parsed = parse_translation_file(&build_content(&items));
-        assert_eq!(parsed[&("a&b.png".to_string(), 1)], "3 < 5 & 7 > 2 \"q\" 's'");
+        assert_eq!(
+            parsed[&("a&b.png".to_string(), 1)],
+            "3 < 5 & 7 > 2 \"q\" 's'"
+        );
     }
 
     #[test]
@@ -1831,7 +2021,11 @@ mod tests {
 
     #[test]
     fn align_maps_response_back_to_input_order() {
-        let items = vec![item("a.png", 1, "x"), item("a.png", 2, "y"), item("b.png", 3, "z")];
+        let items = vec![
+            item("a.png", 1, "x"),
+            item("a.png", 2, "y"),
+            item("b.png", 3, "z"),
+        ];
         let parsed = HashMap::from([
             (("b.png".to_string(), 3), "C".to_string()),
             (("a.png".to_string(), 1), "A".to_string()),
@@ -2027,7 +2221,10 @@ mod tests {
                         release_date: Some("2024-01-01".into()),
                         last_updated: None,
                         modalities: None,
-                        cost: Some(ModelCost { input: Some(2.0), output: Some(4.0) }),
+                        cost: Some(ModelCost {
+                            input: Some(2.0),
+                            output: Some(4.0),
+                        }),
                     },
                 ),
                 (
@@ -2040,7 +2237,10 @@ mod tests {
                         release_date: Some("2024-07-01".into()),
                         last_updated: None,
                         modalities: None,
-                        cost: Some(ModelCost { input: Some(2.0), output: Some(4.0) }),
+                        cost: Some(ModelCost {
+                            input: Some(2.0),
+                            output: Some(4.0),
+                        }),
                     },
                 ),
                 (
@@ -2053,7 +2253,10 @@ mod tests {
                         release_date: Some("2024-09-01".into()),
                         last_updated: None,
                         modalities: None,
-                        cost: Some(ModelCost { input: Some(2.0), output: Some(4.0) }),
+                        cost: Some(ModelCost {
+                            input: Some(2.0),
+                            output: Some(4.0),
+                        }),
                     },
                 ),
             ]),
@@ -2196,30 +2399,66 @@ mod tests {
 
     #[test]
     fn catalog_metadata_matches_the_models_dev_mirror() {
-        assert_eq!(catalog_provider("minimax").unwrap().kind, CompatKind::MiniMax);
-        assert_eq!(catalog_provider("anthropic").unwrap().kind, CompatKind::Anthropic);
+        assert_eq!(
+            catalog_provider("minimax").unwrap().kind,
+            CompatKind::MiniMax
+        );
+        assert_eq!(
+            catalog_provider("anthropic").unwrap().kind,
+            CompatKind::Anthropic
+        );
         assert_eq!(catalog_provider("google").unwrap().kind, CompatKind::Gemini);
         assert_eq!(catalog_provider("xai").unwrap().kind, CompatKind::Xai);
-        assert_eq!(catalog_provider("mistral").unwrap().kind, CompatKind::Mistral);
-        assert_eq!(catalog_provider("deepseek").unwrap().kind, CompatKind::DeepSeek);
-        assert_eq!(catalog_provider("openrouter").unwrap().kind, CompatKind::OpenRouter);
-        assert_eq!(catalog_provider("moonshotai").unwrap().kind, CompatKind::Moonshot);
+        assert_eq!(
+            catalog_provider("mistral").unwrap().kind,
+            CompatKind::Mistral
+        );
+        assert_eq!(
+            catalog_provider("deepseek").unwrap().kind,
+            CompatKind::DeepSeek
+        );
+        assert_eq!(
+            catalog_provider("openrouter").unwrap().kind,
+            CompatKind::OpenRouter
+        );
+        assert_eq!(
+            catalog_provider("moonshotai").unwrap().kind,
+            CompatKind::Moonshot
+        );
         assert_eq!(catalog_provider("zai").unwrap().kind, CompatKind::Zai);
-        assert_eq!(catalog_provider(LOCAL_OLLAMA).unwrap().kind, CompatKind::Ollama);
+        assert_eq!(
+            catalog_provider(LOCAL_OLLAMA).unwrap().kind,
+            CompatKind::Ollama
+        );
         assert_eq!(
             catalog_provider("minimax").unwrap().api,
             "https://api.minimax.io/anthropic"
         );
         assert_eq!(catalog_provider("xai").unwrap().api, "https://api.x.ai");
-        assert_eq!(catalog_provider("mistral").unwrap().api, "https://api.mistral.ai");
-        assert_eq!(catalog_provider(LOCAL_OLLAMA).unwrap().api, "http://localhost:11434");
+        assert_eq!(
+            catalog_provider("mistral").unwrap().api,
+            "https://api.mistral.ai"
+        );
+        assert_eq!(
+            catalog_provider(LOCAL_OLLAMA).unwrap().api,
+            "http://localhost:11434"
+        );
         assert_eq!(
             catalog_provider("google").unwrap().api,
             "https://generativelanguage.googleapis.com"
         );
-        assert_eq!(catalog_provider("google").unwrap().name, "Google (Gemini AI Studio)");
-        assert_eq!(catalog_provider("ollama-cloud").unwrap().api_key_env, "OLLAMA_API_KEY");
-        assert_eq!(catalog_provider("moonshotai").unwrap().api_key_env, "MOONSHOT_API_KEY");
+        assert_eq!(
+            catalog_provider("google").unwrap().name,
+            "Google (Gemini AI Studio)"
+        );
+        assert_eq!(
+            catalog_provider("ollama-cloud").unwrap().api_key_env,
+            "OLLAMA_API_KEY"
+        );
+        assert_eq!(
+            catalog_provider("moonshotai").unwrap().api_key_env,
+            "MOONSHOT_API_KEY"
+        );
     }
 
     #[test]
@@ -2237,7 +2476,10 @@ mod tests {
         assert!(is_custom(CUSTOM_ANTHROPIC));
         assert!(!is_custom("openai"));
         assert_eq!(provider_name(CUSTOM_OPENAI), "Custom (OpenAI-compatible)");
-        assert_eq!(provider_name(CUSTOM_ANTHROPIC), "Custom (Anthropic-compatible)");
+        assert_eq!(
+            provider_name(CUSTOM_ANTHROPIC),
+            "Custom (Anthropic-compatible)"
+        );
         assert_eq!(provider_name("openai"), "OpenAI");
     }
 
@@ -2275,12 +2517,27 @@ mod tests {
         // provider_for_connection for built-ins ignores connection base_url, so
         // canonicalization is via effective_api / fetch_provider; we test the
         // helper directly.
-        assert_eq!(canonical_base_url(CompatKind::Xai, "https://api.x.ai/v1"), "https://api.x.ai");
-        assert_eq!(canonical_base_url(CompatKind::Mistral, "https://api.mistral.ai/v1"), "https://api.mistral.ai");
-        assert_eq!(canonical_base_url(CompatKind::Ollama, "http://localhost:11434/v1"), "http://localhost:11434");
-        assert_eq!(canonical_base_url(CompatKind::MiniMax, "https://api.minimax.io/anthropic/v1"), "https://api.minimax.io/anthropic");
+        assert_eq!(
+            canonical_base_url(CompatKind::Xai, "https://api.x.ai/v1"),
+            "https://api.x.ai"
+        );
+        assert_eq!(
+            canonical_base_url(CompatKind::Mistral, "https://api.mistral.ai/v1"),
+            "https://api.mistral.ai"
+        );
+        assert_eq!(
+            canonical_base_url(CompatKind::Ollama, "http://localhost:11434/v1"),
+            "http://localhost:11434"
+        );
+        assert_eq!(
+            canonical_base_url(CompatKind::MiniMax, "https://api.minimax.io/anthropic/v1"),
+            "https://api.minimax.io/anthropic"
+        );
         // Non-native kinds keep /v1
-        assert_eq!(canonical_base_url(CompatKind::OpenAI, "https://api.openai.com/v1"), "https://api.openai.com/v1");
+        assert_eq!(
+            canonical_base_url(CompatKind::OpenAI, "https://api.openai.com/v1"),
+            "https://api.openai.com/v1"
+        );
         let _ = legacy;
     }
 
@@ -2293,14 +2550,25 @@ mod tests {
             kind: CompatKind::OpenAI,
             api_key_env: "TEST_API_KEY".to_string(),
             models: vec![
-                Model { id: "free-1".to_string(), name: "Free 1".to_string(), free: true, family: None, release_date: None, last_updated: None },
-                Model { id: "paid-1".to_string(), name: "Paid 1".to_string(), free: false, family: None, release_date: None, last_updated: None },
+                Model {
+                    id: "free-1".to_string(),
+                    name: "Free 1".to_string(),
+                    free: true,
+                    family: None,
+                    release_date: None,
+                    last_updated: None,
+                },
+                Model {
+                    id: "paid-1".to_string(),
+                    name: "Paid 1".to_string(),
+                    free: false,
+                    family: None,
+                    release_date: None,
+                    last_updated: None,
+                },
             ],
         };
         assert_eq!(provider.selectable_models(true), vec!["free-1"]);
-        assert_eq!(
-            provider.selectable_models(false),
-            vec!["free-1", "paid-1"]
-        );
+        assert_eq!(provider.selectable_models(false), vec!["free-1", "paid-1"]);
     }
 }

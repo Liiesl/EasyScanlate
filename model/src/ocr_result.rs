@@ -88,7 +88,9 @@ impl OcrResult {
 
     /// Non-deleted entries for `image_id` in insertion order.
     pub fn visible_for(&self, image_id: ImageId) -> impl Iterator<Item = &OcrEntry> {
-        self.entries.iter().filter(move |e| !e.deleted && e.image_id == image_id)
+        self.entries
+            .iter()
+            .filter(move |e| !e.deleted && e.image_id == image_id)
     }
 
     /// Every entry for `image_id` in insertion order, including soft-deleted.
@@ -104,7 +106,10 @@ impl OcrResult {
     }
 
     pub fn total_count_for(&self, image_id: ImageId) -> usize {
-        self.entries.iter().filter(|e| e.image_id == image_id).count()
+        self.entries
+            .iter()
+            .filter(|e| e.image_id == image_id)
+            .count()
     }
 
     /// Reorder entries in place by a custom comparator. Stable sort; not
@@ -204,9 +209,15 @@ mod tests {
     #[test]
     fn append_many_counts_and_preserves_order() {
         let mut store = OcrResult::new();
-        let n = store.append_many_for_image(ImageId(0), vec![new_entry("a"), new_entry("b"), new_entry("c")]);
+        let n = store.append_many_for_image(
+            ImageId(0),
+            vec![new_entry("a"), new_entry("b"), new_entry("c")],
+        );
         assert_eq!(n, 3);
-        let texts: Vec<&str> = store.visible_for(ImageId(0)).map(|e| e.text.as_str()).collect();
+        let texts: Vec<&str> = store
+            .visible_for(ImageId(0))
+            .map(|e| e.text.as_str())
+            .collect();
         assert_eq!(texts, vec!["a", "b", "c"]);
     }
 
@@ -233,7 +244,10 @@ mod tests {
         store.append_for_image(ImageId(0), entry_with_quad("top", 0.0, 10.0));
         store.append_for_image(ImageId(0), entry_with_quad("middle", 0.0, 50.0));
         store.reorder_by_position_for_image(ImageId(0));
-        let texts: Vec<&str> = store.visible_for(ImageId(0)).map(|e| e.text.as_str()).collect();
+        let texts: Vec<&str> = store
+            .visible_for(ImageId(0))
+            .map(|e| e.text.as_str())
+            .collect();
         assert_eq!(texts, vec!["top", "middle", "bottom"]);
     }
 
@@ -244,7 +258,10 @@ mod tests {
         store.append_for_image(ImageId(0), entry_with_quad("left", 10.0, 10.0));
         store.append_for_image(ImageId(0), entry_with_quad("center", 50.0, 10.0));
         store.reorder_by_position_for_image(ImageId(0));
-        let texts: Vec<&str> = store.visible_for(ImageId(0)).map(|e| e.text.as_str()).collect();
+        let texts: Vec<&str> = store
+            .visible_for(ImageId(0))
+            .map(|e| e.text.as_str())
+            .collect();
         assert_eq!(texts, vec!["left", "center", "right"]);
     }
 
@@ -255,7 +272,10 @@ mod tests {
         store.append_for_image(ImageId(0), entry_with_quad("b", 10.0, 10.0));
         store.append_for_image(ImageId(0), entry_with_quad("c", 10.0, 10.0));
         store.reorder_by_position_for_image(ImageId(0));
-        let texts: Vec<&str> = store.visible_for(ImageId(0)).map(|e| e.text.as_str()).collect();
+        let texts: Vec<&str> = store
+            .visible_for(ImageId(0))
+            .map(|e| e.text.as_str())
+            .collect();
         // stable + id tie-breaker keeps insertion order
         assert_eq!(texts, vec!["a", "b", "c"]);
     }
@@ -273,7 +293,10 @@ mod tests {
         assert!(store.get(top).unwrap().deleted);
         assert!(store.get(bottom).unwrap().deleted == false);
         // visible skips deleted
-        let visible: Vec<&str> = store.visible_for(ImageId(0)).map(|e| e.text.as_str()).collect();
+        let visible: Vec<&str> = store
+            .visible_for(ImageId(0))
+            .map(|e| e.text.as_str())
+            .collect();
         assert_eq!(visible, vec!["bottom"]);
     }
 
@@ -285,6 +308,12 @@ mod tests {
         let mut single = OcrResult::new();
         single.append_for_image(ImageId(0), entry_with_quad("only", 5.0, 5.0));
         single.reorder_by_position_for_image(ImageId(0));
-        assert_eq!(single.visible_for(ImageId(0)).map(|e| e.text.as_str()).collect::<Vec<_>>(), vec!["only"]);
+        assert_eq!(
+            single
+                .visible_for(ImageId(0))
+                .map(|e| e.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["only"]
+        );
     }
 }

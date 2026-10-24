@@ -181,18 +181,31 @@ mod tests {
                 StoredSwatchSet {
                     name: "Mine".to_string(),
                     colors: vec![
-                        StoredPicked::Solid { rgba: [255, 0, 0, 255] },
+                        StoredPicked::Solid {
+                            rgba: [255, 0, 0, 255],
+                        },
                         StoredPicked::Gradient {
                             stops: vec![
-                                StoredStop { offset: 0.0, rgba: [0, 0, 0, 255] },
-                                StoredStop { offset: 1.0, rgba: [255, 255, 255, 255] },
+                                StoredStop {
+                                    offset: 0.0,
+                                    rgba: [0, 0, 0, 255],
+                                },
+                                StoredStop {
+                                    offset: 1.0,
+                                    rgba: [255, 255, 255, 255],
+                                },
                             ],
                         },
                     ],
                 },
-                StoredSwatchSet { name: "Other".to_string(), colors: vec![] },
+                StoredSwatchSet {
+                    name: "Other".to_string(),
+                    colors: vec![],
+                },
             ],
-            recents: vec![StoredPicked::Solid { rgba: [1, 2, 3, 255] }],
+            recents: vec![StoredPicked::Solid {
+                rgba: [1, 2, 3, 255],
+            }],
             active_tab: 1,
         };
         save_to(&path, &lib).unwrap();
@@ -203,7 +216,12 @@ mod tests {
     fn sanitizes_limits_and_empty() {
         let lib = StoredLibrary {
             sets: vec![],
-            recents: vec![StoredPicked::Solid { rgba: [0, 0, 0, 255] }; MAX_RECENT + 5],
+            recents: vec![
+                StoredPicked::Solid {
+                    rgba: [0, 0, 0, 255]
+                };
+                MAX_RECENT + 5
+            ],
             active_tab: 99,
         };
         let clean = lib.sanitized();

@@ -7,11 +7,11 @@
 //! - `AuroraBackground` canvas program (global behind `pane_grid`)
 //! - `AuroraWheel` canvas program (Appearance tab picker)
 
-use iced::widget::canvas::{self, Cache, Frame, Geometry, Path, Stroke};
-use iced::widget::canvas::Event;
-use iced::widget::Action;
-use iced::{Color, Element, Length, Point, Rectangle, Size};
 use iced::mouse;
+use iced::widget::Action;
+use iced::widget::canvas::Event;
+use iced::widget::canvas::{self, Cache, Frame, Geometry, Path, Stroke};
+use iced::{Color, Element, Length, Point, Rectangle, Size};
 
 use crate::event::UiEvent;
 use crate::scale;
@@ -308,8 +308,8 @@ pub fn generate_aurora_palette(
 // AuroraBackground — global canvas behind pane_grid (smooth per-pixel radial)
 // ---------------------------------------------------------------------------
 
-use std::sync::{Mutex, OnceLock};
 use iced::advanced::image::{Handle as ImageHandle, Image as CoreImage};
+use std::sync::{Mutex, OnceLock};
 
 /// Longest side of the tiny aurora buffer, in pixels.
 ///
@@ -329,10 +329,14 @@ fn aurora_tiny_size(width: u32, height: u32) -> (u32, u32) {
         return (w, h);
     }
     if w >= h {
-        let th = ((h as f32 * AURORA_TINY_LONG as f32) / m as f32).round().max(1.0) as u32;
+        let th = ((h as f32 * AURORA_TINY_LONG as f32) / m as f32)
+            .round()
+            .max(1.0) as u32;
         (AURORA_TINY_LONG, th)
     } else {
-        let tw = ((w as f32 * AURORA_TINY_LONG as f32) / m as f32).round().max(1.0) as u32;
+        let tw = ((w as f32 * AURORA_TINY_LONG as f32) / m as f32)
+            .round()
+            .max(1.0) as u32;
         (tw, AURORA_TINY_LONG)
     }
 }
@@ -351,9 +355,11 @@ fn cached_aurora_handle(config: &AuroraConfig, width: u32, height: u32) -> Image
     let slot = AURORA_CACHE.get_or_init(|| Mutex::new(None));
     let mut guard = slot.lock().unwrap();
     if let Some((cached_cfg, cached_size, handle)) = guard.as_ref()
-        && cached_cfg == config && *cached_size == (tw, th) {
-            return handle.clone();
-        }
+        && cached_cfg == config
+        && *cached_size == (tw, th)
+    {
+        return handle.clone();
+    }
     let handle = generate_aurora_handle(tw, th, config);
     *guard = Some((config.clone(), (tw, th), handle.clone()));
     handle
@@ -389,12 +395,22 @@ fn generate_aurora_rgba(width: u32, height: u32, config: &AuroraConfig) -> Vec<u
     }
 
     if config.blob_count <= 1 {
-        let alpha = if config.is_dark { 100.0 / 255.0 } else { 50.0 / 255.0 };
+        let alpha = if config.is_dark {
+            100.0 / 255.0
+        } else {
+            50.0 / 255.0
+        };
         let [sr, sg, sb, _] = config.color.into_rgba8();
         // Blend flat overlay over base per pixel (same for all pixels)
-        let r = (sr as f32 * alpha + br * (1.0 - alpha)).round().clamp(0.0, 255.0) as u8;
-        let g = (sg as f32 * alpha + bg * (1.0 - alpha)).round().clamp(0.0, 255.0) as u8;
-        let b = (sb as f32 * alpha + bb * (1.0 - alpha)).round().clamp(0.0, 255.0) as u8;
+        let r = (sr as f32 * alpha + br * (1.0 - alpha))
+            .round()
+            .clamp(0.0, 255.0) as u8;
+        let g = (sg as f32 * alpha + bg * (1.0 - alpha))
+            .round()
+            .clamp(0.0, 255.0) as u8;
+        let b = (sb as f32 * alpha + bb * (1.0 - alpha))
+            .round()
+            .clamp(0.0, 255.0) as u8;
         let mut out = vec![0u8; total * 4];
         for px in out.chunks_exact_mut(4) {
             px.copy_from_slice(&[r, g, b, 255]);
@@ -507,10 +523,7 @@ impl canvas::Program<UiEvent> for AuroraBackground {
         let handle = cached_aurora_handle(&self.config, width, height);
         let mut frame = Frame::new(renderer, bounds.size());
         let image = CoreImage::new(handle);
-        frame.draw_image(
-            Rectangle::new(Point::ORIGIN, Size::new(bw, bh)),
-            image,
-        );
+        frame.draw_image(Rectangle::new(Point::ORIGIN, Size::new(bw, bh)), image);
         vec![frame.into_geometry()]
     }
 }
@@ -596,7 +609,11 @@ impl canvas::Program<UiEvent> for AuroraWheel {
 
             // Draw hue wheel base as many small pie slices approximating conical gradient.
             // 360 slices, each 1 degree.
-            let v_base = if self.config.is_dark { WHEEL_DM_MAX } else { 1.0 };
+            let v_base = if self.config.is_dark {
+                WHEEL_DM_MAX
+            } else {
+                1.0
+            };
             for deg in 0..360 {
                 let hue = (360.0 - deg as f32) / 360.0;
                 let col = hsv_f_to_color(hue, 1.0, v_base);
@@ -637,7 +654,9 @@ impl canvas::Program<UiEvent> for AuroraWheel {
             frame.stroke_rectangle(
                 rect.position(),
                 rect.size(),
-                Stroke::default().with_width(1.0).with_color(Color::from_rgba8(255, 255, 255, 0.15)),
+                Stroke::default()
+                    .with_width(1.0)
+                    .with_color(Color::from_rgba8(255, 255, 255, 0.15)),
             );
 
             // Draw ghost + main handles
@@ -653,7 +672,18 @@ impl canvas::Program<UiEvent> for AuroraWheel {
                 let gh = blob.h / 360.0;
                 let gs = blob.s / 255.0;
                 let gv = blob.v / 255.0;
-                draw_handle(frame, center, max_radius, rect, gh, gs, gv, true, blob.color, self.config.is_dark);
+                draw_handle(
+                    frame,
+                    center,
+                    max_radius,
+                    rect,
+                    gh,
+                    gs,
+                    gv,
+                    true,
+                    blob.color,
+                    self.config.is_dark,
+                );
             }
             // Main
             let preview = if !self.config.is_dark {
@@ -665,7 +695,18 @@ impl canvas::Program<UiEvent> for AuroraWheel {
             } else {
                 self.config.color
             };
-            draw_handle(frame, center, max_radius, rect, hf, sf, vf, false, preview, self.config.is_dark);
+            draw_handle(
+                frame,
+                center,
+                max_radius,
+                rect,
+                hf,
+                sf,
+                vf,
+                false,
+                preview,
+                self.config.is_dark,
+            );
         });
         vec![geometry]
     }
@@ -755,10 +796,18 @@ fn draw_handle(
     if is_ghost {
         // dotted line to center
         let line = Path::line(center, pos);
-        frame.stroke(&line, Stroke::default().with_width(1.0).with_color(Color::from_rgba8(255, 255, 255, 0.588)));
+        frame.stroke(
+            &line,
+            Stroke::default()
+                .with_width(1.0)
+                .with_color(Color::from_rgba8(255, 255, 255, 0.588)),
+        );
         let c = Path::circle(pos, 6.0);
         frame.fill(&c, color);
-        frame.stroke(&c, Stroke::default().with_width(1.0).with_color(Color::WHITE));
+        frame.stroke(
+            &c,
+            Stroke::default().with_width(1.0).with_color(Color::WHITE),
+        );
     } else {
         let c = Path::circle(pos, 8.0);
         let border = if color.r > 0.7 && color.g > 0.7 && color.b > 0.7 {

@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 use iced::Task;
 
-use easyscanlate_model::ProfileId;
 use easyscanlate_mmtl::translation::TranslationLine;
+use easyscanlate_model::ProfileId;
 
 use super::tab::{Tab, TabId};
 use super::{App, Message, TabMessage};
@@ -138,7 +138,15 @@ pub fn handle_export(app: &mut App) -> Task<Message> {
                 .await;
             file.map(|f| f.path().to_string_lossy().to_string())
         },
-        move |picked| Message::Tab(tid, TabMessage::TranslationExportPicked { profile: pid, path: picked }),
+        move |picked| {
+            Message::Tab(
+                tid,
+                TabMessage::TranslationExportPicked {
+                    profile: pid,
+                    path: picked,
+                },
+            )
+        },
     )
 }
 
@@ -160,7 +168,12 @@ pub fn handle_export_picked(
         app.tabs[idx].status = "Open a project first.".to_string();
         return Task::none();
     }
-    let pid = if app.tabs[idx].project.profiles.iter().any(|p| p.id == profile) {
+    let pid = if app.tabs[idx]
+        .project
+        .profiles
+        .iter()
+        .any(|p| p.id == profile)
+    {
         profile
     } else {
         app.tabs[idx].project.profiles.selected_id()
@@ -192,7 +205,11 @@ pub fn handle_export_picked(
     )
 }
 
-pub fn handle_exported(app: &mut App, tab_id: TabId, result: Result<String, String>) -> Task<Message> {
+pub fn handle_exported(
+    app: &mut App,
+    tab_id: TabId,
+    result: Result<String, String>,
+) -> Task<Message> {
     let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
         Some(i) => i,
         None => return Task::none(),
@@ -228,7 +245,11 @@ pub fn handle_import(app: &mut App) -> Task<Message> {
         move |picked| {
             Message::Tab(
                 tid,
-                TabMessage::TranslationImportPicked { target, new_name: new_name.clone(), path: picked },
+                TabMessage::TranslationImportPicked {
+                    target,
+                    new_name: new_name.clone(),
+                    path: picked,
+                },
             )
         },
     )
@@ -262,7 +283,11 @@ pub fn handle_import_picked(
         move |result| {
             Message::Tab(
                 tab_id,
-                TabMessage::TranslationImportLoaded { target, new_name: new_name.clone(), result },
+                TabMessage::TranslationImportLoaded {
+                    target,
+                    new_name: new_name.clone(),
+                    result,
+                },
             )
         },
     )
@@ -327,7 +352,9 @@ pub fn handle_import_loaded(
             id
         }
         None => {
-            let (nid, ev) = app.tabs[idx].project.create_profile_with_event(target_name.clone());
+            let (nid, ev) = app.tabs[idx]
+                .project
+                .create_profile_with_event(target_name.clone());
             crate::app::handle_model_event(&mut app.tabs[idx], ev);
             if let Some(ev2) = app.tabs[idx].project.select_profile_with_event(nid) {
                 crate::app::handle_model_event(&mut app.tabs[idx], ev2);
@@ -350,7 +377,9 @@ pub fn handle_import_loaded(
             target_name = fork_name;
         } else {
             let name = app.tabs[idx].project.profiles.next_available_name();
-            let (nid, ev) = app.tabs[idx].project.create_profile_with_event(name.clone());
+            let (nid, ev) = app.tabs[idx]
+                .project
+                .create_profile_with_event(name.clone());
             crate::app::handle_model_event(&mut app.tabs[idx], ev);
             if let Some(ev2) = app.tabs[idx].project.select_profile_with_event(nid) {
                 crate::app::handle_model_event(&mut app.tabs[idx], ev2);

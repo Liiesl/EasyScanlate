@@ -133,7 +133,11 @@ pub(crate) fn apply_quad_alpha_mask(crop: &mut RgbaImage, quad: &Quad, crop_orig
 pub(crate) fn bbox_crops(patch: RgbaImage, origin: [f32; 2], quads: &[Quad]) -> Vec<InpaintPatch> {
     if quads.is_empty() {
         let (width, height) = patch.dimensions();
-        return vec![(patch, [origin[0], origin[1], width as f32, height as f32], None)];
+        return vec![(
+            patch,
+            [origin[0], origin[1], width as f32, height as f32],
+            None,
+        )];
     }
     let ox = origin[0] as i64;
     let oy = origin[1] as i64;
@@ -182,17 +186,16 @@ pub(crate) fn bbox_crops(patch: RgbaImage, origin: [f32; 2], quads: &[Quad]) -> 
         let cy1 = (iy1.ceil() as i64).clamp(cy0 + 1, max_y);
         let w = (cx1 - cx0) as u32;
         let h = (cy1 - cy0) as u32;
-        let mut crop = image::imageops::crop_imm(
-            &patch,
-            (cx0 - ox) as u32,
-            (cy0 - oy) as u32,
-            w,
-            h,
-        )
-        .to_image();
+        let mut crop =
+            image::imageops::crop_imm(&patch, (cx0 - ox) as u32, (cy0 - oy) as u32, w, h)
+                .to_image();
         // Make outside-quad pixels transparent so only the actual rotated quad is patched
         apply_quad_alpha_mask(&mut crop, quad, [cx0 as f32, cy0 as f32]);
-        crops.push((crop, [cx0 as f32, cy0 as f32, w as f32, h as f32], Some(*quad)));
+        crops.push((
+            crop,
+            [cx0 as f32, cy0 as f32, w as f32, h as f32],
+            Some(*quad),
+        ));
     }
     crops
 }
@@ -217,7 +220,15 @@ pub(crate) fn diffusion_inpaint_crop(
         image.height(),
     );
     let exp_origin = [ex as f32, ey as f32];
-    let mask = build_mask_expanded(exp_w, exp_h, quads, rect, exp_origin, image.width(), image.height());
+    let mask = build_mask_expanded(
+        exp_w,
+        exp_h,
+        quads,
+        rect,
+        exp_origin,
+        image.width(),
+        image.height(),
+    );
     eprintln!(
         "[inpaint::{log_tag}] rect={:?} quads={} pad={} image={}x{} exp=[{},{},{},{}] exp_origin={:?} mask_sum={} quad_bounds={:?} quad_pts={:?}",
         rect,
@@ -250,7 +261,11 @@ pub(crate) fn diffusion_inpaint_crop(
     if quads.is_empty() {
         let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
         let sub = image::imageops::crop_imm(&filled, ox - ex, oy - ey, ow, oh).to_image();
-        return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32], None)]);
+        return Ok(vec![(
+            sub,
+            [ox as f32, oy as f32, ow as f32, oh as f32],
+            None,
+        )]);
     }
     let out = bbox_crops(filled, exp_origin, quads);
     eprintln!(
@@ -268,14 +283,15 @@ pub(crate) fn diffusion_inpaint_crop(
 /// crop is `rect` expanded by [`SHIFTMAP_CONTEXT_PAD`] (the MRF stage caps
 /// its long edge at `shiftmap::MAX_EDGE`, giant masks fall back to
 /// harmonic diffusion). Same per-mask-box crop contract as the Telea path.
-pub fn shiftmap_inpaint_crop(
-    image: &RgbaImage,
-    rect: [f32; 4],
-    quads: &[Quad],
-) -> InpaintResult {
-    diffusion_inpaint_crop("shiftmap", image, rect, quads, SHIFTMAP_CONTEXT_PAD, |rgb, mask| {
-        crate::shiftmap::shiftmap_inpaint_rgb(rgb, mask)
-    })
+pub fn shiftmap_inpaint_crop(image: &RgbaImage, rect: [f32; 4], quads: &[Quad]) -> InpaintResult {
+    diffusion_inpaint_crop(
+        "shiftmap",
+        image,
+        rect,
+        quads,
+        SHIFTMAP_CONTEXT_PAD,
+        |rgb, mask| crate::shiftmap::shiftmap_inpaint_rgb(rgb, mask),
+    )
 }
 
 /// Inpaints `rect` of `image` with the Harmonic (Laplace) backend: solves
@@ -300,7 +316,15 @@ pub fn harmonic_inpaint_crop(
         image.height(),
     );
     let exp_origin = [ex as f32, ey as f32];
-    let mask = build_mask_expanded(exp_w, exp_h, quads, rect, exp_origin, image.width(), image.height());
+    let mask = build_mask_expanded(
+        exp_w,
+        exp_h,
+        quads,
+        rect,
+        exp_origin,
+        image.width(),
+        image.height(),
+    );
     eprintln!(
         "[inpaint::harmonic] rect={:?} quads={} pad={} image={}x{} exp=[{},{},{},{}] exp_origin={:?} mask_sum={} quad_bounds={:?} quad_pts={:?}",
         rect,
@@ -322,7 +346,11 @@ pub fn harmonic_inpaint_crop(
     if quads.is_empty() {
         let [ox, oy, ow, oh] = crop_spec([rx, ry, rx + rw, ry + rh], image.width(), image.height());
         let sub = image::imageops::crop_imm(&filled, ox - ex, oy - ey, ow, oh).to_image();
-        return Ok(vec![(sub, [ox as f32, oy as f32, ow as f32, oh as f32], None)]);
+        return Ok(vec![(
+            sub,
+            [ox as f32, oy as f32, ow as f32, oh as f32],
+            None,
+        )]);
     }
     let out = bbox_crops(filled, exp_origin, quads);
     eprintln!(
@@ -340,7 +368,14 @@ pub fn harmonic_inpaint_crop(
 /// If selection is full width/height, expands other direction to make square of that full side (600x135 full width on 600x1600 -> 600x600).
 /// Side is clamped to `min(img_w, img_h)` to fit without excessive mirror, otherwise mirror pad will be used.
 /// Returns `(side, sx, sy)` where `side` is square side and `sx,sy` is top-left in image.
-pub fn manual_square_params(sel_x0: u32, sel_y0: u32, sel_w: u32, sel_h: u32, img_w: u32, img_h: u32) -> (u32, u32, u32) {
+pub fn manual_square_params(
+    sel_x0: u32,
+    sel_y0: u32,
+    sel_w: u32,
+    sel_h: u32,
+    img_w: u32,
+    img_h: u32,
+) -> (u32, u32, u32) {
     let larger_is_w = sel_w >= sel_h;
     let side_full = if larger_is_w { img_w } else { img_h };
     let mut side = side_full;
@@ -383,9 +418,15 @@ mod tests {
 
     #[test]
     fn crop_spec_clamps_and_rounds_to_full_pixels() {
-        assert_eq!(crop_spec([10.4, 20.7, 30.2, 40.3], 100, 100), [10, 20, 21, 21]);
+        assert_eq!(
+            crop_spec([10.4, 20.7, 30.2, 40.3], 100, 100),
+            [10, 20, 21, 21]
+        );
         assert_eq!(crop_spec([-5.0, -5.0, 5.0, 5.0], 100, 100), [0, 0, 5, 5]);
-        assert_eq!(crop_spec([95.0, 95.0, 500.0, 500.0], 100, 100), [95, 95, 5, 5]);
+        assert_eq!(
+            crop_spec([95.0, 95.0, 500.0, 500.0], 100, 100),
+            [95, 95, 5, 5]
+        );
         let tiny = crop_spec([10.0, 10.0, 10.4, 10.6], 100, 100);
         assert_eq!(tiny[2], 1);
         assert_eq!(tiny[3], 1);
@@ -397,7 +438,12 @@ mod tests {
         let mask = build_mask(
             100,
             100,
-            &[quad([[10.0, 10.0], [30.0, 10.0], [30.0, 20.0], [10.0, 20.0]])],
+            &[quad([
+                [10.0, 10.0],
+                [30.0, 10.0],
+                [30.0, 20.0],
+                [10.0, 20.0],
+            ])],
             origin,
         );
         assert_eq!(mask[(20, 15)][0], 255, "inside the box must be masked");
@@ -419,7 +465,11 @@ mod tests {
         );
         assert_eq!(mask[(15, 15)][0], 255);
         assert_eq!(mask[(50, 45)][0], 255);
-        assert_eq!(mask[(30, 30)][0], 0, "the gap between the boxes stays black");
+        assert_eq!(
+            mask[(30, 30)][0],
+            0,
+            "the gap between the boxes stays black"
+        );
     }
 
     #[test]
@@ -428,7 +478,12 @@ mod tests {
         let mask = build_mask(
             10,
             10,
-            &[quad([[-100.0, -100.0], [-90.0, -100.0], [-90.0, -90.0], [-100.0, -90.0]])],
+            &[quad([
+                [-100.0, -100.0],
+                [-90.0, -100.0],
+                [-90.0, -90.0],
+                [-100.0, -90.0],
+            ])],
             origin,
         );
         assert_eq!(mask[(0, 0)][0], 0);
@@ -476,7 +531,12 @@ mod tests {
         let patch = RgbaImage::from_pixel(100, 50, Rgba([9, 9, 9, 255]));
         let quads = [
             quad([[95.0, 30.0], [120.0, 30.0], [120.0, 60.0], [95.0, 60.0]]),
-            quad([[150.0, 150.0], [160.0, 150.0], [160.0, 160.0], [150.0, 160.0]]),
+            quad([
+                [150.0, 150.0],
+                [160.0, 150.0],
+                [160.0, 160.0],
+                [150.0, 160.0],
+            ]),
         ];
         let crops = bbox_crops(patch, [0.0, 0.0], &quads);
         assert_eq!(crops.len(), 1, "the outside box must be dropped");
@@ -495,7 +555,11 @@ mod tests {
         assert_eq!(crops[0].0.dimensions(), (60, 60));
         assert!(crops[0].2.is_some());
         // corners of AABB should be transparent
-        assert_eq!(crops[0].0.get_pixel(0, 0)[3], 0, "top-left corner outside diamond must be transparent");
+        assert_eq!(
+            crops[0].0.get_pixel(0, 0)[3],
+            0,
+            "top-left corner outside diamond must be transparent"
+        );
         assert_eq!(crops[0].0.get_pixel(59, 0)[3], 0);
         assert_eq!(crops[0].0.get_pixel(0, 59)[3], 0);
         assert_eq!(crops[0].0.get_pixel(59, 59)[3], 0);

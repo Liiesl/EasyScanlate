@@ -6,8 +6,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use super::{
-    is_custom, is_local, provider_for_connection, provider_name, Connection, Provider,
-    CUSTOM_ANTHROPIC, CUSTOM_OPENAI, SUPPORTED_PROVIDERS,
+    CUSTOM_ANTHROPIC, CUSTOM_OPENAI, Connection, Provider, SUPPORTED_PROVIDERS, is_custom,
+    is_local, provider_for_connection, provider_name,
 };
 
 /// One model entry in the picker: `(model id, display name)`.
@@ -48,10 +48,7 @@ pub struct Session {
 impl Session {
     /// Restores the stored connections, then picks `last_provider` when it is
     /// still connected (or falls back to the first connected provider).
-    pub fn new(
-        connections: BTreeMap<String, Connection>,
-        last_provider: Option<String>,
-    ) -> Self {
+    pub fn new(connections: BTreeMap<String, Connection>, last_provider: Option<String>) -> Self {
         let mut session = Session {
             connections,
             ..Session::default()
@@ -114,10 +111,7 @@ impl Session {
         let ids = self.visible_models(provider);
         ids.into_iter()
             .map(|id| {
-                let display = provider
-                    .model_display_name(&id)
-                    .unwrap_or(&id)
-                    .to_string();
+                let display = provider.model_display_name(&id).unwrap_or(&id).to_string();
                 (id, display)
             })
             .collect()
@@ -135,15 +129,11 @@ impl Session {
             self.selected_model = String::new();
             return;
         }
-        let provider = self
-            .fetched
-            .get(&self.selected_id)
-            .cloned()
-            .or_else(|| {
-                self.connections.get(&self.selected_id).map(|connection| {
-                    provider_for_connection(&self.selected_id, connection)
-                })
-            });
+        let provider = self.fetched.get(&self.selected_id).cloned().or_else(|| {
+            self.connections
+                .get(&self.selected_id)
+                .map(|connection| provider_for_connection(&self.selected_id, connection))
+        });
         let models = provider
             .as_ref()
             .map(|p| self.visible_models(p))
@@ -161,8 +151,7 @@ impl Session {
         if let Some(provider) = provider
             && let Some(hidden) = self.hidden_models.get_mut(&provider.id)
         {
-            let valid: BTreeSet<String> =
-                provider.models.iter().map(|m| m.id.clone()).collect();
+            let valid: BTreeSet<String> = provider.models.iter().map(|m| m.id.clone()).collect();
             hidden.retain(|id| valid.contains(id));
         }
     }
@@ -218,8 +207,7 @@ impl Session {
                         .map(|connection| provider_for_connection(id, connection))
                 })?;
                 let models = self.visible_model_pairs(&provider);
-                (!models.is_empty())
-                    .then(|| (id.clone(), provider_name(id), models))
+                (!models.is_empty()).then(|| (id.clone(), provider_name(id), models))
             })
             .collect()
     }
@@ -243,8 +231,7 @@ impl Session {
                     .map(|m| (m.id.clone(), m.display_name().to_string()))
                     .collect();
                 pairs.sort_by(|a, b| a.0.cmp(&b.0));
-                (!pairs.is_empty())
-                    .then(|| (id.clone(), provider_name(id), pairs))
+                (!pairs.is_empty()).then(|| (id.clone(), provider_name(id), pairs))
             })
             .collect()
     }
@@ -279,11 +266,15 @@ impl Session {
     /// the catalog fallback (or custom/local placeholder). Used for default
     /// hidden computation.
     fn provider_for_default_hidden(&self, provider: &str) -> Option<Provider> {
-        self.fetched.get(provider).cloned().or_else(|| {
-            self.connections
-                .get(provider)
-                .map(|connection| provider_for_connection(provider, connection))
-        }).or_else(|| super::catalog_provider(provider).cloned())
+        self.fetched
+            .get(provider)
+            .cloned()
+            .or_else(|| {
+                self.connections
+                    .get(provider)
+                    .map(|connection| provider_for_connection(provider, connection))
+            })
+            .or_else(|| super::catalog_provider(provider).cloned())
     }
 
     /// Default hidden set for `provider`: older paid family members, free and
@@ -415,9 +406,9 @@ impl Session {
     /// The requestable [`Provider`] for the selected connection (catalog or
     /// custom, with the connection's api/kind/model baked in).
     pub fn selected_provider(&self) -> Option<Provider> {
-        self.connections.get(&self.selected_id).map(|connection| {
-            provider_for_connection(&self.selected_id, connection)
-        })
+        self.connections
+            .get(&self.selected_id)
+            .map(|connection| provider_for_connection(&self.selected_id, connection))
     }
 
     /// The stored API key of the selected connection, if any.
@@ -456,7 +447,11 @@ mod tests {
         );
         assert_eq!(
             session.connected_ids,
-            vec!["openai".to_string(), "deepseek".to_string(), CUSTOM_OPENAI.to_string()]
+            vec![
+                "openai".to_string(),
+                "deepseek".to_string(),
+                CUSTOM_OPENAI.to_string()
+            ]
         );
     }
 
@@ -527,8 +522,7 @@ mod tests {
         assert_eq!(session.selected_id, "deepseek");
         assert!(session.connected_ids.contains(&"deepseek".to_string()));
         assert_eq!(
-            session.connections["deepseek"].api_key,
-            "sk-d",
+            session.connections["deepseek"].api_key, "sk-d",
             "the API key is kept in memory only"
         );
     }
@@ -553,8 +547,22 @@ mod tests {
             kind: super::super::CompatKind::OpenAI,
             api_key_env: "DEEPSEEK_API_KEY".to_string(),
             models: vec![
-                super::super::Model { id: "free-1".to_string(), name: "Free 1".to_string(), free: true, family: None, release_date: None, last_updated: None },
-                super::super::Model { id: "paid-1".to_string(), name: "Paid 1".to_string(), free: false, family: None, release_date: None, last_updated: None },
+                super::super::Model {
+                    id: "free-1".to_string(),
+                    name: "Free 1".to_string(),
+                    free: true,
+                    family: None,
+                    release_date: None,
+                    last_updated: None,
+                },
+                super::super::Model {
+                    id: "paid-1".to_string(),
+                    name: "Paid 1".to_string(),
+                    free: false,
+                    family: None,
+                    release_date: None,
+                    last_updated: None,
+                },
             ],
         }
     }
@@ -571,14 +579,23 @@ mod tests {
             "before the fetch the catalog fallback list is shown"
         );
 
-        session.on_fetched(HashMap::from([("deepseek".to_string(), fetched_deepseek())]));
-        assert_eq!(session.models, vec!["free-1".to_string(), "paid-1".to_string()]);
+        session.on_fetched(HashMap::from([(
+            "deepseek".to_string(),
+            fetched_deepseek(),
+        )]));
+        assert_eq!(
+            session.models,
+            vec!["free-1".to_string(), "paid-1".to_string()]
+        );
         assert_eq!(session.selected_model, "free-1");
 
         session.set_free_only(true);
         assert_eq!(session.models, vec!["free-1".to_string()]);
         session.set_free_only(false);
-        assert_eq!(session.models, vec!["free-1".to_string(), "paid-1".to_string()]);
+        assert_eq!(
+            session.models,
+            vec!["free-1".to_string(), "paid-1".to_string()]
+        );
 
         session.connect("openai".to_string(), connection("sk-o"));
         assert_eq!(session.selected_id, "openai");
@@ -589,7 +606,10 @@ mod tests {
         );
 
         session.select("deepseek".to_string());
-        assert_eq!(session.models, vec!["free-1".to_string(), "paid-1".to_string()]);
+        assert_eq!(
+            session.models,
+            vec!["free-1".to_string(), "paid-1".to_string()]
+        );
     }
 
     #[test]
@@ -603,7 +623,10 @@ mod tests {
             ]),
             None,
         );
-        assert_eq!(session.fetch_ids(), vec!["openai".to_string(), "deepseek".to_string()]);
+        assert_eq!(
+            session.fetch_ids(),
+            vec!["openai".to_string(), "deepseek".to_string()]
+        );
     }
 
     #[test]
@@ -687,7 +710,10 @@ mod tests {
                     "DeepSeek".to_string(),
                     vec![
                         ("deepseek-chat".to_string(), "deepseek-chat".to_string()),
-                        ("deepseek-reasoner".to_string(), "deepseek-reasoner".to_string()),
+                        (
+                            "deepseek-reasoner".to_string(),
+                            "deepseek-reasoner".to_string()
+                        ),
                     ],
                 ),
             ]
@@ -700,7 +726,10 @@ mod tests {
             BTreeMap::from([("deepseek".to_string(), connection("sk-d"))]),
             Some("deepseek".to_string()),
         );
-        session.on_fetched(HashMap::from([("deepseek".to_string(), fetched_deepseek())]));
+        session.on_fetched(HashMap::from([(
+            "deepseek".to_string(),
+            fetched_deepseek(),
+        )]));
         assert_eq!(
             session.model_groups(),
             vec![(

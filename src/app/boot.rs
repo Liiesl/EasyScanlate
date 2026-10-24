@@ -1,20 +1,20 @@
-#[cfg(feature = "test-ui")]
-use std::sync::Arc;
-use iced::Task;
-use neverliie_iced_widgets::title_bar::NativeFrame;
 use easyscanlate_model::{EntrySource, NewEntry, Quad};
 #[cfg(feature = "test-ui")]
 use easyscanlate_ui::main_area::decode::{DecodedPage, PageDecode, Tier};
 #[allow(unused_imports)]
 use easyscanlate_ui::{KOREAN_FONT_PATH, LoadedImage};
+use iced::Task;
 #[cfg(feature = "test-ui")]
 use iced::widget::image::Handle;
+use neverliie_iced_widgets::title_bar::NativeFrame;
+#[cfg(feature = "test-ui")]
+use std::sync::Arc;
 
 use iced::Font;
 use std::collections::HashSet;
 
-use super::{App, Message};
 use super::translation;
+use super::{App, Message};
 
 /// CJK families that provide Hangul/Han/Kana coverage on at least one OS.
 /// Mirrors `easyscanlate_ui::main_area::overlay::fallback::CJK_FALLBACK_FAMILIES`
@@ -155,7 +155,10 @@ pub fn boot(
         let cloud_task = if fetch_ids.is_empty() {
             Task::none()
         } else {
-            Task::perform(translation::fetch_providers(fetch_ids), Message::ModelsFetched)
+            Task::perform(
+                translation::fetch_providers(fetch_ids),
+                Message::ModelsFetched,
+            )
         };
         let local_endpoints = app.tx.local_fetch_endpoints();
         let local_task = if local_endpoints.is_empty() {
@@ -188,7 +191,8 @@ pub fn boot(
             let nid = crate::app::tab::TabId(app.next_tab_id);
             app.next_tab_id += 1;
             let mut project = easyscanlate_model::Project::new();
-            let (image_id, ev) = project.add_image_with_event("fake-white-page.png", width as f32, height as f32);
+            let (image_id, ev) =
+                project.add_image_with_event("fake-white-page.png", width as f32, height as f32);
             let images = vec![LoadedImage {
                 image_id,
                 decode: PageDecode {
@@ -208,7 +212,10 @@ pub fn boot(
             // project_from_loaded already set dirty=false; replay the add_image event for dirty flag
             crate::app::handle_model_event(&mut tab, ev);
             let image_id = tab.images[0].image_id;
-            if let Some(ev2) = tab.project.append_ocr_for_image_with_event(image_id, fake_ocr_entries()) {
+            if let Some(ev2) = tab
+                .project
+                .append_ocr_for_image_with_event(image_id, fake_ocr_entries())
+            {
                 crate::app::handle_model_event(&mut tab, ev2);
             }
             // Ensure the fake tab is dirty=false after boot (like a loaded project)
@@ -249,8 +256,9 @@ pub fn boot(
             tx.sync_models();
             app.tx = tx;
         }
-        app.active_tab_mut().status = "TEST-UI build: fake white page with fake OCR entries and fake translation loaded."
-            .to_string();
+        app.active_tab_mut().status =
+            "TEST-UI build: fake white page with fake OCR entries and fake translation loaded."
+                .to_string();
     }
     // Full system-font scan is ~100s of ms: keep the two tasks (enumerate +
     // CJK allow-list) but run them on the blocking pool so the iced async
@@ -303,8 +311,7 @@ pub fn boot(
     // immediately so feedback is instant (mirrors ManhwaOCR main.py:216-226).
     let cli_task = if let Some(path) = initial_mmtl {
         if !path.exists() {
-            app.active_tab_mut().status =
-                format!("Missing: {}", path.display());
+            app.active_tab_mut().status = format!("Missing: {}", path.display());
             crate::app::mmtl::drop_missing(&mut app, &path.to_string_lossy());
             Task::none()
         } else if let Some(new_id) = crate::app::mmtl::create_loading_tab(&mut app, path.clone()) {
@@ -349,22 +356,38 @@ pub fn boot(
 #[cfg_attr(all(feature = "ocr", not(feature = "test-ui")), allow(dead_code))]
 pub fn fake_ocr_entries() -> Vec<NewEntry> {
     let (w, h) = (900.0f32, 1200.0f32);
-    let box_at = |cx: f32, cy: f32, bw: f32, bh: f32| {
-        Quad {
-            points: [
-                [cx - bw / 2.0, cy - bh / 2.0],
-                [cx + bw / 2.0, cy - bh / 2.0],
-                [cx + bw / 2.0, cy + bh / 2.0],
-                [cx - bw / 2.0, cy + bh / 2.0],
-            ],
-        }
+    let box_at = |cx: f32, cy: f32, bw: f32, bh: f32| Quad {
+        points: [
+            [cx - bw / 2.0, cy - bh / 2.0],
+            [cx + bw / 2.0, cy - bh / 2.0],
+            [cx + bw / 2.0, cy + bh / 2.0],
+            [cx - bw / 2.0, cy + bh / 2.0],
+        ],
     };
     let specs = [
         ("안녕하세요!", 0.5 * w, 0.10 * h, 0.28 * w, 0.05 * h),
-        ("오늘은 좋은 날이네요.", 0.45 * w, 0.22 * h, 0.32 * w, 0.05 * h),
-        ("저기 보이는 게 뭐지?", 0.55 * w, 0.34 * h, 0.30 * w, 0.05 * h),
+        (
+            "오늘은 좋은 날이네요.",
+            0.45 * w,
+            0.22 * h,
+            0.32 * w,
+            0.05 * h,
+        ),
+        (
+            "저기 보이는 게 뭐지?",
+            0.55 * w,
+            0.34 * h,
+            0.30 * w,
+            0.05 * h,
+        ),
         ("조심해서 가자.", 0.35 * w, 0.50 * h, 0.24 * w, 0.05 * h),
-        ("정말 멋진 풍경이야!", 0.60 * w, 0.62 * h, 0.32 * w, 0.05 * h),
+        (
+            "정말 멋진 풍경이야!",
+            0.60 * w,
+            0.62 * h,
+            0.32 * w,
+            0.05 * h,
+        ),
         ("다음에 또 만나요.", 0.45 * w, 0.78 * h, 0.26 * w, 0.05 * h),
     ];
     specs

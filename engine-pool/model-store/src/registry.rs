@@ -168,9 +168,10 @@ pub fn is_downloaded_with_legacy(spec: &ModelSpec) -> bool {
         return true;
     }
     if let Some(legacy) = spec.replaces
-        && models_dir().join(legacy).exists() {
-            return true;
-        }
+        && models_dir().join(legacy).exists()
+    {
+        return true;
+    }
     false
 }
 
@@ -184,10 +185,7 @@ pub fn missing_models() -> Vec<&'static ModelSpec> {
 
 /// List all models that are present.
 pub fn present_models() -> Vec<&'static ModelSpec> {
-    MODELS
-        .iter()
-        .filter(|m| is_downloaded(m))
-        .collect()
+    MODELS.iter().filter(|m| is_downloaded(m)).collect()
 }
 
 #[cfg(test)]

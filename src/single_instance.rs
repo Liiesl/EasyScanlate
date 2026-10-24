@@ -55,8 +55,9 @@ impl Listener {
                                     break;
                                 }
                             }
-                            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
-                                || e.kind() == std::io::ErrorKind::TimedOut =>
+                            Err(e)
+                                if e.kind() == std::io::ErrorKind::WouldBlock
+                                    || e.kind() == std::io::ErrorKind::TimedOut =>
                             {
                                 break;
                             }
@@ -148,22 +149,16 @@ fn forward_to_primary(paths: &[String]) -> Result<(), String> {
     stream
         .set_write_timeout(Some(Duration::from_millis(600)))
         .ok();
-    stream
-        .set_read_timeout(Some(READ_TIMEOUT))
-        .ok();
+    stream.set_read_timeout(Some(READ_TIMEOUT)).ok();
     if paths.is_empty() {
-        stream
-            .write_all(b"\n")
-            .map_err(|e| format!("write: {e}"))?;
+        stream.write_all(b"\n").map_err(|e| format!("write: {e}"))?;
     } else {
         for p in paths {
             // Send each path on its own line (handles spaces safely).
             stream
                 .write_all(p.as_bytes())
                 .map_err(|e| format!("write: {e}"))?;
-            stream
-                .write_all(b"\n")
-                .map_err(|e| format!("write: {e}"))?;
+            stream.write_all(b"\n").map_err(|e| format!("write: {e}"))?;
         }
     }
     stream.flush().map_err(|e| format!("flush: {e}"))?;
@@ -196,7 +191,9 @@ pub fn parse_all_mmtl(args: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     for raw in args.iter().skip(1) {
         let t = raw.trim().trim_matches('"').trim();
-        if t.is_empty() || t.starts_with('-') { continue; }
+        if t.is_empty() || t.starts_with('-') {
+            continue;
+        }
         if t.to_ascii_lowercase().ends_with(".mmtl") {
             out.push(t.to_string());
         }
@@ -206,7 +203,10 @@ pub fn parse_all_mmtl(args: &[String]) -> Vec<String> {
 
 #[allow(dead_code)]
 pub fn is_mmtl_path(p: &str) -> bool {
-    p.trim().trim_matches('"').to_ascii_lowercase().ends_with(".mmtl")
+    p.trim()
+        .trim_matches('"')
+        .to_ascii_lowercase()
+        .ends_with(".mmtl")
 }
 
 #[allow(dead_code)]
@@ -255,13 +255,23 @@ mod tests {
     use super::*;
     #[test]
     fn parse_skips_flags() {
-        let args = vec!["easyscanlate".to_string(), "--register".to_string(), "a.mmtl".to_string()];
+        let args = vec![
+            "easyscanlate".to_string(),
+            "--register".to_string(),
+            "a.mmtl".to_string(),
+        ];
         assert_eq!(parse_initial_mmtl(&args), Some("a.mmtl".to_string()));
     }
     #[test]
     fn parse_quoted_spaces() {
-        let args = vec!["easyscanlate".to_string(), "\"C:\\My Proj\\a.mmtl\"".to_string()];
-        assert_eq!(parse_initial_mmtl(&args), Some("C:\\My Proj\\a.mmtl".to_string()));
+        let args = vec![
+            "easyscanlate".to_string(),
+            "\"C:\\My Proj\\a.mmtl\"".to_string(),
+        ];
+        assert_eq!(
+            parse_initial_mmtl(&args),
+            Some("C:\\My Proj\\a.mmtl".to_string())
+        );
     }
     #[test]
     fn is_mmtl_case_insensitive() {

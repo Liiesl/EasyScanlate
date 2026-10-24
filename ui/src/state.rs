@@ -4,8 +4,11 @@ use iced::{Font, Rectangle};
 use easyscanlate_model::{EntryId, EntryStyle, TextAlign};
 
 use crate::connect::ConnectModal;
-use crate::event::{EditOrigin, MainAreaMode, ManualMode, SettingsTab, StyleField, TargetProfileSelection, TranslationPanelMode};
-use crate::layout::{PaneKind, ResultsPaneKind, EditorPaneKind};
+use crate::event::{
+    EditOrigin, MainAreaMode, ManualMode, SettingsTab, StyleField, TargetProfileSelection,
+    TranslationPanelMode,
+};
+use crate::layout::{EditorPaneKind, PaneKind, ResultsPaneKind};
 use crate::loaded::LoadedImage;
 use easyscanlate_model::{ProfileId, Project};
 use iced::widget::pane_grid;
@@ -171,17 +174,27 @@ pub trait UiState {
     /// True while a manual OCR job is running.
     fn is_manual_ocring(&self) -> bool;
     /// True while the OCR pipeline (SFX filter / style classify / auto-inpaint staging) is active beyond raw OCR.
-    fn is_pipeline_running(&self) -> bool { false }
+    fn is_pipeline_running(&self) -> bool {
+        false
+    }
     /// True while any auto-inpaint jobs are pending (Telea/LaMa/AOT).
-    fn is_auto_inpainting(&self) -> bool { false }
+    fn is_auto_inpainting(&self) -> bool {
+        false
+    }
     /// True while SFX segmentation filtering is running.
-    fn is_segment_filtering(&self) -> bool { false }
+    fn is_segment_filtering(&self) -> bool {
+        false
+    }
     /// True while styling classification jobs are pending/running.
-    fn is_styling_busy(&self) -> bool { false }
+    fn is_styling_busy(&self) -> bool {
+        false
+    }
     /// Weighted overall pipeline progress (`0.0..=1.0`) for the Start OCR
     /// button: OCR x5 + SFX segment x2 + style x1 + auto-inpaint x3,
     /// normalized over the enabled stages. `None` when idle (hide bar).
-    fn pipeline_progress(&self) -> Option<f32> { None }
+    fn pipeline_progress(&self) -> Option<f32> {
+        None
+    }
     /// Bulk busy: any job that mutates OCR entries / inpaint patches / translations and conflicts with bulk actions.
     /// Used to disable Start OCR (re-enable), Translate, Retranslate, AutoDetect, InpaintBackground, manual mode etc.
     /// Note: main-area text editing and fine-grained style controls are intentionally *not* gated by this.
@@ -231,7 +244,9 @@ pub trait UiState {
     /// Blurred snapshot of the window behind the Settings / Manage Models /
     /// New Project overlays (`None` = not captured yet: render flat). Captured clean
     /// before the modal opens, downscaled + blurred off-thread.
-    fn backdrop_blur(&self) -> Option<iced::widget::image::Handle> { None }
+    fn backdrop_blur(&self) -> Option<iced::widget::image::Handle> {
+        None
+    }
     /// Every connected provider's *all* toggleable models (deprecated already
     /// removed) grouped by provider – shown in the Manage Models overlay.
     /// Each inner pair is `(model id, display name)`; the hidden set is
@@ -287,21 +302,43 @@ pub trait UiState {
         ""
     }
     fn translation_anim_phase(&self) -> f32;
-    fn is_loading(&self) -> bool { false }
-    fn loading_phase(&self) -> f32 { 0.0 }
-    fn loading_title(&self) -> String { String::new() }
+    fn is_loading(&self) -> bool {
+        false
+    }
+    fn loading_phase(&self) -> f32 {
+        0.0
+    }
+    fn loading_title(&self) -> String {
+        String::new()
+    }
     /// True while the active tab is exporting raster images.
-    fn is_exporting(&self) -> bool { false }
+    fn is_exporting(&self) -> bool {
+        false
+    }
     /// Export progress as `(done, total, failed)`. `None` when idle.
-    fn export_progress(&self) -> Option<(usize, usize, usize)> { None }
+    fn export_progress(&self) -> Option<(usize, usize, usize)> {
+        None
+    }
     /// Destination folder of the running export, if any.
-    fn export_folder(&self) -> Option<String> { None }
+    fn export_folder(&self) -> Option<String> {
+        None
+    }
     // ——— Tabs (titlebar) ———
-    fn tab_metas(&self) -> Vec<TabMeta> { Vec::new() }
-    fn active_tab_id(&self) -> u64 { 0 }
-    fn pending_close(&self) -> Option<TabMeta> { None }
-    fn autosave_prompt(&self) -> Option<AutosavePromptMeta> { None }
-    fn titlebar_height(&self) -> f32 { 32.0 }
+    fn tab_metas(&self) -> Vec<TabMeta> {
+        Vec::new()
+    }
+    fn active_tab_id(&self) -> u64 {
+        0
+    }
+    fn pending_close(&self) -> Option<TabMeta> {
+        None
+    }
+    fn autosave_prompt(&self) -> Option<AutosavePromptMeta> {
+        None
+    }
+    fn titlebar_height(&self) -> f32 {
+        32.0
+    }
     fn editor_panes(
         &self,
     ) -> Option<(
@@ -312,28 +349,61 @@ pub trait UiState {
         None
     }
     // ——— Updates (Velopack) ———
-    fn update_current_version(&self) -> String { String::new() }
-    fn update_available_version(&self) -> Option<String> { None }
-    fn update_downloading(&self) -> bool { false }
-    fn update_progress(&self) -> i16 { 0 }
-    fn update_ready(&self) -> bool { false }
-    fn update_notes(&self) -> Option<String> { None }
+    fn update_current_version(&self) -> String {
+        String::new()
+    }
+    fn update_available_version(&self) -> Option<String> {
+        None
+    }
+    fn update_downloading(&self) -> bool {
+        false
+    }
+    fn update_progress(&self) -> i16 {
+        0
+    }
+    fn update_ready(&self) -> bool {
+        false
+    }
+    fn update_notes(&self) -> Option<String> {
+        None
+    }
     /// Whether the blocking update-available popup is currently shown.
-    fn update_popup_visible(&self) -> bool { false }
+    fn update_popup_visible(&self) -> bool {
+        false
+    }
     /// Blurred snapshot cropped to the update popup card (`None` = flat).
-    fn update_blur(&self) -> Option<iced::widget::image::Handle> { None }
+    fn update_blur(&self) -> Option<iced::widget::image::Handle> {
+        None
+    }
     // ——— Onboarding (first-run, blocking) ———
-    fn onboarding_open(&self) -> bool { false }    fn onboarding_step(&self) -> u8 { 0 }
-    fn onboarding_models(&self) -> Vec<(String, String, ModelDownloadStatus)> { Vec::new() }
-    fn onboarding_overall_progress(&self) -> f32 { 0.0 }
-    fn onboarding_downloading(&self) -> bool { false }
-    fn onboarding_all_done(&self) -> bool { true }
+    fn onboarding_open(&self) -> bool {
+        false
+    }
+    fn onboarding_step(&self) -> u8 {
+        0
+    }
+    fn onboarding_models(&self) -> Vec<(String, String, ModelDownloadStatus)> {
+        Vec::new()
+    }
+    fn onboarding_overall_progress(&self) -> f32 {
+        0.0
+    }
+    fn onboarding_downloading(&self) -> bool {
+        false
+    }
+    fn onboarding_all_done(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ModelDownloadStatus {
     NotStarted,
-    Downloading { percent: f32, downloaded: u64, total: u64 },
+    Downloading {
+        percent: f32,
+        downloaded: u64,
+        total: u64,
+    },
     Done,
     Failed(String),
 }

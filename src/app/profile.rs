@@ -11,7 +11,13 @@ pub fn handle_select(app: &mut App, id: easyscanlate_model::ProfileId) -> Task<M
     } else {
         return Task::none();
     }
-    let name = app.active_tab_mut().project.profiles.selected().name.clone();
+    let name = app
+        .active_tab_mut()
+        .project
+        .profiles
+        .selected()
+        .name
+        .clone();
     app.active_tab_mut().status = format!("Profile: {name}");
     Task::none()
 }
@@ -26,7 +32,13 @@ pub fn handle_create(app: &mut App) -> Task<Message> {
     if let Some(sel_ev) = app.active_tab_mut().project.select_profile_with_event(id) {
         crate::app::state::handle_model_event(app.active_tab_mut(), sel_ev);
     }
-    let name = app.active_tab_mut().project.profiles.selected().name.clone();
+    let name = app
+        .active_tab_mut()
+        .project
+        .profiles
+        .selected()
+        .name
+        .clone();
     app.active_tab_mut().status = format!("Profile: {name} (created)");
     Task::none()
 }

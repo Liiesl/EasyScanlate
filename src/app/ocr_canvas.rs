@@ -12,7 +12,7 @@
 use image::{RgbImage, imageops};
 
 use easyscanlate_model::{EntryId, EntrySource, NewEntry, Quad};
-use easyscanlate_ocr::{DetectorQuad, OcrLine, OCR_QUAD_PAD, load_rgb};
+use easyscanlate_ocr::{DetectorQuad, OCR_QUAD_PAD, OcrLine, load_rgb};
 
 // ---------------------------------------------------------------------------
 // Run planning
@@ -81,7 +81,10 @@ pub fn plan_runs(dims: &[(u32, u32)]) -> Vec<RunPlan> {
         if ratio(i) > MAX_ASPECT_RATIO {
             let chunks = (ratio(i) / MAX_ASPECT_RATIO).ceil() as u32;
             for chunk in 0..chunks {
-                let band = (chunk as f32 / chunks as f32, (chunk + 1) as f32 / chunks as f32);
+                let band = (
+                    chunk as f32 / chunks as f32,
+                    (chunk + 1) as f32 / chunks as f32,
+                );
                 let above = if chunk > 0 {
                     Some((i, ((chunk - 1) as f32 / chunks as f32, band.0)))
                 } else {
@@ -137,14 +140,22 @@ fn strip(image: &RgbImage, margin: u32, y: u32, width: u32) -> Option<RgbImage> 
     Some(imageops::resize(
         &crop,
         width,
-        (margin as f32 * width as f32 / image.width().max(1) as f32).round().max(1.0) as u32,
+        (margin as f32 * width as f32 / image.width().max(1) as f32)
+            .round()
+            .max(1.0) as u32,
         imageops::FilterType::Triangle,
     ))
 }
 
 /// Crops `margin` rows at the bottom (`bottom`) or top edge of `band`
 /// (fractions of the image's height) and scales the strip to `width`.
-fn band_strip(image: &RgbImage, band: (f32, f32), margin: u32, width: u32, bottom: bool) -> Option<RgbImage> {
+fn band_strip(
+    image: &RgbImage,
+    band: (f32, f32),
+    margin: u32,
+    width: u32,
+    bottom: bool,
+) -> Option<RgbImage> {
     let height = image.height() as f32;
     let band_height = (band.1 - band.0) * height;
     if band_height < 1.0 || margin == 0 || width == 0 {
@@ -164,14 +175,24 @@ fn band_strip(image: &RgbImage, band: (f32, f32), margin: u32, width: u32, botto
 /// by the run's top boundary still appears whole. `band` is the covered band
 /// as fractions of the image's height. Returns `None` when the crop is
 /// impossible (image too small, zero width).
-pub fn top_margin_strip(image: &RgbImage, band: (f32, f32), width: u32, margin: u32) -> Option<RgbImage> {
+pub fn top_margin_strip(
+    image: &RgbImage,
+    band: (f32, f32),
+    width: u32,
+    margin: u32,
+) -> Option<RgbImage> {
     band_strip(image, band, margin, width, true)
 }
 
 /// The run's bottom margin strip: the top `margin` rows of the band of
 /// `image` directly below the run, scaled to `width`. Returns `None` when the
 /// crop is impossible.
-pub fn bottom_margin_strip(image: &RgbImage, band: (f32, f32), width: u32, margin: u32) -> Option<RgbImage> {
+pub fn bottom_margin_strip(
+    image: &RgbImage,
+    band: (f32, f32),
+    width: u32,
+    margin: u32,
+) -> Option<RgbImage> {
     band_strip(image, band, margin, width, false)
 }
 
@@ -401,7 +422,10 @@ pub fn distribute(
             (t, (band_top - offset(t) - margin_top as f32) * scaled[t].0)
         } else {
             let t = page_at(bounds[1] - margin_top as f32);
-            (t, ((band_top - offset(t)).max(0.0) - margin_top as f32 - offset(t)) * scaled[t].0)
+            (
+                t,
+                ((band_top - offset(t)).max(0.0) - margin_top as f32 - offset(t)) * scaled[t].0,
+            )
         };
         let scale = scaled[target].0;
         per_page[target].push(NewEntry {
@@ -430,7 +454,11 @@ pub fn distribute(
 /// edge; whole-page runs dedup against the previous page's full height.
 /// Returns `(page, offset)` where `offset` is the band-top edge in that page's
 /// pixel space. `None` for the very first run.
-pub fn dedup_target_for(index: usize, plans: &[RunPlan], dims: &[(u32, u32)]) -> Option<(usize, u32)> {
+pub fn dedup_target_for(
+    index: usize,
+    plans: &[RunPlan],
+    dims: &[(u32, u32)],
+) -> Option<(usize, u32)> {
     let run = *plans.get(index)?;
     if run.band.0 > 0.0 {
         let h = dims.get(run.page_start)?.1;
@@ -503,11 +531,18 @@ pub fn dedup_with_previous(
     for mut line in lines {
         let bounds = box_bounds(&line.bbox);
         // A couple of pixels of slack absorbs OCR jitter between runs.
-        let padded = [bounds[0] - 2.0, bounds[1] - 2.0, bounds[2] + 2.0, bounds[3] + 2.0];
+        let padded = [
+            bounds[0] - 2.0,
+            bounds[1] - 2.0,
+            bounds[2] + 2.0,
+            bounds[3] + 2.0,
+        ];
         let hits: Vec<usize> = mapped
             .iter()
             .enumerate()
-            .filter(|(_, (_, _, p))| !(p[2] < padded[0] || p[0] > padded[2] || p[3] < padded[1] || p[1] > padded[3]))
+            .filter(|(_, (_, _, p))| {
+                !(p[2] < padded[0] || p[0] > padded[2] || p[3] < padded[1] || p[1] > padded[3])
+            })
             .map(|(i, _)| i)
             .collect();
         if hits.is_empty() {
@@ -545,8 +580,19 @@ mod tests {
         }
     }
 
-    fn prev_quad(id: u64, text: &str, x0: f32, y0: f32, x1: f32, y1: f32) -> (EntryId, String, Quad) {
-        (EntryId(id), text.to_string(), Quad::from_xyxy(x0, y0, x1, y1))
+    fn prev_quad(
+        id: u64,
+        text: &str,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+    ) -> (EntryId, String, Quad) {
+        (
+            EntryId(id),
+            text.to_string(),
+            Quad::from_xyxy(x0, y0, x1, y1),
+        )
     }
 
     fn rgb(w: u32, h: u32, fill: [u8; 3]) -> RgbImage {
@@ -564,9 +610,17 @@ mod tests {
         }
         let top = top_margin_strip(&image, (0.0, 1.0), 50, 20).unwrap();
         assert_eq!((top.width(), top.height()), (50, 10));
-        assert_eq!(top.get_pixel(25, 5).0, [90, 0, 0], "bottom rows of the source");
+        assert_eq!(
+            top.get_pixel(25, 5).0,
+            [90, 0, 0],
+            "bottom rows of the source"
+        );
         let bottom = bottom_margin_strip(&image, (0.0, 1.0), 50, 20).unwrap();
-        assert_eq!(bottom.get_pixel(25, 5).0, [90, 0, 0], "top rows of the source");
+        assert_eq!(
+            bottom.get_pixel(25, 5).0,
+            [90, 0, 0],
+            "top rows of the source"
+        );
     }
 
     #[test]
@@ -582,7 +636,11 @@ mod tests {
         let strip = top_margin_strip(&image, (0.3, 0.5), 100, 10).unwrap();
         assert_eq!((strip.width(), strip.height()), (100, 10));
         for y in 0..10 {
-            assert_eq!(strip.get_pixel(50, y).0, [90, 0, 0], "row {y} must come from the band");
+            assert_eq!(
+                strip.get_pixel(50, y).0,
+                [90, 0, 0],
+                "row {y} must come from the band"
+            );
         }
     }
 
@@ -832,7 +890,15 @@ mod tests {
     #[test]
     fn distribute_without_lines_yields_no_entries() {
         assert!(distribute(vec![], &[(0, 100, 200)], (0.0, 1.0), 200).is_empty());
-        assert!(distribute(vec![line("x", 0.0, 0.0, 10.0, 10.0, 0.9)], &[], (0.0, 1.0), 200).is_empty());
+        assert!(
+            distribute(
+                vec![line("x", 0.0, 0.0, 10.0, 10.0, 0.9)],
+                &[],
+                (0.0, 1.0),
+                200
+            )
+            .is_empty()
+        );
     }
 
     #[test]
@@ -847,7 +913,11 @@ mod tests {
             line("own", 20.0, 220.0, 80.0, 250.0, 0.9),
         ];
         let out = dedup_with_previous(cur, &prev, 100, 500, 100, 100);
-        assert_eq!(out.kept.len(), 1, "spanning bubble deduped against previous page");
+        assert_eq!(
+            out.kept.len(),
+            1,
+            "spanning bubble deduped against previous page"
+        );
         assert_eq!(out.kept[0].text, "own");
         assert!(out.drop_prev.is_empty());
     }
@@ -884,7 +954,10 @@ mod tests {
         let prev = vec![prev_quad(7, "span", 10.0, 290.0, 60.0, 330.0)];
         let cur = vec![line("span", 10.0, 90.0, 60.0, 130.0, 0.9)];
         let out = dedup_with_previous(cur, &prev, 100, 300, 100, 100);
-        assert!(out.kept.is_empty(), "chunk boundary duplicate must be dropped");
+        assert!(
+            out.kept.is_empty(),
+            "chunk boundary duplicate must be dropped"
+        );
         assert!(out.drop_prev.is_empty());
     }
 
@@ -899,9 +972,23 @@ mod tests {
     #[test]
     fn dedup_without_previous_data_keeps_everything() {
         let lines = vec![line("x", 0.0, 90.0, 10.0, 110.0, 0.9)];
-        assert_eq!(dedup_with_previous(lines.clone(), &[], 100, 500, 100, 100).kept.len(), 1);
         assert_eq!(
-            dedup_with_previous(lines, &[prev_quad(7, "x", 0.0, 0.0, 1.0, 1.0)], 0, 500, 100, 100).kept.len(),
+            dedup_with_previous(lines.clone(), &[], 100, 500, 100, 100)
+                .kept
+                .len(),
+            1
+        );
+        assert_eq!(
+            dedup_with_previous(
+                lines,
+                &[prev_quad(7, "x", 0.0, 0.0, 1.0, 1.0)],
+                0,
+                500,
+                100,
+                100
+            )
+            .kept
+            .len(),
             1
         );
     }

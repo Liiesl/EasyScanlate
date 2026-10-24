@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet};
 #[cfg(all(feature = "test-ui", not(feature = "translation")))]
 use std::collections::BTreeMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, mpsc};
 
 use iced::{Color, Element, Font, Subscription, Task, Theme};
@@ -8,53 +8,53 @@ use neverliie_iced_widgets::color_picker::DropperBuffer;
 use neverliie_iced_widgets::title_bar::{FrameAction, NativeFrame};
 
 use easyscanlate_model::{EntryId, EntryStyle, ModelEvent, NewEntry, ProfileId};
-use easyscanlate_settings::StylePresets;
 #[cfg(feature = "ocr")]
 use easyscanlate_ocr::{self as ocr_engine};
-use easyscanlate_ui::translation as ui_translation;
+use easyscanlate_settings::StylePresets;
 use easyscanlate_ui::main_area::decode::{DecodedPage, Tier};
+use easyscanlate_ui::translation as ui_translation;
 use easyscanlate_ui::{
-    event::{SettingsTab, UiEvent},
     ConnectModal,
+    event::{SettingsTab, UiEvent},
 };
 
 // ---------------------------------------------------------------------------
 // Sub-modules
 // ---------------------------------------------------------------------------
-pub mod layout;
-pub mod chrome;
-pub mod boot;
-pub mod backdrop;
-pub mod state;
-pub mod edit;
-pub mod ocr;
-pub mod ocr_canvas;
-pub mod inpaint;
-pub mod manual;
-pub mod styling;
-pub mod segment;
-pub mod pipeline;
-pub mod translation;
-pub mod settings;
 pub mod advanced;
-pub mod mmtl;
-pub mod new_project;
-pub mod profile;
-pub mod entries;
-pub mod main_area;
-pub mod subscription;
-pub mod update;
-pub mod update_popup;
-pub mod export;
-pub mod view;
-pub mod tab;
-pub mod tabs;
-pub mod confirm_close;
 pub mod autosave;
 pub mod autosave_prompt;
-pub mod queue;
-pub mod onboarding;
+pub mod backdrop;
+pub mod boot;
+pub mod chrome;
+pub mod confirm_close;
+pub mod edit;
+pub mod entries;
 pub mod error;
+pub mod export;
+pub mod inpaint;
+pub mod layout;
+pub mod main_area;
+pub mod manual;
+pub mod mmtl;
+pub mod new_project;
+pub mod ocr;
+pub mod ocr_canvas;
+pub mod onboarding;
+pub mod pipeline;
+pub mod profile;
+pub mod queue;
+pub mod segment;
+pub mod settings;
+pub mod state;
+pub mod styling;
+pub mod subscription;
+pub mod tab;
+pub mod tabs;
+pub mod translation;
+pub mod update;
+pub mod update_popup;
+pub mod view;
 
 /// Pending autosave-recovery prompt for one tab (in-app modal).
 #[derive(Debug, Clone)]
@@ -64,20 +64,16 @@ pub struct AutosavePrompt {
     pub dir: std::path::PathBuf,
 }
 
-use tab::{EnginePool, Tab, TabId};
 #[cfg(feature = "inpaint")]
-use tab::{AutoInpaintJob};
+use tab::AutoInpaintJob;
+use tab::{EnginePool, Tab, TabId};
 // ---------------------------------------------------------------------------
 // Shared complex payload aliases (silences `clippy::type_complexity`).
 // ---------------------------------------------------------------------------
 
 /// One inpaint patch: RGBA crop, bounds, source quad.
 #[cfg(feature = "inpaint")]
-type InpaintPatch = (
-    image::RgbaImage,
-    [f32; 4],
-    Option<easyscanlate_model::Quad>,
-);
+type InpaintPatch = (image::RgbaImage, [f32; 4], Option<easyscanlate_model::Quad>);
 /// Grouped manual inpaint result: per-image patches.
 #[cfg(feature = "inpaint")]
 type GroupedInpaintPatches = Vec<(usize, Vec<InpaintPatch>)>;
@@ -148,7 +144,11 @@ pub enum TabMessage {
     #[cfg(feature = "inpaint")]
     ManualInpaintStreamRun(Result<ManualInpaintStreamItem, String>),
     #[cfg(all(feature = "styling", feature = "inpaint"))]
-    PipelineStyleDetected(usize, EntryId, Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>),
+    PipelineStyleDetected(
+        usize,
+        EntryId,
+        Result<(EntryStyle, easyscanlate_styling::StylePrediction), String>,
+    ),
     #[cfg(feature = "styling")]
     StyleDetected(usize, EntryId, Result<EntryStyle, String>),
     #[cfg(feature = "segment")]
@@ -176,10 +176,21 @@ pub enum TabMessage {
     ExportFinished(Result<String, String>),
     ExportStreamRun(Result<ExportStreamItem, String>),
     ExportStreamFailed(String),
-    TranslationExportPicked { profile: ProfileId, path: Option<String> },
+    TranslationExportPicked {
+        profile: ProfileId,
+        path: Option<String>,
+    },
     TranslationExported(Result<String, String>),
-    TranslationImportPicked { target: Option<ProfileId>, new_name: String, path: Option<String> },
-    TranslationImportLoaded { target: Option<ProfileId>, new_name: String, result: advanced::TranslationImportResult },
+    TranslationImportPicked {
+        target: Option<ProfileId>,
+        new_name: String,
+        path: Option<String>,
+    },
+    TranslationImportLoaded {
+        target: Option<ProfileId>,
+        new_name: String,
+        result: advanced::TranslationImportResult,
+    },
     TilesVisible(std::ops::Range<usize>),
     TileScrollEnded,
     AutosaveDone(Result<String, String>),
@@ -245,7 +256,10 @@ pub enum Message {
     UpdateCheckAgain,
     UpdatePoll,
     // ——— Onboarding (first-run, blocking) ———
-    OnboardingModelDone { id: String, result: Result<(), String> },
+    OnboardingModelDone {
+        id: String,
+        result: Result<(), String>,
+    },
     OnboardingModelPoll,
     // ——— Blurred backdrop (Settings / Manage Models) ———
     BackdropCaptured(Box<iced::window::Screenshot>, backdrop::BackdropKind),
@@ -259,7 +273,10 @@ pub enum Message {
     ErrorDismissed,
     /// Non-panic error dialog: user pressed "Copy details". Handler writes
     /// the full text to the clipboard and re-shows the dialog for dismissal.
-    ErrorCopyRetry { title: String, details: String },
+    ErrorCopyRetry {
+        title: String,
+        details: String,
+    },
 }
 
 impl From<UiEvent> for Message {
@@ -364,7 +381,11 @@ impl App {
     pub fn theme(&self) -> Theme {
         use iced::theme::palette::{Extended, Palette};
         let is_dark = easyscanlate_settings::get(|s| s.aurora_is_dark);
-        let base_palette = if is_dark { Palette::DARK } else { Palette::LIGHT };
+        let base_palette = if is_dark {
+            Palette::DARK
+        } else {
+            Palette::LIGHT
+        };
         let opaque_bg = base_palette.background;
         let mut transparent_palette = base_palette;
         transparent_palette.background = Color {
@@ -392,9 +413,7 @@ impl App {
 
     pub(crate) fn new(frame: NativeFrame) -> Self {
         let (color_swatches, color_recents, color_active_tab) =
-            easyscanlate_ui::color::library_to_widget(
-                &easyscanlate_settings::color_library::load(),
-            );
+            easyscanlate_ui::color::library_to_widget(&easyscanlate_settings::color_library::load());
         Self {
             tabs: vec![Tab::home(TabId(0))],
             active: 0,
@@ -458,9 +477,16 @@ impl App {
                 }
                 #[cfg(feature = "models")]
                 {
-                    let (completed, ver) = easyscanlate_settings::get(|s| (s.onboarding_completed, s.onboarding_version));
-                    let is_completed = completed && ver >= easyscanlate_settings::CURRENT_ONBOARDING_VERSION;
-                    if is_completed { None } else { Some(onboarding::OnboardingState::new()) }
+                    let (completed, ver) = easyscanlate_settings::get(|s| {
+                        (s.onboarding_completed, s.onboarding_version)
+                    });
+                    let is_completed =
+                        completed && ver >= easyscanlate_settings::CURRENT_ONBOARDING_VERSION;
+                    if is_completed {
+                        None
+                    } else {
+                        Some(onboarding::OnboardingState::new())
+                    }
                 }
             },
             onboarding_rx: None,
@@ -485,7 +511,10 @@ impl App {
         self.tabs[self.active].is_home()
     }
     pub(crate) fn active_state(&self) -> crate::app::state::ActiveTab<'_> {
-        crate::app::state::ActiveTab { app: self, tab: &self.tabs[self.active] }
+        crate::app::state::ActiveTab {
+            app: self,
+            tab: &self.tabs[self.active],
+        }
     }
 }
 
@@ -518,20 +547,31 @@ fn handle_engine_pool_message(
         } => match result {
             Ok(built) => match built {
                 #[cfg(feature = "ocr")]
-                BuiltEngine::OcrParallel(engine) => ocr::handle_parallel_ready(app, tab_id, Ok(engine)),
+                BuiltEngine::OcrParallel(engine) => {
+                    ocr::handle_parallel_ready(app, tab_id, Ok(engine))
+                }
                 #[cfg(feature = "ocr")]
-                BuiltEngine::OcrManual(engine) => ocr::handle_manual_ocr_engine_ready(app, tab_id, Ok(engine)),
+                BuiltEngine::OcrManual(engine) => {
+                    ocr::handle_manual_ocr_engine_ready(app, tab_id, Ok(engine))
+                }
                 #[cfg(feature = "segment")]
-                BuiltEngine::Segment(engine) => segment::handle_engine_ready(app, tab_id, Ok(engine)),
+                BuiltEngine::Segment(engine) => {
+                    segment::handle_engine_ready(app, tab_id, Ok(engine))
+                }
                 #[cfg(feature = "styling")]
-                BuiltEngine::Styling(engine) => styling::handle_styling_ready(app, tab_id, Ok(engine)),
+                BuiltEngine::Styling(engine) => {
+                    styling::handle_styling_ready(app, tab_id, Ok(engine))
+                }
                 #[cfg(feature = "inpaint")]
                 BuiltEngine::Inpaint { backend, engine } => {
                     // Manual/background vs auto share the inpaint slot: route by
                     // which pending payload exists (same rule as the legacy split).
                     let is_manual = app
                         .tab_by_id(tab_id)
-                        .map(|t| t.pending_manual_multi.is_some() || t.pending_background_stitch.is_some())
+                        .map(|t| {
+                            t.pending_manual_multi.is_some()
+                                || t.pending_background_stitch.is_some()
+                        })
                         .unwrap_or(false);
                     if is_manual {
                         inpaint::handle_inpaint_engine_ready(app, tab_id, Ok(engine))
@@ -551,18 +591,29 @@ fn handle_engine_pool_message(
                 match kind {
                     #[cfg(feature = "ocr")]
                     easyscanlate_engine_pool::JobKind::Ocr(mode) => match mode {
-                        easyscanlate_engine_pool::OcrMode::Auto => ocr::handle_parallel_ready(app, tab_id, Err(e)),
-                        easyscanlate_engine_pool::OcrMode::Manual => ocr::handle_manual_ocr_engine_ready(app, tab_id, Err(e)),
+                        easyscanlate_engine_pool::OcrMode::Auto => {
+                            ocr::handle_parallel_ready(app, tab_id, Err(e))
+                        }
+                        easyscanlate_engine_pool::OcrMode::Manual => {
+                            ocr::handle_manual_ocr_engine_ready(app, tab_id, Err(e))
+                        }
                     },
                     #[cfg(feature = "segment")]
-                    easyscanlate_engine_pool::JobKind::Segment => segment::handle_engine_ready(app, tab_id, Err(e)),
+                    easyscanlate_engine_pool::JobKind::Segment => {
+                        segment::handle_engine_ready(app, tab_id, Err(e))
+                    }
                     #[cfg(feature = "styling")]
-                    easyscanlate_engine_pool::JobKind::Styling => styling::handle_styling_ready(app, tab_id, Err(e)),
+                    easyscanlate_engine_pool::JobKind::Styling => {
+                        styling::handle_styling_ready(app, tab_id, Err(e))
+                    }
                     #[cfg(feature = "inpaint")]
                     easyscanlate_engine_pool::JobKind::Inpaint(backend) => {
                         let is_manual = app
                             .tab_by_id(tab_id)
-                            .map(|t| t.pending_manual_multi.is_some() || t.pending_background_stitch.is_some())
+                            .map(|t| {
+                                t.pending_manual_multi.is_some()
+                                    || t.pending_background_stitch.is_some()
+                            })
                             .unwrap_or(false);
                         if is_manual {
                             inpaint::handle_inpaint_engine_ready(app, tab_id, Err(e))
@@ -583,14 +634,18 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
     // New-tab creations carry a fresh TabId not yet in `tabs` (allocated at spawn
     // time). Handle them before the `idx` guard so the push isn't dropped.
     match &msg {
-        TabMessage::MmtlLoaded(_) | TabMessage::RecentPickedToLoad(_) | TabMessage::CreateProjectPicked(_) => {
+        TabMessage::MmtlLoaded(_)
+        | TabMessage::RecentPickedToLoad(_)
+        | TabMessage::CreateProjectPicked(_) => {
             return match msg {
                 TabMessage::MmtlLoaded(res) => mmtl::handle_loaded(app, tab_id, res),
                 TabMessage::RecentPickedToLoad(res) => {
                     match res {
                         Ok((project, images, display, temp_dir)) => {
                             debug_assert_eq!(project.image_count(), images.len());
-                            return mmtl::push_project_tab(app, tab_id, project, images, display, temp_dir);
+                            return mmtl::push_project_tab(
+                                app, tab_id, project, images, display, temp_dir,
+                            );
                         }
                         Err(e) => {
                             // Load resolved (failed): the reusable capture is stale.
@@ -610,34 +665,16 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
                         }
                     }
                 }
-                TabMessage::CreateProjectPicked(res) => {
-                    match res {
-                        Ok(path_str) => match mmtl::load_created_project(path_str.clone()) {
-                            Ok((project, images, display, temp_dir)) => {
-                                app.pending_create_series = None;
-                                debug_assert_eq!(project.image_count(), images.len());
-                                return mmtl::push_project_tab(app, tab_id, project, images, display, temp_dir);
-                            }
-                            Err(e) => {
-                                app.backdrop_frame = None;
-                                if let Some(idx) = app.tabs.iter().position(|t| t.id == tab_id) {
-                                    let tab = &mut app.tabs[idx];
-                                    if tab.loading {
-                                        tab.loading = false;
-                                        tab.loading_path = None;
-                                        tab.loading_phase = 0.0;
-                                    }
-                                    tab.status = format!("Created {path_str} but load failed: {e}");
-                                } else {
-                                    app.active_tab_mut().status = format!("Created {path_str} but load failed: {e}");
-                                }
-                                let series = app.pending_create_series.take().flatten();
-                                mmtl::touch_opened(app, path_str.clone(), series);
-                                return error::show("Project created, but it wouldn't open", format!("{path_str}\n{e}"));
-                            }
-                        },
-                        Err(e) => {
+                TabMessage::CreateProjectPicked(res) => match res {
+                    Ok(path_str) => match mmtl::load_created_project(path_str.clone()) {
+                        Ok((project, images, display, temp_dir)) => {
                             app.pending_create_series = None;
+                            debug_assert_eq!(project.image_count(), images.len());
+                            return mmtl::push_project_tab(
+                                app, tab_id, project, images, display, temp_dir,
+                            );
+                        }
+                        Err(e) => {
                             app.backdrop_frame = None;
                             if let Some(idx) = app.tabs.iter().position(|t| t.id == tab_id) {
                                 let tab = &mut app.tabs[idx];
@@ -646,14 +683,36 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
                                     tab.loading_path = None;
                                     tab.loading_phase = 0.0;
                                 }
-                                tab.status = format!("Create failed: {e}");
+                                tab.status = format!("Created {path_str} but load failed: {e}");
                             } else {
-                                app.active_tab_mut().status = format!("Create failed: {e}");
+                                app.active_tab_mut().status =
+                                    format!("Created {path_str} but load failed: {e}");
                             }
-                            return error::show("Couldn't create the project", e);
+                            let series = app.pending_create_series.take().flatten();
+                            mmtl::touch_opened(app, path_str.clone(), series);
+                            return error::show(
+                                "Project created, but it wouldn't open",
+                                format!("{path_str}\n{e}"),
+                            );
                         }
+                    },
+                    Err(e) => {
+                        app.pending_create_series = None;
+                        app.backdrop_frame = None;
+                        if let Some(idx) = app.tabs.iter().position(|t| t.id == tab_id) {
+                            let tab = &mut app.tabs[idx];
+                            if tab.loading {
+                                tab.loading = false;
+                                tab.loading_path = None;
+                                tab.loading_phase = 0.0;
+                            }
+                            tab.status = format!("Create failed: {e}");
+                        } else {
+                            app.active_tab_mut().status = format!("Create failed: {e}");
+                        }
+                        return error::show("Couldn't create the project", e);
                     }
-                }
+                },
                 _ => unreachable!(),
             };
         }
@@ -696,26 +755,34 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
             if accept {
                 let project_clone = app.tabs[idx].project.clone();
                 let tab = &mut app.tabs[idx];
-                tab.scheduler.settle_with_project(&mut tab.images, &project_clone, {
-                    let tid = tab_id;
-                    move |i, r| Message::Tab(tid, TabMessage::FullDecoded(i, r))
-                })
+                tab.scheduler
+                    .settle_with_project(&mut tab.images, &project_clone, {
+                        let tid = tab_id;
+                        move |i, r| Message::Tab(tid, TabMessage::FullDecoded(i, r))
+                    })
             } else {
                 Task::none()
             }
         }
         TabMessage::TilesVisible(range) => {
             let tid = tab_id;
-            app.tabs[idx].scheduler.schedule(range, move |seq| Message::Tab(tid, TabMessage::SettleElapsed(seq)))
+            app.tabs[idx].scheduler.schedule(range, move |seq| {
+                Message::Tab(tid, TabMessage::SettleElapsed(seq))
+            })
         }
         TabMessage::TileScrollEnded => {
             let project_clone = app.tabs[idx].project.clone();
             let tab = &mut app.tabs[idx];
             let tid = tab_id;
-            tab.scheduler.settle_with_project(&mut tab.images, &project_clone, move |i, r| Message::Tab(tid, TabMessage::FullDecoded(i, r)))
+            tab.scheduler
+                .settle_with_project(&mut tab.images, &project_clone, move |i, r| {
+                    Message::Tab(tid, TabMessage::FullDecoded(i, r))
+                })
         }
         #[cfg(feature = "ocr")]
-        TabMessage::ManualOcrMultiFinished(result) => ocr::handle_manual_ocr_finished(app, tab_id, result),
+        TabMessage::ManualOcrMultiFinished(result) => {
+            ocr::handle_manual_ocr_finished(app, tab_id, result)
+        }
         #[cfg(feature = "ocr")]
         TabMessage::OcrStreamRun(result) => ocr::handle_ocr_stream_run(app, tab_id, result),
         #[cfg(feature = "ocr")]
@@ -727,7 +794,8 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
         }
         TabMessage::TranslateTick => {
             if app.tabs[idx].translating {
-                app.tabs[idx].translate_anim_phase = (app.tabs[idx].translate_anim_phase + 0.016) % 6.0;
+                app.tabs[idx].translate_anim_phase =
+                    (app.tabs[idx].translate_anim_phase + 0.016) % 6.0;
             } else {
                 app.tabs[idx].translate_anim_phase = 0.0;
             }
@@ -742,48 +810,88 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
             Task::none()
         }
         #[cfg(feature = "styling")]
-        TabMessage::StyleDetected(index, id, result) => styling::handle_style_detected(app, tab_id, index, id, result),
+        TabMessage::StyleDetected(index, id, result) => {
+            styling::handle_style_detected(app, tab_id, index, id, result)
+        }
         #[cfg(all(feature = "styling", feature = "inpaint"))]
-        TabMessage::PipelineStyleDetected(index, id, result) => styling::handle_pipeline_style_detected(app, tab_id, index, id, result),
+        TabMessage::PipelineStyleDetected(index, id, result) => {
+            styling::handle_pipeline_style_detected(app, tab_id, index, id, result)
+        }
         #[cfg(feature = "inpaint")]
-        TabMessage::AutoInpaintFinished(index, id, result) => inpaint::handle_auto_finished(app, tab_id, index, id, result),
+        TabMessage::AutoInpaintFinished(index, id, result) => {
+            inpaint::handle_auto_finished(app, tab_id, index, id, result)
+        }
         #[cfg(feature = "inpaint")]
-        TabMessage::AutoInpaintStreamRun(result) => inpaint::handle_auto_stream_run(app, tab_id, result),
+        TabMessage::AutoInpaintStreamRun(result) => {
+            inpaint::handle_auto_stream_run(app, tab_id, result)
+        }
         #[cfg(feature = "inpaint")]
-        TabMessage::AutoInpaintStreamFailed(e) => inpaint::handle_auto_stream_failed(app, tab_id, e),
+        TabMessage::AutoInpaintStreamFailed(e) => {
+            inpaint::handle_auto_stream_failed(app, tab_id, e)
+        }
         #[cfg(feature = "inpaint")]
-        TabMessage::ManualInpaintStreamRun(result) => inpaint::handle_manual_stream_run(app, tab_id, result),
+        TabMessage::ManualInpaintStreamRun(result) => {
+            inpaint::handle_manual_stream_run(app, tab_id, result)
+        }
         #[cfg(feature = "segment")]
         TabMessage::SegmentStreamRun(result) => segment::handle_stream_run(app, tab_id, result),
         #[cfg(feature = "segment")]
         TabMessage::SegmentStreamFailed(e) => segment::handle_stream_failed(app, tab_id, e),
         #[cfg(feature = "inpaint")]
-        TabMessage::ManualMultiInpaintFinished(result) => inpaint::handle_inpaint_finished(app, tab_id, result),
+        TabMessage::ManualMultiInpaintFinished(result) => {
+            inpaint::handle_inpaint_finished(app, tab_id, result)
+        }
         TabMessage::EnginePool(outcome) => handle_engine_pool_message(app, tab_id, outcome),
-        TabMessage::TranslateFinished(jobs, result) => translation::handle_translate_finished(app, tab_id, jobs, result),
-        TabMessage::RetranslateFinished((index, entry_id), result) => translation::handle_retranslate_finished(app, tab_id, index, entry_id, result),
+        TabMessage::TranslateFinished(jobs, result) => {
+            translation::handle_translate_finished(app, tab_id, jobs, result)
+        }
+        TabMessage::RetranslateFinished((index, entry_id), result) => {
+            translation::handle_retranslate_finished(app, tab_id, index, entry_id, result)
+        }
         TabMessage::MmtlSavePicked(picked) => mmtl::handle_save_picked(app, tab_id, picked),
         TabMessage::MmtlOpenPicked(picked) => match picked {
             // Cancelled picker: status only, never a load — no capture.
             None => mmtl::handle_open_picked(app, tab_id, None),
-            Some(path) => backdrop::begin_load(app, backdrop::PendingLoad::OpenPicked { tab_id, path }),
+            Some(path) => {
+                backdrop::begin_load(app, backdrop::PendingLoad::OpenPicked { tab_id, path })
+            }
         },
         TabMessage::MmtlSaved(result) => mmtl::handle_saved(app, tab_id, result),
-        TabMessage::NewProjectSourcePicked(result) => new_project::handle_source_picked(app, tab_id, result),
-        TabMessage::NewProjectFolderPicked(result) => new_project::handle_folder_picked(app, tab_id, result),
+        TabMessage::NewProjectSourcePicked(result) => {
+            new_project::handle_source_picked(app, tab_id, result)
+        }
+        TabMessage::NewProjectFolderPicked(result) => {
+            new_project::handle_folder_picked(app, tab_id, result)
+        }
         TabMessage::NewProjectThumbs(handles) => new_project::handle_thumbs(app, tab_id, handles),
-        TabMessage::NewProjectLocationPicked(picked) => new_project::handle_location_picked(app, tab_id, picked),
+        TabMessage::NewProjectLocationPicked(picked) => {
+            new_project::handle_location_picked(app, tab_id, picked)
+        }
         TabMessage::ExportFolderPicked(picked) => export::handle_export_picked(app, tab_id, picked),
         TabMessage::ExportFinished(result) => export::handle_export_finished(app, tab_id, result),
-        TabMessage::ExportStreamRun(result) => export::handle_export_stream_run(app, tab_id, result),
+        TabMessage::ExportStreamRun(result) => {
+            export::handle_export_stream_run(app, tab_id, result)
+        }
         TabMessage::ExportStreamFailed(e) => export::handle_export_stream_failed(app, tab_id, e),
-        TabMessage::TranslationExportPicked { profile, path } => advanced::handle_export_picked(app, tab_id, profile, path),
+        TabMessage::TranslationExportPicked { profile, path } => {
+            advanced::handle_export_picked(app, tab_id, profile, path)
+        }
         TabMessage::TranslationExported(result) => advanced::handle_exported(app, tab_id, result),
-        TabMessage::TranslationImportPicked { target, new_name, path } => advanced::handle_import_picked(app, tab_id, target, new_name, path),
-        TabMessage::TranslationImportLoaded { target, new_name, result } => advanced::handle_import_loaded(app, tab_id, target, new_name, result),
+        TabMessage::TranslationImportPicked {
+            target,
+            new_name,
+            path,
+        } => advanced::handle_import_picked(app, tab_id, target, new_name, path),
+        TabMessage::TranslationImportLoaded {
+            target,
+            new_name,
+            result,
+        } => advanced::handle_import_loaded(app, tab_id, target, new_name, result),
         TabMessage::AutosaveDone(result) => autosave::handle_done(app, tab_id, result),
         TabMessage::AutosaveCheckDone(found) => autosave::handle_check_done(app, tab_id, found),
-        TabMessage::MmtlLoaded(_) | TabMessage::CreateProjectPicked(_) | TabMessage::RecentPickedToLoad(_) => {
+        TabMessage::MmtlLoaded(_)
+        | TabMessage::CreateProjectPicked(_)
+        | TabMessage::RecentPickedToLoad(_) => {
             unreachable!("MmtlLoaded/Create/Recent are handled before the idx guard")
         }
     }
@@ -851,9 +959,17 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
 
     match message {
         Message::IpcPoll => {
-            let pending = app.ipc_listener.as_mut().map(|l| l.poll()).unwrap_or_default();
+            let pending = app
+                .ipc_listener
+                .as_mut()
+                .map(|l| l.poll())
+                .unwrap_or_default();
             let paths: Vec<String> = pending.into_iter().filter(|s| !s.is_empty()).collect();
-            if paths.is_empty() { Task::none() } else { backdrop::begin_load(app, backdrop::PendingLoad::External(paths)) }
+            if paths.is_empty() {
+                Task::none()
+            } else {
+                backdrop::begin_load(app, backdrop::PendingLoad::External(paths))
+            }
         }
         Message::ExternalOpen(paths) => {
             if app.new_project.is_some() {
@@ -862,7 +978,11 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
                     if pb.is_dir() {
                         return true;
                     }
-                    let ext = pb.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+                    let ext = pb
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
                     crate::app::layout::IMAGE_FILTERS.contains(&ext.as_str())
                 });
                 if has_images {
@@ -881,12 +1001,27 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         }
         Message::FetchModels => translation::handle_fetch_models(app),
         Message::ModelsFetched(providers) => translation::handle_models_fetched(app, providers),
-        Message::Ui(UiEvent::TabSelected(raw)) => { app.backdrop_frame = None; tabs::handle_selected(app, raw) }
-        Message::Ui(UiEvent::TabClose(raw)) => { app.backdrop_frame = None; tabs::handle_close(app, raw) }
-        Message::Ui(UiEvent::TabCloseConfirmed(raw, save)) => { app.backdrop_frame = None; tabs::handle_close_confirmed(app, raw, save) }
+        Message::Ui(UiEvent::TabSelected(raw)) => {
+            app.backdrop_frame = None;
+            tabs::handle_selected(app, raw)
+        }
+        Message::Ui(UiEvent::TabClose(raw)) => {
+            app.backdrop_frame = None;
+            tabs::handle_close(app, raw)
+        }
+        Message::Ui(UiEvent::TabCloseConfirmed(raw, save)) => {
+            app.backdrop_frame = None;
+            tabs::handle_close_confirmed(app, raw, save)
+        }
         Message::Ui(UiEvent::TabCloseCancel) => tabs::handle_close_cancel(app),
-        Message::Ui(UiEvent::TabCloseOthers(raw)) => { app.backdrop_frame = None; tabs::handle_close_others(app, raw) }
-        Message::Ui(UiEvent::TabCloseAll) => { app.backdrop_frame = None; tabs::handle_close_all(app) }
+        Message::Ui(UiEvent::TabCloseOthers(raw)) => {
+            app.backdrop_frame = None;
+            tabs::handle_close_others(app, raw)
+        }
+        Message::Ui(UiEvent::TabCloseAll) => {
+            app.backdrop_frame = None;
+            tabs::handle_close_all(app)
+        }
         Message::Ui(UiEvent::TabNew) => new_project::handle_new(app),
         Message::Ui(UiEvent::HomeNewProject) => new_project::handle_new(app),
         Message::Ui(UiEvent::HomeOpenProject) => mmtl::handle_open(app),
@@ -910,18 +1045,32 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::NewProjectSourceImage) => new_project::handle_source_image(app),
         Message::Ui(UiEvent::NewProjectSourceFolder) => new_project::handle_source_folder(app),
         Message::Ui(UiEvent::NewProjectLocationBrowse) => new_project::handle_location_browse(app),
-        Message::Ui(UiEvent::NewProjectOriginalLang(lang)) => new_project::handle_original_lang(app, lang),
+        Message::Ui(UiEvent::NewProjectOriginalLang(lang)) => {
+            new_project::handle_original_lang(app, lang)
+        }
         Message::Ui(UiEvent::NewProjectName(name)) => new_project::handle_name(app, name),
         Message::Ui(UiEvent::NewProjectSeriesToggle) => new_project::handle_series_toggle(app),
-        Message::Ui(UiEvent::NewProjectPathInput(input)) => new_project::handle_path_input(app, input),
+        Message::Ui(UiEvent::NewProjectPathInput(input)) => {
+            new_project::handle_path_input(app, input)
+        }
         Message::Ui(UiEvent::NewProjectPathSubmit) => new_project::handle_path_submit(app),
         Message::NewProjectDragHover(hovered) => new_project::handle_drag_hover(app, hovered),
-        Message::Ui(UiEvent::NewProjectSeriesSelect(series)) => new_project::handle_series_select(app, series),
-        Message::Ui(UiEvent::NewProjectSeriesCreateStart) => new_project::handle_series_create_start(app),
-        Message::Ui(UiEvent::NewProjectSeriesName(name)) => new_project::handle_series_name(app, name),
-        Message::Ui(UiEvent::NewProjectSeriesCreateConfirm) => new_project::handle_series_create_confirm(app),
+        Message::Ui(UiEvent::NewProjectSeriesSelect(series)) => {
+            new_project::handle_series_select(app, series)
+        }
+        Message::Ui(UiEvent::NewProjectSeriesCreateStart) => {
+            new_project::handle_series_create_start(app)
+        }
+        Message::Ui(UiEvent::NewProjectSeriesName(name)) => {
+            new_project::handle_series_name(app, name)
+        }
+        Message::Ui(UiEvent::NewProjectSeriesCreateConfirm) => {
+            new_project::handle_series_create_confirm(app)
+        }
         Message::Ui(UiEvent::NewProjectSeriesCancel) => new_project::handle_series_cancel(app),
-        Message::Ui(UiEvent::NewProjectCreate) => backdrop::begin_load(app, backdrop::PendingLoad::Create),
+        Message::Ui(UiEvent::NewProjectCreate) => {
+            backdrop::begin_load(app, backdrop::PendingLoad::Create)
+        }
         Message::Ui(UiEvent::StartOcr) => ocr::handle_start_ocr(app),
         Message::Ui(UiEvent::StopOcr) => ocr::handle_stop_ocr(app),
         Message::FontLoaded => boot::handle_font_loaded(app),
@@ -931,49 +1080,86 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::StyleFontPreviewLoaded(_) => Task::none(),
         Message::StyleFontFileRead(name, bytes) => boot::handle_style_font_file_read(name, bytes),
         Message::CjkFallbackLoaded(count) => boot::handle_cjk_fallback_loaded(app, count),
-        Message::BootMaintenanceDone { recents, series_items } => boot::handle_maintenance_done(app, recents, series_items),
-        Message::TranslationCacheLoaded(providers) => translation::handle_cache_loaded(app, providers),
+        Message::BootMaintenanceDone {
+            recents,
+            series_items,
+        } => boot::handle_maintenance_done(app, recents, series_items),
+        Message::TranslationCacheLoaded(providers) => {
+            translation::handle_cache_loaded(app, providers)
+        }
         Message::Ui(UiEvent::ProfileSelect(id)) => profile::handle_select(app, id),
         Message::Ui(UiEvent::ProfileCreate) => profile::handle_create(app),
-        Message::Ui(UiEvent::TranslationPanelMode(mode)) => translation::handle_panel_mode(app, mode),
+        Message::Ui(UiEvent::TranslationPanelMode(mode)) => {
+            translation::handle_panel_mode(app, mode)
+        }
         Message::Ui(UiEvent::BaseProfileSelect(id)) => translation::handle_base_select(app, id),
-        Message::Ui(UiEvent::TargetProfileSelect(sel)) => translation::handle_target_select(app, sel),
+        Message::Ui(UiEvent::TargetProfileSelect(sel)) => {
+            translation::handle_target_select(app, sel)
+        }
         Message::Ui(UiEvent::TilesVisible(range)) => {
             let tid = app.active_tab().id;
             handle_tab_message(app, tid, TabMessage::TilesVisible(range))
-        },
+        }
         Message::Ui(UiEvent::TileScrollEnded) => {
             let tid = app.active_tab().id;
             handle_tab_message(app, tid, TabMessage::TileScrollEnded)
         }
 
         Message::Ui(UiEvent::Translate) => translation::handle_translate(app),
-        Message::Ui(UiEvent::TranslateModelSelect { provider, model }) => translation::handle_model_select(app, provider, model),
+        Message::Ui(UiEvent::TranslateModelSelect { provider, model }) => {
+            translation::handle_model_select(app, provider, model)
+        }
         Message::Ui(UiEvent::TranslateLang(lang)) => translation::handle_lang(app, lang),
-        Message::Ui(UiEvent::TranslateConnect(provider_id)) => translation::handle_connect(app, provider_id),
-        Message::Ui(UiEvent::TranslateDisconnect(provider_id)) => translation::handle_disconnect(app, provider_id),
-        Message::Ui(UiEvent::ConnectModalKey(key)) => translation::handle_connect_modal_key(app, key),
-        Message::Ui(UiEvent::ConnectModalBaseUrl(url)) => translation::handle_connect_modal_base_url(app, url),
-        Message::Ui(UiEvent::ConnectModalModel(model)) => translation::handle_connect_modal_model(app, model),
+        Message::Ui(UiEvent::TranslateConnect(provider_id)) => {
+            translation::handle_connect(app, provider_id)
+        }
+        Message::Ui(UiEvent::TranslateDisconnect(provider_id)) => {
+            translation::handle_disconnect(app, provider_id)
+        }
+        Message::Ui(UiEvent::ConnectModalKey(key)) => {
+            translation::handle_connect_modal_key(app, key)
+        }
+        Message::Ui(UiEvent::ConnectModalBaseUrl(url)) => {
+            translation::handle_connect_modal_base_url(app, url)
+        }
+        Message::Ui(UiEvent::ConnectModalModel(model)) => {
+            translation::handle_connect_modal_model(app, model)
+        }
         Message::Ui(UiEvent::ConnectModalSubmit) => translation::handle_connect_modal_submit(app),
         Message::Ui(UiEvent::ConnectModalCancel) => translation::handle_connect_modal_cancel(app),
         Message::Ui(UiEvent::ManageModelsOpen) => settings::handle_manage_models_open(app),
         Message::Ui(UiEvent::ManageModelsClose) => settings::handle_manage_models_close(app),
-        Message::Ui(UiEvent::ManageModelsSearch(query)) => settings::handle_manage_models_search(app, query),
+        Message::Ui(UiEvent::ManageModelsSearch(query)) => {
+            settings::handle_manage_models_search(app, query)
+        }
         Message::Ui(UiEvent::EntryClicked(selection)) => edit::handle_entry_clicked(app, selection),
-        Message::Ui(UiEvent::EntryDoubleClicked(pair)) => edit::handle_entry_double_clicked(app, pair),
+        Message::Ui(UiEvent::EntryDoubleClicked(pair)) => {
+            edit::handle_entry_double_clicked(app, pair)
+        }
         Message::Ui(UiEvent::PanelEntryEdit(pair)) => edit::handle_panel_entry_edit(app, pair),
-        Message::Ui(UiEvent::InpaintClicked(selection)) => inpaint::handle_inpaint_clicked(app, selection),
-        Message::Ui(UiEvent::InpaintDelete(pair)) => inpaint::handle_inpaint_delete(app, pair.0, pair.1),
-        Message::Ui(UiEvent::InpaintRepaint(pair)) => inpaint::handle_inpaint_repaint(app, pair.0, pair.1),
-        Message::Ui(UiEvent::InpaintToolbar((image_index, patch_idx, action))) => inpaint::handle_inpaint_toolbar(app, image_index, patch_idx, action),
-        Message::Ui(UiEvent::RetranslateEntry(pair)) => translation::handle_retranslate_entry(app, pair.0, pair.1),
+        Message::Ui(UiEvent::InpaintClicked(selection)) => {
+            inpaint::handle_inpaint_clicked(app, selection)
+        }
+        Message::Ui(UiEvent::InpaintDelete(pair)) => {
+            inpaint::handle_inpaint_delete(app, pair.0, pair.1)
+        }
+        Message::Ui(UiEvent::InpaintRepaint(pair)) => {
+            inpaint::handle_inpaint_repaint(app, pair.0, pair.1)
+        }
+        Message::Ui(UiEvent::InpaintToolbar((image_index, patch_idx, action))) => {
+            inpaint::handle_inpaint_toolbar(app, image_index, patch_idx, action)
+        }
+        Message::Ui(UiEvent::RetranslateEntry(pair)) => {
+            translation::handle_retranslate_entry(app, pair.0, pair.1)
+        }
         Message::Ui(UiEvent::ReorderEntries) => entries::handle_reorder(app),
         Message::Ui(UiEvent::ManualModeEnter(mode)) => manual::handle_enter(app, mode),
         Message::Ui(UiEvent::ManualModeCancel) => manual::handle_cancel(app),
         Message::Ui(UiEvent::ManualModeReset) => manual::handle_reset(app),
         Message::Ui(UiEvent::ManualModeStart) => manual::handle_start(app),
-        Message::Ui(UiEvent::ManualSelectionAdded(pair)) => manual::handle_selection(app, vec![pair]),
+        Message::Ui(UiEvent::ManualSelectionAdded(pair)) => {
+            manual::handle_selection(app, vec![pair])
+        }
         Message::Ui(UiEvent::ManualSelectionSpan(spans)) => manual::handle_selection(app, spans),
         Message::Ui(UiEvent::ToggleOverlayText) => main_area::handle_toggle_overlay(app),
         Message::Ui(UiEvent::ToggleInpaintLayer) => main_area::handle_toggle_inpaint(app),
@@ -981,8 +1167,12 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::ViewerScroll(anchor)) => main_area::handle_viewer_scroll(app, anchor),
         Message::Ui(UiEvent::PanelScroll(anchor)) => translation::handle_panel_scroll(app, anchor),
         Message::Ui(UiEvent::LayerScroll(anchor)) => inpaint::handle_layer_scroll(app, anchor),
-        Message::Ui(UiEvent::EntryToolbar((index, id, action))) => edit::handle_entry_toolbar(app, index, id, action),
-        Message::Ui(UiEvent::EntryMoved((index, id, quad))) => edit::handle_entry_moved(app, index, id, quad),
+        Message::Ui(UiEvent::EntryToolbar((index, id, action))) => {
+            edit::handle_entry_toolbar(app, index, id, action)
+        }
+        Message::Ui(UiEvent::EntryMoved((index, id, quad))) => {
+            edit::handle_entry_moved(app, index, id, quad)
+        }
         Message::Ui(UiEvent::EditAction(action)) => edit::handle_edit_action(app, action),
         Message::Ui(UiEvent::EditRect(rect)) => edit::handle_edit_rect(app, rect),
         Message::Ui(UiEvent::EditSubmit) => edit::handle_edit_submit(app),
@@ -990,45 +1180,77 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::StyleItalic(italic)) => styling::handle_italic(app, italic),
         Message::Ui(UiEvent::StyleFont(name)) => styling::handle_font(app, name),
         Message::Ui(UiEvent::StyleFontPreviewOpen) => styling::handle_font_preview_open(app),
-        Message::Ui(UiEvent::StyleFontPreviewHover(name)) => styling::handle_font_preview_hover(app, name),
+        Message::Ui(UiEvent::StyleFontPreviewHover(name)) => {
+            styling::handle_font_preview_hover(app, name)
+        }
         Message::Ui(UiEvent::StyleTextAlign(align)) => styling::handle_text_align(app, align),
         Message::Ui(UiEvent::StyleColorOpen(field)) => styling::handle_color_open(app, field),
         Message::Ui(UiEvent::StyleColorCancel(field)) => styling::handle_color_cancel(app, field),
-        Message::Ui(UiEvent::StyleColorChanged(field, value)) => styling::handle_color_changed(app, field, value),
-        Message::Ui(UiEvent::StyleColorSubmit(field, value)) => styling::handle_color_submit(app, field, value),
-        Message::Ui(UiEvent::StyleColorTabChanged(field, tab)) => styling::handle_color_tab_changed(app, field, tab),
-        Message::Ui(UiEvent::StyleLibraryChanged(swatches, recents, active)) => styling::handle_library_changed(app, swatches, recents, active),
-        Message::Ui(UiEvent::StyleGradientAngle((index, id, field, angle))) => styling::handle_gradient_angle(app, index, id, field, angle),
+        Message::Ui(UiEvent::StyleColorChanged(field, value)) => {
+            styling::handle_color_changed(app, field, value)
+        }
+        Message::Ui(UiEvent::StyleColorSubmit(field, value)) => {
+            styling::handle_color_submit(app, field, value)
+        }
+        Message::Ui(UiEvent::StyleColorTabChanged(field, tab)) => {
+            styling::handle_color_tab_changed(app, field, tab)
+        }
+        Message::Ui(UiEvent::StyleLibraryChanged(swatches, recents, active)) => {
+            styling::handle_library_changed(app, swatches, recents, active)
+        }
+        Message::Ui(UiEvent::StyleGradientAngle((index, id, field, angle))) => {
+            styling::handle_gradient_angle(app, index, id, field, angle)
+        }
         Message::Ui(UiEvent::StyleDropperCapture) => styling::handle_dropper_capture(app),
         Message::Ui(UiEvent::StyleDropperShot(shot)) => styling::handle_dropper_shot(app, shot),
         Message::Ui(UiEvent::StyleStrokeWidth(value)) => styling::handle_stroke_width(app, value),
         Message::Ui(UiEvent::StyleBgRadius(value)) => styling::handle_bg_radius(app, value),
-        Message::Ui(UiEvent::StyleShadowEnabled(enabled)) => styling::handle_shadow_enabled(app, enabled),
-        Message::Ui(UiEvent::StyleShadowDistance(value)) => styling::handle_shadow_distance(app, value),
+        Message::Ui(UiEvent::StyleShadowEnabled(enabled)) => {
+            styling::handle_shadow_enabled(app, enabled)
+        }
+        Message::Ui(UiEvent::StyleShadowDistance(value)) => {
+            styling::handle_shadow_distance(app, value)
+        }
         Message::Ui(UiEvent::StyleShadowAngle(value)) => styling::handle_shadow_angle(app, value),
         Message::Ui(UiEvent::StyleShadowBlur(value)) => styling::handle_shadow_blur(app, value),
         Message::Ui(UiEvent::StyleFontSize(value)) => styling::handle_font_size(app, value),
         Message::Ui(UiEvent::StyleLineHeight(value)) => styling::handle_line_height(app, value),
-        Message::Ui(UiEvent::StyleLetterSpacing(value)) => styling::handle_letter_spacing(app, value),
+        Message::Ui(UiEvent::StyleLetterSpacing(value)) => {
+            styling::handle_letter_spacing(app, value)
+        }
         Message::Ui(UiEvent::StyleAutoSize(enabled)) => styling::handle_auto_size(app, enabled),
         Message::Ui(UiEvent::StyleCaps(caps)) => styling::handle_caps(app, caps),
         #[cfg(feature = "inpaint")]
-        Message::Ui(UiEvent::StyleInpaintBackground) => inpaint::handle_style_inpaint_background(app),
+        Message::Ui(UiEvent::StyleInpaintBackground) => {
+            inpaint::handle_style_inpaint_background(app)
+        }
         #[cfg(not(feature = "inpaint"))]
         Message::Ui(UiEvent::StyleInpaintBackground) => Task::none(),
         #[cfg(feature = "inpaint")]
-        Message::Ui(UiEvent::StyleInpaintBackendSelected(backend)) => inpaint::handle_style_inpaint_backend_selected(app, backend),
+        Message::Ui(UiEvent::StyleInpaintBackendSelected(backend)) => {
+            inpaint::handle_style_inpaint_backend_selected(app, backend)
+        }
         #[cfg(not(feature = "inpaint"))]
-        Message::Ui(UiEvent::StyleInpaintBackendSelected(_)) => Task::none(),        
+        Message::Ui(UiEvent::StyleInpaintBackendSelected(_)) => Task::none(),
         Message::Ui(UiEvent::StylePresetApply(preset)) => styling::handle_preset_apply(app, preset),
         Message::Ui(UiEvent::StylePresetAdd) => styling::handle_preset_add(app),
-        Message::Ui(UiEvent::StylePresetReplace(preset)) => styling::handle_preset_replace(app, preset),
-        Message::Ui(UiEvent::StylePresetRemove(preset)) => styling::handle_preset_remove(app, preset),
+        Message::Ui(UiEvent::StylePresetReplace(preset)) => {
+            styling::handle_preset_replace(app, preset)
+        }
+        Message::Ui(UiEvent::StylePresetRemove(preset)) => {
+            styling::handle_preset_remove(app, preset)
+        }
         Message::Ui(UiEvent::StylePresetMenuDismiss) => Task::none(),
         Message::Ui(UiEvent::StyleAutoDetect) => styling::handle_auto_detect(app),
-        Message::Ui(UiEvent::PanelResized(resized)) => main_area::handle_panel_resized(app, resized),
-        Message::Ui(UiEvent::ResultsPaneResized(resized)) => main_area::handle_results_pane_resized(app, resized),
-        Message::Ui(UiEvent::EditorResized(resized)) => main_area::handle_editor_resized(app, resized),
+        Message::Ui(UiEvent::PanelResized(resized)) => {
+            main_area::handle_panel_resized(app, resized)
+        }
+        Message::Ui(UiEvent::ResultsPaneResized(resized)) => {
+            main_area::handle_results_pane_resized(app, resized)
+        }
+        Message::Ui(UiEvent::EditorResized(resized)) => {
+            main_area::handle_editor_resized(app, resized)
+        }
         Message::Ui(UiEvent::SettingsOpen) => settings::handle_settings_open(app),
         Message::Ui(UiEvent::SettingsOpenTab(tab)) => settings::handle_settings_open_tab(app, tab),
         Message::Ui(UiEvent::SettingsClose) => settings::handle_settings_close(app),
@@ -1036,12 +1258,22 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::SettingsSearch(query)) => settings::handle_settings_search(app, query),
         Message::Ui(UiEvent::SettingsChanged) => settings::handle_settings_changed(app),
         Message::Ui(UiEvent::SettingEdit(edit)) => settings::handle_setting_edit(app, edit),
-        Message::Ui(UiEvent::ProjectSeriesSelect(series)) => settings::handle_project_series_select(app, series),
-        Message::Ui(UiEvent::ProjectSeriesCreateStart) => settings::handle_project_series_create_start(app),
-        Message::Ui(UiEvent::ProjectSeriesName(name)) => settings::handle_project_series_name(app, name),
-        Message::Ui(UiEvent::ProjectSeriesCreateConfirm) => settings::handle_project_series_create_confirm(app),
+        Message::Ui(UiEvent::ProjectSeriesSelect(series)) => {
+            settings::handle_project_series_select(app, series)
+        }
+        Message::Ui(UiEvent::ProjectSeriesCreateStart) => {
+            settings::handle_project_series_create_start(app)
+        }
+        Message::Ui(UiEvent::ProjectSeriesName(name)) => {
+            settings::handle_project_series_name(app, name)
+        }
+        Message::Ui(UiEvent::ProjectSeriesCreateConfirm) => {
+            settings::handle_project_series_create_confirm(app)
+        }
         Message::Ui(UiEvent::ProjectSeriesCancel) => settings::handle_project_series_cancel(app),
-        Message::Ui(UiEvent::AdvExportProfileSelect(id)) => advanced::handle_export_profile(app, id),
+        Message::Ui(UiEvent::AdvExportProfileSelect(id)) => {
+            advanced::handle_export_profile(app, id)
+        }
         Message::Ui(UiEvent::AdvImportTargetSelect(id)) => advanced::handle_import_target(app, id),
         Message::Ui(UiEvent::AdvImportName(name)) => advanced::handle_import_name(app, name),
         Message::Ui(UiEvent::TranslationExport) => advanced::handle_export(app),
@@ -1068,9 +1300,13 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::OnboardingRetry(id)) => onboarding::handle_retry(app, id),
         Message::Ui(UiEvent::OnboardingToggleTheme) => onboarding::handle_toggle_theme(app),
         Message::Ui(UiEvent::OnboardingFontSize(inc)) => onboarding::handle_font_size(app, inc),
-        Message::Ui(UiEvent::OnboardingToggleAutoStyle) => onboarding::handle_toggle_auto_style(app),
+        Message::Ui(UiEvent::OnboardingToggleAutoStyle) => {
+            onboarding::handle_toggle_auto_style(app)
+        }
         Message::Ui(UiEvent::OnboardingToggleAutoSfx) => onboarding::handle_toggle_auto_sfx(app),
-        Message::Ui(UiEvent::OnboardingToggleAutoInpaint) => onboarding::handle_toggle_auto_inpaint(app),
+        Message::Ui(UiEvent::OnboardingToggleAutoInpaint) => {
+            onboarding::handle_toggle_auto_inpaint(app)
+        }
         Message::Ui(UiEvent::OnboardingOpenTranslationSettings) => {
             // Deprecated: inline is baked into onboarding; no Settings popup (covered)
             Task::none()
@@ -1089,7 +1325,9 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::UpdateApply => update::handle_apply(app),
         Message::UpdateDismiss => update::handle_dismiss(app),
         Message::UpdatePoll => update::handle_poll(app),
-        Message::OnboardingModelDone { id, result } => onboarding::handle_model_done(app, id, result),
+        Message::OnboardingModelDone { id, result } => {
+            onboarding::handle_model_done(app, id, result)
+        }
         Message::OnboardingModelPoll => onboarding::handle_poll(app),
         Message::BackdropCaptured(shot, kind) => backdrop::handle_captured(app, *shot, kind),
         Message::BackdropReady(handle, kind) => backdrop::handle_ready(app, handle, kind),

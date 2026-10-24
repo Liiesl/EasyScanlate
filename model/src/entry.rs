@@ -116,10 +116,26 @@ impl Quad {
 
     /// Axis-aligned bounding box as `[min_x, min_y, max_x, max_y]`.
     pub fn bounds(&self) -> [f32; 4] {
-        let min_x = self.points.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min);
-        let min_y = self.points.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min);
-        let max_x = self.points.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max);
-        let max_y = self.points.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max);
+        let min_x = self
+            .points
+            .iter()
+            .map(|p| p[0])
+            .fold(f32::INFINITY, f32::min);
+        let min_y = self
+            .points
+            .iter()
+            .map(|p| p[1])
+            .fold(f32::INFINITY, f32::min);
+        let max_x = self
+            .points
+            .iter()
+            .map(|p| p[0])
+            .fold(f32::NEG_INFINITY, f32::max);
+        let max_y = self
+            .points
+            .iter()
+            .map(|p| p[1])
+            .fold(f32::NEG_INFINITY, f32::max);
         [min_x, min_y, max_x, max_y]
     }
 
@@ -153,8 +169,16 @@ impl Quad {
                 return Self::from_xyxy(
                     ordered.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min) - pad,
                     ordered.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min) - pad,
-                    ordered.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max) + pad,
-                    ordered.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max) + pad,
+                    ordered
+                        .iter()
+                        .map(|p| p[0])
+                        .fold(f32::NEG_INFINITY, f32::max)
+                        + pad,
+                    ordered
+                        .iter()
+                        .map(|p| p[1])
+                        .fold(f32::NEG_INFINITY, f32::max)
+                        + pad,
                 );
             }
             let mut nx = dy / len;
@@ -179,11 +203,14 @@ impl Quad {
                 if !(len > 1e-6) {
                     return self;
                 }
-                out[i] = [ordered[i][0] + px / len * pad, ordered[i][1] + py / len * pad];
+                out[i] = [
+                    ordered[i][0] + px / len * pad,
+                    ordered[i][1] + py / len * pad,
+                ];
                 continue;
             }
-            let t = ((curr.0[0] - prev.0[0]) * curr.1[1] - (curr.0[1] - prev.0[1]) * curr.1[0])
-                / denom;
+            let t =
+                ((curr.0[0] - prev.0[0]) * curr.1[1] - (curr.0[1] - prev.0[1]) * curr.1[0]) / denom;
             out[i] = [prev.0[0] + prev.1[0] * t, prev.0[1] + prev.1[1] * t];
             if !out[i][0].is_finite() || !out[i][1].is_finite() {
                 return self;
@@ -300,19 +327,22 @@ mod tests {
         for (point, corner) in ordered.iter().zip(corners) {
             assert!((point[0] - corner[0]).abs() < 1.0 || (point[1] - corner[1]).abs() < 1.0);
         }
-        assert!((ordered[1][0] - ordered[0][0]).abs() > 0.0 || (ordered[1][1] - ordered[0][1]).abs() > 0.0);
+        assert!(
+            (ordered[1][0] - ordered[0][0]).abs() > 0.0
+                || (ordered[1][1] - ordered[0][1]).abs() > 0.0
+        );
     }
 
     #[test]
     fn rotate_spins_points_around_the_center() {
         let q = quad(0.0, 0.0, 100.0, 100.0);
         let rotated = q.rotate([50.0, 50.0], std::f32::consts::PI / 2.0);
-        for (point, expected) in rotated.points.iter().zip([
-            [100.0, 0.0],
-            [100.0, 100.0],
-            [0.0, 100.0],
-            [0.0, 0.0],
-        ]) {
+        for (point, expected) in
+            rotated
+                .points
+                .iter()
+                .zip([[100.0, 0.0], [100.0, 100.0], [0.0, 100.0], [0.0, 0.0]])
+        {
             assert!((point[0] - expected[0]).abs() < 1e-3, "x: {point:?}");
             assert!((point[1] - expected[1]).abs() < 1e-3, "y: {point:?}");
         }
@@ -354,8 +384,14 @@ mod tests {
     #[test]
     fn intersects_rect_edge_touching_is_not_overlap() {
         let q = quad(0.0, 0.0, 100.0, 100.0);
-        assert!(!q.intersects_rect([100.0, 0.0, 10.0, 100.0]), "x1 <= rect[0]");
-        assert!(!q.intersects_rect([0.0, 100.0, 100.0, 10.0]), "y1 <= rect[1]");
+        assert!(
+            !q.intersects_rect([100.0, 0.0, 10.0, 100.0]),
+            "x1 <= rect[0]"
+        );
+        assert!(
+            !q.intersects_rect([0.0, 100.0, 100.0, 10.0]),
+            "y1 <= rect[1]"
+        );
     }
 
     #[test]
@@ -387,7 +423,10 @@ mod tests {
         let just_inside = quad(0.0, 20.0, 100.0, 80.0).rotate(center, 0.08);
         let just_outside = quad(0.0, 20.0, 100.0, 80.0).rotate(center, 0.12);
         assert!(just_inside.is_near_upright(), "4.6deg should snap");
-        assert!(!just_outside.is_near_upright(), "6.9deg should stay rotated");
+        assert!(
+            !just_outside.is_near_upright(),
+            "6.9deg should stay rotated"
+        );
         assert_eq!(
             just_outside.snap_if_near_upright().points,
             just_outside.points,

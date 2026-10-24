@@ -259,7 +259,10 @@ mod tests {
             ],
             collapsed: BTreeSet::new(),
         };
-        assert_eq!(series_names_of(&store), vec!["B".to_string(), "A".to_string()]);
+        assert_eq!(
+            series_names_of(&store),
+            vec!["B".to_string(), "A".to_string()]
+        );
     }
 
     #[test]
@@ -279,7 +282,9 @@ mod tests {
         assert_eq!(back.items[0].series.as_deref(), Some("S"));
         assert!(back.collapsed.contains("S"));
         // Legacy file without `series`/`collapsed` still loads.
-        let legacy: SeriesStore = toml::from_str("[[items]]\npath = \"y.mmtl\"\nname = \"y.mmtl\"\nlast_opened = 1\n").unwrap();
+        let legacy: SeriesStore =
+            toml::from_str("[[items]]\npath = \"y.mmtl\"\nname = \"y.mmtl\"\nlast_opened = 1\n")
+                .unwrap();
         assert_eq!(legacy.items[0].series, None);
         assert!(legacy.collapsed.is_empty());
     }

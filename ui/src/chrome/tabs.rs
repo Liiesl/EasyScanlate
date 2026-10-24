@@ -21,7 +21,10 @@ const PANEL_BG: Color = Color::from_rgba8(34, 36, 44, 0.70);
 const PANEL_HOVER: Color = Color::from_rgba8(46, 48, 62, 0.82);
 const PANEL_PRESSED: Color = Color::from_rgba8(55, 57, 72, 0.87);
 
-fn chip_button_style(active: bool, is_dark: bool) -> impl Fn(&Theme, button::Status) -> button::Style + Clone {
+fn chip_button_style(
+    active: bool,
+    is_dark: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style + Clone {
     move |_theme: &Theme, status: button::Status| {
         // Active bg = PANEL_BG, inactive = TRANSPARENT (same for dark/light per spec Q3).
         // Text stays theme-aware for readability on transparent.
@@ -74,7 +77,10 @@ fn chip_button_style(active: bool, is_dark: bool) -> impl Fn(&Theme, button::Sta
 
 fn ghost_close_style(_theme: &Theme, status: button::Status) -> button::Style {
     let (bg, txt) = match status {
-        button::Status::Hovered => (Color::from_rgba8(255, 70, 70, 0.18), Color::from_rgb8(255, 120, 120)),
+        button::Status::Hovered => (
+            Color::from_rgba8(255, 70, 70, 0.18),
+            Color::from_rgb8(255, 120, 120),
+        ),
         button::Status::Pressed => (Color::from_rgba8(180, 40, 40, 0.25), Color::WHITE),
         button::Status::Active => (Color::TRANSPARENT, Color::from_rgb8(180, 180, 185)),
         button::Status::Disabled => (Color::TRANSPARENT, Color::from_rgba8(100, 100, 100, 0.5)),
@@ -111,14 +117,28 @@ fn ghost_add_style(is_dark: bool) -> impl Fn(&Theme, button::Status) -> button::
             }
             _ => Color::TRANSPARENT,
         };
-        let txt = if is_dark { Color::from_rgb8(200, 200, 210) } else { Color::from_rgb8(60, 60, 70) };
+        let txt = if is_dark {
+            Color::from_rgb8(200, 200, 210)
+        } else {
+            Color::from_rgb8(60, 60, 70)
+        };
         button::Style {
             background: Some(Background::Color(bg)),
             border: Border {
                 color: if matches!(status, button::Status::Hovered) {
-                    if is_dark { Color::from_rgba8(255, 255, 255, 0.10) } else { Color::from_rgba8(0,0,0,0.08) }
-                } else { Color::TRANSPARENT },
-                width: if matches!(status, button::Status::Hovered) { 1.0 } else { 0.0 },
+                    if is_dark {
+                        Color::from_rgba8(255, 255, 255, 0.10)
+                    } else {
+                        Color::from_rgba8(0, 0, 0, 0.08)
+                    }
+                } else {
+                    Color::TRANSPARENT
+                },
+                width: if matches!(status, button::Status::Hovered) {
+                    1.0
+                } else {
+                    0.0
+                },
                 radius: Radius::default().top(6.0),
             },
             shadow: Shadow::default(),
@@ -152,10 +172,9 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             let is_home = meta.is_home;
 
             let title: Element<'_, UiEvent> = if is_home {
-                let icon_elem: Element<'_, UiEvent> =
-                    crate::chrome::title_icon_handle()
-                        .map(|h| iced::widget::image(h).width(14).height(14).into())
-                        .unwrap_or_else(|| space::horizontal().width(Length::Fixed(0.0)).into());
+                let icon_elem: Element<'_, UiEvent> = crate::chrome::title_icon_handle()
+                    .map(|h| iced::widget::image(h).width(14).height(14).into())
+                    .unwrap_or_else(|| space::horizontal().width(Length::Fixed(0.0)).into());
                 let label: Element<'_, UiEvent> =
                     text("easyscanlate").size(12).width(Length::Fill).into();
                 row![icon_elem, label]
@@ -164,10 +183,7 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                     .width(Length::Fill)
                     .into()
             } else {
-                text(meta.title.clone())
-                    .size(12)
-                    .width(Length::Fill)
-                    .into()
+                text(meta.title.clone()).size(12).width(Length::Fill).into()
             };
 
             let dirty: Element<'_, UiEvent> = if meta.dirty {
@@ -220,14 +236,19 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             chip_plus.push(chip_btn);
         }
 
-        let add_btn: Element<'_, UiEvent> =
-            button(text("+").size(14).width(Length::Fixed(24.0)).height(Length::Fixed(24.0)).center())
-                .width(Length::Fixed(28.0))
+        let add_btn: Element<'_, UiEvent> = button(
+            text("+")
+                .size(14)
+                .width(Length::Fixed(24.0))
                 .height(Length::Fixed(24.0))
-                .padding([2, 6])
-                .style(ghost_add_style(is_dark))
-                .on_press(UiEvent::TabNew)
-                .into();
+                .center(),
+        )
+        .width(Length::Fixed(28.0))
+        .height(Length::Fixed(24.0))
+        .padding([2, 6])
+        .style(ghost_add_style(is_dark))
+        .on_press(UiEvent::TabNew)
+        .into();
         chip_plus.push(add_btn);
 
         let chips_row: Element<'_, UiEvent> = row(chip_plus)

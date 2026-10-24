@@ -8,7 +8,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use easyscanlate_model::{ImageId, Project};
-use zip::{write::SimpleFileOptions, ZipArchive, ZipWriter};
+use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 use crate::legacy;
 use crate::xml::{from_xml_str, to_xml_string};
@@ -39,7 +39,9 @@ pub fn save_mmtl(
     dest: &Path,
 ) -> Result<(), String> {
     // Validate dest ends with .mmtl
-    let dest = if dest.extension().map(|e| e.to_string_lossy().to_lowercase()) != Some("mmtl".to_string()) {
+    let dest = if dest.extension().map(|e| e.to_string_lossy().to_lowercase())
+        != Some("mmtl".to_string())
+    {
         let mut p = dest.as_os_str().to_owned();
         p.push(".mmtl");
         PathBuf::from(p)
@@ -63,7 +65,10 @@ pub fn save_mmtl(
         .iter()
         .map(|m| ImageMeta {
             id: m.id,
-            path: id_to_rel.get(&m.id).cloned().unwrap_or_else(|| m.path.clone()),
+            path: id_to_rel
+                .get(&m.id)
+                .cloned()
+                .unwrap_or_else(|| m.path.clone()),
             width: m.width,
             height: m.height,
         })
@@ -91,7 +96,8 @@ pub fn save_mmtl(
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     // project.xml
-    zip.start_file("project.xml", options).map_err(|e| e.to_string())?;
+    zip.start_file("project.xml", options)
+        .map_err(|e| e.to_string())?;
     zip.write_all(xml.as_bytes()).map_err(|e| e.to_string())?;
 
     // images/ (read from original absolute/temp path, write to relative zip path)
@@ -139,7 +145,9 @@ pub fn save_mmtl(
 }
 
 pub fn save_legacy_mmtl(project: &Project, dest: &Path) -> Result<(), String> {
-    let dest = if dest.extension().map(|e| e.to_string_lossy().to_lowercase()) != Some("mmtl".to_string()) {
+    let dest = if dest.extension().map(|e| e.to_string_lossy().to_lowercase())
+        != Some("mmtl".to_string())
+    {
         let mut p = dest.as_os_str().to_owned();
         p.push(".mmtl");
         PathBuf::from(p)
@@ -154,10 +162,14 @@ pub fn save_legacy_mmtl(project: &Project, dest: &Path) -> Result<(), String> {
     let file = File::create(&dest).map_err(|e| format!("create {dest:?}: {e}"))?;
     let mut zip = ZipWriter::new(file);
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    zip.start_file("master.json", options).map_err(|e| e.to_string())?;
-    zip.write_all(master_json.as_bytes()).map_err(|e| e.to_string())?;
-    zip.start_file("meta.json", options).map_err(|e| e.to_string())?;
-    zip.write_all(meta_json.as_bytes()).map_err(|e| e.to_string())?;
+    zip.start_file("master.json", options)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(master_json.as_bytes())
+        .map_err(|e| e.to_string())?;
+    zip.start_file("meta.json", options)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(meta_json.as_bytes())
+        .map_err(|e| e.to_string())?;
     // images
     for meta_img in project.images() {
         let src_path = &meta_img.path;
@@ -167,7 +179,8 @@ pub fn save_legacy_mmtl(project: &Project, dest: &Path) -> Result<(), String> {
             .unwrap_or_else(|| format!("{}.png", meta_img.id.0));
         let zip_path = format!("images/{}_{}", meta_img.id.0, file_name);
         if let Ok(data) = std::fs::read(src_path) {
-            zip.start_file(zip_path, options).map_err(|e| e.to_string())?;
+            zip.start_file(zip_path, options)
+                .map_err(|e| e.to_string())?;
             zip.write_all(&data).map_err(|e| e.to_string())?;
         }
     }
@@ -184,8 +197,12 @@ pub fn load_mmtl(path: &Path) -> Result<LoadResult, String> {
     for i in 0..archive.len() {
         if let Ok(f) = archive.by_index(i) {
             let name = f.name().to_string();
-            if name == "project.xml" { has_xml = true; }
-            if name == "master.json" { has_master = true; }
+            if name == "project.xml" {
+                has_xml = true;
+            }
+            if name == "master.json" {
+                has_master = true;
+            }
         }
     }
     if has_xml {
@@ -217,7 +234,10 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
         std::io::copy(&mut file, &mut out).map_err(|e| e.to_string())?;
         if name == "project.xml" {
             let mut buf = String::new();
-            File::open(&out_path).map_err(|e| e.to_string())?.read_to_string(&mut buf).map_err(|e| e.to_string())?;
+            File::open(&out_path)
+                .map_err(|e| e.to_string())?
+                .read_to_string(&mut buf)
+                .map_err(|e| e.to_string())?;
             xml_data = Some(buf);
         } else if name.starts_with("inpaint/") {
             inpaint_names.push(name);
@@ -234,8 +254,7 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
         if !found.exists() {
             return Err(format!(
                 "missing image file for id {}: expected {} in .mmtl",
-                meta.id.0,
-                meta.path
+                meta.id.0, meta.path
             ));
         }
         id_to_path.insert(meta.id, found);
@@ -243,16 +262,32 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
     // Rebuild project with updated paths
     let mut new_images = Vec::new();
     for meta in project.images().iter() {
-        let new_path = id_to_path.get(&meta.id).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| meta.path.clone());
+        let new_path = id_to_path
+            .get(&meta.id)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| meta.path.clone());
         // optionally re-read dimensions from extracted file
         let (w, h) = if let Some(p) = id_to_path.get(&meta.id) {
-            if let Ok(img) = image::ImageReader::open(p).and_then(|r| r.with_guessed_format().map_err(std::io::Error::other)) {
+            if let Ok(img) = image::ImageReader::open(p)
+                .and_then(|r| r.with_guessed_format().map_err(std::io::Error::other))
+            {
                 if let Ok(decoded) = img.decode() {
                     (decoded.width() as f32, decoded.height() as f32)
-                } else { (meta.width, meta.height) }
-            } else { (meta.width, meta.height) }
-        } else { (meta.width, meta.height) };
-        new_images.push(ImageMeta { id: meta.id, path: new_path, width: w, height: h });
+                } else {
+                    (meta.width, meta.height)
+                }
+            } else {
+                (meta.width, meta.height)
+            }
+        } else {
+            (meta.width, meta.height)
+        };
+        new_images.push(ImageMeta {
+            id: meta.id,
+            path: new_path,
+            width: w,
+            height: h,
+        });
     }
     if !new_images.is_empty() {
         // reconstruct project with new images paths
@@ -272,8 +307,18 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
         // We already consumed ocr, profiles etc.
         // Let's build new project correctly by using from_raw with collected data
         // We lost next_image_id, so recompute
-        let next_image_id = new_images.iter().map(|m| m.id.0+1).max().unwrap_or(0);
-        let rebuilt = Project::from_raw(pid, series, new_images, next_image_id, ocr, profiles, styles_map, view_quads, extras);
+        let next_image_id = new_images.iter().map(|m| m.id.0 + 1).max().unwrap_or(0);
+        let rebuilt = Project::from_raw(
+            pid,
+            series,
+            new_images,
+            next_image_id,
+            ocr,
+            profiles,
+            styles_map,
+            view_quads,
+            extras,
+        );
         project = rebuilt;
     }
 
@@ -285,20 +330,39 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
     // verification to catch mismatches.
     let mut inpaint_files = Vec::new();
     // Parse each name into (image_id, raw_idx, PathBuf, full_name)
-    struct Parsed { image_id: ImageId, raw_idx: Option<usize>, path: PathBuf, name: String }
+    struct Parsed {
+        image_id: ImageId,
+        raw_idx: Option<usize>,
+        path: PathBuf,
+        name: String,
+    }
     let mut parsed: Vec<Parsed> = Vec::new();
     for name in &inpaint_names {
         let path = temp.path().join(name);
-        let stem = Path::new(name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        let stem = Path::new(name)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
         let mut parts = stem.split('_');
         if let (Some(id_str), Some(idx_str)) = (parts.next(), parts.next())
-            && let Ok(id) = id_str.parse::<u64>() {
-                let raw_idx = idx_str.parse::<usize>().ok();
-                parsed.push(Parsed { image_id: ImageId(id), raw_idx, path: path.clone(), name: name.clone() });
-                continue;
-            }
+            && let Ok(id) = id_str.parse::<u64>()
+        {
+            let raw_idx = idx_str.parse::<usize>().ok();
+            parsed.push(Parsed {
+                image_id: ImageId(id),
+                raw_idx,
+                path: path.clone(),
+                name: name.clone(),
+            });
+            continue;
+        }
         // unparsable -> push with dummy id 0 (will be skipped)
-        parsed.push(Parsed { image_id: ImageId(0), raw_idx: None, path: path.clone(), name: name.clone() });
+        parsed.push(Parsed {
+            image_id: ImageId(0),
+            raw_idx: None,
+            path: path.clone(),
+            name: name.clone(),
+        });
     }
     // Group by image_id, sort each group by raw_idx (or name) for stable order.
     let mut groups: HashMap<ImageId, Vec<Parsed>> = HashMap::new();
@@ -306,7 +370,7 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
         // skip dummy unparsable that looked like inpaint/.png with no id
         if p.image_id == ImageId(0) && p.raw_idx.is_none() {
             // try to still expose as fallback entry so user sees something
-            inpaint_files.push((ImageId(0), [0.0;4], p.path));
+            inpaint_files.push((ImageId(0), [0.0; 4], p.path));
             continue;
         }
         groups.entry(p.image_id).or_default().push(p);
@@ -315,14 +379,17 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
         // sort by raw_idx numeric if present, else lexicographically; this
         // makes legacy global-idx files (e.g. 19_5.png,19_6.png,19_7.png) fall
         // into per-image sequential order 5->0,6->1,7->2 after grouping.
-        entries.sort_by(|a, b| {
-            match (a.raw_idx, b.raw_idx) {
-                (Some(ai), Some(bi)) => ai.cmp(&bi),
-                _ => a.name.cmp(&b.name),
-            }
+        entries.sort_by(|a, b| match (a.raw_idx, b.raw_idx) {
+            (Some(ai), Some(bi)) => ai.cmp(&bi),
+            _ => a.name.cmp(&b.name),
         });
         // Patches for this image in insertion order (the canonical store)
-        let patches_for_image: Vec<_> = project.extras.inpaint_patches.iter().filter(|p| p.image_id==image_id).collect();
+        let patches_for_image: Vec<_> = project
+            .extras
+            .inpaint_patches
+            .iter()
+            .filter(|p| p.image_id == image_id)
+            .collect();
         // If file count != patch count, still assign 1:1 in sorted order up to min;
         // extras may be ground truth length, so use min.
         // We attempt dimension-aware matching to detect ordering drift:
@@ -330,11 +397,17 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
         // First pass: try to match by dimensions (PNG w/h == patch w/h) for robustness.
         let mut assigned: Vec<bool> = vec![false; patches_for_image.len()];
         // Pre-read dimensions for entries (cheap: read header via image crate)
-        let mut entry_dims: Vec<Option<(u32,u32)>> = Vec::new();
+        let mut entry_dims: Vec<Option<(u32, u32)>> = Vec::new();
         for e in &entries {
             let dim = image::ImageReader::open(&e.path)
-                .and_then(|r| r.with_guessed_format().map_err(|e| std::io::Error::other(e.to_string())))
-                .and_then(|r| r.into_dimensions().map_err(|e| std::io::Error::other(e.to_string())))
+                .and_then(|r| {
+                    r.with_guessed_format()
+                        .map_err(|e| std::io::Error::other(e.to_string()))
+                })
+                .and_then(|r| {
+                    r.into_dimensions()
+                        .map_err(|e| std::io::Error::other(e.to_string()))
+                })
                 .ok();
             // into_dimensions returns (w,h); but we called via ImageReader? Actually with_guessed_format returns Reader; use .into_dimensions
             // If we used ImageReader::open + with_guessed_format, we get an ImageReader; into_dimensions works without decoding full.
@@ -343,10 +416,12 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
         // Try dimension match
         let mut matched_by_dim: Vec<Option<usize>> = vec![None; entries.len()];
         for (ei, dim) in entry_dims.iter().enumerate() {
-            if let Some((w,h)) = dim {
+            if let Some((w, h)) = dim {
                 let mut best: Option<usize> = None;
                 for (pi, patch) in patches_for_image.iter().enumerate() {
-                    if assigned[pi] { continue; }
+                    if assigned[pi] {
+                        continue;
+                    }
                     if patch.bounds[2] as u32 == *w && patch.bounds[3] as u32 == *h {
                         best = Some(pi);
                         break;
@@ -380,11 +455,12 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
                     // Still expose file with dummy bounds so UI shows something instead of silently dropping.
                     // Try raw_idx direct if possible
                     if let Some(raw) = entry.raw_idx
-                        && let Some(patch) = patches_for_image.get(raw) {
-                            inpaint_files.push((patch.image_id, patch.bounds, entry.path.clone()));
-                            continue;
-                        }
-                    inpaint_files.push((entry.image_id, [0.0;4], entry.path.clone()));
+                        && let Some(patch) = patches_for_image.get(raw)
+                    {
+                        inpaint_files.push((patch.image_id, patch.bounds, entry.path.clone()));
+                        continue;
+                    }
+                    inpaint_files.push((entry.image_id, [0.0; 4], entry.path.clone()));
                 }
             }
         }
@@ -395,7 +471,12 @@ fn load_native_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
     for (id, path) in &id_to_path {
         image_paths.insert(*id, path.clone());
     }
-    Ok(LoadResult { project, image_paths, temp_dir: temp, inpaint_files })
+    Ok(LoadResult {
+        project,
+        image_paths,
+        temp_dir: temp,
+        inpaint_files,
+    })
 }
 
 fn load_legacy_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> {
@@ -436,21 +517,28 @@ fn load_legacy_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
     let legacy_master = legacy::parse_legacy_master_slice(&master_bytes)?;
     let legacy_meta = legacy::parse_legacy_meta_slice(&meta_bytes)?;
     // Build image dims map from extracted files
-    let mut dims: HashMap<String, (f32,f32)> = HashMap::new();
+    let mut dims: HashMap<String, (f32, f32)> = HashMap::new();
     for name in &image_names {
         let path = temp.path().join(name);
-        let filename = Path::new(name).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        let filename = Path::new(name)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
         if let Ok(reader) = image::ImageReader::open(&path)
             && let Ok(reader) = reader.with_guessed_format()
-                && let Ok(img) = reader.decode() {
-                    dims.insert(filename, (img.width() as f32, img.height() as f32));
-                }
+            && let Ok(img) = reader.decode()
+        {
+            dims.insert(filename, (img.width() as f32, img.height() as f32));
+        }
     }
     let mut project = legacy::project_from_legacy(&legacy_master, &legacy_meta, &dims)?;
     // Update paths to extracted absolute paths
     let mut new_images: Vec<ImageMeta> = Vec::new();
     for meta in project.images().iter() {
-        let basename = Path::new(&meta.path).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| meta.path.clone());
+        let basename = Path::new(&meta.path)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| meta.path.clone());
         // find extracted file path that matches basename
         let mut found_path = None;
         for n in &image_names {
@@ -459,8 +547,15 @@ fn load_legacy_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
                 break;
             }
         }
-        let abs_path = found_path.map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| meta.path.clone());
-        new_images.push(ImageMeta { id: meta.id, path: abs_path, width: meta.width, height: meta.height });
+        let abs_path = found_path
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| meta.path.clone());
+        new_images.push(ImageMeta {
+            id: meta.id,
+            path: abs_path,
+            width: meta.width,
+            height: meta.height,
+        });
     }
     // reconstruct with new paths
     let pid = project.project_id().map(str::to_owned);
@@ -470,21 +565,36 @@ fn load_legacy_zip(mut archive: ZipArchive<File>) -> Result<LoadResult, String> 
     let styles = project.styles().clone();
     let view_quads = project.view_quads().clone();
     let extras = std::mem::take(&mut project.extras);
-    let next_image_id = new_images.iter().map(|m| m.id.0+1).max().unwrap_or(0);
-    let rebuilt = Project::from_raw(pid, series, new_images.clone(), next_image_id, ocr, profiles, styles, view_quads, extras);
+    let next_image_id = new_images.iter().map(|m| m.id.0 + 1).max().unwrap_or(0);
+    let rebuilt = Project::from_raw(
+        pid,
+        series,
+        new_images.clone(),
+        next_image_id,
+        ocr,
+        profiles,
+        styles,
+        view_quads,
+        extras,
+    );
     let mut image_paths = HashMap::new();
     for m in &new_images {
         image_paths.insert(m.id, PathBuf::from(&m.path));
     }
-    Ok(LoadResult { project: rebuilt, image_paths, temp_dir: temp, inpaint_files: Vec::new() })
+    Ok(LoadResult {
+        project: rebuilt,
+        image_paths,
+        temp_dir: temp,
+        inpaint_files: Vec::new(),
+    })
 }
 
-use easyscanlate_model::{OcrResult, ImageMeta};
+use easyscanlate_model::{ImageMeta, OcrResult};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use easyscanlate_model::{EntrySource, NewEntry, Quad, Project};
+    use easyscanlate_model::{EntrySource, NewEntry, Project, Quad};
 
     #[test]
     fn save_and_load_roundtrip() {
@@ -500,14 +610,26 @@ mod tests {
         images[0].path = img_path.to_string_lossy().to_string();
         let pid = project.project_id().map(str::to_owned);
         let series = project.series().map(str::to_owned);
-        let ocr = std::mem::replace(&mut project.ocr, OcrResult::from_raw(Vec::new(),0));
+        let ocr = std::mem::replace(&mut project.ocr, OcrResult::from_raw(Vec::new(), 0));
         let profiles = std::mem::take(&mut project.profiles);
         let styles = project.styles().clone();
         let view_quads = project.view_quads().clone();
         let extras = std::mem::take(&mut project.extras);
-        let project2 = Project::from_raw(pid, series, images, 1, ocr, profiles, styles, view_quads, extras);
+        let project2 = Project::from_raw(
+            pid, series, images, 1, ocr, profiles, styles, view_quads, extras,
+        );
         let mut project = project2;
-        project.ocr.append_for_image(id, NewEntry{ source: EntrySource::AutoOcr, text:"hi".into(), score:0.9, quad: Quad{points:[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]]}});
+        project.ocr.append_for_image(
+            id,
+            NewEntry {
+                source: EntrySource::AutoOcr,
+                text: "hi".into(),
+                score: 0.9,
+                quad: Quad {
+                    points: [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+                },
+            },
+        );
         let dest = tmp.path().join("out.mmtl");
         save_mmtl(&project, &[], &dest).unwrap();
         let loaded = load_mmtl(&dest).unwrap();

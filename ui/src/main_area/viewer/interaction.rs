@@ -97,8 +97,12 @@ impl SaveMenuButton {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Interaction {
     None,
-    TouchScrolling { origin: Point },
-    ScrollerGrabbed { grab_offset: f32 },
+    TouchScrolling {
+        origin: Point,
+    },
+    ScrollerGrabbed {
+        grab_offset: f32,
+    },
     DragPending {
         index: usize,
         id: EntryId,
@@ -223,25 +227,81 @@ pub struct ResizeHandle {
 }
 
 impl ResizeHandle {
-    pub const NW: Self = Self { left: true, right: false, top: true, bottom: false };
-    pub const N: Self = Self { left: false, right: false, top: true, bottom: false };
-    pub const NE: Self = Self { left: false, right: true, top: true, bottom: false };
-    pub const E: Self = Self { left: false, right: true, top: false, bottom: false };
-    pub const SE: Self = Self { left: false, right: true, top: false, bottom: true };
-    pub const S: Self = Self { left: false, right: false, top: false, bottom: true };
-    pub const SW: Self = Self { left: true, right: false, top: false, bottom: true };
-    pub const W: Self = Self { left: true, right: false, top: false, bottom: false };
+    pub const NW: Self = Self {
+        left: true,
+        right: false,
+        top: true,
+        bottom: false,
+    };
+    pub const N: Self = Self {
+        left: false,
+        right: false,
+        top: true,
+        bottom: false,
+    };
+    pub const NE: Self = Self {
+        left: false,
+        right: true,
+        top: true,
+        bottom: false,
+    };
+    pub const E: Self = Self {
+        left: false,
+        right: true,
+        top: false,
+        bottom: false,
+    };
+    pub const SE: Self = Self {
+        left: false,
+        right: true,
+        top: false,
+        bottom: true,
+    };
+    pub const S: Self = Self {
+        left: false,
+        right: false,
+        top: false,
+        bottom: true,
+    };
+    pub const SW: Self = Self {
+        left: true,
+        right: false,
+        top: false,
+        bottom: true,
+    };
+    pub const W: Self = Self {
+        left: true,
+        right: false,
+        top: false,
+        bottom: false,
+    };
 
     pub fn cursor(self) -> mouse::Interaction {
         match self {
-            Self { left: true, right: false, top: true, bottom: false }
-            | Self { left: false, right: true, top: false, bottom: true } => {
-                mouse::Interaction::ResizingDiagonallyDown
+            Self {
+                left: true,
+                right: false,
+                top: true,
+                bottom: false,
             }
-            Self { left: false, right: true, top: true, bottom: false }
-            | Self { left: true, right: false, top: false, bottom: true } => {
-                mouse::Interaction::ResizingDiagonallyUp
+            | Self {
+                left: false,
+                right: true,
+                top: false,
+                bottom: true,
+            } => mouse::Interaction::ResizingDiagonallyDown,
+            Self {
+                left: false,
+                right: true,
+                top: true,
+                bottom: false,
             }
+            | Self {
+                left: true,
+                right: false,
+                top: false,
+                bottom: true,
+            } => mouse::Interaction::ResizingDiagonallyUp,
             Self { top: true, .. } | Self { bottom: true, .. } => {
                 mouse::Interaction::ResizingVertically
             }

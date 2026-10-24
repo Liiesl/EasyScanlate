@@ -5,7 +5,8 @@
 //! the connection on submit.
 
 use iced::widget::{
-    button, center, column, container, mouse_area, opaque, row, space, stack, text, text_input, tooltip,
+    button, center, column, container, mouse_area, opaque, row, space, stack, text, text_input,
+    tooltip,
 };
 use iced::{Color, Element, Fill as FillLength, Length};
 use lucide_icons::Icon;
@@ -119,10 +120,13 @@ pub fn view<'a, S: UiState + ?Sized>(
                     button(crate::icon::lucide(Icon::X).size(scale::s(14.0)).center())
                         .padding(scale::s(4.0))
                         .style(crate::panel::button_style)
-            .on_press(UiEvent::ConnectModalCancel),
-                    container(text("Close").size(scale::s(11.0))).padding(scale::s(6.0)).style(container::rounded_box),
+                        .on_press(UiEvent::ConnectModalCancel),
+                    container(text("Close").size(scale::s(11.0)))
+                        .padding(scale::s(6.0))
+                        .style(container::rounded_box),
                     tooltip::Position::Top
-                ).gap(scale::s(4.0)),
+                )
+                .gap(scale::s(4.0)),
             ],
             column(fields).spacing(scale::s(4.0)).height(FillLength),
             row![
@@ -131,18 +135,28 @@ pub fn view<'a, S: UiState + ?Sized>(
                     button(crate::icon::lucide(Icon::X).size(scale::s(14.0)).center())
                         .padding(scale::s(6.0))
                         .style(crate::panel::button_style)
-            .on_press(UiEvent::ConnectModalCancel),
-                    container(text("Cancel").size(scale::s(11.0))).padding(scale::s(6.0)).style(container::rounded_box),
-                    tooltip::Position::Top
-                ).gap(scale::s(4.0)),
-                tooltip(
-                    button(crate::icon::lucide(Icon::Plug).size(scale::s(14.0)).center())
+                        .on_press(UiEvent::ConnectModalCancel),
+                    container(text("Cancel").size(scale::s(11.0)))
                         .padding(scale::s(6.0))
-                        .style(crate::panel::button_style)
-            .on_press(UiEvent::ConnectModalSubmit),
-                    container(text("Connect").size(scale::s(11.0))).padding(scale::s(6.0)).style(container::rounded_box),
+                        .style(container::rounded_box),
                     tooltip::Position::Top
-                ).gap(scale::s(4.0)),
+                )
+                .gap(scale::s(4.0)),
+                tooltip(
+                    button(
+                        crate::icon::lucide(Icon::Plug)
+                            .size(scale::s(14.0))
+                            .center()
+                    )
+                    .padding(scale::s(6.0))
+                    .style(crate::panel::button_style)
+                    .on_press(UiEvent::ConnectModalSubmit),
+                    container(text("Connect").size(scale::s(11.0)))
+                        .padding(scale::s(6.0))
+                        .style(container::rounded_box),
+                    tooltip::Position::Top
+                )
+                .gap(scale::s(4.0)),
             ]
             .spacing(scale::s(6.0)),
         ]
@@ -153,25 +167,28 @@ pub fn view<'a, S: UiState + ?Sized>(
     .padding(scale::s(12.0))
     .style(|_theme| container::Style {
         background: Some(PANEL_BG.into()),
-        border: iced::Border::default().rounded(scale::s(8.0)).color(Color::from_rgb8(60, 63, 74)).width(scale::s(1.0)),
+        border: iced::Border::default()
+            .rounded(scale::s(8.0))
+            .color(Color::from_rgb8(60, 63, 74))
+            .width(scale::s(1.0)),
         ..container::Style::default()
     });
 
     stack![
         base,
         opaque(
-            mouse_area(
-                center(opaque(window)).style(|_theme| container::Style {
+            mouse_area(center(opaque(window)).style(|_theme| {
+                container::Style {
                     background: Some(
                         Color {
                             a: 0.4,
                             ..Color::BLACK
                         }
-                        .into()
+                        .into(),
                     ),
                     ..container::Style::default()
-                })
-            )
+                }
+            }))
             .on_press(UiEvent::ConnectModalCancel)
         )
     ]

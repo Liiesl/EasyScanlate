@@ -69,9 +69,16 @@ fn header_row<'a, S: UiState + ?Sized>(state: &'a S, total: usize) -> Element<'a
             .on_press(UiEvent::ToggleInpaintLayer);
             tooltip(
                 btn,
-                container(text(if state.show_inpaint() { "Hide inpaint layer" } else { "Show inpaint layer" }).size(scale::s(11.0)))
-                    .padding(scale::s(6.0))
-                    .style(container::rounded_box),
+                container(
+                    text(if state.show_inpaint() {
+                        "Hide inpaint layer"
+                    } else {
+                        "Show inpaint layer"
+                    })
+                    .size(scale::s(11.0)),
+                )
+                .padding(scale::s(6.0))
+                .style(container::rounded_box),
                 tooltip::Position::Top,
             )
             .gap(scale::s(4.0))
@@ -151,12 +158,20 @@ fn layer_row<'a>(
         Icon::ImageOff
     })
     .size(scale::s(12.0))
-    .color(if global_visible { MUTED_FG } else { Color::from_rgba8(120, 120, 120, 0.9) })
+    .color(if global_visible {
+        MUTED_FG
+    } else {
+        Color::from_rgba8(120, 120, 120, 0.9)
+    })
     .width(Length::Fixed(scale::s(16.0)))
     .center()
     .into();
 
-    let row_bg = if global_visible { ROW_BG } else { ROW_BG_DIMMED };
+    let row_bg = if global_visible {
+        ROW_BG
+    } else {
+        ROW_BG_DIMMED
+    };
 
     // Right-side actions: only when selected, mirroring the results row's
     // Delete / Retranslate but for inpaint: Delete / Repaint (exact rect).
@@ -165,25 +180,41 @@ fn layer_row<'a>(
         row![
             tooltip(
                 crate::button::with_disabled_cursor(
-                    button(crate::icon::lucide(Icon::Trash2).size(scale::s(12.0)).center())
-                        .padding(scale::s(4.0))
-                        .style(crate::panel::button_style)
-                        .on_press_maybe((!bulk_busy).then_some(UiEvent::InpaintDelete((image_index, index_in_image))))
-                        .into(),
+                    button(
+                        crate::icon::lucide(Icon::Trash2)
+                            .size(scale::s(12.0))
+                            .center()
+                    )
+                    .padding(scale::s(4.0))
+                    .style(crate::panel::button_style)
+                    .on_press_maybe(
+                        (!bulk_busy)
+                            .then_some(UiEvent::InpaintDelete((image_index, index_in_image)))
+                    )
+                    .into(),
                 ),
-                container(text(if bulk_busy { "Busy" } else { "Delete patch" }).size(scale::s(11.0)))
-                    .padding(scale::s(6.0))
-                    .style(container::rounded_box),
+                container(
+                    text(if bulk_busy { "Busy" } else { "Delete patch" }).size(scale::s(11.0))
+                )
+                .padding(scale::s(6.0))
+                .style(container::rounded_box),
                 tooltip::Position::Top
             )
             .gap(scale::s(4.0)),
             tooltip(
                 crate::button::with_disabled_cursor(
-                    button(crate::icon::lucide(Icon::RefreshCw).size(scale::s(12.0)).center())
-                        .padding(scale::s(4.0))
-                        .style(crate::panel::button_style)
-                        .on_press_maybe((!bulk_busy).then_some(UiEvent::InpaintRepaint((image_index, index_in_image))))
-                        .into(),
+                    button(
+                        crate::icon::lucide(Icon::RefreshCw)
+                            .size(scale::s(12.0))
+                            .center()
+                    )
+                    .padding(scale::s(4.0))
+                    .style(crate::panel::button_style)
+                    .on_press_maybe(
+                        (!bulk_busy)
+                            .then_some(UiEvent::InpaintRepaint((image_index, index_in_image)))
+                    )
+                    .into(),
                 ),
                 container(text(if bulk_busy { "Busy" } else { "Repaint" }).size(scale::s(11.0)))
                     .padding(scale::s(6.0))
@@ -205,7 +236,9 @@ fn layer_row<'a>(
         eye,
         thumb,
         column![
-            text(title).size(scale::s(11.0)).color(Color::from_rgb8(230, 230, 230)),
+            text(title)
+                .size(scale::s(11.0))
+                .color(Color::from_rgb8(230, 230, 230)),
             text(subtitle).size(scale::s(10.0)).color(MUTED_FG),
         ]
         .spacing(scale::s(1.0))
@@ -225,9 +258,7 @@ fn layer_row<'a>(
         })
         .style(move |_theme| container::Style {
             background: Some(if is_selected { SELECTED_BG } else { row_bg }.into()),
-            border: Border::default()
-                .width(0.0)
-                .rounded(scale::s(6.0)),
+            border: Border::default().width(0.0).rounded(scale::s(6.0)),
             ..container::Style::default()
         });
 
@@ -246,9 +277,13 @@ fn image_header<'a>(name: &'a str, count: usize) -> Element<'a, UiEvent> {
     row![
         text(name).size(scale::s(11.0)).color(MUTED_FG),
         space::horizontal(),
-        text(format!("{} patch{}", count, if count == 1 { "" } else { "es" }))
-            .size(scale::s(10.0))
-            .color(Color::from_rgba8(140, 140, 150, 1.0)),
+        text(format!(
+            "{} patch{}",
+            count,
+            if count == 1 { "" } else { "es" }
+        ))
+        .size(scale::s(10.0))
+        .color(Color::from_rgba8(140, 140, 150, 1.0)),
     ]
     .spacing(scale::s(6.0))
     .align_y(iced::Alignment::Center)
@@ -298,7 +333,16 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         sections.push(image_header(name, entries.len()));
         for (i, (bounds, handle)) in entries.into_iter().enumerate() {
             let is_selected = selected_inpaint == Some((image_index, i));
-            sections.push(layer_row(name, image_index, i, bounds, handle, global_visible, is_selected, state.is_bulk_busy()));
+            sections.push(layer_row(
+                name,
+                image_index,
+                i,
+                bounds,
+                handle,
+                global_visible,
+                is_selected,
+                state.is_bulk_busy(),
+            ));
         }
     }
 
@@ -356,13 +400,15 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                     // keeps the old value for non-finite publishes.
                     let bounds_h = viewport.bounds().height;
                     let content_h = viewport.content_bounds().height;
-                    if !(bounds_h > f32::EPSILON)
-                        || !(content_h > bounds_h + f32::EPSILON)
-                    {
+                    if !(bounds_h > f32::EPSILON) || !(content_h > bounds_h + f32::EPSILON) {
                         return UiEvent::LayerScroll(f32::NAN);
                     }
                     let y = viewport.relative_offset().y;
-                    let anchor = if y.is_finite() { y.clamp(0.0, 1.0) } else { f32::NAN };
+                    let anchor = if y.is_finite() {
+                        y.clamp(0.0, 1.0)
+                    } else {
+                        f32::NAN
+                    };
                     UiEvent::LayerScroll(anchor)
                 })
         )
@@ -379,7 +425,9 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
             ..container::Style::default()
         }),
         // Footer hint, subtle
-        text("Inpaint • Notes (layers)").size(scale::s(9.0)).color(Color::from_rgba8(110, 110, 120, 1.0)),
+        text("Inpaint • Notes (layers)")
+            .size(scale::s(9.0))
+            .color(Color::from_rgba8(110, 110, 120, 1.0)),
     ]
     .spacing(scale::s(8.0))
     .height(FillLength)
@@ -401,6 +449,9 @@ where
     };
     iced::widget::operation::snap_to(
         iced::widget::Id::new(LAYER_LIST_ID),
-        iced::widget::operation::RelativeOffset { x: None, y: Some(y) },
+        iced::widget::operation::RelativeOffset {
+            x: None,
+            y: Some(y),
+        },
     )
 }

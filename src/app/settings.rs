@@ -1,7 +1,7 @@
-use iced::Task;
-use super::{App, Message};
 use super::backdrop::{self, BackdropKind};
 use super::translation;
+use super::{App, Message};
+use iced::Task;
 
 pub fn handle_settings_open(app: &mut App) -> Task<Message> {
     // Capture-then-open: screenshot the clean base first so the blurred
@@ -23,7 +23,10 @@ pub fn handle_settings_open(app: &mut App) -> Task<Message> {
     backdrop::capture_task(app, BackdropKind::Settings)
 }
 
-pub fn handle_settings_open_tab(app: &mut App, tab: easyscanlate_ui::event::SettingsTab) -> Task<Message> {
+pub fn handle_settings_open_tab(
+    app: &mut App,
+    tab: easyscanlate_ui::event::SettingsTab,
+) -> Task<Message> {
     app.settings_tab = tab;
     handle_settings_open(app)
 }
@@ -46,7 +49,10 @@ pub fn handle_settings_close(app: &mut App) -> Task<Message> {
     Task::none()
 }
 
-pub fn handle_settings_tab(app: &mut App, tab: easyscanlate_ui::event::SettingsTab) -> Task<Message> {
+pub fn handle_settings_tab(
+    app: &mut App,
+    tab: easyscanlate_ui::event::SettingsTab,
+) -> Task<Message> {
     app.settings_tab = tab;
     Task::none()
 }
@@ -124,29 +130,33 @@ pub fn handle_project_series_cancel(app: &mut App) -> Task<Message> {
     Task::none()
 }
 
-pub fn handle_setting_edit(app: &mut App, edit: easyscanlate_ui::event::SettingEdit) -> Task<Message> {
+pub fn handle_setting_edit(
+    app: &mut App,
+    edit: easyscanlate_ui::event::SettingEdit,
+) -> Task<Message> {
     // Compute default hidden sets before mutating the store (needs app.tx models).
-    let reset_defaults: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> = match &edit {
-        easyscanlate_ui::event::SettingEdit::HiddenModelsReset(provider) => {
-            let mut m = std::collections::BTreeMap::new();
-            let default = app.tx.default_hidden_for(provider);
-            if !default.is_empty() {
-                m.insert(provider.clone(), default);
-            }
-            m
-        }
-        easyscanlate_ui::event::SettingEdit::HiddenModelsResetAll => {
-            let mut m = std::collections::BTreeMap::new();
-            for id in app.tx.connected_ids.clone() {
-                let default = app.tx.default_hidden_for(&id);
+    let reset_defaults: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
+        match &edit {
+            easyscanlate_ui::event::SettingEdit::HiddenModelsReset(provider) => {
+                let mut m = std::collections::BTreeMap::new();
+                let default = app.tx.default_hidden_for(provider);
                 if !default.is_empty() {
-                    m.insert(id, default);
+                    m.insert(provider.clone(), default);
                 }
+                m
             }
-            m
-        }
-        _ => std::collections::BTreeMap::new(),
-    };
+            easyscanlate_ui::event::SettingEdit::HiddenModelsResetAll => {
+                let mut m = std::collections::BTreeMap::new();
+                for id in app.tx.connected_ids.clone() {
+                    let default = app.tx.default_hidden_for(&id);
+                    if !default.is_empty() {
+                        m.insert(id, default);
+                    }
+                }
+                m
+            }
+            _ => std::collections::BTreeMap::new(),
+        };
     let _ = easyscanlate_settings::modify(|s| match edit {
         easyscanlate_ui::event::SettingEdit::AuroraDarkMode(v) => s.aurora_is_dark = v,
         easyscanlate_ui::event::SettingEdit::AuroraBlobCount(v) => {

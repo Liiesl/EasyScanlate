@@ -56,32 +56,47 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
         .into()
     };
     let ocr_btn = button(ocr_content)
-    .style(crate::panel::button_style)
-    .on_press_maybe(
-        if is_stop {
+        .style(crate::panel::button_style)
+        .on_press_maybe(if is_stop {
             Some(UiEvent::StopOcr)
         } else if can_start {
             Some(UiEvent::StartOcr)
         } else {
             None
-        },
-    )
-    .padding(scale::s(6.0));
-    let ocr: Element<'_, UiEvent> = tooltip(crate::button::with_disabled_cursor(ocr_btn.into()), tip_label(ocr_label), tooltip::Position::Bottom)
-        .gap(scale::s(4.0))
-        .into();
-
-    let settings_btn = button(crate::icon::lucide(Icon::Settings).size(scale::s(16.0)).center())
-        .style(crate::panel::button_style)
-        .on_press(UiEvent::SettingsOpen)
+        })
         .padding(scale::s(6.0));
-    let settings: Element<'_, UiEvent> =
-        tooltip(settings_btn, tip_label("Settings"), tooltip::Position::Bottom)
-            .gap(scale::s(4.0))
-            .into();
+    let ocr: Element<'_, UiEvent> = tooltip(
+        crate::button::with_disabled_cursor(ocr_btn.into()),
+        tip_label(ocr_label),
+        tooltip::Position::Bottom,
+    )
+    .gap(scale::s(4.0))
+    .into();
+
+    let settings_btn = button(
+        crate::icon::lucide(Icon::Settings)
+            .size(scale::s(16.0))
+            .center(),
+    )
+    .style(crate::panel::button_style)
+    .on_press(UiEvent::SettingsOpen)
+    .padding(scale::s(6.0));
+    let settings: Element<'_, UiEvent> = tooltip(
+        settings_btn,
+        tip_label("Settings"),
+        tooltip::Position::Bottom,
+    )
+    .gap(scale::s(4.0))
+    .into();
 
     container(
-        row![ocr, text(state.status()).size(scale::s(12.0)).width(Length::Fill), settings]
+        row![
+            ocr,
+            text(state.status())
+                .size(scale::s(12.0))
+                .width(Length::Fill),
+            settings
+        ]
         .spacing(scale::s(6.0))
         .width(Length::Fill),
     )

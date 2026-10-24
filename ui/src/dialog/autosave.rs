@@ -2,7 +2,9 @@
 //! Mirrors `ui/src/dialog/confirm_close.rs` overlay pattern and panel colors.
 //! Shown when `autosave_prompt()` is `Some`.
 
-use iced::widget::{button, center, column, container, mouse_area, opaque, row, space, stack, text};
+use iced::widget::{
+    button, center, column, container, mouse_area, opaque, row, space, stack, text,
+};
 use iced::{Color, Element, Length};
 
 use crate::event::UiEvent;
@@ -65,8 +67,9 @@ fn danger_button_style(_theme: &iced::Theme, status: button::Status) -> button::
 
 pub fn window<'a, S: UiState + ?Sized>(state: &S) -> Option<Element<'a, UiEvent>> {
     let prompt = state.autosave_prompt()?;
-    let w = container(
-        column![
+    let w =
+        container(
+            column![
             text(format!("Load autosave for \"{}\"?", prompt.title))
                 .size(scale::s(14.0))
                 .color(Color::WHITE),
@@ -95,60 +98,69 @@ pub fn window<'a, S: UiState + ?Sized>(state: &S) -> Option<Element<'a, UiEvent>
             .spacing(scale::s(8.0))
             .align_y(iced::Alignment::Center),
         ]
-        .spacing(scale::s(10.0)),
-    )
-    .width(Length::Fixed(scale::s(420.0)))
-    .padding(scale::s(16.0))
-    .style(|_theme| container::Style {
-        background: Some(PANEL_BG.into()),
-        border: iced::Border::default()
-            .rounded(scale::s(8.0))
-            .color(Color::from_rgb8(60, 63, 74))
-            .width(scale::s(1.0)),
-        ..container::Style::default()
-    });
+            .spacing(scale::s(10.0)),
+        )
+        .width(Length::Fixed(scale::s(420.0)))
+        .padding(scale::s(16.0))
+        .style(|_theme| container::Style {
+            background: Some(PANEL_BG.into()),
+            border: iced::Border::default()
+                .rounded(scale::s(8.0))
+                .color(Color::from_rgb8(60, 63, 74))
+                .width(scale::s(1.0)),
+            ..container::Style::default()
+        });
     Some(w.into())
 }
 
 /// Overlay that asks `Load autosave for {title}?` with `Load / Discard / Later`.
 /// Returns `base` unchanged when `state.autosave_prompt()` is `None`.
-pub fn view<'a, S: UiState + ?Sized>(state: &S, base: Element<'a, UiEvent>) -> Element<'a, UiEvent> {
+pub fn view<'a, S: UiState + ?Sized>(
+    state: &S,
+    base: Element<'a, UiEvent>,
+) -> Element<'a, UiEvent> {
     let Some(window) = window(state) else {
         return base;
     };
     let h = state.titlebar_height();
-    let title_dim = container(space::horizontal().width(Length::Fill).height(Length::Fixed(h)))
-        .width(Length::Fill)
-        .height(Length::Fixed(h))
-        .style(|_| container::Style {
-            background: Some(
-                Color {
-                    a: 0.45,
-                    ..Color::BLACK
-                }
-                .into(),
-            ),
-            ..container::Style::default()
-        });
-
-    let content_dim = opaque(mouse_area(
-        container(center(opaque(window)))
+    let title_dim = container(
+        space::horizontal()
             .width(Length::Fill)
-            .height(Length::Fill)
-            .style(|_| container::Style {
-                background: Some(
-                    Color {
-                        a: 0.45,
-                        ..Color::BLACK
-                    }
-                    .into(),
-                ),
-                ..container::Style::default()
-            })
-            .center_x(Length::Fill)
-            .center_y(Length::Fill),
+            .height(Length::Fixed(h)),
     )
-    .on_press(UiEvent::AutosaveLater));
+    .width(Length::Fill)
+    .height(Length::Fixed(h))
+    .style(|_| container::Style {
+        background: Some(
+            Color {
+                a: 0.45,
+                ..Color::BLACK
+            }
+            .into(),
+        ),
+        ..container::Style::default()
+    });
+
+    let content_dim = opaque(
+        mouse_area(
+            container(center(opaque(window)))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(|_| container::Style {
+                    background: Some(
+                        Color {
+                            a: 0.45,
+                            ..Color::BLACK
+                        }
+                        .into(),
+                    ),
+                    ..container::Style::default()
+                })
+                .center_x(Length::Fill)
+                .center_y(Length::Fill),
+        )
+        .on_press(UiEvent::AutosaveLater),
+    );
 
     stack![
         base,

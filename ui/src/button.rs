@@ -10,8 +10,8 @@
 //! behavior. Always wrap (never branch on `enabled`) to keep the widget
 //! tree shape stable across enabled/disabled flips.
 
-use iced::{Element, mouse};
 use iced::widget::mouse_area;
+use iced::{Element, mouse};
 
 use crate::event::UiEvent;
 

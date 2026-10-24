@@ -1,12 +1,16 @@
-use std::sync::{Arc, Mutex, mpsc};
 use iced::Task;
+use std::sync::{Arc, Mutex, mpsc};
 
 use super::{App, Message};
 
 pub fn handle_check(app: &mut App) -> Task<Message> {
     app.update_error = None;
     Task::perform(
-        async { tokio::task::spawn_blocking(crate::updater::check_for_updates).await.unwrap_or(None) },
+        async {
+            tokio::task::spawn_blocking(crate::updater::check_for_updates)
+                .await
+                .unwrap_or(None)
+        },
         |info| Message::UpdateCheckResult(Box::new(info)),
     )
 }
@@ -23,8 +27,18 @@ pub fn handle_download(app: &mut App) -> Task<Message> {
     app.update_rx = Some(Arc::new(Mutex::new(rx)));
     app.update_error = None;
     Task::perform(
-        async move { tokio::task::spawn_blocking(move || crate::updater::download_updates(&info, tx)).await.unwrap_or(false) },
-        |ok| if ok { Message::UpdatePoll } else { Message::UpdateDismiss },
+        async move {
+            tokio::task::spawn_blocking(move || crate::updater::download_updates(&info, tx))
+                .await
+                .unwrap_or(false)
+        },
+        |ok| {
+            if ok {
+                Message::UpdatePoll
+            } else {
+                Message::UpdateDismiss
+            }
+        },
     )
 }
 
@@ -73,7 +87,10 @@ pub fn handle_check_again(app: &mut App) -> Task<Message> {
     handle_check(app)
 }
 
-pub fn handle_check_result(app: &mut App, info: Option<crate::updater::UpdateInfo>) -> Task<Message> {
+pub fn handle_check_result(
+    app: &mut App,
+    info: Option<crate::updater::UpdateInfo>,
+) -> Task<Message> {
     app.update_info = info;
     if app.update_info.is_none() {
         app.update_error = None;
@@ -123,12 +140,13 @@ pub fn handle_poll(app: &mut App) -> Task<Message> {
         }
         if app.update_downloading
             && let Ok(rx) = rx_arc.lock()
-                && let Err(mpsc::TryRecvError::Disconnected) = rx.try_recv() {
-                    app.update_downloading = false;
-                    app.update_ready = true;
-                    app.update_progress = 100;
-                    app.update_rx = None;
-                }
+            && let Err(mpsc::TryRecvError::Disconnected) = rx.try_recv()
+        {
+            app.update_downloading = false;
+            app.update_ready = true;
+            app.update_progress = 100;
+            app.update_rx = None;
+        }
     }
     Task::none()
 }

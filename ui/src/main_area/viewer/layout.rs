@@ -1,5 +1,5 @@
-use super::constants::{SCROLLBAR_MARGIN, SCROLLBAR_WIDTH};
 use super::TileSpec;
+use super::constants::{SCROLLBAR_MARGIN, SCROLLBAR_WIDTH};
 
 /// Width available to tile content: scrollbar gutter reserved.
 pub fn content_width(width: f32) -> f32 {

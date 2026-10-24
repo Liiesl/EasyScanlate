@@ -29,8 +29,8 @@
 use std::collections::HashMap;
 
 use image::{GrayImage, RgbImage};
-use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 
 /// Patch side length (odd). Mirrors `patch=9`.
 pub const PATCH: usize = 9;
@@ -177,7 +177,9 @@ fn shiftmap_core(img: &RgbImage, mask: &GrayImage) -> RgbImage {
             data[k * nl + li] = ssd_full(&canvas, w, h, y, x, sy, sx, r, f64::INFINITY);
         }
     }
-    let keep: Vec<usize> = (0..nl).filter(|&li| (0..n).any(|k| feasible[k * nl + li])).collect();
+    let keep: Vec<usize> = (0..nl)
+        .filter(|&li| (0..n).any(|k| feasible[k * nl + li]))
+        .collect();
     if keep.is_empty() {
         eprintln!("[inpaint::shiftmap] no feasible label -> harmonic fallback");
         return crate::harmonic::harmonic_fallback_rgb(img, mask);
@@ -197,11 +199,23 @@ fn shiftmap_core(img: &RgbImage, mask: &GrayImage) -> RgbImage {
     let edges = neighbour_edges(&hy, &hx, w, h);
 
     let init_energy = total_energy(&canvas, w, h, &hy, &hx, &shifts, &data, nl, &edges);
-    let labels = alpha_expansion(&canvas, w, h, &hy, &hx, &shifts, &data, &edges, EXPANSION_ITERS);
+    let labels = alpha_expansion(
+        &canvas,
+        w,
+        h,
+        &hy,
+        &hx,
+        &shifts,
+        &data,
+        &edges,
+        EXPANSION_ITERS,
+    );
     let labels = {
         let e = total_energy_with(&canvas, w, h, &hy, &hx, &shifts, &data, nl, &edges, &labels);
         if e > init_energy {
-            eprintln!("[inpaint::shiftmap] expansion energy {e:.1} > init {init_energy:.1} -> ICM fallback");
+            eprintln!(
+                "[inpaint::shiftmap] expansion energy {e:.1} > init {init_energy:.1} -> ICM fallback"
+            );
             icm(&canvas, w, h, &hy, &hx, &shifts, &data, &edges, 6)
         } else {
             labels
@@ -323,12 +337,20 @@ fn patchmatch_nnf(
 
     // Donor pool: fully-known patch centres (with r-border cleared by caller).
     let donors: Vec<(usize, usize)> = (0..h)
-        .flat_map(|y| (0..w).filter(move |&x| valid[y * w + x]).map(move |x| (y, x)))
+        .flat_map(|y| {
+            (0..w)
+                .filter(move |&x| valid[y * w + x])
+                .map(move |x| (y, x))
+        })
         .collect();
     let donors: Vec<(usize, usize)> = if donors.is_empty() {
         // Degenerate: fall back to any known pixel (mirrors Python).
         (0..h)
-            .flat_map(|y| (0..w).filter(move |&x| known[y * w + x]).map(move |x| (y, x)))
+            .flat_map(|y| {
+                (0..w)
+                    .filter(move |&x| known[y * w + x])
+                    .map(move |x| (y, x))
+            })
             .collect()
     } else {
         donors
@@ -352,8 +374,16 @@ fn patchmatch_nnf(
 
     for it in 0..iters {
         let fwd = it % 2 == 0;
-        let y_range: Vec<usize> = if fwd { (0..h).collect() } else { (0..h).rev().collect() };
-        let x_range: Vec<usize> = if fwd { (0..w).collect() } else { (0..w).rev().collect() };
+        let y_range: Vec<usize> = if fwd {
+            (0..h).collect()
+        } else {
+            (0..h).rev().collect()
+        };
+        let x_range: Vec<usize> = if fwd {
+            (0..w).collect()
+        } else {
+            (0..w).rev().collect()
+        };
         for &y in &y_range {
             for &x in &x_range {
                 if known[y * w + x] {
@@ -391,7 +421,11 @@ fn patchmatch_nnf(
                 for (dy, dx) in cands {
                     let sy = y as i32 + dy;
                     let sx = x as i32 + dx;
-                    if sy < r as i32 || sx < r as i32 || sy + r as i32 >= h as i32 || sx + r as i32 >= w as i32 {
+                    if sy < r as i32
+                        || sx < r as i32
+                        || sy + r as i32 >= h as i32
+                        || sx + r as i32 >= w as i32
+                    {
                         continue;
                     }
                     let (sy, sx) = (sy as usize, sx as usize);
@@ -434,7 +468,8 @@ fn top_shifts(
         }
         let sy = y as i32 + dy;
         let sx = x as i32 + dx;
-        if sy < r as i32 || sx < r as i32 || sy + r as i32 >= h as i32 || sx + r as i32 >= w as i32 {
+        if sy < r as i32 || sx < r as i32 || sy + r as i32 >= h as i32 || sx + r as i32 >= w as i32
+        {
             continue;
         }
         if !valid[sy as usize * w + sx as usize] {
@@ -540,7 +575,12 @@ struct StGraph {
 
 impl StGraph {
     fn new(n: usize) -> Self {
-        Self { n, cap_source: vec![0; n], cap_sink: vec![0; n], pairs: Vec::new() }
+        Self {
+            n,
+            cap_source: vec![0; n],
+            cap_sink: vec![0; n],
+            pairs: Vec::new(),
+        }
     }
 
     fn add_tedge(&mut self, i: usize, cap_source: f64, cap_sink: f64) {
@@ -580,7 +620,10 @@ fn add_binary_pairwise(g: &mut StGraph, na: usize, nb: usize, a: f64, b: f64, c:
     let cx = ((c + d) - (a + b)) / 2.0;
     let cy = ((b + d) - (a + c)) / 2.0;
     let w = (b + c - a - d) / 2.0;
-    debug_assert!(w >= -1e-9, "non-submodular edge reaching graph: {a},{b},{c},{d}");
+    debug_assert!(
+        w >= -1e-9,
+        "non-submodular edge reaching graph: {a},{b},{c},{d}"
+    );
     let w = w.max(0.0);
     g.add_tedge(na, cx.max(0.0), (-cx).max(0.0));
     g.add_tedge(nb, cy.max(0.0), (-cy).max(0.0));
@@ -629,7 +672,18 @@ fn total_energy_with(
         let lb = labels[b] as usize;
         if la != lb {
             e += SMOOTH_W
-                * seam_cost(canvas, w, h, hy[a], hx[a], hy[b], hx[b], shifts[la], shifts[lb], SMOOTH_TRUNC);
+                * seam_cost(
+                    canvas,
+                    w,
+                    h,
+                    hy[a],
+                    hx[a],
+                    hy[b],
+                    hx[b],
+                    shifts[la],
+                    shifts[lb],
+                    SMOOTH_TRUNC,
+                );
         }
     }
     e
@@ -684,11 +738,44 @@ fn alpha_expansion(
                     continue;
                 }
                 let mut a_cost = SMOOTH_W
-                    * seam_cost(canvas, w, h, hy[a], hx[a], hy[b], hx[b], shifts[la], shifts[lb], SMOOTH_TRUNC);
+                    * seam_cost(
+                        canvas,
+                        w,
+                        h,
+                        hy[a],
+                        hx[a],
+                        hy[b],
+                        hx[b],
+                        shifts[la],
+                        shifts[lb],
+                        SMOOTH_TRUNC,
+                    );
                 let b_cost = SMOOTH_W
-                    * seam_cost(canvas, w, h, hy[a], hx[a], hy[b], hx[b], shifts[la], shifts[alpha], SMOOTH_TRUNC);
+                    * seam_cost(
+                        canvas,
+                        w,
+                        h,
+                        hy[a],
+                        hx[a],
+                        hy[b],
+                        hx[b],
+                        shifts[la],
+                        shifts[alpha],
+                        SMOOTH_TRUNC,
+                    );
                 let c_cost = SMOOTH_W
-                    * seam_cost(canvas, w, h, hy[a], hx[a], hy[b], hx[b], shifts[alpha], shifts[lb], SMOOTH_TRUNC);
+                    * seam_cost(
+                        canvas,
+                        w,
+                        h,
+                        hy[a],
+                        hx[a],
+                        hy[b],
+                        hx[b],
+                        shifts[alpha],
+                        shifts[lb],
+                        SMOOTH_TRUNC,
+                    );
                 if a_cost > b_cost + c_cost {
                     a_cost = b_cost + c_cost; // Rother truncation
                 }
@@ -739,8 +826,16 @@ fn icm(
                     if li as u32 != labels[nb] {
                         e += SMOOTH_W
                             * seam_cost(
-                                canvas, w, h, hy[k], hx[k], hy[nb], hx[nb],
-                                shifts[li], shifts[labels[nb] as usize], SMOOTH_TRUNC,
+                                canvas,
+                                w,
+                                h,
+                                hy[k],
+                                hx[k],
+                                hy[nb],
+                                hx[nb],
+                                shifts[li],
+                                shifts[labels[nb] as usize],
+                                SMOOTH_TRUNC,
                             );
                     }
                 }
@@ -905,7 +1000,11 @@ mod tests {
         }
         let mean = vals.iter().sum::<f64>() / vals.len() as f64;
         let var = vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / vals.len() as f64;
-        assert!(var.sqrt() > 20.0, "stripes should continue through hole, std={}", var.sqrt());
+        assert!(
+            var.sqrt() > 20.0,
+            "stripes should continue through hole, std={}",
+            var.sqrt()
+        );
     }
 
     #[test]

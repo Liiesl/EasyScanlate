@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use easyscanlate_model::{
-    natural_cmp, EntrySource, ImageId, NewEntry, OcrResult, ProfileId, Project, Quad,
+    EntrySource, ImageId, NewEntry, OcrResult, ProfileId, Project, Quad, natural_cmp,
 };
 use serde::{Deserialize, Serialize};
 
@@ -89,7 +89,10 @@ pub fn project_from_legacy(
     for le in &entries_sorted {
         if let Some(trans) = &le.translations {
             for k in trans.keys() {
-                if k != "Original" && project.profiles.find_by_name(k).is_none() && !profile_names.contains_key(k) {
+                if k != "Original"
+                    && project.profiles.find_by_name(k).is_none()
+                    && !profile_names.contains_key(k)
+                {
                     let id = project.profiles.add(k.clone());
                     profile_names.insert(k.clone(), id);
                 }
@@ -98,9 +101,10 @@ pub fn project_from_legacy(
     }
     // also ensure active_profile exists
     if let Some(active) = &meta.active_profile_name
-        && project.profiles.find_by_name(active).is_none() {
-            let _ = project.profiles.add(active.clone());
-        }
+        && project.profiles.find_by_name(active).is_none()
+    {
+        let _ = project.profiles.add(active.clone());
+    }
 
     // Now append entries
     // We'll need to map each legacy entry to an OcrEntry and insert translations after
@@ -109,16 +113,30 @@ pub fn project_from_legacy(
             Some(id) => *id,
             None => {
                 // create missing image
-                let (w, h) = image_dims.get(&le.filename).copied().unwrap_or((1000.0, 1000.0));
+                let (w, h) = image_dims
+                    .get(&le.filename)
+                    .copied()
+                    .unwrap_or((1000.0, 1000.0));
                 let id = project.add_image(le.filename.clone(), w, h);
                 file_to_id.insert(le.filename.clone(), id);
                 id
             }
         };
-        let source = if le.is_manual.unwrap_or(false) { EntrySource::Manual } else { EntrySource::AutoOcr };
+        let source = if le.is_manual.unwrap_or(false) {
+            EntrySource::Manual
+        } else {
+            EntrySource::AutoOcr
+        };
         let score = le.confidence.unwrap_or(0.9);
-        let quad = Quad { points: le.coordinates };
-        let new_entry = NewEntry { source, text: le.text.clone(), score, quad };
+        let quad = Quad {
+            points: le.coordinates,
+        };
+        let new_entry = NewEntry {
+            source,
+            text: le.text.clone(),
+            score,
+            quad,
+        };
         let eid = project.ocr.append_for_image(image_id, new_entry);
         // handle deleted after append: need to set deleted flag
         if le.is_deleted.unwrap_or(false) {
@@ -126,9 +144,10 @@ pub fn project_from_legacy(
         }
         // custom_style -> EntryStyle : apply to project styles
         if let Some(style_val) = &le.custom_style
-            && let Some(style) = legacy_style_to_entry_style(style_val) {
-                project.set_entry_style(eid, style);
-            }
+            && let Some(style) = legacy_style_to_entry_style(style_val)
+        {
+            project.set_entry_style(eid, style);
+        }
         // translations per entry
         if let Some(trans) = &le.translations {
             for (pname, ttext) in trans {
@@ -142,7 +161,10 @@ pub fn project_from_legacy(
                     // We'll select, set, then restore
                     let prev = project.profiles.selected_id();
                     project.profiles.select(pid);
-                    project.profiles.selected_mut().set_translation(eid, Some(ttext.clone()));
+                    project
+                        .profiles
+                        .selected_mut()
+                        .set_translation(eid, Some(ttext.clone()));
                     project.profiles.select(prev);
                 }
             }
@@ -151,14 +173,23 @@ pub fn project_from_legacy(
 
     // set active profile selection
     if let Some(active) = &meta.active_profile_name
-        && let Some(pid) = project.profiles.find_by_name(active) {
-            project.profiles.select(pid);
-        }
+        && let Some(pid) = project.profiles.find_by_name(active)
+    {
+        project.profiles.select(pid);
+    }
 
     // fix next_id to be max row_number +1 if larger than current
-    let max_row = master.iter().filter_map(|e| row_to_u64(&e.row_number)).max().unwrap_or(0);
+    let max_row = master
+        .iter()
+        .filter_map(|e| row_to_u64(&e.row_number))
+        .max()
+        .unwrap_or(0);
     // project.ocr.next_id is currently len; if max_row+1 > next, we need to bump
-    let desired = if max_row > 0 { max_row + 1 } else { project.ocr.next_id() };
+    let desired = if max_row > 0 {
+        max_row + 1
+    } else {
+        project.ocr.next_id()
+    };
     if desired > project.ocr.next_id() {
         // reconstruct OcrResult with desired next_id
         let entries = project.ocr.entries().to_vec();
@@ -173,7 +204,17 @@ pub fn project_from_legacy(
         let styles = project.styles().clone();
         let view_quads = project.view_quads().clone();
         let extras = std::mem::take(&mut project.extras);
-        let new_proj = Project::from_raw(pid, series, images, next_image_id, ocr, profiles, styles, view_quads, extras);
+        let new_proj = Project::from_raw(
+            pid,
+            series,
+            images,
+            next_image_id,
+            ocr,
+            profiles,
+            styles,
+            view_quads,
+            extras,
+        );
         return Ok(new_proj);
     }
 
@@ -224,20 +265,23 @@ fn legacy_style_to_entry_style(val: &serde_json::Value) -> Option<easyscanlate_m
         changed = true;
     }
     if let Some(bg) = obj.get("bg_color").and_then(|v| v.as_str())
-        && let Some(rgba) = parse_hex_argb(bg) {
-            style.bg_color = rgba;
-            changed = true;
-        }
+        && let Some(rgba) = parse_hex_argb(bg)
+    {
+        style.bg_color = rgba;
+        changed = true;
+    }
     if let Some(tc) = obj.get("text_color").and_then(|v| v.as_str())
-        && let Some(rgba) = parse_hex_argb(tc) {
-            style.text_color = rgba;
-            changed = true;
-        }
+        && let Some(rgba) = parse_hex_argb(tc)
+    {
+        style.text_color = rgba;
+        changed = true;
+    }
     if let Some(bc) = obj.get("border_color").and_then(|v| v.as_str())
-        && let Some(rgba) = parse_hex_argb(bc) {
-            style.stroke_color = rgba;
-            changed = true;
-        }
+        && let Some(rgba) = parse_hex_argb(bc)
+    {
+        style.stroke_color = rgba;
+        changed = true;
+    }
     if let Some(bw) = obj.get("border_width").and_then(|v| v.as_f64()) {
         style.stroke_width = bw as f32;
         changed = true;
@@ -296,39 +340,73 @@ fn entry_style_to_legacy_custom(val: &easyscanlate_model::EntryStyle) -> Option<
     }
     let mut map = serde_json::Map::new();
     if val.font_size != def.font_size {
-        map.insert("font_size".into(), serde_json::Value::Number(serde_json::Number::from_f64(val.font_size as f64).unwrap()));
+        map.insert(
+            "font_size".into(),
+            serde_json::Value::Number(serde_json::Number::from_f64(val.font_size as f64).unwrap()),
+        );
     }
     if val.auto_size != def.auto_size {
         map.insert("auto_size".into(), serde_json::Value::Bool(val.auto_size));
     }
     if val.line_height != def.line_height {
-        map.insert("line_height".into(), serde_json::Value::Number(serde_json::Number::from_f64(val.line_height as f64).unwrap()));
+        map.insert(
+            "line_height".into(),
+            serde_json::Value::Number(
+                serde_json::Number::from_f64(val.line_height as f64).unwrap(),
+            ),
+        );
     }
     if val.letter_spacing != def.letter_spacing {
-        map.insert("letter_spacing".into(), serde_json::Value::Number(serde_json::Number::from_f64(val.letter_spacing as f64).unwrap()));
+        map.insert(
+            "letter_spacing".into(),
+            serde_json::Value::Number(
+                serde_json::Number::from_f64(val.letter_spacing as f64).unwrap(),
+            ),
+        );
     }
     if val.caps != def.caps {
-        map.insert("caps".into(), serde_json::Value::String(val.caps.label().to_string()));
+        map.insert(
+            "caps".into(),
+            serde_json::Value::String(val.caps.label().to_string()),
+        );
     }
     if val.bg_color != def.bg_color {
-        map.insert("bg_color".into(), serde_json::Value::String(rgba_to_hex(val.bg_color)));
+        map.insert(
+            "bg_color".into(),
+            serde_json::Value::String(rgba_to_hex(val.bg_color)),
+        );
     }
     if val.text_color != def.text_color {
-        map.insert("text_color".into(), serde_json::Value::String(rgba_to_hex(val.text_color)));
+        map.insert(
+            "text_color".into(),
+            serde_json::Value::String(rgba_to_hex(val.text_color)),
+        );
     }
     if val.stroke_color != def.stroke_color {
-        map.insert("border_color".into(), serde_json::Value::String(rgba_to_hex(val.stroke_color)));
+        map.insert(
+            "border_color".into(),
+            serde_json::Value::String(rgba_to_hex(val.stroke_color)),
+        );
     }
     if val.stroke_width != def.stroke_width {
-        map.insert("border_width".into(), serde_json::Value::Number(serde_json::Number::from_f64(val.stroke_width as f64).unwrap()));
+        map.insert(
+            "border_width".into(),
+            serde_json::Value::Number(
+                serde_json::Number::from_f64(val.stroke_width as f64).unwrap(),
+            ),
+        );
     }
     if val.bg_radius != def.bg_radius {
-        map.insert("corner_radius".into(), serde_json::Value::Number(serde_json::Number::from_f64(val.bg_radius as f64).unwrap()));
+        map.insert(
+            "corner_radius".into(),
+            serde_json::Value::Number(serde_json::Number::from_f64(val.bg_radius as f64).unwrap()),
+        );
     }
     if val.font_family != def.font_family
-        && let Some(fam) = &val.font_family {
-            map.insert("font_family".into(), serde_json::Value::String(fam.clone()));
-        }
+        && let Some(fam) = &val.font_family
+    {
+        map.insert("font_family".into(), serde_json::Value::String(fam.clone()));
+    }
     if val.bold != def.bold {
         map.insert("font_bold".into(), serde_json::Value::Bool(val.bold));
     }
@@ -342,9 +420,16 @@ fn entry_style_to_legacy_custom(val: &easyscanlate_model::EntryStyle) -> Option<
             easyscanlate_model::TextAlign::Right => 2,
             easyscanlate_model::TextAlign::Circular => 1,
         };
-        map.insert("text_alignment".into(), serde_json::Value::Number(serde_json::Number::from(v)));
+        map.insert(
+            "text_alignment".into(),
+            serde_json::Value::Number(serde_json::Number::from(v)),
+        );
     }
-    if map.is_empty() { None } else { Some(serde_json::Value::Object(map)) }
+    if map.is_empty() {
+        None
+    } else {
+        Some(serde_json::Value::Object(map))
+    }
 }
 
 fn rgba_to_hex(c: [u8; 4]) -> String {
@@ -355,20 +440,39 @@ fn rgba_to_hex(c: [u8; 4]) -> String {
 pub fn project_to_legacy_master(project: &Project) -> Vec<serde_json::Value> {
     let mut out = Vec::new();
     // need mapping image_id -> filename
-    let id_to_file: HashMap<ImageId, String> = project.images().iter().map(|m| (m.id, m.path.clone())).collect();
+    let id_to_file: HashMap<ImageId, String> = project
+        .images()
+        .iter()
+        .map(|m| (m.id, m.path.clone()))
+        .collect();
     // for filename, use basename only (like legacy)
     for entry in project.ocr.entries() {
         // use entry.id.0+1 as row_number to keep uniqueness, but mimic legacy row_number sequential
         let row_number = entry.id.0 + 1;
-        let filename = id_to_file.get(&entry.image_id).map(|p| {
-            std::path::Path::new(p).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| p.clone())
-        }).unwrap_or_else(|| "unknown.jpg".to_string());
+        let filename = id_to_file
+            .get(&entry.image_id)
+            .map(|p| {
+                std::path::Path::new(p)
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| p.clone())
+            })
+            .unwrap_or_else(|| "unknown.jpg".to_string());
         let mut obj = serde_json::Map::new();
-        obj.insert("row_number".into(), serde_json::Value::Number(serde_json::Number::from(row_number)));
+        obj.insert(
+            "row_number".into(),
+            serde_json::Value::Number(serde_json::Number::from(row_number)),
+        );
         obj.insert("filename".into(), serde_json::Value::String(filename));
         obj.insert("coordinates".into(), serde_json::json!(entry.quad.points));
         obj.insert("text".into(), serde_json::Value::String(entry.text.clone()));
-        obj.insert("confidence".into(), serde_json::Value::Number(serde_json::Number::from_f64(entry.score as f64).unwrap_or(serde_json::Number::from(0))));
+        obj.insert(
+            "confidence".into(),
+            serde_json::Value::Number(
+                serde_json::Number::from_f64(entry.score as f64)
+                    .unwrap_or(serde_json::Number::from(0)),
+            ),
+        );
         // translations
         let mut trans = serde_json::Map::new();
         for prof in project.profiles.iter() {

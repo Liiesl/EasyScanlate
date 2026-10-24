@@ -117,10 +117,7 @@ pub struct LoadingBar {
 
 impl LoadingBar {
     pub fn new(phase: f32) -> Self {
-        Self {
-            phase,
-            label: None,
-        }
+        Self { phase, label: None }
     }
 
     /// Attach an optional label like "LOADING" above the bar.
@@ -235,11 +232,8 @@ impl canvas::Program<UiEvent> for LoadingBarCanvas {
 
         // 3. Draw rounded pill bar
         let radius = (h * 0.5).min(bar_w * 0.5);
-        let path = Path::rounded_rectangle(
-            Point::new(bar_x, 0.0),
-            Size::new(bar_w, h),
-            radius.into(),
-        );
+        let path =
+            Path::rounded_rectangle(Point::new(bar_x, 0.0), Size::new(bar_w, h), radius.into());
 
         frame.fill(&path, gradient);
 

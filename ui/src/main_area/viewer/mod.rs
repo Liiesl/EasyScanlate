@@ -18,8 +18,8 @@ use iced::advanced::graphics::geometry::{self};
 use iced::advanced::layout::{self as iced_layout, Layout};
 use iced::advanced::mouse;
 use iced::advanced::renderer;
-use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::widget::Widget;
+use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::{Clipboard, Shell};
 use iced::keyboard;
 use iced::touch::Event as TouchEvent;
@@ -135,7 +135,8 @@ pub struct TileView<
     on_gradient_angle: Option<Z>,
 }
 
-impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Z> TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Z>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Z>
+    TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Z>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -363,7 +364,8 @@ where
 // Widget impl - delegates geometry/hit-testing/drawing to submodules
 // ---------------------------------------------------------------------------
 
-impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Z, Theme, Renderer> Widget<Message, Theme, Renderer>
+impl<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Z, Theme, Renderer>
+    Widget<Message, Theme, Renderer>
     for TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Z>
 where
     F: Fn(Range<usize>) -> Message,
@@ -397,7 +399,12 @@ where
         tree::State::new(TileViewState::default())
     }
 
-    fn layout(&mut self, tree: &mut Tree, _renderer: &Renderer, limits: &iced_layout::Limits) -> iced_layout::Node {
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        limits: &iced_layout::Limits,
+    ) -> iced_layout::Node {
         let width = limits.max().width;
         let new_viewport = limits.max().height;
         let state = tree.state.downcast_mut::<TileViewState>();
@@ -423,8 +430,8 @@ where
         // fits) have no meaningful anchor: applying `scroll_to` here would
         // force offset 0.0 and lose the position, so keep the stored offset
         // until a real viewport returns.
-        let geometry_valid = new_viewport > f32::EPSILON
-            && new_content_height > new_viewport + f32::EPSILON;
+        let geometry_valid =
+            new_viewport > f32::EPSILON && new_content_height > new_viewport + f32::EPSILON;
         if let Some(anchor) = self.scroll_to {
             if geometry_valid && anchor.is_finite() {
                 let new_offset = offset_from_anchor(anchor, new_content_height, new_viewport);
@@ -441,19 +448,22 @@ where
         if self.reveal != state.last_revealed {
             state.last_revealed = self.reveal;
             if let Some((index, id)) = self.reveal
-                && let Some(new_offset) = hit_test::reveal_offset(&self.tiles, state, index, id) {
-                    state.offset = new_offset;
-                }
+                && let Some(new_offset) = hit_test::reveal_offset(&self.tiles, state, index, id)
+            {
+                state.offset = new_offset;
+            }
         }
         // Inpaint selection reveal (panel -> main area): bring its bbox into view.
         if self.inpaint_reveal != state.last_inpaint_revealed {
             state.last_inpaint_revealed = self.inpaint_reveal;
             if let Some((index, patch_idx)) = self.inpaint_reveal
                 && let Some(tile) = self.tiles.get(index)
-                    && let Some(layer) = tile.inpaint.get(patch_idx)
-                        && let Some(new_offset) = inpaint_reveal_offset(&self.tiles, state, index, layer.bounds) {
-                            state.offset = new_offset;
-                        }
+                && let Some(layer) = tile.inpaint.get(patch_idx)
+                && let Some(new_offset) =
+                    inpaint_reveal_offset(&self.tiles, state, index, layer.bounds)
+            {
+                state.offset = new_offset;
+            }
         }
         if new_viewport > 0.0 {
             state.offset = state
@@ -464,7 +474,16 @@ where
         iced_layout::Node::new(Size::new(width, limits.max().height))
     }
 
-    fn draw(&self, tree: &Tree, renderer: &mut Renderer, _theme: &Theme, _style: &renderer::Style, layout: Layout<'_>, cursor: mouse::Cursor, viewport: &Rectangle) {
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        _theme: &Theme,
+        _style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
         let state = tree.state.downcast_ref::<TileViewState>();
         let bounds = layout.bounds();
         let Some(visible_bounds) = bounds.intersection(viewport) else {
@@ -476,202 +495,244 @@ where
         );
         renderer.with_translation(Vector::new(bounds.x, bounds.y), |renderer| {
             renderer.with_layer(local_bounds, |renderer| {
-            renderer.with_translation(Vector::new(0.0, -state.offset), |renderer| {
-                let top = state.offset;
-                let bottom = state.offset + visible_bounds.height;
-                let content_w = content_width(bounds.width);
-                let (layout, _) = tile_layout(&self.tiles, content_w);
-                for (index, tile) in self.tiles.iter().enumerate() {
-                    let (y, height) = layout[index];
-                    if y + height <= top || y >= bottom {
-                        continue;
-                    }
-                    let tile_bounds = Rectangle::new(Point::new(0.0, y), Size::new(content_w, height));
-                    let mut frame = renderer.new_frame(tile_bounds);
-                    frame.translate(Vector::new(tile_bounds.x, tile_bounds.y));
-                    match tile.decode.image() {
-                        Some(decoded) => {
-                            frame.draw_image(
-                                Rectangle::with_size(frame.size()),
-                                geometry::Image::new(decoded.handle.clone()),
-                            );
-                            if self.show_inpaint {
-                                let scale = frame.width() / tile.source_width.max(1) as f32;
-                                for layer in tile.inpaint {
-                                    let bounds = layer.bounds;
-                                    frame.draw_image(
-                                        Rectangle::new(
-                                            Point::new(bounds[0] * scale, bounds[1] * scale),
-                                            Size::new(bounds[2] * scale, bounds[3] * scale),
-                                        ),
-                                        geometry::Image::new(layer.handle.clone()),
-                                    );
+                renderer.with_translation(Vector::new(0.0, -state.offset), |renderer| {
+                    let top = state.offset;
+                    let bottom = state.offset + visible_bounds.height;
+                    let content_w = content_width(bounds.width);
+                    let (layout, _) = tile_layout(&self.tiles, content_w);
+                    for (index, tile) in self.tiles.iter().enumerate() {
+                        let (y, height) = layout[index];
+                        if y + height <= top || y >= bottom {
+                            continue;
+                        }
+                        let tile_bounds =
+                            Rectangle::new(Point::new(0.0, y), Size::new(content_w, height));
+                        let mut frame = renderer.new_frame(tile_bounds);
+                        frame.translate(Vector::new(tile_bounds.x, tile_bounds.y));
+                        match tile.decode.image() {
+                            Some(decoded) => {
+                                frame.draw_image(
+                                    Rectangle::with_size(frame.size()),
+                                    geometry::Image::new(decoded.handle.clone()),
+                                );
+                                if self.show_inpaint {
+                                    let scale = frame.width() / tile.source_width.max(1) as f32;
+                                    for layer in tile.inpaint {
+                                        let bounds = layer.bounds;
+                                        frame.draw_image(
+                                            Rectangle::new(
+                                                Point::new(bounds[0] * scale, bounds[1] * scale),
+                                                Size::new(bounds[2] * scale, bounds[3] * scale),
+                                            ),
+                                            geometry::Image::new(layer.handle.clone()),
+                                        );
+                                    }
                                 }
                             }
+                            None => {
+                                draw_placeholder(&mut frame, tile.decode.thumb_failed(), self.font)
+                            }
                         }
-                        None => draw_placeholder(&mut frame, tile.decode.thumb_failed(), self.font),
+                        renderer.draw_geometry(frame.into_geometry());
                     }
-                    renderer.draw_geometry(frame.into_geometry());
-                }
-            });
-            let content_w = content_width(bounds.width);
-            let (layout, _) = tile_layout(&self.tiles, content_w);
-            let visible_top = state.offset;
-            let visible_bottom = state.offset + visible_bounds.height;
-            let inpaint_span = if state.inpaint_mode() {
-                match state.interaction {
-                    Interaction::InpaintSelecting { index, start, current } => {
-                        let (sy, _) = layout[index];
-                        let gy0 = sy + start.y.min(current.y);
-                        let gy1 = sy + start.y.max(current.y);
-                        Some((gy0, gy1))
+                });
+                let content_w = content_width(bounds.width);
+                let (layout, _) = tile_layout(&self.tiles, content_w);
+                let visible_top = state.offset;
+                let visible_bottom = state.offset + visible_bounds.height;
+                let inpaint_span = if state.inpaint_mode() {
+                    match state.interaction {
+                        Interaction::InpaintSelecting {
+                            index,
+                            start,
+                            current,
+                        } => {
+                            let (sy, _) = layout[index];
+                            let gy0 = sy + start.y.min(current.y);
+                            let gy1 = sy + start.y.max(current.y);
+                            Some((gy0, gy1))
+                        }
+                        _ => None,
                     }
-                    _ => None,
-                }
-            } else {
-                None
-            };
-            let ocr_span = if state.ocr_mode() {
-                match state.interaction {
-                    Interaction::OcrSelecting { index, start, current } => {
-                        let (sy, _) = layout[index];
-                        let gy0 = sy + start.y.min(current.y);
-                        let gy1 = sy + start.y.max(current.y);
-                        Some((gy0, gy1))
+                } else {
+                    None
+                };
+                let ocr_span = if state.ocr_mode() {
+                    match state.interaction {
+                        Interaction::OcrSelecting {
+                            index,
+                            start,
+                            current,
+                        } => {
+                            let (sy, _) = layout[index];
+                            let gy0 = sy + start.y.min(current.y);
+                            let gy1 = sy + start.y.max(current.y);
+                            Some((gy0, gy1))
+                        }
+                        _ => None,
                     }
-                    _ => None,
-                }
-            } else {
-                None
-            };
-            let is_inpaint_span = |index: usize, gy0: f32, gy1: f32| {
-                let (y, h) = layout[index];
-                gy1 > y && gy0 < y + h
-            };
-            let mut visible_tiles: Vec<usize> = self
-                .tiles
-                .iter()
-                .enumerate()
-                .filter_map(|(index, tile)| {
-                    let (y, height) = layout[index];
-                    let tile_visible = y + height > visible_top && y < visible_bottom;
-                    let is_selecting = inpaint_span.is_some_and(|(gy0, gy1)| is_inpaint_span(index, gy0, gy1))
-                        || ocr_span.is_some_and(|(gy0, gy1)| is_inpaint_span(index, gy0, gy1));
-                    // Keep the selecting tile visible even when it has no overlays so the
-                    // inpaint marquee (rubber band) always has a frame to draw into.
-                    if is_selecting && tile_visible {
-                        return Some(index);
-                    }
-                    // Persistent manual selections keep tiles visible for their marquees
-                    let has_manual = self.manual_selections.iter().any(|(idx, _)| *idx == index);
-                    if has_manual && tile_visible {
-                        return Some(index);
-                    }
-                    let scale = state.width / tile.source_width.max(1) as f32;
-                    let has_visible_entry = tile.overlays.iter().any(|entry| {
-                        let [min_x, min_y, max_x, max_y] = entry.bounds;
-                        let left = min_x * scale;
-                        let right = max_x * scale;
-                        let top = y + min_y * scale;
-                        let bottom = y + max_y * scale;
-                        right >= 0.0 && left <= content_w && bottom >= visible_top && top <= visible_bottom
-                    });
-                    has_visible_entry.then_some(index)
-                })
-                .collect();
-            // Inpaint selection must also drive a frame even while OCR overlays are hidden.
-            if let Some((img_idx, _)) = self.selected_inpaint
-                && !visible_tiles.contains(&img_idx)
+                } else {
+                    None
+                };
+                let is_inpaint_span = |index: usize, gy0: f32, gy1: f32| {
+                    let (y, h) = layout[index];
+                    gy1 > y && gy0 < y + h
+                };
+                let mut visible_tiles: Vec<usize> = self
+                    .tiles
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, tile)| {
+                        let (y, height) = layout[index];
+                        let tile_visible = y + height > visible_top && y < visible_bottom;
+                        let is_selecting = inpaint_span
+                            .is_some_and(|(gy0, gy1)| is_inpaint_span(index, gy0, gy1))
+                            || ocr_span.is_some_and(|(gy0, gy1)| is_inpaint_span(index, gy0, gy1));
+                        // Keep the selecting tile visible even when it has no overlays so the
+                        // inpaint marquee (rubber band) always has a frame to draw into.
+                        if is_selecting && tile_visible {
+                            return Some(index);
+                        }
+                        // Persistent manual selections keep tiles visible for their marquees
+                        let has_manual =
+                            self.manual_selections.iter().any(|(idx, _)| *idx == index);
+                        if has_manual && tile_visible {
+                            return Some(index);
+                        }
+                        let scale = state.width / tile.source_width.max(1) as f32;
+                        let has_visible_entry = tile.overlays.iter().any(|entry| {
+                            let [min_x, min_y, max_x, max_y] = entry.bounds;
+                            let left = min_x * scale;
+                            let right = max_x * scale;
+                            let top = y + min_y * scale;
+                            let bottom = y + max_y * scale;
+                            right >= 0.0
+                                && left <= content_w
+                                && bottom >= visible_top
+                                && top <= visible_bottom
+                        });
+                        has_visible_entry.then_some(index)
+                    })
+                    .collect();
+                // Inpaint selection must also drive a frame even while OCR overlays are hidden.
+                if let Some((img_idx, _)) = self.selected_inpaint
+                    && !visible_tiles.contains(&img_idx)
                     && let Some((y, height)) = layout.get(img_idx).copied()
-                        && y + height > visible_top && y < visible_bottom {
-                            visible_tiles.push(img_idx);
+                    && y + height > visible_top
+                    && y < visible_bottom
+                {
+                    visible_tiles.push(img_idx);
+                }
+                // Ensure selecting marquee tiles are visible even if overlays hidden (span-aware)
+                if visible_tiles.is_empty() {
+                    if let Some((gy0, gy1)) = inpaint_span {
+                        for (idx, (y, height)) in layout.iter().enumerate() {
+                            if gy1 > *y
+                                && gy0 < *y + *height
+                                && *y + *height > visible_top
+                                && *y < visible_bottom
+                                && !visible_tiles.contains(&idx)
+                            {
+                                visible_tiles.push(idx);
+                            }
                         }
-            // Ensure selecting marquee tiles are visible even if overlays hidden (span-aware)
-            if visible_tiles.is_empty() {
-                if let Some((gy0, gy1)) = inpaint_span {
-                    for (idx, (y, height)) in layout.iter().enumerate() {
-                        if gy1 > *y && gy0 < *y + *height && *y + *height > visible_top && *y < visible_bottom
-                            && !visible_tiles.contains(&idx) { visible_tiles.push(idx); }
                     }
-                }
-                if let Some((gy0, gy1)) = ocr_span {
-                    for (idx, (y, height)) in layout.iter().enumerate() {
-                        if gy1 > *y && gy0 < *y + *height && *y + *height > visible_top && *y < visible_bottom
-                            && !visible_tiles.contains(&idx) { visible_tiles.push(idx); }
+                    if let Some((gy0, gy1)) = ocr_span {
+                        for (idx, (y, height)) in layout.iter().enumerate() {
+                            if gy1 > *y
+                                && gy0 < *y + *height
+                                && *y + *height > visible_top
+                                && *y < visible_bottom
+                                && !visible_tiles.contains(&idx)
+                            {
+                                visible_tiles.push(idx);
+                            }
+                        }
                     }
-                }
-                // also for persistent manual selections when otherwise empty
-                if !self.manual_selections.is_empty() {
+                    // also for persistent manual selections when otherwise empty
+                    if !self.manual_selections.is_empty() {
+                        for (sel_idx, _) in &self.manual_selections {
+                            if !visible_tiles.contains(sel_idx)
+                                && let Some((y, height)) = layout.get(*sel_idx).copied()
+                                && y + height > visible_top
+                                && y < visible_bottom
+                            {
+                                visible_tiles.push(*sel_idx);
+                            }
+                        }
+                    }
+                } else {
+                    // Even when we have visible_tiles, ensure manual tiles are included
                     for (sel_idx, _) in &self.manual_selections {
                         if !visible_tiles.contains(sel_idx)
                             && let Some((y, height)) = layout.get(*sel_idx).copied()
-                                && y + height > visible_top && y < visible_bottom {
-                                    visible_tiles.push(*sel_idx);
-                                }
+                            && y + height > visible_top
+                            && y < visible_bottom
+                        {
+                            visible_tiles.push(*sel_idx);
+                        }
                     }
                 }
-            } else {
-                // Even when we have visible_tiles, ensure manual tiles are included
-                for (sel_idx, _) in &self.manual_selections {
-                    if !visible_tiles.contains(sel_idx)
-                        && let Some((y, height)) = layout.get(*sel_idx).copied()
-                            && y + height > visible_top && y < visible_bottom {
-                                visible_tiles.push(*sel_idx);
-                            }
-                }
-            }
-            if !visible_tiles.is_empty() {
-                renderer.with_layer(local_bounds, |renderer| {
-                    renderer.with_translation(Vector::new(0.0, -state.offset), |renderer| {
-                        let overlay_clip = Rectangle::new(
-                            Point::new(0.0, state.offset),
-                            Size::new(content_w, visible_bounds.height),
-                        );
-                        let mut overlay_frame = renderer.new_frame(overlay_clip);
-                        for index in visible_tiles {
-                            let (y, height) = layout[index];
-                            let tile_bounds = Rectangle::new(Point::new(0.0, y), Size::new(content_w, height));
-                            overlay_frame.push_transform();
-                            overlay_frame.translate(Vector::new(tile_bounds.x, tile_bounds.y));
-                            crate::main_area::overlay::draw_entries(
-                                &mut overlay_frame,
-                                &self.tiles[index].overlays,
-                                self.font,
-                                self.tiles[index].source_width as f32,
-                                !self.show_overlay_text,
+                if !visible_tiles.is_empty() {
+                    renderer.with_layer(local_bounds, |renderer| {
+                        renderer.with_translation(Vector::new(0.0, -state.offset), |renderer| {
+                            let overlay_clip = Rectangle::new(
+                                Point::new(0.0, state.offset),
+                                Size::new(content_w, visible_bounds.height),
                             );
-                            let cursor_local = cursor.position_over(bounds).map(|position| {
-                                Point::new(
-                                    position.x - bounds.x,
-                                    position.y - bounds.y + state.offset - tile_bounds.y,
-                                )
-                            });
-                            let flip_at = state.offset + visible_bounds.height - tile_bounds.y;
-                            let flip_from = state.offset - tile_bounds.y;
-                            draw_selection_decorations(
-                                &mut overlay_frame,
-                                state,
-                                &self.tiles,
-                                index,
-                                cursor_local,
-                                flip_from,
-                                flip_at,
-                                self.show_overlay_text,
-                                self.gradient_handle,
-                            );
-                            // Inpaint static highlight + floating toolbar (no handles), like result border.
-                            if self.show_inpaint {
-                                draw_inpaint_decorations(
+                            let mut overlay_frame = renderer.new_frame(overlay_clip);
+                            for index in visible_tiles {
+                                let (y, height) = layout[index];
+                                let tile_bounds = Rectangle::new(
+                                    Point::new(0.0, y),
+                                    Size::new(content_w, height),
+                                );
+                                overlay_frame.push_transform();
+                                overlay_frame.translate(Vector::new(tile_bounds.x, tile_bounds.y));
+                                crate::main_area::overlay::draw_entries(
                                     &mut overlay_frame,
+                                    &self.tiles[index].overlays,
+                                    self.font,
+                                    self.tiles[index].source_width as f32,
+                                    !self.show_overlay_text,
+                                );
+                                let cursor_local = cursor.position_over(bounds).map(|position| {
+                                    Point::new(
+                                        position.x - bounds.x,
+                                        position.y - bounds.y + state.offset - tile_bounds.y,
+                                    )
+                                });
+                                let flip_at = state.offset + visible_bounds.height - tile_bounds.y;
+                                let flip_from = state.offset - tile_bounds.y;
+                                draw_selection_decorations(
+                                    &mut overlay_frame,
+                                    state,
                                     &self.tiles,
                                     index,
-                                    self.selected_inpaint,
                                     cursor_local,
+                                    flip_from,
                                     flip_at,
+                                    self.show_overlay_text,
+                                    self.gradient_handle,
                                 );
-                            }
-                            if state.inpaint_mode()
-                                && let Interaction::InpaintSelecting { index: sel_idx, start, current } = state.interaction {
+                                // Inpaint static highlight + floating toolbar (no handles), like result border.
+                                if self.show_inpaint {
+                                    draw_inpaint_decorations(
+                                        &mut overlay_frame,
+                                        &self.tiles,
+                                        index,
+                                        self.selected_inpaint,
+                                        cursor_local,
+                                        flip_at,
+                                    );
+                                }
+                                if state.inpaint_mode()
+                                    && let Interaction::InpaintSelecting {
+                                        index: sel_idx,
+                                        start,
+                                        current,
+                                    } = state.interaction
+                                {
                                     let (adj_start, adj_current) = adjust_selection_points(
                                         start,
                                         current,
@@ -689,11 +750,21 @@ where
                                         let y1 = (global_y1.min(y_tile + h_tile) - y_tile).max(0.0);
                                         let a = Point::new(x0, y0);
                                         let b = Point::new(x1, y1);
-                                        draw_inpaint_marquee(&mut overlay_frame, a, b, tile_bounds.size());
+                                        draw_inpaint_marquee(
+                                            &mut overlay_frame,
+                                            a,
+                                            b,
+                                            tile_bounds.size(),
+                                        );
                                     }
                                 }
-                            if state.ocr_mode()
-                                && let Interaction::OcrSelecting { index: sel_idx, start, current } = state.interaction {
+                                if state.ocr_mode()
+                                    && let Interaction::OcrSelecting {
+                                        index: sel_idx,
+                                        start,
+                                        current,
+                                    } = state.interaction
+                                {
                                     let (adj_start, adj_current) = adjust_selection_points(
                                         start,
                                         current,
@@ -711,23 +782,32 @@ where
                                         let y1 = (global_y1.min(y_tile + h_tile) - y_tile).max(0.0);
                                         let a = Point::new(x0, y0);
                                         let b = Point::new(x1, y1);
-                                        draw_ocr_marquee(&mut overlay_frame, a, b, tile_bounds.size());
+                                        draw_ocr_marquee(
+                                            &mut overlay_frame,
+                                            a,
+                                            b,
+                                            tile_bounds.size(),
+                                        );
                                     }
                                 }
-                            // Horizontal-only canvas auto-align guide: one per-tile
-                            // segment at the same X so it reads as continuous.
-                            if matches!(state.interaction, Interaction::Dragging { .. })
-                                && let Some(guide_x) = state.align_guide
-                            {
-                                draw_align_guide(&mut overlay_frame, guide_x, tile_bounds.height);
-                            }
-                            // Shift axis-lock guide: same pink style as alignment.
-                            // Vertical reuses the align draw; horizontal draws
-                            // across this tile only when the locked Y crosses it.
-                            if matches!(state.interaction, Interaction::Dragging { .. })
-                                && let Some(axis) = state.axis_lock
-                            {
-                                match axis {
+                                // Horizontal-only canvas auto-align guide: one per-tile
+                                // segment at the same X so it reads as continuous.
+                                if matches!(state.interaction, Interaction::Dragging { .. })
+                                    && let Some(guide_x) = state.align_guide
+                                {
+                                    draw_align_guide(
+                                        &mut overlay_frame,
+                                        guide_x,
+                                        tile_bounds.height,
+                                    );
+                                }
+                                // Shift axis-lock guide: same pink style as alignment.
+                                // Vertical reuses the align draw; horizontal draws
+                                // across this tile only when the locked Y crosses it.
+                                if matches!(state.interaction, Interaction::Dragging { .. })
+                                    && let Some(axis) = state.axis_lock
+                                {
+                                    match axis {
                                     crate::main_area::viewer::state::AxisLockGuide::Vertical(
                                         x,
                                     ) => {
@@ -748,76 +828,99 @@ where
                                         );
                                     }
                                 }
-                            }
-                            // Persistent manual multi-select rubber bands (kept after drag release)
-                            if !self.manual_selections.is_empty() {
-                                let scale = self.tiles[index].source_width.max(1) as f32;
-                                let tile_scale = state.width / scale;
-                                let is_inpaint = self.manual_mode == crate::event::ManualMode::Inpaint;
-                                for (sel_idx, rect) in &self.manual_selections {
-                                    if *sel_idx != index { continue; }
-                                    let x0 = rect.x * tile_scale;
-                                    let y0 = rect.y * tile_scale;
-                                    let x1 = (rect.x + rect.width) * tile_scale;
-                                    let y1 = (rect.y + rect.height) * tile_scale;
-                                    let a = Point::new(x0, y0);
-                                    let b = Point::new(x1, y1);
-                                    if is_inpaint {
-                                        draw_inpaint_marquee(&mut overlay_frame, a, b, tile_bounds.size());
-                                    } else {
-                                        draw_ocr_marquee(&mut overlay_frame, a, b, tile_bounds.size());
+                                }
+                                // Persistent manual multi-select rubber bands (kept after drag release)
+                                if !self.manual_selections.is_empty() {
+                                    let scale = self.tiles[index].source_width.max(1) as f32;
+                                    let tile_scale = state.width / scale;
+                                    let is_inpaint =
+                                        self.manual_mode == crate::event::ManualMode::Inpaint;
+                                    for (sel_idx, rect) in &self.manual_selections {
+                                        if *sel_idx != index {
+                                            continue;
+                                        }
+                                        let x0 = rect.x * tile_scale;
+                                        let y0 = rect.y * tile_scale;
+                                        let x1 = (rect.x + rect.width) * tile_scale;
+                                        let y1 = (rect.y + rect.height) * tile_scale;
+                                        let a = Point::new(x0, y0);
+                                        let b = Point::new(x1, y1);
+                                        if is_inpaint {
+                                            draw_inpaint_marquee(
+                                                &mut overlay_frame,
+                                                a,
+                                                b,
+                                                tile_bounds.size(),
+                                            );
+                                        } else {
+                                            draw_ocr_marquee(
+                                                &mut overlay_frame,
+                                                a,
+                                                b,
+                                                tile_bounds.size(),
+                                            );
+                                        }
                                     }
                                 }
+                                overlay_frame.pop_transform();
                             }
-                            overlay_frame.pop_transform();
-                        }
-                        renderer.draw_geometry(overlay_frame.into_geometry());
+                            renderer.draw_geometry(overlay_frame.into_geometry());
+                        });
                     });
+                }
+            });
+            if self.show_scrollbar && state.content_height > visible_bounds.height + 1.0 {
+                renderer.with_layer(local_bounds, |renderer| {
+                    let mut frame = renderer.new_frame(local_bounds);
+                    draw_scrollbar(&mut frame, state, local_bounds);
+                    renderer.draw_geometry(frame.into_geometry());
                 });
             }
-        });
-        if self.show_scrollbar && state.content_height > visible_bounds.height + 1.0 {
-            renderer.with_layer(local_bounds, |renderer| {
-                let mut frame = renderer.new_frame(local_bounds);
-                draw_scrollbar(&mut frame, state, local_bounds);
-                renderer.draw_geometry(frame.into_geometry());
-            });
-        }
-        if self.show_overlay_buttons {
-            let hovered_button = cursor
-                .position_over(bounds)
-                .map(|position| {
-                    let local = Point::new(position.x - bounds.x, position.y - bounds.y);
-                    hit_overlay_button(local_bounds, local)
-                })
-                .unwrap_or(None);
-            let hovered_menu = if state.save_menu_open {
-                cursor
+            if self.show_overlay_buttons {
+                let hovered_button = cursor
                     .position_over(bounds)
                     .map(|position| {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
-                        hit_save_menu_button(local_bounds, local)
+                        hit_overlay_button(local_bounds, local)
                     })
-                    .unwrap_or(None)
-            } else {
-                None
-            };
-            renderer.with_layer(local_bounds, |renderer| {
-                let mut frame = renderer.new_frame(local_bounds);
-                draw_overlay_buttons(
-                    &mut frame,
-                    local_bounds,
-                    hovered_button,
-                    state.save_menu_open,
-                    hovered_menu,
-                );
-                renderer.draw_geometry(frame.into_geometry());
-            });
-        }
+                    .unwrap_or(None);
+                let hovered_menu = if state.save_menu_open {
+                    cursor
+                        .position_over(bounds)
+                        .map(|position| {
+                            let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                            hit_save_menu_button(local_bounds, local)
+                        })
+                        .unwrap_or(None)
+                } else {
+                    None
+                };
+                renderer.with_layer(local_bounds, |renderer| {
+                    let mut frame = renderer.new_frame(local_bounds);
+                    draw_overlay_buttons(
+                        &mut frame,
+                        local_bounds,
+                        hovered_button,
+                        state.save_menu_open,
+                        hovered_menu,
+                    );
+                    renderer.draw_geometry(frame.into_geometry());
+                });
+            }
         });
     }
 
-    fn update(&mut self, tree: &mut Tree, event: &Event, layout: Layout<'_>, cursor: mouse::Cursor, _renderer: &Renderer, _clipboard: &mut dyn Clipboard, shell: &mut Shell<'_, Message>, _viewport: &Rectangle) {
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _renderer: &Renderer,
+        _clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        _viewport: &Rectangle,
+    ) {
         let state = tree.state.downcast_mut::<TileViewState>();
         let bounds = layout.bounds();
         state.width = content_width(bounds.width);
@@ -856,7 +959,8 @@ where
                     shell.capture_event();
                 }
             }
-            Event::Touch(TouchEvent::FingerLifted { .. }) | Event::Touch(TouchEvent::FingerLost { .. }) => {
+            Event::Touch(TouchEvent::FingerLifted { .. })
+            | Event::Touch(TouchEvent::FingerLost { .. }) => {
                 if matches!(state.interaction, Interaction::TouchScrolling { .. }) {
                     state.interaction = Interaction::None;
                     if let Some(callback) = self.on_scroll_ended.as_ref() {
@@ -870,11 +974,14 @@ where
                     let local = local_point(position, bounds);
                     if self.show_overlay_buttons {
                         if state.save_menu_open
-                            && let Some(menu_button) = hit_save_menu_button(bounds, local) {
-                                state.interaction = Interaction::SaveMenuPressed { button: menu_button };
-                                shell.capture_event();
-                                return;
-                            }
+                            && let Some(menu_button) = hit_save_menu_button(bounds, local)
+                        {
+                            state.interaction = Interaction::SaveMenuPressed {
+                                button: menu_button,
+                            };
+                            shell.capture_event();
+                            return;
+                        }
                         if let Some(button) = hit_overlay_button(bounds, local) {
                             state.interaction = Interaction::OverlayButtonPressed { button };
                             shell.capture_event();
@@ -889,23 +996,35 @@ where
                     // Persistent manual mode has priority over inpaint patch toolbar
                     if self.manual_mode != ManualMode::None {
                         if let Some(hover_index) = hit_tile(&self.tiles, state, local)
-                            && !track_rect(bounds).contains(local) {
-                                let (layout, _) = tile_layout(&self.tiles, state.width);
-                                let content = tile_local_point(&layout, hover_index, local, state.offset);
-                                match self.manual_mode {
-                                    ManualMode::Inpaint => {
-                                        state.interaction = Interaction::InpaintSelecting { index: hover_index, start: content, current: content };
-                                    }
-                                    ManualMode::Ocr => {
-                                        state.interaction = Interaction::OcrSelecting { index: hover_index, start: content, current: content };
-                                    }
-                                    ManualMode::None => {}
+                            && !track_rect(bounds).contains(local)
+                        {
+                            let (layout, _) = tile_layout(&self.tiles, state.width);
+                            let content =
+                                tile_local_point(&layout, hover_index, local, state.offset);
+                            match self.manual_mode {
+                                ManualMode::Inpaint => {
+                                    state.interaction = Interaction::InpaintSelecting {
+                                        index: hover_index,
+                                        start: content,
+                                        current: content,
+                                    };
                                 }
-                                shell.capture_event();
-                                return;
+                                ManualMode::Ocr => {
+                                    state.interaction = Interaction::OcrSelecting {
+                                        index: hover_index,
+                                        start: content,
+                                        current: content,
+                                    };
+                                }
+                                ManualMode::None => {}
                             }
+                            shell.capture_event();
+                            return;
+                        }
                         if self.show_scrollbar && track_rect(bounds).contains(local) {
-                            state.interaction = Interaction::ScrollerGrabbed { grab_offset: local.y - thumb_rect(bounds, state).y };
+                            state.interaction = Interaction::ScrollerGrabbed {
+                                grab_offset: local.y - thumb_rect(bounds, state).y,
+                            };
                             shell.capture_event();
                         } else {
                             shell.capture_event();
@@ -921,15 +1040,16 @@ where
                                 state,
                                 self.selected_inpaint,
                                 local,
-                            ) {
-                                state.interaction = Interaction::InpaintToolbarPressed {
-                                    index: idx,
-                                    patch,
-                                    action,
-                                };
-                                shell.capture_event();
-                                return;
-                            }
+                            )
+                        {
+                            state.interaction = Interaction::InpaintToolbarPressed {
+                                index: idx,
+                                patch,
+                                action,
+                            };
+                            shell.capture_event();
+                            return;
+                        }
                         // While an inpaint is selected OCR overlays are hidden and must not
                         // be interactive (no drag/resize/rotate/toolbar). Fall through to
                         // scrollbar / empty click handling only.
@@ -957,30 +1077,34 @@ where
                         }
                         if self.inpaint_mode
                             && let Some(hover_index) = hit_tile(&self.tiles, state, local)
-                                && !track_rect(bounds).contains(local) {
-                                    let (layout, _) = tile_layout(&self.tiles, state.width);
-                                    let content = tile_local_point(&layout, hover_index, local, state.offset);
-                                    state.interaction = Interaction::InpaintSelecting {
-                                        index: hover_index,
-                                        start: content,
-                                        current: content,
-                                    };
-                                    shell.capture_event();
-                                    return;
-                                }
+                            && !track_rect(bounds).contains(local)
+                        {
+                            let (layout, _) = tile_layout(&self.tiles, state.width);
+                            let content =
+                                tile_local_point(&layout, hover_index, local, state.offset);
+                            state.interaction = Interaction::InpaintSelecting {
+                                index: hover_index,
+                                start: content,
+                                current: content,
+                            };
+                            shell.capture_event();
+                            return;
+                        }
                         if self.ocr_mode
                             && let Some(hover_index) = hit_tile(&self.tiles, state, local)
-                                && !track_rect(bounds).contains(local) {
-                                    let (layout, _) = tile_layout(&self.tiles, state.width);
-                                    let content = tile_local_point(&layout, hover_index, local, state.offset);
-                                    state.interaction = Interaction::OcrSelecting {
-                                        index: hover_index,
-                                        start: content,
-                                        current: content,
-                                    };
-                                    shell.capture_event();
-                                    return;
-                                }
+                            && !track_rect(bounds).contains(local)
+                        {
+                            let (layout, _) = tile_layout(&self.tiles, state.width);
+                            let content =
+                                tile_local_point(&layout, hover_index, local, state.offset);
+                            state.interaction = Interaction::OcrSelecting {
+                                index: hover_index,
+                                start: content,
+                                current: content,
+                            };
+                            shell.capture_event();
+                            return;
+                        }
                         if let Some((index, id, hit)) = hit_top_decor(&self.tiles, state, local) {
                             match hit {
                                 TopDecorHit::Revert => {
@@ -1016,44 +1140,46 @@ where
                             }
                         }
                         if let Some((index, id, handle)) = hit_handle(&self.tiles, state, local)
-                            && let Some(quad) = hit_test::entry_quad(&self.tiles, index, id) {
-                                if let Some(corner) = handle.corner()
-                                    && state.keyboard_modifiers.command() {
-                                        state.interaction = Interaction::DistortPending {
-                                            index,
-                                            id,
-                                            corner,
-                                            quad: Quad {
-                                                points: crate::main_area::geometry::order_quad(quad.points),
-                                            },
-                                            press: local,
-                                        };
-                                        shell.capture_event();
-                                        return;
-                                    }
-                                if handle.edge().is_some() && state.keyboard_modifiers.command() {
-                                    state.interaction = Interaction::SkewPending {
-                                        index,
-                                        id,
-                                        handle,
-                                        quad: Quad {
-                                            points: crate::main_area::geometry::order_quad(quad.points),
-                                        },
-                                        press: local,
-                                    };
-                                    shell.capture_event();
-                                    return;
-                                }
-                                state.interaction = Interaction::ResizePending {
+                            && let Some(quad) = hit_test::entry_quad(&self.tiles, index, id)
+                        {
+                            if let Some(corner) = handle.corner()
+                                && state.keyboard_modifiers.command()
+                            {
+                                state.interaction = Interaction::DistortPending {
                                     index,
                                     id,
-                                    handle,
-                                    quad,
+                                    corner,
+                                    quad: Quad {
+                                        points: crate::main_area::geometry::order_quad(quad.points),
+                                    },
                                     press: local,
                                 };
                                 shell.capture_event();
                                 return;
                             }
+                            if handle.edge().is_some() && state.keyboard_modifiers.command() {
+                                state.interaction = Interaction::SkewPending {
+                                    index,
+                                    id,
+                                    handle,
+                                    quad: Quad {
+                                        points: crate::main_area::geometry::order_quad(quad.points),
+                                    },
+                                    press: local,
+                                };
+                                shell.capture_event();
+                                return;
+                            }
+                            state.interaction = Interaction::ResizePending {
+                                index,
+                                id,
+                                handle,
+                                quad,
+                                press: local,
+                            };
+                            shell.capture_event();
+                            return;
+                        }
                     }
                     if self.show_scrollbar && track_rect(bounds).contains(local) {
                         state.interaction = Interaction::ScrollerGrabbed {
@@ -1066,67 +1192,79 @@ where
                         let is_double = matches!(&state.last_click, Some((at, prev)) if *prev == hit && now.duration_since(*at) <= DOUBLE_CLICK_DELAY);
                         state.last_click = Some((now, hit));
                         if is_double {
-                            if let (Some(hit), Some(callback)) = (hit, self.on_entry_double_clicked.as_ref()) {
+                            if let (Some(hit), Some(callback)) =
+                                (hit, self.on_entry_double_clicked.as_ref())
+                            {
                                 shell.publish(callback(hit));
                             }
-                            if let (Some(hit), Some(rect_callback)) = (hit, self.on_edit_rect.as_ref())
-                                && let Some(rect) = editing_rect(&self.tiles, state, hit) {
-                                    state.last_edit_rect = Some(rect);
-                                    shell.publish(rect_callback(rect));
-                                }
+                            if let (Some(hit), Some(rect_callback)) =
+                                (hit, self.on_edit_rect.as_ref())
+                                && let Some(rect) = editing_rect(&self.tiles, state, hit)
+                            {
+                                state.last_edit_rect = Some(rect);
+                                shell.publish(rect_callback(rect));
+                            }
                         } else if let Some(callback) = self.on_entry_clicked.as_ref() {
                             shell.publish(callback(hit));
                         }
                         if let Some((index, id)) = hit
                             && let Some(offset) = drag_grab(&self.tiles, state, index, id, local)
-                                && let Some(quad) = hit_test::entry_quad(&self.tiles, index, id) {
-                                    state.interaction = Interaction::DragPending {
-                                        index,
-                                        id,
-                                        offset,
-                                        quad,
-                                        press: local,
-                                    };
-                                }
+                            && let Some(quad) = hit_test::entry_quad(&self.tiles, index, id)
+                        {
+                            state.interaction = Interaction::DragPending {
+                                index,
+                                id,
+                                offset,
+                                quad,
+                                press: local,
+                            };
+                        }
                         shell.capture_event();
                     }
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                if let Interaction::InpaintToolbarPressed { index, patch, action } = state.interaction
-                    && let Some(position) = cursor.position_over(bounds) {
-                        let local = local_point(position, bounds);
-                        let still_hovered = hit_inpaint_toolbar(
-                            &self.tiles,
-                            state,
-                            self.selected_inpaint,
-                            local,
-                        ) == Some((index, patch, action));
-                        if still_hovered
-                            && let Some(callback) = self.on_inpaint_toolbar.as_ref() {
-                                shell.publish(callback((index, patch, action)));
-                                shell.request_redraw();
-                            }
+                if let Interaction::InpaintToolbarPressed {
+                    index,
+                    patch,
+                    action,
+                } = state.interaction
+                    && let Some(position) = cursor.position_over(bounds)
+                {
+                    let local = local_point(position, bounds);
+                    let still_hovered =
+                        hit_inpaint_toolbar(&self.tiles, state, self.selected_inpaint, local)
+                            == Some((index, patch, action));
+                    if still_hovered && let Some(callback) = self.on_inpaint_toolbar.as_ref() {
+                        shell.publish(callback((index, patch, action)));
+                        shell.request_redraw();
                     }
+                }
                 if let Interaction::ToolbarPressed { index, id, action } = state.interaction
-                    && let Some(position) = cursor.position_over(bounds) {
-                        let local = local_point(position, bounds);
-                        let still_hovered = match action {
-                            ToolbarAction::RevertTransform => {
-                                hit_top_decor(&self.tiles, state, local) == Some((index, id, TopDecorHit::Revert))
-                            }
-                            _ => hit_toolbar(&self.tiles, state, local) == Some((index, id, action)),
-                        };
-                        if still_hovered
-                            && let Some(callback) = self.on_toolbar_action.as_ref() {
-                                shell.publish(callback((index, id, action)));
-                                shell.request_redraw();
-                            }
+                    && let Some(position) = cursor.position_over(bounds)
+                {
+                    let local = local_point(position, bounds);
+                    let still_hovered = match action {
+                        ToolbarAction::RevertTransform => {
+                            hit_top_decor(&self.tiles, state, local)
+                                == Some((index, id, TopDecorHit::Revert))
+                        }
+                        _ => hit_toolbar(&self.tiles, state, local) == Some((index, id, action)),
+                    };
+                    if still_hovered && let Some(callback) = self.on_toolbar_action.as_ref() {
+                        shell.publish(callback((index, id, action)));
+                        shell.request_redraw();
                     }
+                }
                 let manual_active = self.manual_mode != ManualMode::None;
                 if manual_active {
                     // In manual mode every drag is accumulated as persistent selections
-                    if let Interaction::InpaintSelecting { index, start, current } = state.interaction {
+                    if let Interaction::InpaintSelecting {
+                        index,
+                        start,
+                        current,
+                    } = state.interaction
+                    {
                         let (layout, _) = tile_layout(&self.tiles, state.width);
                         let (adj_start, adj_current) = adjust_selection_points(
                             start,
@@ -1143,19 +1281,28 @@ where
                             let (gy0, gy1) = (gy0_raw.min(gy1_raw), gy0_raw.max(gy1_raw));
                             let mut spans: Vec<(usize, Rectangle)> = Vec::new();
                             for (i, (y, h)) in layout.iter().enumerate() {
-                                if gy1 <= *y || gy0 >= y + h { continue; }
+                                if gy1 <= *y || gy0 >= y + h {
+                                    continue;
+                                }
                                 let y0_tile = (gy0.max(*y) - y).max(0.0);
                                 let y1_tile = (gy1.min(y + h) - y).max(0.0);
-                                if y1_tile <= y0_tile { continue; }
+                                if y1_tile <= y0_tile {
+                                    continue;
+                                }
                                 let tile = &self.tiles[i];
-                                if tile.source_width == 0 { continue; }
+                                if tile.source_width == 0 {
+                                    continue;
+                                }
                                 let scale = state.width / tile.source_width as f32;
-                                if scale <= 0.0 { continue; }
+                                if scale <= 0.0 {
+                                    continue;
+                                }
                                 let rect = Rectangle::new(
                                     Point::new(x0 / scale, y0_tile / scale),
                                     Size::new((x1 - x0) / scale, (y1_tile - y0_tile) / scale),
                                 );
-                                if rect.width >= MIN_INPAINT_EDGE && rect.height >= MIN_INPAINT_EDGE {
+                                if rect.width >= MIN_INPAINT_EDGE && rect.height >= MIN_INPAINT_EDGE
+                                {
                                     spans.push((i, rect));
                                 }
                             }
@@ -1175,14 +1322,23 @@ where
                                     shell.publish(cb(spans));
                                     shell.request_redraw();
                                 } else if let Some(cb) = self.on_inpaint_span.as_ref() {
-                                    let trimmed = if spans.len() > 2 { spans[..2].to_vec() } else { spans };
+                                    let trimmed = if spans.len() > 2 {
+                                        spans[..2].to_vec()
+                                    } else {
+                                        spans
+                                    };
                                     shell.publish(cb(trimmed));
                                     shell.request_redraw();
                                 }
                             }
                         }
                     }
-                    if let Interaction::OcrSelecting { index, start, current } = state.interaction {
+                    if let Interaction::OcrSelecting {
+                        index,
+                        start,
+                        current,
+                    } = state.interaction
+                    {
                         let (layout, _) = tile_layout(&self.tiles, state.width);
                         let (adj_start, adj_current) = adjust_selection_points(
                             start,
@@ -1199,14 +1355,22 @@ where
                             let (gy0, gy1) = (gy0_raw.min(gy1_raw), gy0_raw.max(gy1_raw));
                             let mut spans: Vec<(usize, Rectangle)> = Vec::new();
                             for (i, (y, h)) in layout.iter().enumerate() {
-                                if gy1 <= *y || gy0 >= y + h { continue; }
+                                if gy1 <= *y || gy0 >= y + h {
+                                    continue;
+                                }
                                 let y0_tile = (gy0.max(*y) - y).max(0.0);
                                 let y1_tile = (gy1.min(y + h) - y).max(0.0);
-                                if y1_tile <= y0_tile { continue; }
+                                if y1_tile <= y0_tile {
+                                    continue;
+                                }
                                 let tile = &self.tiles[i];
-                                if tile.source_width == 0 { continue; }
+                                if tile.source_width == 0 {
+                                    continue;
+                                }
                                 let scale = state.width / tile.source_width as f32;
-                                if scale <= 0.0 { continue; }
+                                if scale <= 0.0 {
+                                    continue;
+                                }
                                 let rect = Rectangle::new(
                                     Point::new(x0 / scale, y0_tile / scale),
                                     Size::new((x1 - x0) / scale, (y1_tile - y0_tile) / scale),
@@ -1230,7 +1394,11 @@ where
                                     shell.publish(cb(spans));
                                     shell.request_redraw();
                                 } else if let Some(cb) = self.on_ocr_span.as_ref() {
-                                    let trimmed = if spans.len() > 2 { spans[..2].to_vec() } else { spans };
+                                    let trimmed = if spans.len() > 2 {
+                                        spans[..2].to_vec()
+                                    } else {
+                                        spans
+                                    };
                                     shell.publish(cb(trimmed));
                                     shell.request_redraw();
                                 }
@@ -1238,7 +1406,12 @@ where
                         }
                     }
                 } else {
-                    if let Interaction::InpaintSelecting { index, start, current } = state.interaction {
+                    if let Interaction::InpaintSelecting {
+                        index,
+                        start,
+                        current,
+                    } = state.interaction
+                    {
                         let (layout, _) = tile_layout(&self.tiles, state.width);
                         let (adj_start, adj_current) = adjust_selection_points(
                             start,
@@ -1255,19 +1428,28 @@ where
                             let (gy0, gy1) = (gy0_raw.min(gy1_raw), gy0_raw.max(gy1_raw));
                             let mut spans: Vec<(usize, Rectangle)> = Vec::new();
                             for (i, (y, h)) in layout.iter().enumerate() {
-                                if gy1 <= *y || gy0 >= y + h { continue; }
+                                if gy1 <= *y || gy0 >= y + h {
+                                    continue;
+                                }
                                 let y0_tile = (gy0.max(*y) - y).max(0.0);
                                 let y1_tile = (gy1.min(y + h) - y).max(0.0);
-                                if y1_tile <= y0_tile { continue; }
+                                if y1_tile <= y0_tile {
+                                    continue;
+                                }
                                 let tile = &self.tiles[i];
-                                if tile.source_width == 0 { continue; }
+                                if tile.source_width == 0 {
+                                    continue;
+                                }
                                 let scale = state.width / tile.source_width as f32;
-                                if scale <= 0.0 { continue; }
+                                if scale <= 0.0 {
+                                    continue;
+                                }
                                 let rect = Rectangle::new(
                                     Point::new(x0 / scale, y0_tile / scale),
                                     Size::new((x1 - x0) / scale, (y1_tile - y0_tile) / scale),
                                 );
-                                if rect.width >= MIN_INPAINT_EDGE && rect.height >= MIN_INPAINT_EDGE {
+                                if rect.width >= MIN_INPAINT_EDGE && rect.height >= MIN_INPAINT_EDGE
+                                {
                                     spans.push((i, rect));
                                 }
                             }
@@ -1281,7 +1463,11 @@ where
                             } else {
                                 spans.sort_by_key(|(idx, _)| *idx);
                                 // limit to 2 consecutive images (span across seam only)
-                                let trimmed = if spans.len() > 2 { spans[..2].to_vec() } else { spans };
+                                let trimmed = if spans.len() > 2 {
+                                    spans[..2].to_vec()
+                                } else {
+                                    spans
+                                };
                                 if let Some(callback) = self.on_inpaint_span.as_ref() {
                                     shell.publish(callback(trimmed));
                                     shell.request_redraw();
@@ -1292,7 +1478,12 @@ where
                             }
                         }
                     }
-                    if let Interaction::OcrSelecting { index, start, current } = state.interaction {
+                    if let Interaction::OcrSelecting {
+                        index,
+                        start,
+                        current,
+                    } = state.interaction
+                    {
                         let (layout, _) = tile_layout(&self.tiles, state.width);
                         let (adj_start, adj_current) = adjust_selection_points(
                             start,
@@ -1309,14 +1500,22 @@ where
                             let (gy0, gy1) = (gy0_raw.min(gy1_raw), gy0_raw.max(gy1_raw));
                             let mut spans: Vec<(usize, Rectangle)> = Vec::new();
                             for (i, (y, h)) in layout.iter().enumerate() {
-                                if gy1 <= *y || gy0 >= y + h { continue; }
+                                if gy1 <= *y || gy0 >= y + h {
+                                    continue;
+                                }
                                 let y0_tile = (gy0.max(*y) - y).max(0.0);
                                 let y1_tile = (gy1.min(y + h) - y).max(0.0);
-                                if y1_tile <= y0_tile { continue; }
+                                if y1_tile <= y0_tile {
+                                    continue;
+                                }
                                 let tile = &self.tiles[i];
-                                if tile.source_width == 0 { continue; }
+                                if tile.source_width == 0 {
+                                    continue;
+                                }
                                 let scale = state.width / tile.source_width as f32;
-                                if scale <= 0.0 { continue; }
+                                if scale <= 0.0 {
+                                    continue;
+                                }
                                 let rect = Rectangle::new(
                                     Point::new(x0 / scale, y0_tile / scale),
                                     Size::new((x1 - x0) / scale, (y1_tile - y0_tile) / scale),
@@ -1335,13 +1534,20 @@ where
                             } else {
                                 spans.sort_by_key(|(idx, _)| *idx);
                                 // seam only: limit to 2 consecutive images
-                                let trimmed = if spans.len() > 2 { spans[..2].to_vec() } else { spans };
+                                let trimmed = if spans.len() > 2 {
+                                    spans[..2].to_vec()
+                                } else {
+                                    spans
+                                };
                                 if let Some(callback) = self.on_ocr_span.as_ref() {
                                     shell.publish(callback(trimmed));
                                     shell.request_redraw();
                                 } else if let Some(callback) = self.on_ocr_selection.as_ref() {
                                     // fallback: emit largest
-                                    let mut by_area: Vec<_> = trimmed.into_iter().map(|(idx, r)| (idx, r, r.width * r.height)).collect();
+                                    let mut by_area: Vec<_> = trimmed
+                                        .into_iter()
+                                        .map(|(idx, r)| (idx, r, r.width * r.height))
+                                        .collect();
                                     by_area.sort_by(|a, b| b.2.total_cmp(&a.2));
                                     shell.publish(callback((by_area[0].0, by_area[0].1)));
                                     shell.request_redraw();
@@ -1351,37 +1557,44 @@ where
                     }
                 }
                 if let Interaction::OverlayButtonPressed { button } = state.interaction
-                    && let Some(position) = cursor.position_over(bounds) {
-                        let local = local_point(position, bounds);
-                        if hit_overlay_button(bounds, local) == Some(button) {
-                            match button {
-                                OverlayButton::GoTop | OverlayButton::GoBottom => {
-                                    let max_offset = (state.content_height - state.viewport_height).max(0.0);
-                                    let target = match button {
-                                        OverlayButton::GoTop => 0.0,
-                                        _ => max_offset,
-                                    };
-                                    // Any scroll action dismisses save menu
-                                    if state.save_menu_open {
-                                        state.save_menu_open = false;
-                                        shell.request_redraw();
-                                    }
-                                    if (target - state.offset).abs() > f32::EPSILON {
-                                        state.offset = target;
-                                        shell.request_redraw();
-                                        publish_visible(shell, &self.tiles, state, &self.on_visible_range);
-                                        if let Some(callback) = self.on_scroll_ended.as_ref() {
-                                            shell.publish(callback());
-                                        }
-                                    }
-                                }
-                                OverlayButton::Save => {
-                                    state.save_menu_open = !state.save_menu_open;
+                    && let Some(position) = cursor.position_over(bounds)
+                {
+                    let local = local_point(position, bounds);
+                    if hit_overlay_button(bounds, local) == Some(button) {
+                        match button {
+                            OverlayButton::GoTop | OverlayButton::GoBottom => {
+                                let max_offset =
+                                    (state.content_height - state.viewport_height).max(0.0);
+                                let target = match button {
+                                    OverlayButton::GoTop => 0.0,
+                                    _ => max_offset,
+                                };
+                                // Any scroll action dismisses save menu
+                                if state.save_menu_open {
+                                    state.save_menu_open = false;
                                     shell.request_redraw();
                                 }
+                                if (target - state.offset).abs() > f32::EPSILON {
+                                    state.offset = target;
+                                    shell.request_redraw();
+                                    publish_visible(
+                                        shell,
+                                        &self.tiles,
+                                        state,
+                                        &self.on_visible_range,
+                                    );
+                                    if let Some(callback) = self.on_scroll_ended.as_ref() {
+                                        shell.publish(callback());
+                                    }
+                                }
+                            }
+                            OverlayButton::Save => {
+                                state.save_menu_open = !state.save_menu_open;
+                                shell.request_redraw();
                             }
                         }
                     }
+                }
                 if let Interaction::SaveMenuPressed { button } = state.interaction {
                     if let Some(position) = cursor.position_over(bounds) {
                         let local = local_point(position, bounds);
@@ -1416,24 +1629,18 @@ where
                 {
                     if let Some(position) = cursor.position_over(bounds) {
                         let local = local_point(position, bounds);
-                        if let Some(box_rect) =
-                            gradient_handle_box(&self.tiles, state, index, id)
-                        {
+                        if let Some(box_rect) = gradient_handle_box(&self.tiles, state, index, id) {
                             let (layout, _) = tile_layout(&self.tiles, state.width);
                             if let Some((y, h)) = layout.get(index).copied() {
-                                let tile_local =
-                                    Point::new(local.x, local.y + state.offset - y);
-                                let center =
-                                    self::motion::gradient_box_center(box_rect);
+                                let tile_local = Point::new(local.x, local.y + state.offset - y);
+                                let center = self::motion::gradient_box_center(box_rect);
                                 let rx = tile_local.x - center.x;
                                 let ry = tile_local.y - center.y;
                                 if rx.hypot(ry) >= 1.0 {
                                     let delta = wrap_angle_delta(
-                                        gradient_pointer_angle(box_rect, tile_local)
-                                            - press_angle,
+                                        gradient_pointer_angle(box_rect, tile_local) - press_angle,
                                     );
-                                    let angle =
-                                        (start_angle + delta).rem_euclid(360.0);
+                                    let angle = (start_angle + delta).rem_euclid(360.0);
                                     let factor = gradient_release_factor(
                                         box_rect,
                                         angle,
@@ -1480,10 +1687,9 @@ where
                     shell.capture_event();
                     shell.request_redraw();
                 }
-                if ended_scroll
-                    && let Some(callback) = self.on_scroll_ended.as_ref() {
-                        shell.publish(callback());
-                    }
+                if ended_scroll && let Some(callback) = self.on_scroll_ended.as_ref() {
+                    shell.publish(callback());
+                }
             }
             Event::Mouse(mouse::Event::CursorMoved { position }) => {
                 if state.save_menu_open && cursor.position_over(bounds).is_some() {
@@ -1505,12 +1711,24 @@ where
                         }
                         shell.capture_event();
                     }
-                    Interaction::DragPending { index, id, offset, quad, press } => {
+                    Interaction::DragPending {
+                        index,
+                        id,
+                        offset,
+                        quad,
+                        press,
+                    } => {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         let dx = local.x - press.x;
                         let dy = local.y - press.y;
                         if dx * dx + dy * dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
-                            state.interaction = Interaction::Dragging { index, id, offset, quad, press };
+                            state.interaction = Interaction::Dragging {
+                                index,
+                                id,
+                                offset,
+                                quad,
+                                press,
+                            };
                             if let (Some(callback), Some(quad)) = (
                                 self.on_entry_moved.as_ref(),
                                 drag_quad(&self.tiles, state, index, local, offset, quad, press),
@@ -1542,15 +1760,21 @@ where
                         }
                         shell.capture_event();
                     }
-                    Interaction::Dragging { index, id, offset, quad, press } => {
+                    Interaction::Dragging {
+                        index,
+                        id,
+                        offset,
+                        quad,
+                        press,
+                    } => {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         if let (Some(callback), Some(quad)) = (
                             self.on_entry_moved.as_ref(),
                             drag_quad(&self.tiles, state, index, local, offset, quad, press),
                         ) {
                             let shift = state.keyboard_modifiers.shift();
-                            let vertical = shift
-                                && (local.x - press.x).abs() < (local.y - press.y).abs();
+                            let vertical =
+                                shift && (local.x - press.x).abs() < (local.y - press.y).abs();
                             state.align_guide = if vertical {
                                 None
                             } else {
@@ -1576,12 +1800,24 @@ where
                         }
                         shell.capture_event();
                     }
-                    Interaction::ResizePending { index, id, handle, quad, press } => {
+                    Interaction::ResizePending {
+                        index,
+                        id,
+                        handle,
+                        quad,
+                        press,
+                    } => {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         let dx = local.x - press.x;
                         let dy = local.y - press.y;
                         if dx * dx + dy * dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
-                            state.interaction = Interaction::Resizing { index, id, handle, quad, press };
+                            state.interaction = Interaction::Resizing {
+                                index,
+                                id,
+                                handle,
+                                quad,
+                                press,
+                            };
                             if let (Some(callback), Some(quad)) = (
                                 self.on_entry_moved.as_ref(),
                                 resize_quad(&self.tiles, state, index, handle, quad, local),
@@ -1592,7 +1828,13 @@ where
                         }
                         shell.capture_event();
                     }
-                    Interaction::Resizing { index, id, handle, quad, press: _ } => {
+                    Interaction::Resizing {
+                        index,
+                        id,
+                        handle,
+                        quad,
+                        press: _,
+                    } => {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         if let (Some(callback), Some(quad)) = (
                             self.on_entry_moved.as_ref(),
@@ -1603,12 +1845,23 @@ where
                         }
                         shell.capture_event();
                     }
-                    Interaction::DistortPending { index, id, corner, quad, press } => {
+                    Interaction::DistortPending {
+                        index,
+                        id,
+                        corner,
+                        quad,
+                        press,
+                    } => {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         let dx = local.x - press.x;
                         let dy = local.y - press.y;
                         if dx * dx + dy * dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
-                            state.interaction = Interaction::Distorting { index, id, corner, quad };
+                            state.interaction = Interaction::Distorting {
+                                index,
+                                id,
+                                corner,
+                                quad,
+                            };
                             if let (Some(callback), Some(quad)) = (
                                 self.on_entry_moved.as_ref(),
                                 distort_quad(&self.tiles, state, index, corner, quad, local),
@@ -1619,7 +1872,12 @@ where
                         }
                         shell.capture_event();
                     }
-                    Interaction::Distorting { index, id, corner, quad } => {
+                    Interaction::Distorting {
+                        index,
+                        id,
+                        corner,
+                        quad,
+                    } => {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         if let (Some(callback), Some(quad)) = (
                             self.on_entry_moved.as_ref(),
@@ -1630,12 +1888,24 @@ where
                         }
                         shell.capture_event();
                     }
-                    Interaction::SkewPending { index, id, handle, quad, press } => {
+                    Interaction::SkewPending {
+                        index,
+                        id,
+                        handle,
+                        quad,
+                        press,
+                    } => {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         let dx = local.x - press.x;
                         let dy = local.y - press.y;
                         if dx * dx + dy * dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
-                            state.interaction = Interaction::Skewing { index, id, handle, quad, press };
+                            state.interaction = Interaction::Skewing {
+                                index,
+                                id,
+                                handle,
+                                quad,
+                                press,
+                            };
                             if let (Some(callback), Some(quad)) = (
                                 self.on_entry_moved.as_ref(),
                                 skew_quad(&self.tiles, state, index, handle, quad, press, local),
@@ -1646,7 +1916,13 @@ where
                         }
                         shell.capture_event();
                     }
-                    Interaction::Skewing { index, id, handle, quad, press } => {
+                    Interaction::Skewing {
+                        index,
+                        id,
+                        handle,
+                        quad,
+                        press,
+                    } => {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         if let (Some(callback), Some(quad)) = (
                             self.on_entry_moved.as_ref(),
@@ -1657,26 +1933,49 @@ where
                         }
                         shell.capture_event();
                     }
-                    Interaction::RotatePending { index, id, quad, center_img, center_view, press } => {
+                    Interaction::RotatePending {
+                        index,
+                        id,
+                        quad,
+                        center_img,
+                        center_view,
+                        press,
+                    } => {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         let dx = local.x - press.x;
                         let dy = local.y - press.y;
                         if dx * dx + dy * dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
-                            state.interaction = Interaction::Rotating { index, id, quad, center_img, center_view, press };
+                            state.interaction = Interaction::Rotating {
+                                index,
+                                id,
+                                quad,
+                                center_img,
+                                center_view,
+                                press,
+                            };
                             if let Some(callback) = self.on_entry_moved.as_ref() {
                                 let snap = state.keyboard_modifiers.shift();
-                                let rotated = rotate_quad(quad, center_img, center_view, press, local, snap);
+                                let rotated =
+                                    rotate_quad(quad, center_img, center_view, press, local, snap);
                                 shell.publish(callback((index, id, rotated)));
                                 shell.request_redraw();
                             }
                         }
                         shell.capture_event();
                     }
-                    Interaction::Rotating { index, id, quad, center_img, center_view, press } => {
+                    Interaction::Rotating {
+                        index,
+                        id,
+                        quad,
+                        center_img,
+                        center_view,
+                        press,
+                    } => {
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         if let Some(callback) = self.on_entry_moved.as_ref() {
                             let snap = state.keyboard_modifiers.shift();
-                            let rotated = rotate_quad(quad, center_img, center_view, press, local, snap);
+                            let rotated =
+                                rotate_quad(quad, center_img, center_view, press, local, snap);
                             shell.publish(callback((index, id, rotated)));
                             shell.request_redraw();
                         }
@@ -1686,7 +1985,11 @@ where
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         let (layout, _) = tile_layout(&self.tiles, state.width);
                         let current = tile_local_point(&layout, index, local, state.offset);
-                        state.interaction = Interaction::InpaintSelecting { index, start, current };
+                        state.interaction = Interaction::InpaintSelecting {
+                            index,
+                            start,
+                            current,
+                        };
                         shell.request_redraw();
                         shell.capture_event();
                     }
@@ -1694,7 +1997,11 @@ where
                         let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         let (layout, _) = tile_layout(&self.tiles, state.width);
                         let current = tile_local_point(&layout, index, local, state.offset);
-                        state.interaction = Interaction::OcrSelecting { index, start, current };
+                        state.interaction = Interaction::OcrSelecting {
+                            index,
+                            start,
+                            current,
+                        };
                         shell.request_redraw();
                         shell.capture_event();
                     }
@@ -1723,28 +2030,21 @@ where
                                 if let Some((y, _)) = layout.get(index).copied() {
                                     let to_tile =
                                         |p: Point| Point::new(p.x, p.y + state.offset - y);
-                                    press_angle =
-                                        gradient_pointer_angle(box_rect, to_tile(press));
+                                    press_angle = gradient_pointer_angle(box_rect, to_tile(press));
                                     let delta = wrap_angle_delta(
                                         gradient_pointer_angle(box_rect, to_tile(local))
                                             - press_angle,
                                     );
-                                    let mut angle =
-                                        (start_angle + delta).rem_euclid(360.0);
+                                    let mut angle = (start_angle + delta).rem_euclid(360.0);
                                     if state.keyboard_modifiers.shift() {
-                                        angle = ((angle / 15.0).round() * 15.0)
-                                            .rem_euclid(360.0);
+                                        angle = ((angle / 15.0).round() * 15.0).rem_euclid(360.0);
                                     }
-                                    if let Some(callback) = self.on_gradient_angle.as_ref()
-                                    {
-                                        let changed =
-                                            self.gradient_handle.map_or(true, |spec| {
-                                                (angle - spec.angle).abs() > 0.1
-                                            });
+                                    if let Some(callback) = self.on_gradient_angle.as_ref() {
+                                        let changed = self
+                                            .gradient_handle
+                                            .map_or(true, |spec| (angle - spec.angle).abs() > 0.1);
                                         if changed {
-                                            shell.publish(callback((
-                                                index, id, field, angle,
-                                            )));
+                                            shell.publish(callback((index, id, field, angle)));
                                             shell.request_redraw();
                                         }
                                     }
@@ -1776,20 +2076,17 @@ where
                         ) {
                             let (layout, _) = tile_layout(&self.tiles, state.width);
                             if let Some((y, _)) = layout.get(index).copied() {
-                                let tile_local =
-                                    Point::new(local.x, local.y + state.offset - y);
+                                let tile_local = Point::new(local.x, local.y + state.offset - y);
                                 let delta = wrap_angle_delta(
                                     gradient_pointer_angle(box_rect, tile_local) - press_angle,
                                 );
-                                let mut angle =
-                                    (start_angle + delta).rem_euclid(360.0);
+                                let mut angle = (start_angle + delta).rem_euclid(360.0);
                                 if state.keyboard_modifiers.shift() {
-                                    angle =
-                                        ((angle / 15.0).round() * 15.0).rem_euclid(360.0);
+                                    angle = ((angle / 15.0).round() * 15.0).rem_euclid(360.0);
                                 }
-                                let changed = self.gradient_handle.map_or(true, |spec| {
-                                    (angle - spec.angle).abs() > 0.1
-                                });
+                                let changed = self
+                                    .gradient_handle
+                                    .map_or(true, |spec| (angle - spec.angle).abs() > 0.1);
                                 if changed {
                                     shell.publish(callback((index, id, field, angle)));
                                     shell.request_redraw();
@@ -1808,7 +2105,9 @@ where
                 }
             }
             Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) => {
-                if *key == keyboard::Key::Named(keyboard::key::Named::Escape) && state.save_menu_open {
+                if *key == keyboard::Key::Named(keyboard::key::Named::Escape)
+                    && state.save_menu_open
+                {
                     state.save_menu_open = false;
                     state.interaction = Interaction::None;
                     state.align_guide = None;
@@ -1823,17 +2122,22 @@ where
                 // press quad + current cursor so Shift/Alt take effect mid-drag.
                 let interaction = state.interaction;
                 match interaction {
-                    Interaction::Dragging { index, id, offset, quad, press } => {
+                    Interaction::Dragging {
+                        index,
+                        id,
+                        offset,
+                        quad,
+                        press,
+                    } => {
                         if let Some(position) = cursor.position_over(bounds) {
-                            let local =
-                                Point::new(position.x - bounds.x, position.y - bounds.y);
+                            let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                             if let (Some(callback), Some(next)) = (
                                 self.on_entry_moved.as_ref(),
                                 drag_quad(&self.tiles, state, index, local, offset, quad, press),
                             ) {
                                 let shift = modifiers.shift();
-                                let vertical = shift
-                                    && (local.x - press.x).abs() < (local.y - press.y).abs();
+                                let vertical =
+                                    shift && (local.x - press.x).abs() < (local.y - press.y).abs();
                                 state.align_guide = if vertical {
                                     None
                                 } else {
@@ -1867,10 +2171,15 @@ where
                             }
                         }
                     }
-                    Interaction::Resizing { index, id, handle, quad, press: _ } => {
+                    Interaction::Resizing {
+                        index,
+                        id,
+                        handle,
+                        quad,
+                        press: _,
+                    } => {
                         if let Some(position) = cursor.position_over(bounds) {
-                            let local =
-                                Point::new(position.x - bounds.x, position.y - bounds.y);
+                            let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                             if let (Some(callback), Some(next)) = (
                                 self.on_entry_moved.as_ref(),
                                 resize_quad(&self.tiles, state, index, handle, quad, local),
@@ -1880,10 +2189,16 @@ where
                             }
                         }
                     }
-                    Interaction::Rotating { index, id, quad, center_img, center_view, press } => {
+                    Interaction::Rotating {
+                        index,
+                        id,
+                        quad,
+                        center_img,
+                        center_view,
+                        press,
+                    } => {
                         if let Some(position) = cursor.position_over(bounds) {
-                            let local =
-                                Point::new(position.x - bounds.x, position.y - bounds.y);
+                            let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                             if let Some(callback) = self.on_entry_moved.as_ref() {
                                 let rotated = rotate_quad(
                                     quad,
@@ -1898,10 +2213,14 @@ where
                             }
                         }
                     }
-                    Interaction::Distorting { index, id, corner, quad } => {
+                    Interaction::Distorting {
+                        index,
+                        id,
+                        corner,
+                        quad,
+                    } => {
                         if let Some(position) = cursor.position_over(bounds) {
-                            let local =
-                                Point::new(position.x - bounds.x, position.y - bounds.y);
+                            let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                             if let (Some(callback), Some(next)) = (
                                 self.on_entry_moved.as_ref(),
                                 distort_quad(&self.tiles, state, index, corner, quad, local),
@@ -1911,10 +2230,15 @@ where
                             }
                         }
                     }
-                    Interaction::Skewing { index, id, handle, quad, press } => {
+                    Interaction::Skewing {
+                        index,
+                        id,
+                        handle,
+                        quad,
+                        press,
+                    } => {
                         if let Some(position) = cursor.position_over(bounds) {
-                            let local =
-                                Point::new(position.x - bounds.x, position.y - bounds.y);
+                            let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                             if let (Some(callback), Some(next)) = (
                                 self.on_entry_moved.as_ref(),
                                 skew_quad(&self.tiles, state, index, handle, quad, press, local),
@@ -1946,7 +2270,14 @@ where
         publish_anchor(shell, state, &self.on_scroll);
     }
 
-    fn mouse_interaction(&self, tree: &Tree, layout: Layout<'_>, cursor: mouse::Cursor, _viewport: &Rectangle, _renderer: &Renderer) -> mouse::Interaction {
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+        _renderer: &Renderer,
+    ) -> mouse::Interaction {
         let state = tree.state.downcast_ref::<TileViewState>();
         match state.interaction {
             Interaction::TouchScrolling { .. }
@@ -1984,10 +2315,15 @@ where
                     // Inpaint toolbar takes precedence and OCR handles are hidden while inpaint selected.
                     if self.selected_inpaint.is_some() {
                         if self.show_inpaint
-                            && hit_inpaint_toolbar(&self.tiles, state, self.selected_inpaint, local).is_some() {
-                                return mouse::Interaction::Pointer;
-                            }
-                        if self.show_scrollbar && (track_rect(bounds).contains(local) || thumb_rect(bounds, state).contains(local)) {
+                            && hit_inpaint_toolbar(&self.tiles, state, self.selected_inpaint, local)
+                                .is_some()
+                        {
+                            return mouse::Interaction::Pointer;
+                        }
+                        if self.show_scrollbar
+                            && (track_rect(bounds).contains(local)
+                                || thumb_rect(bounds, state).contains(local))
+                        {
                             return mouse::Interaction::Pointer;
                         }
                         return mouse::Interaction::None;
@@ -1998,8 +2334,7 @@ where
                         if let Some(spec) = self.gradient_handle
                             && self.selected_inpaint.is_none()
                         {
-                            if hit_gradient_handle(&self.tiles, state, local, spec).is_some()
-                            {
+                            if hit_gradient_handle(&self.tiles, state, local, spec).is_some() {
                                 return mouse::Interaction::Grab;
                             }
                         } else {
@@ -2016,11 +2351,16 @@ where
                                 return handle.cursor();
                             }
                         }
-                        if (self.inpaint_mode || self.ocr_mode) && hit_tile(&self.tiles, state, local).is_some() {
+                        if (self.inpaint_mode || self.ocr_mode)
+                            && hit_tile(&self.tiles, state, local).is_some()
+                        {
                             return mouse::Interaction::Crosshair;
                         }
                     }
-                    if self.show_scrollbar && (track_rect(bounds).contains(local) || thumb_rect(bounds, state).contains(local)) {
+                    if self.show_scrollbar
+                        && (track_rect(bounds).contains(local)
+                            || thumb_rect(bounds, state).contains(local))
+                    {
                         return mouse::Interaction::Pointer;
                     }
                 }
@@ -2030,8 +2370,30 @@ where
     }
 }
 
-impl<'a, Message: 'a, F: 'a, G: 'a, H: 'a, K: 'a, L: 'a, M: 'a, P: 'a, Q: 'a, R: 'a, S: 'a, T: 'a, U: 'a, V: 'a, W: 'a, X: 'a, Y: 'a, Z: 'a, Theme, Renderer>
-    From<TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Z>> for Element<'a, Message, Theme, Renderer>
+impl<
+    'a,
+    Message: 'a,
+    F: 'a,
+    G: 'a,
+    H: 'a,
+    K: 'a,
+    L: 'a,
+    M: 'a,
+    P: 'a,
+    Q: 'a,
+    R: 'a,
+    S: 'a,
+    T: 'a,
+    U: 'a,
+    V: 'a,
+    W: 'a,
+    X: 'a,
+    Y: 'a,
+    Z: 'a,
+    Theme,
+    Renderer,
+> From<TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Z>>
+    for Element<'a, Message, Theme, Renderer>
 where
     F: Fn(Range<usize>) -> Message,
     G: Fn(Option<(usize, EntryId)>) -> Message,
@@ -2052,7 +2414,9 @@ where
     Z: Fn((usize, EntryId, StyleField, f32)) -> Message,
     Renderer: renderer::Renderer + geometry::Renderer,
 {
-    fn from(view: TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Z>) -> Self {
+    fn from(
+        view: TileView<'a, Message, F, G, H, K, L, M, P, Q, R, S, T, U, V, W, X, Y, Z>,
+    ) -> Self {
         Self::new(view)
     }
 }

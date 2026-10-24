@@ -335,7 +335,10 @@ mod tests {
         // (Boundary here is black outside the box; the white box interior
         // is fully masked so no white pins remain.)
         let c = out.get_pixel(16, 16);
-        assert!(c[0] < 128 && c[1] < 128 && c[2] < 128, "center must diffuse to dark: {c:?}");
+        assert!(
+            c[0] < 128 && c[1] < 128 && c[2] < 128,
+            "center must diffuse to dark: {c:?}"
+        );
     }
 
     #[test]
@@ -362,8 +365,14 @@ mod tests {
         let above = out.get_pixel(3, 3)[0] as i32;
         let mid = out.get_pixel(3, 4)[0] as i32;
         let below = out.get_pixel(3, 5)[0] as i32;
-        assert!(mid > above && mid < below, "must interpolate: {above} {mid} {below}");
-        assert!((mid - (above + below) / 2).abs() <= 2, "must be near-linear: {above} {mid} {below}");
+        assert!(
+            mid > above && mid < below,
+            "must interpolate: {above} {mid} {below}"
+        );
+        assert!(
+            (mid - (above + below) / 2).abs() <= 2,
+            "must be near-linear: {above} {mid} {below}"
+        );
     }
 
     #[test]
@@ -397,7 +406,10 @@ mod tests {
         // Both holes diffuse toward the dark surround.
         for (x, y) in [(6, 6), (22, 22)] {
             let c = out.get_pixel(x, y);
-            assert!(c[0] < 128, "multi-blob hole must diffuse dark at ({x},{y}): {c:?}");
+            assert!(
+                c[0] < 128,
+                "multi-blob hole must diffuse dark at ({x},{y}): {c:?}"
+            );
         }
         // Gap between blobs untouched.
         assert_eq!(*out.get_pixel(15, 15), Rgb([40, 40, 40]));

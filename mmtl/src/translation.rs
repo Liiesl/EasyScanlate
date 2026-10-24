@@ -9,9 +9,9 @@
 //! `entry_id` is the stable [`easyscanlate_model::EntryId`]; unknown ids on
 //! import are returned (not dropped silently) so the caller can report them.
 
-use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::Reader;
 use quick_xml::Writer;
+use quick_xml::events::{BytesStart, BytesText, Event};
 
 const VERSION: u32 = 1;
 
@@ -52,7 +52,12 @@ fn attr(e: &BytesStart, key: &[u8]) -> Option<String> {
     None
 }
 
-fn write_text_element(writer: &mut Writer<Vec<u8>>, tag: &str, indent: &str, text: &str) -> Result<(), String> {
+fn write_text_element(
+    writer: &mut Writer<Vec<u8>>,
+    tag: &str,
+    indent: &str,
+    text: &str,
+) -> Result<(), String> {
     writer
         .write_event(Event::Text(BytesText::from_escaped(indent)))
         .map_err(|e| e.to_string())?;
@@ -156,7 +161,9 @@ pub fn from_xml_str(s: &str) -> Result<(String, Vec<TranslationLine>), String> {
                             let raw = attr(&e, b"profile").unwrap_or_default();
                             let raw = unesc(&raw);
                             if raw.trim().is_empty() {
-                                return Err("translation file is missing profile=\"Name\"".to_string());
+                                return Err(
+                                    "translation file is missing profile=\"Name\"".to_string()
+                                );
                             }
                             profile = Some(raw);
                         }

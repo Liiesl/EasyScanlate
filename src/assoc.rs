@@ -22,8 +22,8 @@ pub const PROG_DESC: &str = "EasyScanlate Project";
 #[cfg(all(windows, feature = "file-assoc"))]
 mod imp {
     use super::{PROG_DESC, PROG_ID};
-    use winreg::enums::HKEY_CURRENT_USER;
     use winreg::RegKey;
+    use winreg::enums::HKEY_CURRENT_USER;
 
     fn exe_string() -> Result<String, String> {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -38,9 +38,7 @@ mod imp {
         let (ext_key, _) = hkcu
             .create_subkey(r"Software\Classes\.mmtl")
             .map_err(|e| e.to_string())?;
-        ext_key
-            .set_value("", &PROG_ID)
-            .map_err(|e| e.to_string())?;
+        ext_key.set_value("", &PROG_ID).map_err(|e| e.to_string())?;
 
         // ProgID → description
         let (prog_key, _) = hkcu
@@ -61,15 +59,10 @@ mod imp {
 
         // shell\open\command
         let (cmd_key, _) = hkcu
-            .create_subkey(format!(
-                r"Software\Classes\{}\shell\open\command",
-                PROG_ID
-            ))
+            .create_subkey(format!(r"Software\Classes\{}\shell\open\command", PROG_ID))
             .map_err(|e| e.to_string())?;
         let cmd_val = format!(r#""{}" "%1""#, exe);
-        cmd_key
-            .set_value("", &cmd_val)
-            .map_err(|e| e.to_string())?;
+        cmd_key.set_value("", &cmd_val).map_err(|e| e.to_string())?;
 
         // Best-effort: also write OpenWithProgids so Explorer's "Open with" lists us.
         // This is optional; failure is ignored.

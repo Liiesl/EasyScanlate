@@ -16,11 +16,21 @@ pub fn natural_cmp(a: &str, b: &str) -> Ordering {
                 if a_digit && b_digit {
                     let mut a_num = String::new();
                     while let Some(&c) = a_chars.peek() {
-                        if c.is_ascii_digit() { a_num.push(c); a_chars.next(); } else { break; }
+                        if c.is_ascii_digit() {
+                            a_num.push(c);
+                            a_chars.next();
+                        } else {
+                            break;
+                        }
                     }
                     let mut b_num = String::new();
                     while let Some(&c) = b_chars.peek() {
-                        if c.is_ascii_digit() { b_num.push(c); b_chars.next(); } else { break; }
+                        if c.is_ascii_digit() {
+                            b_num.push(c);
+                            b_chars.next();
+                        } else {
+                            break;
+                        }
                     }
                     let a_trim = a_num.trim_start_matches('0');
                     let b_trim = b_num.trim_start_matches('0');
@@ -39,16 +49,32 @@ pub fn natural_cmp(a: &str, b: &str) -> Ordering {
                 } else {
                     let mut a_chunk = String::new();
                     while let Some(&c) = a_chars.peek() {
-                        if !c.is_ascii_digit() { a_chunk.push(c); a_chars.next(); } else { break; }
+                        if !c.is_ascii_digit() {
+                            a_chunk.push(c);
+                            a_chars.next();
+                        } else {
+                            break;
+                        }
                     }
                     let mut b_chunk = String::new();
                     while let Some(&c) = b_chars.peek() {
-                        if !c.is_ascii_digit() { b_chunk.push(c); b_chars.next(); } else { break; }
+                        if !c.is_ascii_digit() {
+                            b_chunk.push(c);
+                            b_chars.next();
+                        } else {
+                            break;
+                        }
                     }
-                    let ord = a_chunk.to_ascii_lowercase().cmp(&b_chunk.to_ascii_lowercase());
-                    if ord != Ordering::Equal { return ord; }
+                    let ord = a_chunk
+                        .to_ascii_lowercase()
+                        .cmp(&b_chunk.to_ascii_lowercase());
+                    if ord != Ordering::Equal {
+                        return ord;
+                    }
                     let ord2 = a_chunk.cmp(&b_chunk);
-                    if ord2 != Ordering::Equal { return ord2; }
+                    if ord2 != Ordering::Equal {
+                        return ord2;
+                    }
                 }
             }
         }

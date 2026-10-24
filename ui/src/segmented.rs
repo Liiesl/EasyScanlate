@@ -35,33 +35,39 @@ pub fn segment<'a>(
     font: Font,
 ) -> Element<'a, UiEvent> {
     crate::button::with_disabled_cursor(
-        button(text(glyph).size(scale::s(12.0)).font(font).width(FillLength).center())
-            .width(FillLength)
-            .padding([scale::s(8.0), scale::s(0.0)])
-            .on_press_maybe(on_press)
-            .style(move |_theme, status: Status| {
-                let bg = match status {
-                    Status::Disabled => Color::from_rgba8(34, 36, 44, 0.35),
-                    Status::Hovered => Color::from_rgba8(46, 48, 62, 0.82),
-                    Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
-                    Status::Active => crate::panel::PANEL_BG,
-                };
-                let txt = if active {
-                    crate::accent::accent()
-                } else if matches!(status, Status::Disabled) {
-                    MUTED_FG
-                } else {
-                    TEXT_MAIN
-                };
-                button::Style {
-                    background: Some(Background::Color(bg)),
-                    border: Border::default(),
-                    shadow: Shadow::default(),
-                    text_color: txt,
-                    ..button::Style::default()
-                }
-            })
-            .into(),
+        button(
+            text(glyph)
+                .size(scale::s(12.0))
+                .font(font)
+                .width(FillLength)
+                .center(),
+        )
+        .width(FillLength)
+        .padding([scale::s(8.0), scale::s(0.0)])
+        .on_press_maybe(on_press)
+        .style(move |_theme, status: Status| {
+            let bg = match status {
+                Status::Disabled => Color::from_rgba8(34, 36, 44, 0.35),
+                Status::Hovered => Color::from_rgba8(46, 48, 62, 0.82),
+                Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
+                Status::Active => crate::panel::PANEL_BG,
+            };
+            let txt = if active {
+                crate::accent::accent()
+            } else if matches!(status, Status::Disabled) {
+                MUTED_FG
+            } else {
+                TEXT_MAIN
+            };
+            button::Style {
+                background: Some(Background::Color(bg)),
+                border: Border::default(),
+                shadow: Shadow::default(),
+                text_color: txt,
+                ..button::Style::default()
+            }
+        })
+        .into(),
     )
 }
 
@@ -75,33 +81,39 @@ pub fn segment_compact<'a>(
     font: Font,
 ) -> Element<'a, UiEvent> {
     crate::button::with_disabled_cursor(
-        button(text(glyph).size(scale::s(12.0)).font(font).width(FillLength).center())
-            .width(FillLength)
-            .padding([scale::s(4.0), scale::s(0.0)])
-            .on_press_maybe(on_press)
-            .style(move |_theme, status: Status| {
-                let bg = match status {
-                    Status::Disabled => Color::from_rgba8(34, 36, 44, 0.35),
-                    Status::Hovered => Color::from_rgba8(46, 48, 62, 0.82),
-                    Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
-                    Status::Active => crate::panel::PANEL_BG,
-                };
-                let txt = if active {
-                    crate::accent::accent()
-                } else if matches!(status, Status::Disabled) {
-                    MUTED_FG
-                } else {
-                    TEXT_MAIN
-                };
-                button::Style {
-                    background: Some(Background::Color(bg)),
-                    border: Border::default(),
-                    shadow: Shadow::default(),
-                    text_color: txt,
-                    ..button::Style::default()
-                }
-            })
-            .into(),
+        button(
+            text(glyph)
+                .size(scale::s(12.0))
+                .font(font)
+                .width(FillLength)
+                .center(),
+        )
+        .width(FillLength)
+        .padding([scale::s(4.0), scale::s(0.0)])
+        .on_press_maybe(on_press)
+        .style(move |_theme, status: Status| {
+            let bg = match status {
+                Status::Disabled => Color::from_rgba8(34, 36, 44, 0.35),
+                Status::Hovered => Color::from_rgba8(46, 48, 62, 0.82),
+                Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
+                Status::Active => crate::panel::PANEL_BG,
+            };
+            let txt = if active {
+                crate::accent::accent()
+            } else if matches!(status, Status::Disabled) {
+                MUTED_FG
+            } else {
+                TEXT_MAIN
+            };
+            button::Style {
+                background: Some(Background::Color(bg)),
+                border: Border::default(),
+                shadow: Shadow::default(),
+                text_color: txt,
+                ..button::Style::default()
+            }
+        })
+        .into(),
     )
 }
 
@@ -114,33 +126,38 @@ pub fn segment_icon<'a>(
     on_press: Option<UiEvent>,
 ) -> Element<'a, UiEvent> {
     crate::button::with_disabled_cursor(
-        button(crate::icon::lucide(icon).size(scale::s(12.0)).width(FillLength).center())
-            .width(FillLength)
-            .padding([scale::s(4.0), scale::s(0.0)])
-            .on_press_maybe(on_press)
-            .style(move |_theme, status: Status| {
-                let bg = match status {
-                    Status::Disabled => Color::from_rgba8(34, 36, 44, 0.35),
-                    Status::Hovered => Color::from_rgba8(46, 48, 62, 0.82),
-                    Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
-                    Status::Active => crate::panel::PANEL_BG,
-                };
-                let txt = if active {
-                    crate::accent::accent()
-                } else if matches!(status, Status::Disabled) {
-                    MUTED_FG
-                } else {
-                    TEXT_MAIN
-                };
-                button::Style {
-                    background: Some(Background::Color(bg)),
-                    border: Border::default(),
-                    shadow: Shadow::default(),
-                    text_color: txt,
-                    ..button::Style::default()
-                }
-            })
-            .into(),
+        button(
+            crate::icon::lucide(icon)
+                .size(scale::s(12.0))
+                .width(FillLength)
+                .center(),
+        )
+        .width(FillLength)
+        .padding([scale::s(4.0), scale::s(0.0)])
+        .on_press_maybe(on_press)
+        .style(move |_theme, status: Status| {
+            let bg = match status {
+                Status::Disabled => Color::from_rgba8(34, 36, 44, 0.35),
+                Status::Hovered => Color::from_rgba8(46, 48, 62, 0.82),
+                Status::Pressed => Color::from_rgba8(55, 57, 72, 0.87),
+                Status::Active => crate::panel::PANEL_BG,
+            };
+            let txt = if active {
+                crate::accent::accent()
+            } else if matches!(status, Status::Disabled) {
+                MUTED_FG
+            } else {
+                TEXT_MAIN
+            };
+            button::Style {
+                background: Some(Background::Color(bg)),
+                border: Border::default(),
+                shadow: Shadow::default(),
+                text_color: txt,
+                ..button::Style::default()
+            }
+        })
+        .into(),
     )
 }
 
@@ -156,7 +173,10 @@ pub fn segment_icon_label<'a>(
         button(
             row![
                 crate::icon::lucide(icon).size(scale::s(12.0)).center(),
-                text(label).size(scale::s(12.0)).font(Font::DEFAULT).center(),
+                text(label)
+                    .size(scale::s(12.0))
+                    .font(Font::DEFAULT)
+                    .center(),
             ]
             .spacing(scale::s(4.0))
             .align_y(iced::Alignment::Center)

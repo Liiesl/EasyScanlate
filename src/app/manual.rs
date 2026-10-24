@@ -1,14 +1,22 @@
-use iced::Task;
-use iced::Rectangle;
 use easyscanlate_ui::UiState;
 use easyscanlate_ui::event::ManualMode;
+use iced::Rectangle;
+use iced::Task;
 
 use super::{App, Message};
 
 pub fn handle_enter(app: &mut App, mode: ManualMode) -> Task<Message> {
     {
         let tab = app.active_tab();
-        eprintln!("[manual] handle_enter mode={:?} current={:?} images={} inpainting={} running={} translating={}", mode, tab.manual_mode, tab.images.len(), tab.inpainting, tab.running, tab.translating);
+        eprintln!(
+            "[manual] handle_enter mode={:?} current={:?} images={} inpainting={} running={} translating={}",
+            mode,
+            tab.manual_mode,
+            tab.images.len(),
+            tab.inpainting,
+            tab.running,
+            tab.translating
+        );
     }
     if app.active_tab().images.is_empty() {
         app.active_tab_mut().status = "Open images first.".to_string();
@@ -16,7 +24,8 @@ pub fn handle_enter(app: &mut App, mode: ManualMode) -> Task<Message> {
     }
     if app.active_state().is_bulk_busy() {
         // allow switching manual modes? still block entering new one while bulk busy
-        if app.active_tab().manual_mode == ManualMode::None || app.active_tab().manual_mode != mode {
+        if app.active_tab().manual_mode == ManualMode::None || app.active_tab().manual_mode != mode
+        {
             app.active_tab_mut().status = "Wait for current task to finish.".to_string();
             return Task::none();
         }
@@ -42,7 +51,12 @@ pub fn handle_enter(app: &mut App, mode: ManualMode) -> Task<Message> {
     if app.active_tab().manual_mode != ManualMode::None {
         {
             let tab = app.active_tab();
-            eprintln!("[manual] switching mode {:?} -> {:?}, clearing {} selections", tab.manual_mode, mode, tab.manual_selections.len());
+            eprintln!(
+                "[manual] switching mode {:?} -> {:?}, clearing {} selections",
+                tab.manual_mode,
+                mode,
+                tab.manual_selections.len()
+            );
         }
         app.active_tab_mut().manual_selections.clear();
     } else {
@@ -52,7 +66,10 @@ pub fn handle_enter(app: &mut App, mode: ManualMode) -> Task<Message> {
         app.active_tab_mut().view_mode = easyscanlate_ui::event::MainAreaMode::View;
         {
             let tab = app.active_tab();
-            eprintln!("[manual] entering mode {:?}, stashed view_mode={:?}", mode, tab.manual_prev_view_mode);
+            eprintln!(
+                "[manual] entering mode {:?}, stashed view_mode={:?}",
+                mode, tab.manual_prev_view_mode
+            );
         }
     }
     app.active_tab_mut().manual_mode = mode;
@@ -74,7 +91,11 @@ pub fn handle_enter(app: &mut App, mode: ManualMode) -> Task<Message> {
 pub fn handle_cancel(app: &mut App) -> Task<Message> {
     {
         let tab = app.active_tab();
-        eprintln!("[manual] handle_cancel current={:?} selections={}", tab.manual_mode, tab.manual_selections.len());
+        eprintln!(
+            "[manual] handle_cancel current={:?} selections={}",
+            tab.manual_mode,
+            tab.manual_selections.len()
+        );
     }
     if app.active_tab().manual_mode == ManualMode::None {
         return Task::none();
@@ -96,7 +117,11 @@ pub fn handle_cancel(app: &mut App) -> Task<Message> {
 pub fn handle_reset(app: &mut App) -> Task<Message> {
     {
         let tab = app.active_tab();
-        eprintln!("[manual] handle_reset mode={:?} selections={}", tab.manual_mode, tab.manual_selections.len());
+        eprintln!(
+            "[manual] handle_reset mode={:?} selections={}",
+            tab.manual_mode,
+            tab.manual_selections.len()
+        );
     }
     if app.active_tab().manual_mode == ManualMode::None {
         return Task::none();
@@ -117,22 +142,41 @@ pub fn handle_reset(app: &mut App) -> Task<Message> {
 pub fn handle_selection(app: &mut App, sels: Vec<(usize, Rectangle)>) -> Task<Message> {
     {
         let tab = app.active_tab();
-        eprintln!("[manual] handle_selection mode={:?} sels={} before={}", tab.manual_mode, sels.len(), tab.manual_selections.len());
+        eprintln!(
+            "[manual] handle_selection mode={:?} sels={} before={}",
+            tab.manual_mode,
+            sels.len(),
+            tab.manual_selections.len()
+        );
     }
-    for (idx, r) in &sels { eprintln!("[manual]   sel idx={} rect=[{:.1},{:.1},{:.1},{:.1}]", idx, r.x, r.y, r.width, r.height); }
+    for (idx, r) in &sels {
+        eprintln!(
+            "[manual]   sel idx={} rect=[{:.1},{:.1},{:.1},{:.1}]",
+            idx, r.x, r.y, r.width, r.height
+        );
+    }
     if app.active_tab().manual_mode == ManualMode::None {
         eprintln!("[manual] not in manual mode -> none");
         return Task::none();
     }
-    if sels.is_empty() { return Task::none(); }
+    if sels.is_empty() {
+        return Task::none();
+    }
     if sels.len() == 1 {
         let (idx, rect) = sels[0];
         if idx >= app.active_tab().images.len() {
-            eprintln!("[manual] idx {} out of range len={}", idx, app.active_tab().images.len());
+            eprintln!(
+                "[manual] idx {} out of range len={}",
+                idx,
+                app.active_tab().images.len()
+            );
             return Task::none();
         }
         if rect.width < 4.0 || rect.height < 4.0 {
-            eprintln!("[manual] selection too small {:.1}x{:.1}", rect.width, rect.height);
+            eprintln!(
+                "[manual] selection too small {:.1}x{:.1}",
+                rect.width, rect.height
+            );
             app.active_tab_mut().status = "Selection too small.".to_string();
             return Task::none();
         }
@@ -143,30 +187,63 @@ pub fn handle_selection(app: &mut App, sels: Vec<(usize, Rectangle)>) -> Task<Me
             continue;
         }
         if rect.width < 4.0 || rect.height < 4.0 {
-            eprintln!("[manual] span too small {:.1}x{:.1} idx={}", rect.width, rect.height, idx);
+            eprintln!(
+                "[manual] span too small {:.1}x{:.1} idx={}",
+                rect.width, rect.height, idx
+            );
             continue;
         }
-        eprintln!("[manual]   pushing idx={} rect=[{:.1},{:.1},{:.1},{:.1}]", idx, rect.x, rect.y, rect.width, rect.height);
+        eprintln!(
+            "[manual]   pushing idx={} rect=[{:.1},{:.1},{:.1},{:.1}]",
+            idx, rect.x, rect.y, rect.width, rect.height
+        );
         app.active_tab_mut().manual_selections.push((idx, rect));
     }
     app.active_tab_mut().manual_selections.sort_by(|a, b| {
-        a.0.cmp(&b.0).then(a.1.y.total_cmp(&b.1.y)).then(a.1.x.total_cmp(&b.1.x))
+        a.0.cmp(&b.0)
+            .then(a.1.y.total_cmp(&b.1.y))
+            .then(a.1.x.total_cmp(&b.1.x))
     });
     let before = app.active_tab().manual_selections.len();
-    app.active_tab_mut().manual_selections.dedup_by(|a, b| a.0 == b.0 && a.1.x == b.1.x && a.1.y == b.1.y && a.1.width == b.1.width && a.1.height == b.1.height);
+    app.active_tab_mut().manual_selections.dedup_by(|a, b| {
+        a.0 == b.0
+            && a.1.x == b.1.x
+            && a.1.y == b.1.y
+            && a.1.width == b.1.width
+            && a.1.height == b.1.height
+    });
     let n = app.active_tab().manual_selections.len();
-    eprintln!("[manual] added, before_dedup={} after={} selections={:?}", before, n, app.active_tab().manual_selections.iter().map(|(i,r)| (*i, [r.x, r.y, r.width, r.height])).collect::<Vec<_>>());
+    eprintln!(
+        "[manual] added, before_dedup={} after={} selections={:?}",
+        before,
+        n,
+        app.active_tab()
+            .manual_selections
+            .iter()
+            .map(|(i, r)| (*i, [r.x, r.y, r.width, r.height]))
+            .collect::<Vec<_>>()
+    );
     app.active_tab_mut().status = format!("{n} selection(s). Press Start to run.");
     Task::none()
 }
 
-
-
 pub fn handle_start(app: &mut App) -> Task<Message> {
     {
         let tab = app.active_tab();
-        eprintln!("[manual] handle_start mode={:?} selections={} inpainting={} running={} translating={}", tab.manual_mode, tab.manual_selections.len(), tab.inpainting, tab.running, tab.translating);
-        for (i, (idx, r)) in tab.manual_selections.iter().enumerate() { eprintln!("[manual]   sel {}: idx={} rect=[{:.1},{:.1},{:.1},{:.1}]", i, idx, r.x, r.y, r.width, r.height); }
+        eprintln!(
+            "[manual] handle_start mode={:?} selections={} inpainting={} running={} translating={}",
+            tab.manual_mode,
+            tab.manual_selections.len(),
+            tab.inpainting,
+            tab.running,
+            tab.translating
+        );
+        for (i, (idx, r)) in tab.manual_selections.iter().enumerate() {
+            eprintln!(
+                "[manual]   sel {}: idx={} rect=[{:.1},{:.1},{:.1},{:.1}]",
+                i, idx, r.x, r.y, r.width, r.height
+            );
+        }
     }
     if app.active_tab().manual_mode == ManualMode::None {
         eprintln!("[manual] not in manual mode -> none");
@@ -199,14 +276,21 @@ pub fn handle_start(app: &mut App) -> Task<Message> {
         return Task::none();
     }
     let sels = std::mem::take(&mut app.active_tab_mut().manual_selections);
-    eprintln!("[manual] taking {} sels, mode={:?} selections cleared", sels.len(), app.active_tab().manual_mode);
+    eprintln!(
+        "[manual] taking {} sels, mode={:?} selections cleared",
+        sels.len(),
+        app.active_tab().manual_mode
+    );
     // auto clear as per spec, mode stays active
     let mode = app.active_tab().manual_mode;
     match mode {
         ManualMode::Inpaint => {
             #[cfg(feature = "inpaint")]
             {
-                eprintln!("[manual] -> handle_inpaint_selection with {} sels", sels.len());
+                eprintln!(
+                    "[manual] -> handle_inpaint_selection with {} sels",
+                    sels.len()
+                );
                 super::inpaint::handle_inpaint_selection(app, sels)
             }
             #[cfg(not(feature = "inpaint"))]
@@ -220,7 +304,10 @@ pub fn handle_start(app: &mut App) -> Task<Message> {
         ManualMode::Ocr => {
             #[cfg(feature = "ocr")]
             {
-                eprintln!("[manual] -> handle_manual_ocr_selection with {} sels", sels.len());
+                eprintln!(
+                    "[manual] -> handle_manual_ocr_selection with {} sels",
+                    sels.len()
+                );
                 let tid = app.active_tab().id;
                 super::ocr::handle_manual_ocr_selection(app, tid, sels)
             }
