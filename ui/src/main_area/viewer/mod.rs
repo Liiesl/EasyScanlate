@@ -1626,34 +1626,33 @@ where
                     start_angle,
                     ..
                 } = state.interaction
+                    && let Some(position) = cursor.position_over(bounds)
                 {
-                    if let Some(position) = cursor.position_over(bounds) {
-                        let local = local_point(position, bounds);
-                        if let Some(box_rect) = gradient_handle_box(&self.tiles, state, index, id) {
-                            let (layout, _) = tile_layout(&self.tiles, state.width);
-                            if let Some((y, h)) = layout.get(index).copied() {
-                                let tile_local = Point::new(local.x, local.y + state.offset - y);
-                                let center = self::motion::gradient_box_center(box_rect);
-                                let rx = tile_local.x - center.x;
-                                let ry = tile_local.y - center.y;
-                                if rx.hypot(ry) >= 1.0 {
-                                    let delta = wrap_angle_delta(
-                                        gradient_pointer_angle(box_rect, tile_local) - press_angle,
-                                    );
-                                    let angle = (start_angle + delta).rem_euclid(360.0);
-                                    let factor = gradient_release_factor(
-                                        box_rect,
-                                        angle,
-                                        rx.hypot(ry),
-                                        Size::new(state.width, h),
-                                    );
-                                    state.gradient_rest = Some(GradientRest {
-                                        index,
-                                        id,
-                                        field,
-                                        factor,
-                                    });
-                                }
+                    let local = local_point(position, bounds);
+                    if let Some(box_rect) = gradient_handle_box(&self.tiles, state, index, id) {
+                        let (layout, _) = tile_layout(&self.tiles, state.width);
+                        if let Some((y, h)) = layout.get(index).copied() {
+                            let tile_local = Point::new(local.x, local.y + state.offset - y);
+                            let center = self::motion::gradient_box_center(box_rect);
+                            let rx = tile_local.x - center.x;
+                            let ry = tile_local.y - center.y;
+                            if rx.hypot(ry) >= 1.0 {
+                                let delta = wrap_angle_delta(
+                                    gradient_pointer_angle(box_rect, tile_local) - press_angle,
+                                );
+                                let angle = (start_angle + delta).rem_euclid(360.0);
+                                let factor = gradient_release_factor(
+                                    box_rect,
+                                    angle,
+                                    rx.hypot(ry),
+                                    Size::new(state.width, h),
+                                );
+                                state.gradient_rest = Some(GradientRest {
+                                    index,
+                                    id,
+                                    field,
+                                    factor,
+                                });
                             }
                         }
                     }
@@ -2042,7 +2041,7 @@ where
                                     if let Some(callback) = self.on_gradient_angle.as_ref() {
                                         let changed = self
                                             .gradient_handle
-                                            .map_or(true, |spec| (angle - spec.angle).abs() > 0.1);
+                                            .is_none_or(|spec| (angle - spec.angle).abs() > 0.1);
                                         if changed {
                                             shell.publish(callback((index, id, field, angle)));
                                             shell.request_redraw();
@@ -2086,7 +2085,7 @@ where
                                 }
                                 let changed = self
                                     .gradient_handle
-                                    .map_or(true, |spec| (angle - spec.angle).abs() > 0.1);
+                                    .is_none_or(|spec| (angle - spec.angle).abs() > 0.1);
                                 if changed {
                                     shell.publish(callback((index, id, field, angle)));
                                     shell.request_redraw();

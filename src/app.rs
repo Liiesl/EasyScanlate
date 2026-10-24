@@ -173,7 +173,6 @@ pub enum TabMessage {
     CreateProjectPicked(Result<String, String>),
     RecentPickedToLoad(MmtlLoadedPayload),
     ExportFolderPicked(Option<String>),
-    ExportFinished(Result<String, String>),
     ExportStreamRun(Result<ExportStreamItem, String>),
     ExportStreamFailed(String),
     TranslationExportPicked {
@@ -868,7 +867,6 @@ fn handle_tab_message(app: &mut App, tab_id: TabId, msg: TabMessage) -> Task<Mes
             new_project::handle_location_picked(app, tab_id, picked)
         }
         TabMessage::ExportFolderPicked(picked) => export::handle_export_picked(app, tab_id, picked),
-        TabMessage::ExportFinished(result) => export::handle_export_finished(app, tab_id, result),
         TabMessage::ExportStreamRun(result) => {
             export::handle_export_stream_run(app, tab_id, result)
         }

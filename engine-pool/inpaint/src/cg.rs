@@ -49,6 +49,7 @@ impl CgScratch {
 /// (mirrors `scipy.sparse.linalg.cg(..., rtol=1e-4, maxiter=2000)` in the
 /// Python reference). Returns `None` on breakdown / non-convergence so
 /// callers can keep the original pixels instead of emitting garbage.
+#[cfg(test)]
 pub(crate) fn cg_solve(deg: &[f64], nbrs: &[Vec<u32>], rhs: &[f64]) -> Option<Vec<f64>> {
     let n = rhs.len();
     debug_assert_eq!(deg.len(), n);
@@ -220,7 +221,7 @@ fn matvec_csr(deg: &[f64], offsets: &[u32], cols: &[u32], x: &[f64], out: &mut [
 }
 
 /// `out = A·x` for the legacy `Vec<Vec<u32>>` form (tests only).
-#[allow(dead_code)]
+#[cfg(test)]
 fn matvec(deg: &[f64], nbrs: &[Vec<u32>], x: &[f64], out: &mut [f64]) {
     for (k, o) in out.iter_mut().enumerate() {
         let mut acc = deg[k] * x[k];

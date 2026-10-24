@@ -38,6 +38,7 @@ type CosmicAttrs<'a> = cosmic_crate::Attrs<'a>;
 /// right alignment and fit conservative-but-tight like the old
 /// `chars-1 gaps` stub while the glyph positions themselves carry the real
 /// visual spread.
+#[allow(clippy::too_many_arguments)]
 pub fn spaced_buffer(
     text: &str,
     font: Font,
@@ -77,6 +78,7 @@ pub fn spaced_buffer(
 /// Corrected minimum width of `text` with real letter spacing. Used for
 /// Center/Right translation so the trailing tracking advance does not shift
 /// the visual center.
+#[allow(clippy::too_many_arguments)]
 pub fn spaced_min_width(
     text: &str,
     font: Font,

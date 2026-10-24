@@ -1313,10 +1313,9 @@ fn project_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
         Some("Group this project with others on the home screen"),
     ));
     if !state.has_project() {
-        col.push(
-            helper_text("Open or create a project first, then you can assign it to a series.")
-                .into(),
-        );
+        col.push(helper_text(
+            "Open or create a project first, then you can assign it to a series.",
+        ));
     } else {
         let current = state.project().series().map(str::to_owned);
         let available = available_series_names(state.series_items());
@@ -1385,12 +1384,9 @@ fn project_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'st
                 .into(),
             );
         }
-        col.push(
-            helper_text(
-                "Saved with your project when you save. The home sidebar updates right away.",
-            )
-            .into(),
-        );
+        col.push(helper_text(
+            "Saved with your project when you save. The home sidebar updates right away.",
+        ));
     }
     cards.push(
         container(column(col).spacing(scale::s(8.0)))
@@ -1589,7 +1585,7 @@ fn advanced_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'s
     ));
     col.push(field_row("Export profile", export_dropdown));
     if export_name.is_empty() {
-        col.push(helper_text("No profiles yet.").into());
+        col.push(helper_text("No profiles yet."));
     } else if total_count == 0 {
         col.push(
             text("Run OCR first — there are no lines to export.".to_string())
@@ -1618,8 +1614,8 @@ fn advanced_cards<S: UiState + ?Sized>(state: &S, query: &str) -> Vec<Element<'s
             .width(FillLength)
             .into(),
     );
-    col.push(helper_text("Type a name to create a new profile — or overwrite an existing one with that name. Leave it empty to overwrite the profile chosen above. Overwriting Default creates a copy instead.").into());
-    col.push(helper_text("Lines missing from the file are removed, and lines the file doesn't recognize are skipped. Save the project afterwards to keep the changes.").into());
+    col.push(helper_text("Type a name to create a new profile — or overwrite an existing one with that name. Leave it empty to overwrite the profile chosen above. Overwriting Default creates a copy instead."));
+    col.push(helper_text("Lines missing from the file are removed, and lines the file doesn't recognize are skipped. Save the project afterwards to keep the changes."));
     col.push(
         row![space::horizontal().width(FillLength), import_btn]
             .spacing(scale::s(8.0))

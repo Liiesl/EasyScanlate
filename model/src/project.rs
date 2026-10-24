@@ -231,6 +231,7 @@ impl Project {
     /// Reconstruct from raw parts (for persistence).
     /// `project_id` is `None` only for legacy payloads predating the id.
     /// `series` is `None` for standalone / legacy payloads predating series.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_raw(
         project_id: Option<String>,
         series: Option<String>,

@@ -45,7 +45,6 @@ pub struct AutosaveMeta {
 #[derive(Debug, Clone)]
 pub struct AutosaveFound {
     pub dir: PathBuf,
-    pub saved_at_unix: i64,
     pub saved_at_display: String,
 }
 
@@ -494,7 +493,6 @@ pub fn check_after_load(
                     .filter(|(_, meta)| is_fresher(meta, &mmtl_path));
                 found.map(|(dir, meta)| AutosaveFound {
                     dir,
-                    saved_at_unix: meta.saved_at_unix,
                     saved_at_display: format_saved_at(meta.saved_at_unix),
                 })
             })

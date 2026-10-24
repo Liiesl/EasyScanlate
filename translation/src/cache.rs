@@ -119,10 +119,10 @@ pub fn save_provider(provider: &Provider) {
     let Ok(json) = serde_json::to_string_pretty(&cached) else {
         return;
     };
-    if let Some(parent) = path.parent() {
-        if std::fs::create_dir_all(parent).is_err() {
-            return;
-        }
+    if let Some(parent) = path.parent()
+        && std::fs::create_dir_all(parent).is_err()
+    {
+        return;
     }
     // Atomic write: temp file + rename so a crash never leaves half JSON.
     let tmp = path.with_extension("json.tmp");

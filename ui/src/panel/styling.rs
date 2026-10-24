@@ -90,7 +90,7 @@ fn unified_field<'a, S: UiState + ?Sized>(
     )
     .on_submit(move |v| UiEvent::StyleColorSubmit(field, v))
     .on_tab_change(move |tab| UiEvent::StyleColorTabChanged(field, tab))
-    .on_library_change(|sets, recents, active| UiEvent::StyleLibraryChanged(sets, recents, active))
+    .on_library_change(UiEvent::StyleLibraryChanged)
     .swatches(state.color_swatches().to_vec())
     .recent_colors(state.color_recents().to_vec())
     .active_swatch_tab(state.color_active_tab())

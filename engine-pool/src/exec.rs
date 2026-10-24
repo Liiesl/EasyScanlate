@@ -690,6 +690,24 @@ pub fn run_auto_inpaint_job(
 #[cfg(feature = "ocr")]
 pub type ManualOcrItem = (usize, String, [f32; 4]);
 
+/// Decoded manual-OCR crop: image index, path, crop rect, image size, pixels.
+#[cfg(feature = "ocr")]
+type DecodedCrop = (
+    usize,
+    String,
+    u32,
+    u32,
+    u32,
+    u32,
+    u32,
+    u32,
+    image::RgbaImage,
+);
+
+/// Rescaled seam-stitched crop: image index, crop rect, image width, pixels.
+#[cfg(feature = "ocr")]
+type ScaledCrop = (usize, u32, u32, u32, u32, u32, u32, image::RgbaImage);
+
 /// Runs manual OCR over clustered selections (single + seam-stitched multi).
 /// UI-agnostic port of `app::ocr::run_manual_ocr_selection`: rects are plain
 /// arrays, no `iced::Rectangle`, no `App`.
@@ -766,17 +784,7 @@ pub fn run_manual_ocr_selection(
     if jobs.is_empty() {
         return Err("no OCR jobs".to_string());
     }
-    let mut decoded: Vec<(
-        usize,
-        String,
-        u32,
-        u32,
-        u32,
-        u32,
-        u32,
-        u32,
-        image::RgbaImage,
-    )> = Vec::new();
+    let mut decoded: Vec<DecodedCrop> = Vec::new();
     for (idx, path, cluster) in jobs {
         let dyn_img = image::ImageReader::open(&path)
             .map_err(|e| format!("Failed to open {path}: {e}"))?
@@ -858,8 +866,7 @@ pub fn run_manual_ocr_selection(
             if common_w == 0 {
                 continue;
             }
-            let mut scaled: Vec<(usize, u32, u32, u32, u32, u32, u32, image::RgbaImage)> =
-                Vec::new();
+            let mut scaled: Vec<ScaledCrop> = Vec::new();
             let mut total_h: u32 = 0;
             for pi in &g {
                 let (idx, _, x0, y0, cw, ch, _, _, crop) = &decoded[*pi];

@@ -761,7 +761,10 @@ pub fn view<S: UiState + ?Sized>(state: &S) -> Element<'_, UiEvent> {
                 // of clobbering it with 0.0 and jumping to the top.
                 let bounds_h = viewport.bounds().height;
                 let content_h = viewport.content_bounds().height;
-                if !(bounds_h > f32::EPSILON) || !(content_h > bounds_h + f32::EPSILON) {
+                if bounds_h.partial_cmp(&f32::EPSILON) != Some(std::cmp::Ordering::Greater)
+                    || content_h.partial_cmp(&(bounds_h + f32::EPSILON))
+                        != Some(std::cmp::Ordering::Greater)
+                {
                     return UiEvent::PanelScroll(f32::NAN);
                 }
                 let y = viewport.relative_offset().y;

@@ -278,6 +278,7 @@ fn valid_source_mask(known: &[bool], w: usize, h: usize, patch: usize) -> Vec<bo
 /// Mean SSD over the FULL patch on the canvas estimate. Out-of-range
 /// centres return infinity. `bound` enables exact early exit: partial sums
 /// already exceeding `bound * count` can never beat `bound`.
+#[allow(clippy::too_many_arguments)]
 fn ssd_full(
     canvas: &[[f32; 3]],
     w: usize,
@@ -322,6 +323,7 @@ fn ssd_full(
 /// NNF offsets `(dy,dx)` per pixel; valid on hole pixels only. `known` is
 /// currently used for the empty-donor fast path (all sampling is gated by
 /// `valid`).
+#[allow(clippy::too_many_arguments)]
 fn patchmatch_nnf(
     canvas: &[[f32; 3]],
     w: usize,
@@ -451,6 +453,7 @@ fn patchmatch_nnf(
 
 /// Dominant offsets pointing at fully-known sources, quantised with floor
 /// division (matches Python `dy // 2 * 2` for negatives via `div_euclid`).
+#[allow(clippy::too_many_arguments)]
 fn top_shifts(
     offs: &[(i32, i32)],
     hy: &[usize],
@@ -479,7 +482,7 @@ fn top_shifts(
         *counts.entry(key).or_insert(0) += 1;
     }
     let mut ranked: Vec<((i32, i32), usize)> = counts.into_iter().collect();
-    ranked.sort_by(|a, b| b.1.cmp(&a.1));
+    ranked.sort_by_key(|b| std::cmp::Reverse(b.1));
     let mut shifts: Vec<(i32, i32)> = ranked.into_iter().take(k).map(|(s, _)| s).collect();
     if shifts.is_empty() {
         shifts = vec![(0, 5), (5, 0), (0, -5), (-5, 0), (5, 5), (-5, -5)];
@@ -493,6 +496,7 @@ fn top_shifts(
 
 /// He & Sun / Kwatra seam penalty for edge `((y1,x1),(y2,x2))` under shifts
 /// `s1` vs `s2`. Symmetric in the labels; truncated at `trunc`.
+#[allow(clippy::too_many_arguments)]
 fn seam_cost(
     canvas: &[[f32; 3]],
     w: usize,
@@ -651,6 +655,7 @@ fn argmin_labels(data: &[f64], n: usize, nl: usize) -> Vec<u32> {
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn total_energy_with(
     canvas: &[[f32; 3]],
     w: usize,
@@ -689,6 +694,7 @@ fn total_energy_with(
     e
 }
 
+#[allow(clippy::too_many_arguments)]
 fn total_energy(
     canvas: &[[f32; 3]],
     w: usize,
@@ -711,6 +717,7 @@ fn total_energy(
 /// Rother truncation `A=min(A,B+C)`, then Hammer. Data:
 /// `add_tedge(node, D_alpha, D_cur)`. Sink-side nodes take `α` only if
 /// `data[k,alpha]` is finite.
+#[allow(clippy::too_many_arguments)]
 fn alpha_expansion(
     canvas: &[[f32; 3]],
     w: usize,
@@ -794,6 +801,7 @@ fn alpha_expansion(
 }
 
 /// ICM fallback (same energy; no submodularity requirement).
+#[allow(clippy::too_many_arguments)]
 fn icm(
     canvas: &[[f32; 3]],
     w: usize,

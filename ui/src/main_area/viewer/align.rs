@@ -112,7 +112,7 @@ pub fn guide_for_snapped_quad(
         return None;
     }
     let tile = tiles.get(index)?;
-    if tile.source_width <= 0 {
+    if tile.source_width == 0 {
         return None;
     }
     let scale = state.width / tile.source_width as f32;
@@ -140,7 +140,7 @@ pub fn axis_lock_guide_for_quad(
 ) -> Option<super::state::AxisLockGuide> {
     use super::layout::tile_layout;
     let tile = tiles.get(index)?;
-    if tile.source_width <= 0 {
+    if tile.source_width == 0 {
         return None;
     }
     let scale = state.width / tile.source_width as f32;

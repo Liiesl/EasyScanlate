@@ -332,9 +332,8 @@ fn main() -> iced::Result {
     .theme(|app: &app::App| app.theme())
     .subscription(app::subscription)
     .run()
-    .map_err(|e| {
+    .inspect_err(|e| {
         // Non-panic fatal (window/GPU startup): same native panic panel.
         crash::report_iced_error(&e.to_string());
-        e
     })
 }

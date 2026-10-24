@@ -261,7 +261,6 @@ fn start_segment_stream(
 
 /// Single-grid segment execution lives in the pool
 /// (`easyscanlate_engine_pool::run_segment_grid`); this module only streams it.
-
 #[cfg(feature = "segment")]
 pub fn handle_engine_ready(
     app: &mut App,
@@ -289,10 +288,10 @@ pub fn handle_engine_ready(
                 .complete(owner_of(tab_id), crate::app::queue::JobKind::Segment);
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
-            return Task::batch([
+            Task::batch([
                 promote,
                 super::error::show("Segmentation couldn't start", e),
-            ]);
+            ])
         }
     }
 }

@@ -263,6 +263,7 @@ pub fn warp_threshold() -> f32 {
     WARP_THRESHOLD_PX
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn draw_warped_text<F>(
     frame: &mut F,
     text: &Text,

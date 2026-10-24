@@ -10,6 +10,14 @@ use easyscanlate_model::EntryStyle;
 
 use super::fallback::contains_cjk;
 
+type WeightCacheKey = (
+    iced::advanced::graphics::text::Version,
+    String,
+    FontWeight,
+    FontStyle,
+    FontStretch,
+);
+
 /// A `Font` for the installed family `name`, memoized: iced's `Font::with_name` requires `&'static str`.
 pub(crate) fn family_font(name: &str) -> Font {
     static NAMES: OnceLock<Mutex<HashMap<String, &'static str>>> = OnceLock::new();
@@ -221,11 +229,9 @@ fn nearest_available_weight(
     style: FontStyle,
     stretch: FontStretch,
 ) -> FontWeight {
-    use iced::advanced::graphics::text::{Version, font_system};
+    use iced::advanced::graphics::text::font_system;
 
-    static RESOLVED: OnceLock<
-        Mutex<HashMap<(Version, String, FontWeight, FontStyle, FontStretch), FontWeight>>,
-    > = OnceLock::new();
+    static RESOLVED: OnceLock<Mutex<HashMap<WeightCacheKey, FontWeight>>> = OnceLock::new();
 
     let cache = RESOLVED.get_or_init(|| Mutex::new(HashMap::new()));
     let version = font_system().read().expect("Read font system").version();

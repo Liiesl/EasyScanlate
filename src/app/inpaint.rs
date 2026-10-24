@@ -2354,7 +2354,7 @@ pub fn handle_inpaint_engine_ready(
                 crate::app::queue::refresh_queued_statuses(app);
                 return Task::batch([promote, super::error::show("Inpainting couldn't start", e)]);
             }
-            return super::error::show("Inpainting couldn't start", e);
+            super::error::show("Inpainting couldn't start", e)
         }
     }
 }
@@ -2433,10 +2433,10 @@ pub fn handle_auto_engine_ready(
             app.engines.queue.complete(owner_of(tab_id), kind);
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
-            return Task::batch([
+            Task::batch([
                 promote,
                 super::error::show("Auto-inpainting couldn't start", e),
-            ]);
+            ])
         }
     }
 }
@@ -2969,7 +2969,7 @@ pub fn dispatch_auto(
                         unreachable!("telea/harmonic take the parallel arm")
                     }
                 };
-                return start_auto_stream(app, tab_id, engine, jobs, pad, label, backend);
+                start_auto_stream(app, tab_id, engine, jobs, pad, label, backend)
             }
         }
     } else {

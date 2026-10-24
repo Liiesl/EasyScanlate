@@ -165,7 +165,7 @@ impl Quad {
             let dx = q[0] - p[0];
             let dy = q[1] - p[1];
             let len = dx.hypot(dy);
-            if !(len > 1e-6) {
+            if len.partial_cmp(&1e-6) != Some(std::cmp::Ordering::Greater) {
                 return Self::from_xyxy(
                     ordered.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min) - pad,
                     ordered.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min) - pad,
@@ -200,7 +200,7 @@ impl Quad {
                 // Parallel edges: push the corner out along the averaged normal.
                 let (px, py) = (ordered[i][0] - cx, ordered[i][1] - cy);
                 let len = px.hypot(py);
-                if !(len > 1e-6) {
+                if len.partial_cmp(&1e-6) != Some(std::cmp::Ordering::Greater) {
                     return self;
                 }
                 out[i] = [

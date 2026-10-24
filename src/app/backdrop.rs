@@ -399,7 +399,7 @@ fn box_radius_for_sigma(sigma: f32, passes: u32) -> u32 {
 
 /// In-place multi-pass separable box blur on an RGBA buffer.
 /// Each pass = horizontal slide into scratch + vertical slide back.
-fn box_blur_rgba_inplace(buf: &mut Vec<u8>, w: u32, h: u32, radius: u32, passes: u32) {
+fn box_blur_rgba_inplace(buf: &mut [u8], w: u32, h: u32, radius: u32, passes: u32) {
     let (w, h) = (w as usize, h as usize);
     if buf.len() < w * h * 4 || w == 0 || h == 0 || radius == 0 || passes == 0 {
         return;

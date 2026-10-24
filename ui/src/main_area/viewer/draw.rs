@@ -397,69 +397,69 @@ pub fn draw_selection_decorations<'a, F>(
     let Some(entry) = tiles[tile_index].overlays.iter().find(|e| e.selected) else {
         return;
     };
-    if let Some(spec) = gradient {
-        if spec.index == tile_index && spec.id == entry.id {
-            if entry.hide_text {
-                return;
-            }
-            let scale = frame.width() / tiles[tile_index].source_width.max(1) as f32;
-            let box_rect = Rectangle::new(
-                Point::new(entry.bounds[0] * scale, entry.bounds[1] * scale),
-                Size::new(
-                    (entry.bounds[2] - entry.bounds[0]) * scale,
-                    (entry.bounds[3] - entry.bounds[1]) * scale,
-                ),
-            );
-            let factor =
-                super::motion::gradient_rest_factor(state, spec.index, spec.id, spec.field);
-            // While dragging, the grabbed square sticks exactly to the
-            // cursor (no restriction) and the other mirrors across the
-            // center; otherwise both rest at the cached free radius.
-            let dragging_endpoint = match state.interaction {
-                Interaction::GradientPending {
-                    index,
-                    id,
-                    endpoint,
-                    ..
-                }
-                | Interaction::GradientDragging {
-                    index,
-                    id,
-                    endpoint,
-                    ..
-                } if index == tile_index && id == entry.id => Some(endpoint),
-                _ => None,
-            };
-            let center = super::motion::gradient_box_center(box_rect);
-            let exact_cursor = match state.interaction {
-                Interaction::GradientDragging { index, id, .. }
-                    if index == tile_index && id == entry.id =>
-                {
-                    cursor_local.filter(|p| (p.x - center.x).hypot(p.y - center.y) >= 1.0)
-                }
-                _ => None,
-            };
-            let (start, end, hover) = match (exact_cursor, dragging_endpoint) {
-                (Some(cursor), Some(endpoint)) => {
-                    let mirror = Point::new(2.0 * center.x - cursor.x, 2.0 * center.y - cursor.y);
-                    let (s, e) = if endpoint == 0 {
-                        (cursor, mirror)
-                    } else {
-                        (mirror, cursor)
-                    };
-                    (s, e, Some(endpoint))
-                }
-                _ => {
-                    let (s, e) = super::motion::gradient_free_points(box_rect, spec.angle, factor);
-                    let hover = cursor_local.and_then(|local| {
-                        super::motion::gradient_handle_hit(box_rect, spec.angle, factor, local)
-                    });
-                    (s, e, hover.or(dragging_endpoint))
-                }
-            };
-            draw_gradient_handle(frame, start, end, spec.color_a, spec.color_b, hover);
+    if let Some(spec) = gradient
+        && spec.index == tile_index
+        && spec.id == entry.id
+    {
+        if entry.hide_text {
             return;
         }
+        let scale = frame.width() / tiles[tile_index].source_width.max(1) as f32;
+        let box_rect = Rectangle::new(
+            Point::new(entry.bounds[0] * scale, entry.bounds[1] * scale),
+            Size::new(
+                (entry.bounds[2] - entry.bounds[0]) * scale,
+                (entry.bounds[3] - entry.bounds[1]) * scale,
+            ),
+        );
+        let factor = super::motion::gradient_rest_factor(state, spec.index, spec.id, spec.field);
+        // While dragging, the grabbed square sticks exactly to the
+        // cursor (no restriction) and the other mirrors across the
+        // center; otherwise both rest at the cached free radius.
+        let dragging_endpoint = match state.interaction {
+            Interaction::GradientPending {
+                index,
+                id,
+                endpoint,
+                ..
+            }
+            | Interaction::GradientDragging {
+                index,
+                id,
+                endpoint,
+                ..
+            } if index == tile_index && id == entry.id => Some(endpoint),
+            _ => None,
+        };
+        let center = super::motion::gradient_box_center(box_rect);
+        let exact_cursor = match state.interaction {
+            Interaction::GradientDragging { index, id, .. }
+                if index == tile_index && id == entry.id =>
+            {
+                cursor_local.filter(|p| (p.x - center.x).hypot(p.y - center.y) >= 1.0)
+            }
+            _ => None,
+        };
+        let (start, end, hover) = match (exact_cursor, dragging_endpoint) {
+            (Some(cursor), Some(endpoint)) => {
+                let mirror = Point::new(2.0 * center.x - cursor.x, 2.0 * center.y - cursor.y);
+                let (s, e) = if endpoint == 0 {
+                    (cursor, mirror)
+                } else {
+                    (mirror, cursor)
+                };
+                (s, e, Some(endpoint))
+            }
+            _ => {
+                let (s, e) = super::motion::gradient_free_points(box_rect, spec.angle, factor);
+                let hover = cursor_local.and_then(|local| {
+                    super::motion::gradient_handle_hit(box_rect, spec.angle, factor, local)
+                });
+                (s, e, hover.or(dragging_endpoint))
+            }
+        };
+        draw_gradient_handle(frame, start, end, spec.color_a, spec.color_b, hover);
+        return;
     }
     if entry.hide_text || !show_overlay_text {
         return;

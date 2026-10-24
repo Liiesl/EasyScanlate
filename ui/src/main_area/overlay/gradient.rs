@@ -177,6 +177,7 @@ fn rgba8(c: [u8; 4]) -> Color {
 // transform to identity, which dropped the tile translation (gradient
 // invisible past the first image) and clipped rotated text with axis-aligned
 // strips (slivers nowhere near the glyphs).
+#[allow(clippy::too_many_arguments)]
 pub fn fill_gradient_text<F>(
     frame: &mut F,
     text: &Text,
@@ -203,6 +204,7 @@ pub fn fill_gradient_text<F>(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fill_gradient_glyphs<F>(
     frame: &mut F,
     text: &Text,

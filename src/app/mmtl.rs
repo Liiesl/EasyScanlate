@@ -583,11 +583,11 @@ pub fn handle_saved(
             }
             // Manual save makes the central autosave delta redundant.
             // Pass the tab's id so moved-project orphans are cleared too.
-            return super::autosave::clear_for_mmtl_path(&PathBuf::from(&path), pid);
+            super::autosave::clear_for_mmtl_path(&PathBuf::from(&path), pid)
         }
         Err(e) => {
             app.tabs[idx].status = format!("Save failed: {e}");
-            return super::error::show("Couldn't save the project", e);
+            super::error::show("Couldn't save the project", e)
         }
     }
 }
@@ -661,7 +661,7 @@ pub fn handle_loaded(
                 images.len(),
                 "project/images parity must hold after load"
             );
-            return push_project_tab(app, tab_id, project, images, display_path, temp_dir);
+            push_project_tab(app, tab_id, project, images, display_path, temp_dir)
         }
         Err(e) => {
             // Load resolved (failed): the reusable capture is stale.
@@ -679,7 +679,7 @@ pub fn handle_loaded(
             } else {
                 app.active_tab_mut().status = format!("Load failed: {e}");
             }
-            return super::error::show("Couldn't open the project", e);
+            super::error::show("Couldn't open the project", e)
         }
     }
 }

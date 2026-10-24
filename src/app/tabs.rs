@@ -4,6 +4,14 @@ use iced::Task;
 use super::tab::TabId;
 use super::{App, Message, TabMessage};
 
+/// Raw inpaint layer bytes cloned on the UI thread for close-with-save.
+type RawInpaintLayer = (
+    easyscanlate_model::ImageId,
+    [f32; 4],
+    Option<(u32, u32, Vec<u8>)>,
+    Option<bytes::Bytes>,
+);
+
 /// 32px titlebar tab strip — `easyscanlate | proj • × | … + | Fill(drag gap)`.
 ///
 /// `+` is inside the scrollable row immediately after last chip, so it sits
@@ -99,12 +107,7 @@ pub fn handle_close_confirmed(app: &mut App, raw: u64, save: bool) -> Task<Messa
             let tid = id;
             // Raw clone on the UI thread (no decode); `load_from_memory`
             // runs in the blocking task below so close-with-save never stalls.
-            let raw: Vec<(
-                easyscanlate_model::ImageId,
-                [f32; 4],
-                Option<(u32, u32, Vec<u8>)>,
-                Option<bytes::Bytes>,
-            )> = {
+            let raw: Vec<RawInpaintLayer> = {
                 let tab = &app.tabs[idx];
                 let mut out = Vec::new();
                 for loaded in &tab.images {

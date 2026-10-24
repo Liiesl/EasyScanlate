@@ -120,7 +120,6 @@ fn into_paint(style: geometry::Style) -> Paint<'static> {
                             tiny_skia::Transform::identity(),
                         )
                         .expect("valid gradient")
-                        .into()
                     }
                 }
             }
@@ -158,6 +157,8 @@ fn into_stroke(stroke: &Stroke<'_>) -> tiny_skia::Stroke {
 // ---------------------------------------------------------------------------
 // ExportFrame — immediate-mode Backend that draws onto a tiny-skia Pixmap
 // ---------------------------------------------------------------------------
+type MaskCacheEntry = (u32, u32, u32, u32, u32, u32, Mask);
+
 struct ExportFrame {
     pixmap: Rc<RefCell<Pixmap>>,
     transform: Transform,
@@ -168,7 +169,7 @@ struct ExportFrame {
     // every glyph once with the same clip, so rebuilding
     // `Mask::new(w,h)` per glyph was the dominant raster cost. Same bits,
     // just reused (bit-identical output).
-    mask_cache: RefCell<Option<(u32, u32, u32, u32, u32, u32, Mask)>>,
+    mask_cache: RefCell<Option<MaskCacheEntry>>,
 }
 
 impl ExportFrame {
@@ -1031,29 +1032,6 @@ fn export_chunk_parallel(
     // Deterministic order for error messages / tests.
     out.sort_by_key(|(idx, _)| *idx);
     out
-}
-
-pub fn handle_export_finished(
-    app: &mut App,
-    tab_id: crate::app::tab::TabId,
-    result: Result<String, String>,
-) -> Task<Message> {
-    let idx = match app.tabs.iter().position(|t| t.id == tab_id) {
-        Some(i) => i,
-        None => return Task::none(),
-    };
-    app.tabs[idx].exporting = false;
-    clear_export_overlay(app, idx);
-    match result {
-        Ok(msg) => {
-            app.tabs[idx].status = msg;
-            Task::none()
-        }
-        Err(e) => {
-            app.tabs[idx].status = format!("Export failed: {e}");
-            super::error::show("Couldn't export images", e)
-        }
-    }
 }
 
 fn finish_export_if_done(app: &mut App, idx: usize) -> Task<Message> {

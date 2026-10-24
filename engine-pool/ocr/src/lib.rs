@@ -745,7 +745,7 @@ fn group_accepts(group: &Group, b: [f32; 4], cfg: MergeConfig) -> bool {
         let gap_x = (a[0].max(b[0]) - a[2].min(b[2])).max(0.0);
         let gap_y = (a[1].max(b[1]) - a[3].min(b[3])).max(0.0);
         let d = gap_x + gap_y;
-        if best.map_or(true, |(_, _, bd)| d < bd) {
+        if best.is_none_or(|(_, _, bd)| d < bd) {
             best = Some((a, gap_x, gap_y));
         }
     }
@@ -1116,14 +1116,13 @@ fn groups_combine_ok(a: &Group, b: &Group, cfg: MergeConfig) -> bool {
     let mut all: Vec<[f32; 4]> = Vec::with_capacity(a.bounds.len() + b.bounds.len());
     all.extend_from_slice(&a.bounds);
     all.extend_from_slice(&b.bounds);
-    if let Some(gaps) = stacked_gaps(&all) {
-        if let Some(med) = median(gaps.clone()) {
-            if med > 0.0 {
-                for g in gaps {
-                    if g > med * cfg.variance_cut && g > cfg.expand_y * a.mean_h().min(b.mean_h()) {
-                        return false;
-                    }
-                }
+    if let Some(gaps) = stacked_gaps(&all)
+        && let Some(med) = median(gaps.clone())
+        && med > 0.0
+    {
+        for g in gaps {
+            if g > med * cfg.variance_cut && g > cfg.expand_y * a.mean_h().min(b.mean_h()) {
+                return false;
             }
         }
     }

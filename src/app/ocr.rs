@@ -462,7 +462,7 @@ pub fn handle_parallel_ready(
                 .complete_ocr(crate::app::queue::owner_of(tab_id));
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
-            return Task::batch([promote, super::error::show("OCR couldn't start", e)]);
+            Task::batch([promote, super::error::show("OCR couldn't start", e)])
         }
     }
 }
@@ -1045,7 +1045,7 @@ pub fn handle_manual_ocr_engine_ready(
                 crate::app::queue::refresh_queued_statuses(app);
                 return Task::batch([promote, super::error::show("Manual OCR couldn't start", e)]);
             }
-            return super::error::show("Manual OCR couldn't start", e);
+            super::error::show("Manual OCR couldn't start", e)
         }
     }
 }

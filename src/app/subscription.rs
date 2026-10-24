@@ -112,9 +112,7 @@ fn drops_subscription(app: &App) -> Subscription<Message> {
             }
             iced::Event::Window(iced::window::Event::FileDropped(path)) => {
                 let s = path.to_string_lossy().to_string();
-                if modal_open {
-                    Some(Message::ExternalOpen(vec![s]))
-                } else if s.to_ascii_lowercase().ends_with(".mmtl") {
+                if modal_open || s.to_ascii_lowercase().ends_with(".mmtl") {
                     Some(Message::ExternalOpen(vec![s]))
                 } else {
                     None

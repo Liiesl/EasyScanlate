@@ -109,8 +109,11 @@ pub fn publish_anchor<Message, R>(
     // Degenerate frames (minimized / zero-size viewport, or content that
     // fits) carry no meaningful anchor: publishing 0.0 would clobber the
     // app's good per-tab `viewer_scroll`, so skip and keep the old value.
-    if !(state.viewport_height > f32::EPSILON)
-        || !(state.content_height > state.viewport_height + f32::EPSILON)
+    if state.viewport_height.partial_cmp(&f32::EPSILON) != Some(std::cmp::Ordering::Greater)
+        || state
+            .content_height
+            .partial_cmp(&(state.viewport_height + f32::EPSILON))
+            != Some(std::cmp::Ordering::Greater)
     {
         return;
     }

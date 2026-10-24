@@ -1101,7 +1101,7 @@ pub fn handle_styling_ready(
             );
             let promote = crate::app::queue::dispatch_pending(app);
             crate::app::queue::refresh_queued_statuses(app);
-            return Task::batch([promote, super::error::show("Styling couldn't start", e)]);
+            Task::batch([promote, super::error::show("Styling couldn't start", e)])
         }
     }
 }

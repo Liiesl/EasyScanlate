@@ -290,7 +290,7 @@ pub fn shiftmap_inpaint_crop(image: &RgbaImage, rect: [f32; 4], quads: &[Quad]) 
         rect,
         quads,
         SHIFTMAP_CONTEXT_PAD,
-        |rgb, mask| crate::shiftmap::shiftmap_inpaint_rgb(rgb, mask),
+        crate::shiftmap::shiftmap_inpaint_rgb,
     )
 }
 
