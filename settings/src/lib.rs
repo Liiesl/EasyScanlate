@@ -154,6 +154,48 @@ impl fmt::Display for AutoInpaintModel {
     }
 }
 
+/// Which recognition language the OCR engine uses. Korean keeps the
+/// dedicated PP-OCRv5 Korean model; Chinese and Japanese share the
+/// multilingual PP-OCRv6 small rec model + ppocrv6 dict. Detector stays
+/// `PP-OCRv6_det_tiny` for all three.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OcrLanguage {
+    #[default]
+    Korean,
+    Chinese,
+    Japanese,
+}
+
+impl fmt::Display for OcrLanguage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Korean => "Korean",
+            Self::Chinese => "Chinese",
+            Self::Japanese => "Japanese",
+        })
+    }
+}
+
+impl OcrLanguage {
+    /// Normalized recognition backend: Chinese and Japanese share files.
+    pub fn backend(self) -> OcrRecBackend {
+        match self {
+            Self::Korean => OcrRecBackend::Korean,
+            Self::Chinese | Self::Japanese => OcrRecBackend::PpOcrv6,
+        }
+    }
+}
+
+/// File-level recognition backend. Chinese/Japanese collapse here so the
+/// pipeline fingerprint and engine cache don't rebuild when switching
+/// between two languages that share the same rec + dict files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OcrRecBackend {
+    Korean,
+    PpOcrv6,
+}
+
 /// How many preset slots the app starts with: five built-in styles plus
 /// three empty slots.
 pub const INITIAL_PRESET_SLOTS: usize = 8;
@@ -402,6 +444,11 @@ pub struct Settings {
     /// both axes. Raw string; parsed (fallback 0.5).
     #[serde(default = "default_ocr_merge_threshold")]
     pub ocr_merge_threshold: String,
+    /// Which recognition language OCR uses. Korean = dedicated PP-OCRv5
+    /// Korean rec; Chinese/Japanese = shared multilingual PP-OCRv6 small
+    /// rec + ppocrv6 dict.
+    #[serde(default)]
+    pub ocr_language: OcrLanguage,
     /// When enabled, the translation model picker only lists free models.
     #[serde(default)]
     pub free_models_only: bool,
@@ -502,6 +549,7 @@ impl Default for Settings {
             ocr_max_text_height: default_ocr_max_text_height(),
             ocr_max_side_len: default_ocr_max_side_len(),
             ocr_merge_threshold: default_ocr_merge_threshold(),
+            ocr_language: OcrLanguage::default(),
             free_models_only: false,
             hidden_models: BTreeMap::new(),
             inpaint_backend: InpaintBackend::default(),
@@ -821,6 +869,7 @@ mod tests {
             ocr_max_text_height: "500".to_string(),
             ocr_max_side_len: "3000".to_string(),
             ocr_merge_threshold: "0.8".to_string(),
+            ocr_language: OcrLanguage::Chinese,
             free_models_only: true,
             hidden_models: BTreeMap::from([(
                 "deepseek".to_string(),
@@ -861,6 +910,7 @@ mod tests {
         assert_eq!(back.ocr_max_text_height, "500");
         assert_eq!(back.ocr_max_side_len, "3000");
         assert_eq!(back.ocr_merge_threshold, "0.8");
+        assert_eq!(back.ocr_language, OcrLanguage::Chinese);
         assert!(back.free_models_only);
         assert!(back.hidden_models["deepseek"].contains("deepseek-reasoner"));
         assert_eq!(back.inpaint_backend, InpaintBackend::Lama);
@@ -889,6 +939,7 @@ mod tests {
         assert_eq!(back.ocr_max_text_height, "100");
         assert_eq!(back.ocr_max_side_len, "2000");
         assert_eq!(back.ocr_merge_threshold, "0.5");
+        assert_eq!(back.ocr_language, OcrLanguage::Korean);
         assert!(!back.free_models_only);
         assert!(back.hidden_models.is_empty());
         assert_eq!(back.inpaint_backend, InpaintBackend::Harmonic);

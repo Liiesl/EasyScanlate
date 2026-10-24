@@ -126,12 +126,23 @@ fn dispatch_ocr(
             && app.tabs[idx].pending_manual_multi_ocr.is_some()
         {
             let data = app.tabs[idx].pending_manual_multi_ocr.take().unwrap();
-            let cached = app.engines.manual_ocr.clone();
+            let backend = easyscanlate_settings::get(|s| s.ocr_language.backend());
+            let cached = match app.engines.manual_ocr_backend {
+                Some(cached_backend) if cached_backend == backend => {
+                    app.engines.manual_ocr.clone()
+                }
+                _ => {
+                    app.engines.manual_ocr = None;
+                    app.engines.manual_ocr_backend = None;
+                    None
+                }
+            };
             if let Some(engine) = cached {
                 return crate::app::ocr::start_manual_ocr_selection(app, tab_id, data, engine);
             } else {
                 let cfg = easyscanlate_settings::get(|s| {
-                    easyscanlate_ocr::config_with(
+                    easyscanlate_ocr::config_for_lang(
+                        s.ocr_language,
                         0.0,
                         s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000),
                     )
@@ -164,14 +175,19 @@ fn dispatch_ocr(
         return Task::none();
     }
     // otherwise pipeline OCR
-    let (workers, cfg) = easyscanlate_settings::get(|s| {
+    let (workers, cfg, backend) = easyscanlate_settings::get(|s| {
         let workers = s.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
-        let cfg = easyscanlate_ocr::config_from_strings(&s.ocr_text_score, &s.ocr_max_side_len);
-        (workers, cfg)
+        let backend = s.ocr_language.backend();
+        let cfg = easyscanlate_ocr::config_from_strings_for_lang(
+            s.ocr_language,
+            &s.ocr_text_score,
+            &s.ocr_max_side_len,
+        );
+        (workers, cfg, backend)
     });
-    let (fp_workers, fp_score, fp_side) =
-        easyscanlate_ocr::pipeline_fingerprint(&cfg, workers);
-    if app.engines.pipeline_matches(fp_workers, fp_score, fp_side) {
+    let (fp_workers, fp_score, fp_side, fp_backend) =
+        easyscanlate_ocr::pipeline_fingerprint(&cfg, workers, backend);
+    if app.engines.pipeline_matches(fp_workers, fp_score, fp_side, fp_backend) {
         return crate::app::ocr::maybe_start_ocr(app, tab_id);
     }
     // First build or stale config: drop the old pipeline (if any) so the

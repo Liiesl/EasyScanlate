@@ -16,6 +16,8 @@ use iced::widget::text_input;
 use iced::{Color, Element, Fill as FillLength, Length};
 use lucide_icons::Icon;
 
+#[cfg(feature = "ocr")]
+use easyscanlate_settings::OcrLanguage;
 #[cfg(feature = "inpaint")]
 use easyscanlate_settings::{AutoInpaintModel, InpaintBackend};
 
@@ -1300,10 +1302,10 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
 
     #[cfg(feature = "ocr")]
     {
-        let show_ocr = matches_any(query_ref, &["ocr", "engine", "detection", "recognition", "confidence", "text", "height", "bbox", "merge", "distance", "threshold", "side", "len", "workers", "parallel", "tuning"]);
+        let show_ocr = matches_any(query_ref, &["ocr", "engine", "detection", "recognition", "confidence", "text", "height", "bbox", "merge", "distance", "threshold", "side", "len", "workers", "parallel", "tuning", "language", "korean", "chinese", "japanese"]);
         if show_ocr {
             let workers = easyscanlate_settings::get(|s| s.ocr_workers.clone());
-            let (text_score, min_bbox_h, max_bbox_h, max_side, merge_thr) =
+            let (text_score, min_bbox_h, max_bbox_h, max_side, merge_thr, ocr_lang) =
                 easyscanlate_settings::get(|s| {
                     (
                         s.ocr_text_score.clone(),
@@ -1311,10 +1313,18 @@ fn ocr_tab_filtered(query: String) -> Element<'static, UiEvent> {
                         s.ocr_max_text_height.clone(),
                         s.ocr_max_side_len.clone(),
                         s.ocr_merge_threshold.clone(),
+                        s.ocr_language,
                     )
                 });
             let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
             col.push(card_header(Icon::ScanSearch, "OCR Engine", Some("Applies the next time you run OCR")));
+            if matches_any(query_ref, &["ocr", "language", "korean", "chinese", "japanese", "recognition", "engine"]) || query_ref.trim().is_empty() {
+                col.push(field_row("Language",
+                    pick_list([OcrLanguage::Korean, OcrLanguage::Chinese, OcrLanguage::Japanese], Some(ocr_lang), |lang| set(move |s| s.ocr_language = lang)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()
+                ));
+                col.push(helper_text("Korean uses its dedicated model; Chinese and Japanese share the multilingual PP-OCRv6 model."));
+                col.push(item_separator());
+            }
             if matches_any(query_ref, &["ocr", "workers", "parallel", "detection", "engine"]) || query_ref.trim().is_empty() {
                 col.push(field_row("Detection workers",
                     text_input("2", &workers)
@@ -1414,10 +1424,10 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
     let mut cards: Vec<Element<'static, UiEvent>> = Vec::new();
     #[cfg(feature = "ocr")]
     {
-        let show_ocr = matches_any(query, &["ocr", "engine", "detection", "recognition", "confidence", "text", "height", "bbox", "merge", "distance", "threshold", "side", "len", "workers", "parallel", "tuning"]);
+        let show_ocr = matches_any(query, &["ocr", "engine", "detection", "recognition", "confidence", "text", "height", "bbox", "merge", "distance", "threshold", "side", "len", "workers", "parallel", "tuning", "language", "korean", "chinese", "japanese"]);
         if show_ocr {
             let workers = easyscanlate_settings::get(|s| s.ocr_workers.clone());
-            let (text_score, min_bbox_h, max_bbox_h, max_side, merge_thr) =
+            let (text_score, min_bbox_h, max_bbox_h, max_side, merge_thr, ocr_lang) =
                 easyscanlate_settings::get(|s| {
                     (
                         s.ocr_text_score.clone(),
@@ -1425,10 +1435,18 @@ fn ocr_cards(query: &str) -> Vec<Element<'static, UiEvent>> {
                         s.ocr_max_text_height.clone(),
                         s.ocr_max_side_len.clone(),
                         s.ocr_merge_threshold.clone(),
+                        s.ocr_language,
                     )
                 });
             let mut col: Vec<Element<'static, UiEvent>> = Vec::new();
             col.push(card_header(Icon::ScanSearch, "OCR Engine", Some("Applies the next time you run OCR")));
+            if matches_any(query, &["ocr", "language", "korean", "chinese", "japanese", "recognition", "engine"]) || query.trim().is_empty() {
+                col.push(field_row("Language",
+                    pick_list([OcrLanguage::Korean, OcrLanguage::Chinese, OcrLanguage::Japanese], Some(ocr_lang), |lang| set(move |s| s.ocr_language = lang)).padding(scale::s(4.0)).text_size(scale::s(12.0)).into()
+                ));
+                col.push(helper_text("Korean uses its dedicated model; Chinese and Japanese share the multilingual PP-OCRv6 model."));
+                col.push(item_separator());
+            }
             if matches_any(query, &["ocr", "workers", "parallel", "detection", "engine"]) || query.trim().is_empty() {
                 col.push(field_row("Detection workers",
                     text_input("2", &workers)

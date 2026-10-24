@@ -79,6 +79,27 @@ pub const KOREAN_DICT: ModelSpec = ModelSpec {
     replaces: None,
 };
 
+/// Multilingual PP-OCRv6 small recognition (mobile). Shared by the
+/// Chinese and Japanese OCR language options; detector stays
+/// `PP-OCRv6_det_tiny` for all languages.
+pub const PPOCRV6_SMALL_REC: ModelSpec = ModelSpec {
+    id: "ppocrv6-rec",
+    filename: "PP-OCRv6_small_rec.onnx",
+    url: "https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx/resolve/main/inference.onnx?download=true",
+    description: "PP-OCRv6 small recognition (multilingual, shared by Chinese/Japanese)",
+    available: true,
+    replaces: None,
+};
+
+pub const PPOCRV6_DICT: ModelSpec = ModelSpec {
+    id: "ppocrv6-dict",
+    filename: "ppocrv6_dict.txt",
+    url: "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/ppocr/utils/dict/ppocrv6_dict.txt",
+    description: "PP-OCRv6 dict (upstream PaddleOCR, multilingual)",
+    available: true,
+    replaces: None,
+};
+
 /// AOT inpainting model (optional lazy download, not part of mandatory onboarding).
 pub const AOT_INPAINT: ModelSpec = ModelSpec {
     id: "aot-inpaint",
@@ -96,6 +117,8 @@ pub const MODELS: &[ModelSpec] = &[
     KOHARU_SEG,
     KOREAN_REC,
     KOREAN_DICT,
+    PPOCRV6_SMALL_REC,
+    PPOCRV6_DICT,
     PPOCR_DET_TINY,
     AOT_INPAINT,
 ];
@@ -179,6 +202,8 @@ mod tests {
         assert!(ids.contains(&"koharu-seg"));
         assert!(ids.contains(&"korean-rec"));
         assert!(ids.contains(&"korean-dict"));
+        assert!(ids.contains(&"ppocrv6-rec"));
+        assert!(ids.contains(&"ppocrv6-dict"));
         assert!(ids.contains(&"ppocr-det-tiny"));
         assert!(ids.contains(&"aot-inpaint"));
     }

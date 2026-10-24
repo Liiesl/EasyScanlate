@@ -178,12 +178,33 @@ pub fn config() -> RapidOcrConfig {
 /// Builds a [`RapidOcrConfig`] with the given tunables, clamped to valid
 /// ranges. `text_score` is min confidence (0..1), `max_side_len` is the
 /// "max side len (max longer side before resize)" knob. Other pipeline sizes
-/// stay at defaults (30).
+/// stay at defaults (30). Language defaults to Korean (legacy behavior).
 pub fn config_with(text_score: f32, max_side_len: u32) -> RapidOcrConfig {
+    config_for_lang(easyscanlate_settings::OcrLanguage::Korean, text_score, max_side_len)
+}
+
+/// Like [`config_with`] but for an explicit OCR language. Korean uses the
+/// dedicated PP-OCRv5 Korean rec + dict; Chinese/Japanese share the
+/// multilingual PP-OCRv6 small rec + ppocrv6 dict. Detector
+/// (`PP-OCRv6_det_tiny`) and rec `image_shape` stay the same for all.
+pub fn config_for_lang(
+    lang: easyscanlate_settings::OcrLanguage,
+    text_score: f32,
+    max_side_len: u32,
+) -> RapidOcrConfig {
     // Prefer onboarding-downloaded models in settings models_dir(), fallback to legacy crate-relative ../models.
     let det_path = easyscanlate_settings::resolve_model_path("PP-OCRv6_det_tiny.onnx");
-    let rec_path = easyscanlate_settings::resolve_model_path("korean_PP-OCRv5_rec_mobile.onnx");
-    let dict_path = easyscanlate_settings::resolve_model_path("ppocrv5_korean_dict.txt");
+    let (rec_file, dict_file) = match lang.backend() {
+        easyscanlate_settings::OcrRecBackend::Korean => (
+            "korean_PP-OCRv5_rec_mobile.onnx",
+            "ppocrv5_korean_dict.txt",
+        ),
+        easyscanlate_settings::OcrRecBackend::PpOcrv6 => {
+            ("PP-OCRv6_small_rec.onnx", "ppocrv6_dict.txt")
+        }
+    };
+    let rec_path = easyscanlate_settings::resolve_model_path(rec_file);
+    let dict_path = easyscanlate_settings::resolve_model_path(dict_file);
     // Keep model_dir for error messages fallback, but use resolved paths.
     let _model_dir = PathBuf::from(MODEL_DIR);
     // Clamp to valid ranges; rapidocr_core::config::RapidOcrConfig::validate
@@ -239,21 +260,47 @@ pub fn config_with(text_score: f32, max_side_len: u32) -> RapidOcrConfig {
 }
 
 /// Parses OCR tunables from raw settings strings (surviving half-typing) and
-/// builds a [`RapidOcrConfig`] with fallbacks to defaults.
+/// builds a [`RapidOcrConfig`] with fallbacks to defaults. Language defaults
+/// to Korean (legacy behavior).
 pub fn config_from_strings(text_score_str: &str, max_side_str: &str) -> RapidOcrConfig {
+    config_from_strings_for_lang(
+        easyscanlate_settings::OcrLanguage::Korean,
+        text_score_str,
+        max_side_str,
+    )
+}
+
+/// Like [`config_from_strings`] but for an explicit OCR language.
+pub fn config_from_strings_for_lang(
+    lang: easyscanlate_settings::OcrLanguage,
+    text_score_str: &str,
+    max_side_str: &str,
+) -> RapidOcrConfig {
     let text_score = text_score_str.trim().parse::<f32>().unwrap_or(0.5);
     let max_side = max_side_str.trim().parse::<u32>().unwrap_or(2000);
-    config_with(text_score, max_side)
+    config_for_lang(lang, text_score, max_side)
 }
 
 /// Cache fingerprint for the shared auto-OCR pipeline: sanitized
-/// `(workers, text_score_bits, max_side_len)` derived from an already-built
-/// [`RapidOcrConfig`]. Both build and reuse paths go through
-/// [`config_from_strings`]/[`config_with`], so comparing fingerprints avoids
-/// reloads on cosmetic string differences (`"0.5"` vs `" 0.5 "`) while still
-/// rebuilding when the effective config changes.
-pub fn pipeline_fingerprint(cfg: &RapidOcrConfig, workers: usize) -> (usize, u32, u32) {
-    (workers.max(1), cfg.text_score.to_bits(), cfg.max_side_len)
+/// `(workers, text_score_bits, max_side_len, rec_backend)` derived from an
+/// already-built [`RapidOcrConfig`] plus the requested language backend.
+/// Both build and reuse paths go through
+/// [`config_from_strings_for_lang`]/[`config_for_lang`], so comparing
+/// fingerprints avoids reloads on cosmetic string differences (`"0.5"` vs
+/// `" 0.5 "`) while still rebuilding when the effective config changes.
+/// Chinese/Japanese share the ppocrv6 backend, so switching between them is
+/// a cache hit.
+pub fn pipeline_fingerprint(
+    cfg: &RapidOcrConfig,
+    workers: usize,
+    backend: easyscanlate_settings::OcrRecBackend,
+) -> (usize, u32, u32, easyscanlate_settings::OcrRecBackend) {
+    (
+        workers.max(1),
+        cfg.text_score.to_bits(),
+        cfg.max_side_len,
+        backend,
+    )
 }
 
 /// Tuning for merging nearby OCR text boxes into one entry.

@@ -257,16 +257,21 @@ pub fn handle_start_ocr(app: &mut App) -> Task<Message> {
                     crate::app::queue::POOL_CAPACITY,
                     run_count
                 );
-                let (workers, cfg) = easyscanlate_settings::get(|s| {
+                let (workers, cfg, backend) = easyscanlate_settings::get(|s| {
                     let workers = s.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
-                    let cfg = ocr::config_from_strings(&s.ocr_text_score, &s.ocr_max_side_len);
-                    (workers, cfg)
+                    let backend = s.ocr_language.backend();
+                    let cfg = ocr::config_from_strings_for_lang(
+                        s.ocr_language,
+                        &s.ocr_text_score,
+                        &s.ocr_max_side_len,
+                    );
+                    (workers, cfg, backend)
                 });
-                let (fp_workers, fp_score, fp_side) =
-                    ocr::pipeline_fingerprint(&cfg, workers);
+                let (fp_workers, fp_score, fp_side, fp_backend) =
+                    ocr::pipeline_fingerprint(&cfg, workers, backend);
                 let needs_build = if app
                     .engines
-                    .pipeline_matches(fp_workers, fp_score, fp_side)
+                    .pipeline_matches(fp_workers, fp_score, fp_side, fp_backend)
                 {
                     app.tabs[idx].status = format!(
                         "OCR running (pool {}/{}) on {} run(s)...",
@@ -356,18 +361,24 @@ pub fn handle_parallel_ready(app: &mut App, tab_id: super::tab::TabId, result: R
         Ok(pipeline) => {
             // Fingerprint from current settings: a settings change mid-build is
             // rare, and the next start/dispatch re-checks and rebuilds if stale.
-            let (workers, cfg) = easyscanlate_settings::get(|s| {
+            let (workers, cfg, backend) = easyscanlate_settings::get(|s| {
                 let workers = s.ocr_workers.parse::<usize>().unwrap_or(2).max(1);
-                let cfg = ocr::config_from_strings(&s.ocr_text_score, &s.ocr_max_side_len);
-                (workers, cfg)
+                let backend = s.ocr_language.backend();
+                let cfg = ocr::config_from_strings_for_lang(
+                    s.ocr_language,
+                    &s.ocr_text_score,
+                    &s.ocr_max_side_len,
+                );
+                (workers, cfg, backend)
             });
-            let (fp_workers, fp_score, fp_side) =
-                ocr::pipeline_fingerprint(&cfg, workers);
+            let (fp_workers, fp_score, fp_side, fp_backend) =
+                ocr::pipeline_fingerprint(&cfg, workers, backend);
             app.engines.set_pipeline(
                 pipeline.clone(),
                 fp_workers,
                 fp_score,
                 fp_side,
+                fp_backend,
             );
             maybe_start_ocr(app, tab_id)
         }
@@ -778,7 +789,10 @@ pub fn handle_ocr_stream_failed(app: &mut App, tab_id: super::tab::TabId, e: Str
 pub fn handle_manual_ocr_engine_ready(app: &mut App, tab_id: super::tab::TabId, result: Result<ocr::Engine, String>) -> Task<Message> {
     match result {
         Ok(engine) => {
+            let backend =
+                easyscanlate_settings::get(|s| s.ocr_language.backend());
             app.engines.manual_ocr = Some(engine.clone());
+            app.engines.manual_ocr_backend = Some(backend);
             if let Some(tab) = app.tab_by_id_mut(tab_id)
                 && let Some(multi) = tab.pending_manual_multi_ocr.take() {
                     return start_manual_ocr_selection(app, tab_id, multi, engine.clone());
@@ -878,8 +892,24 @@ pub fn handle_manual_ocr_selection(app: &mut App, tab_id: super::tab::TabId, sel
                 return Task::none();
             }
         }
-        let cfg = easyscanlate_settings::get(|s| ocr::config_with(0.0, s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000)));
-        let cached = app.engines.manual_ocr.clone();
+        let (cfg, backend) = easyscanlate_settings::get(|s| {
+            (
+                ocr::config_for_lang(
+                    s.ocr_language,
+                    0.0,
+                    s.ocr_max_side_len.trim().parse::<u32>().unwrap_or(2000),
+                ),
+                s.ocr_language.backend(),
+            )
+        });
+        let cached = match app.engines.manual_ocr_backend {
+            Some(cached_backend) if cached_backend == backend => app.engines.manual_ocr.clone(),
+            _ => {
+                app.engines.manual_ocr = None;
+                app.engines.manual_ocr_backend = None;
+                None
+            }
+        };
         if let Some(engine) = cached { return start_manual_ocr_selection(app, tab_id, valid, engine); }
         if let Some(tab) = app.tab_by_id_mut(tab_id) {
             tab.pending_manual_multi_ocr = Some(valid);

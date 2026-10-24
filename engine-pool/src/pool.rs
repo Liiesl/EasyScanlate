@@ -19,6 +19,7 @@ pub struct OcrPipelineCache {
     pub workers: usize,
     pub text_score_bits: u32,
     pub max_side_len: u32,
+    pub backend: easyscanlate_settings::OcrRecBackend,
 }
 
 #[cfg(feature = "ocr")]
@@ -28,20 +29,31 @@ impl OcrPipelineCache {
         workers: usize,
         text_score_bits: u32,
         max_side_len: u32,
+        backend: easyscanlate_settings::OcrRecBackend,
     ) -> Self {
         Self {
             engine,
             workers: workers.max(1),
             text_score_bits,
             max_side_len,
+            backend,
         }
     }
 
     /// True when this cached engine was built with the same effective config.
-    pub fn matches(&self, workers: usize, text_score_bits: u32, max_side_len: u32) -> bool {
+    /// Chinese/Japanese share the ppocrv6 backend, so switching between them
+    /// is a hit.
+    pub fn matches(
+        &self,
+        workers: usize,
+        text_score_bits: u32,
+        max_side_len: u32,
+        backend: easyscanlate_settings::OcrRecBackend,
+    ) -> bool {
         self.workers == workers.max(1)
             && self.text_score_bits == text_score_bits
             && self.max_side_len == max_side_len
+            && self.backend == backend
     }
 }
 
@@ -51,6 +63,10 @@ pub struct EnginePool {
     pub pipeline: Option<OcrPipelineCache>,
     #[cfg(feature = "ocr")]
     pub manual_ocr: Option<easyscanlate_ocr::Engine>,
+    /// Backend the cached manual OCR engine was built with. `None` means no
+    /// manual engine is cached. Cleared together with the engine on mismatch.
+    #[cfg(feature = "ocr")]
+    pub manual_ocr_backend: Option<easyscanlate_settings::OcrRecBackend>,
     #[cfg(feature = "inpaint")]
     pub auto_telea: Option<easyscanlate_inpaint::Engine>,
     #[cfg(feature = "inpaint")]
@@ -94,10 +110,11 @@ impl EnginePool {
         workers: usize,
         text_score_bits: u32,
         max_side_len: u32,
+        backend: easyscanlate_settings::OcrRecBackend,
     ) -> bool {
         self.pipeline
             .as_ref()
-            .is_some_and(|c| c.matches(workers, text_score_bits, max_side_len))
+            .is_some_and(|c| c.matches(workers, text_score_bits, max_side_len, backend))
     }
 
     /// Store a freshly built auto-OCR pipeline with its config fingerprint.
@@ -108,12 +125,14 @@ impl EnginePool {
         workers: usize,
         text_score_bits: u32,
         max_side_len: u32,
+        backend: easyscanlate_settings::OcrRecBackend,
     ) {
         self.pipeline = Some(OcrPipelineCache::new(
             engine,
             workers,
             text_score_bits,
             max_side_len,
+            backend,
         ));
     }
 
