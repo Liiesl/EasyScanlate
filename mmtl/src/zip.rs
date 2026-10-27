@@ -33,6 +33,66 @@ pub struct LoadResult {
     pub inpaint_files: Vec<(ImageId, [f32; 4], PathBuf)>,
 }
 
+/// Rewrites the `series` attribute of `project.xml` inside an existing
+/// `.mmtl`, leaving the packaged images/inpaint entries untouched.
+///
+/// The whole zip is rewritten to a temporary file (raw-copying every other
+/// entry) and atomically replaces the original. Legacy archives without a
+/// native `project.xml` are left unchanged.
+pub fn update_project_series(path: &Path, series: Option<String>) -> Result<(), String> {
+    let file = File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
+    let mut archive = ZipArchive::new(file).map_err(|e| format!("zip open: {e}"))?;
+
+    let mut xml = String::new();
+    match archive.by_name("project.xml") {
+        Ok(mut entry) => {
+            entry
+                .read_to_string(&mut xml)
+                .map_err(|e| format!("read project.xml: {e}"))?;
+        }
+        Err(zip::result::ZipError::FileNotFound) => return Ok(()),
+        Err(e) => return Err(format!("read project.xml: {e}")),
+    }
+
+    let mut project = from_xml_str(&xml)?;
+    project.set_series(series);
+    let xml = to_xml_string(&project)?;
+
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let tmp = tempfile::Builder::new()
+        .prefix(".easyscanlate-series-")
+        .suffix(".mmtl")
+        .tempfile_in(parent)
+        .map_err(|e| format!("create temp file: {e}"))?;
+
+    {
+        let out = tmp.reopen().map_err(|e| format!("reopen temp file: {e}"))?;
+        let mut writer = ZipWriter::new(out);
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        for i in 0..archive.len() {
+            let entry = archive.by_index(i).map_err(|e| e.to_string())?;
+            if entry.name() == "project.xml" {
+                writer
+                    .start_file("project.xml", options)
+                    .map_err(|e| e.to_string())?;
+                writer
+                    .write_all(xml.as_bytes())
+                    .map_err(|e| e.to_string())?;
+            } else {
+                writer.raw_copy_file(entry).map_err(|e| e.to_string())?;
+            }
+        }
+        writer.finish().map_err(|e| e.to_string())?;
+    }
+
+    // The source archive must be closed before replacing it (Windows sharing).
+    drop(archive);
+    tmp.persist(path)
+        .map_err(|e| format!("replace {path:?}: {}", e.error))?;
+    Ok(())
+}
+
 pub fn save_mmtl(
     project: &Project,
     inpaint_images: &[InpaintImageData],

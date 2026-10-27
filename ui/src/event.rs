@@ -150,7 +150,9 @@ pub enum UiEvent {
     // -- Homepage / New Project (single-window overlay) --
     HomeNewProject,
     HomeOpenProject,
-    HomeRecentClicked(String),
+    /// A Home table row was clicked: the first click selects it,
+    /// a second click on the same row opens the project.
+    HomeProjectClicked(String),
     HomeSettings,
     /// Show standalone recents in the home main panel.
     HomeSelectRecent,
@@ -158,6 +160,19 @@ pub enum UiEvent {
     HomeSelectSeries(String),
     /// Collapse/expand the `Series` group as a whole in the home sidebar.
     HomeToggleSeriesGroup,
+    /// Reassign the series of the Home project at `path` (`None` = standalone).
+    HomeSeriesChanged {
+        path: String,
+        series: Option<String>,
+    },
+    /// Show the inline "+ New series" input for the Home project at `path`.
+    HomeSeriesCreateStart(String),
+    /// The Home inline new-series input text changed.
+    HomeSeriesName(String),
+    /// Confirm the Home inline new-series input.
+    HomeSeriesCreateConfirm,
+    /// Hide the Home inline new-series input.
+    HomeSeriesCancel,
     NewProjectClose,
     NewProjectSourceImage,
     NewProjectSourceFolder,

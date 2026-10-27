@@ -32,6 +32,7 @@ pub mod edit;
 pub mod entries;
 pub mod error;
 pub mod export;
+pub mod home;
 pub mod inpaint;
 pub mod layout;
 pub mod main_area;
@@ -236,6 +237,11 @@ pub enum Message {
         recents: Vec<easyscanlate_settings::RecentProject>,
         series_items: Vec<easyscanlate_settings::series::TrackedProject>,
     },
+    /// A Home series reassignment finished writing a closed project's file.
+    HomeSeriesPersisted {
+        path: String,
+        result: Result<(), String>,
+    },
     /// Deferred translation listing-cache load (per-provider JSON) finished
     /// off-thread; merged like a fetched listing.
     TranslationCacheLoaded(std::collections::HashMap<String, ui_translation::Provider>),
@@ -346,6 +352,14 @@ pub struct App {
     pub(crate) adv_import_name: String,
     /// Home sidebar filter: standalone recents vs one series.
     pub(crate) home_selection: easyscanlate_ui::state::HomeSelection,
+    /// Absolute path of the Home project row highlighted by a single click.
+    pub(crate) home_selected_project: Option<String>,
+    /// Last Home project click `(at, path)` for double-click detection.
+    pub(crate) home_last_click: Option<(std::time::Instant, String)>,
+    /// Path of the Home project whose inline "+ New series" editor is open.
+    pub(crate) home_series_creating: Option<String>,
+    /// Current text of the Home inline new-series input.
+    pub(crate) home_series_name: String,
     /// Whether the `Series` group as a whole is collapsed in the home
     /// sidebar. Session-only (resets to expanded on launch).
     pub(crate) home_series_collapsed: bool,
@@ -454,6 +468,10 @@ impl App {
             adv_import_target: None,
             adv_import_name: String::new(),
             home_selection: easyscanlate_ui::state::HomeSelection::Recent,
+            home_selected_project: None,
+            home_last_click: None,
+            home_series_creating: None,
+            home_series_name: String::new(),
             home_series_collapsed: false,
             frame,
             pending_close: None,
@@ -1023,21 +1041,33 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Ui(UiEvent::TabNew) => new_project::handle_new(app),
         Message::Ui(UiEvent::HomeNewProject) => new_project::handle_new(app),
         Message::Ui(UiEvent::HomeOpenProject) => mmtl::handle_open(app),
-        Message::Ui(UiEvent::HomeRecentClicked(path)) => {
-            backdrop::begin_load(app, backdrop::PendingLoad::Recent(path))
-        }
+        Message::Ui(UiEvent::HomeProjectClicked(path)) => home::handle_project_click(app, path),
         Message::Ui(UiEvent::HomeSettings) => settings::handle_settings_open(app),
         Message::Ui(UiEvent::HomeSelectRecent) => {
             app.home_selection = easyscanlate_ui::state::HomeSelection::Recent;
+            home::clear_interaction(app);
             Task::none()
         }
         Message::Ui(UiEvent::HomeSelectSeries(name)) => {
             app.home_selection = easyscanlate_ui::state::HomeSelection::Series(name);
+            home::clear_interaction(app);
             Task::none()
         }
         Message::Ui(UiEvent::HomeToggleSeriesGroup) => {
             app.home_series_collapsed = !app.home_series_collapsed;
             Task::none()
+        }
+        Message::Ui(UiEvent::HomeSeriesChanged { path, series }) => {
+            home::handle_series_changed(app, path, series)
+        }
+        Message::Ui(UiEvent::HomeSeriesCreateStart(path)) => {
+            home::handle_series_create_start(app, path)
+        }
+        Message::Ui(UiEvent::HomeSeriesName(name)) => home::handle_series_name(app, name),
+        Message::Ui(UiEvent::HomeSeriesCreateConfirm) => home::handle_series_create_confirm(app),
+        Message::Ui(UiEvent::HomeSeriesCancel) => home::handle_series_cancel(app),
+        Message::HomeSeriesPersisted { path, result } => {
+            home::handle_series_persisted(app, path, result)
         }
         Message::Ui(UiEvent::NewProjectClose) => new_project::handle_close(app),
         Message::Ui(UiEvent::NewProjectSourceImage) => new_project::handle_source_image(app),

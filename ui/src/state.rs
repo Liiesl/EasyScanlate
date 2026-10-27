@@ -272,6 +272,18 @@ pub trait UiState {
     fn series_items(&self) -> &[easyscanlate_settings::series::TrackedProject] {
         &[]
     }
+    /// Absolute path of the Home project row highlighted by a single click.
+    fn home_selected_project(&self) -> Option<&str> {
+        None
+    }
+    /// Path of the Home project whose inline "+ New series" input is open.
+    fn home_series_creating(&self) -> Option<&str> {
+        None
+    }
+    /// Current text of the Home inline new-series input.
+    fn home_series_name(&self) -> &str {
+        ""
+    }
     /// Whether the `Series` group as a whole is collapsed in the home
     /// sidebar (session-only, defaults to expanded).
     fn is_series_group_collapsed(&self) -> bool {

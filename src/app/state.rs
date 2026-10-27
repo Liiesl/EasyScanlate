@@ -607,6 +607,18 @@ impl UiState for ActiveTab<'_> {
         &self.app.series_items
     }
 
+    fn home_selected_project(&self) -> Option<&str> {
+        self.app.home_selected_project.as_deref()
+    }
+
+    fn home_series_creating(&self) -> Option<&str> {
+        self.app.home_series_creating.as_deref()
+    }
+
+    fn home_series_name(&self) -> &str {
+        &self.app.home_series_name
+    }
+
     fn is_series_group_collapsed(&self) -> bool {
         self.app.home_series_collapsed
     }
@@ -1114,6 +1126,15 @@ impl UiState for App {
     }
     fn series_items(&self) -> &[easyscanlate_settings::series::TrackedProject] {
         &self.series_items
+    }
+    fn home_selected_project(&self) -> Option<&str> {
+        self.home_selected_project.as_deref()
+    }
+    fn home_series_creating(&self) -> Option<&str> {
+        self.home_series_creating.as_deref()
+    }
+    fn home_series_name(&self) -> &str {
+        &self.home_series_name
     }
     fn is_series_group_collapsed(&self) -> bool {
         self.home_series_collapsed

@@ -12,4 +12,4 @@ pub use translation::{
     to_xml_string as translation_to_xml_string,
 };
 pub use xml::{from_xml_str, to_xml_string};
-pub use zip::{InpaintImageData, LoadResult, load_mmtl, save_mmtl};
+pub use zip::{InpaintImageData, LoadResult, load_mmtl, save_mmtl, update_project_series};

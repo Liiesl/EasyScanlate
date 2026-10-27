@@ -1,16 +1,52 @@
 use std::collections::BTreeSet;
+use std::time::Duration;
 
-use iced::widget::{button, column, container, row, scrollable, text};
-use iced::{Color, Element, Fill as FillLength, Length};
+use iced::widget::{button, column, container, row, scrollable, text, text_input};
+use iced::{Border, Color, Element, Fill as FillLength, Length};
 use lucide_icons::Icon;
+use neverliie_iced_widgets::advanced_dropdown::{
+    Footer, Handle, Item, MenuItem, Status as DropdownStatus, advanced_dropdown,
+};
 use neverliie_iced_widgets::ellipsis_text::EllipsisText;
 
 use crate::event::UiEvent;
 use crate::panel::PANEL_BG;
 use crate::scale;
+use crate::segmented::{BORDER, INPUT_BG, MUTED_FG, TEXT_MAIN};
 use crate::state::HomeSelection;
 
 const SIDEBAR_WIDTH: f32 = 200.0;
+
+/// Maximum gap between two presses on the same Home row to count as a
+/// double-click (opens the project).
+pub const DOUBLE_CLICK_DELAY: Duration = Duration::from_millis(400);
+
+/// Value/label pair for the Series column dropdown. The Display form is
+/// shortened so the closed cell never overflows the fixed column; menu items
+/// keep the full name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HomeSeriesOption {
+    name: Option<String>,
+}
+
+impl std::fmt::Display for HomeSeriesOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.name {
+            Some(name) => f.write_str(&truncate_series_label(name)),
+            None => f.write_str("—"),
+        }
+    }
+}
+
+fn truncate_series_label(name: &str) -> String {
+    const MAX_CHARS: usize = 18;
+    if name.chars().count() <= MAX_CHARS {
+        return name.to_string();
+    }
+    let mut out: String = name.chars().take(MAX_CHARS - 1).collect();
+    out.push('…');
+    out
+}
 
 /// Fixed widths of the main-panel table columns (shared by rows + header).
 /// Name and Path are flexible (`Fill` / `FillPortion(2)`): they split all
@@ -155,11 +191,147 @@ fn ellipsis_cell<'a>(
     .into()
 }
 
+/// Compact inline input used by the home "+ New series" editor.
+fn home_input_style(_theme: &iced::Theme, _status: text_input::Status) -> text_input::Style {
+    text_input::Style {
+        background: INPUT_BG.into(),
+        border: Border {
+            color: BORDER,
+            width: scale::s(1.0),
+            radius: scale::s(4.0).into(),
+        },
+        placeholder: MUTED_FG,
+        value: TEXT_MAIN,
+        selection: crate::accent::accent(),
+        icon: MUTED_FG,
+    }
+}
+
+/// Closed field of the series dropdown: invisible (plain text) at rest, a
+/// subtle rounded highlight + brighter text on hover/open.
+fn series_dropdown_style(
+    _theme: &iced::Theme,
+    status: DropdownStatus,
+) -> neverliie_iced_widgets::advanced_dropdown::Style {
+    let (text_color, background, border): (Color, iced::Background, Border) = match status {
+        DropdownStatus::Active => (MUTED_FG, Color::TRANSPARENT.into(), Border::default()),
+        DropdownStatus::Hovered | DropdownStatus::Opened { .. } => (
+            TEXT_MAIN,
+            Color::from_rgba8(255, 255, 255, 0.10).into(),
+            Border::default().rounded(scale::s(4.0)),
+        ),
+    };
+    neverliie_iced_widgets::advanced_dropdown::Style {
+        text_color,
+        placeholder_color: MUTED_FG,
+        handle_color: MUTED_FG,
+        background,
+        border,
+    }
+}
+
+/// The Series table cell: a text-looking dropdown that reassigns the row's
+/// project without opening it.
+fn series_dropdown_cell<'a>(
+    path: String,
+    current: Option<String>,
+    available: &[String],
+) -> Element<'a, UiEvent> {
+    let mut entries: Vec<MenuItem<'a, HomeSeriesOption, UiEvent, iced::Theme, iced::Renderer>> =
+        Vec::with_capacity(available.len() + 3);
+    entries.push(MenuItem::Item(Item::new(
+        HomeSeriesOption { name: None },
+        "No series",
+    )));
+    if !available.is_empty() {
+        entries.push(MenuItem::Separator);
+        entries.push(MenuItem::Label("Series"));
+        for name in available {
+            entries.push(MenuItem::Item(Item::new(
+                HomeSeriesOption {
+                    name: Some(name.clone()),
+                },
+                name.clone(),
+            )));
+        }
+    }
+    let select_path = path.clone();
+    let selected = Some(HomeSeriesOption { name: current });
+    advanced_dropdown(entries, selected, move |opt: HomeSeriesOption| {
+        UiEvent::HomeSeriesChanged {
+            path: select_path.clone(),
+            series: opt.name,
+        }
+    })
+    .placeholder("—")
+    .text_size(scale::s(12.0))
+    .width(Length::Fixed(scale::s(SERIES_W)))
+    .padding([0.0, scale::s(4.0)])
+    .menu_max_height(240.0)
+    .handle(Handle::None)
+    .style(series_dropdown_style)
+    .footer(Footer::new(
+        "+ New series",
+        UiEvent::HomeSeriesCreateStart(path),
+    ))
+    .into()
+}
+
+/// Inline editor shown under a Home row while creating/assigning a new series.
+fn home_series_editor<'a>(name: &'a str) -> Element<'a, UiEvent> {
+    container(
+        row![
+            text("New series").size(scale::s(11.0)).color(MUTED_FG),
+            text_input("New series name…", name)
+                .on_input(UiEvent::HomeSeriesName)
+                .on_submit(UiEvent::HomeSeriesCreateConfirm)
+                .padding(scale::s(6.0))
+                .size(scale::s(12.0))
+                .width(FillLength)
+                .style(home_input_style),
+            button(
+                text("Add")
+                    .size(scale::s(12.0))
+                    .width(FillLength)
+                    .center()
+            )
+            .padding(scale::s(6.0))
+            .width(Length::Fixed(scale::s(64.0)))
+            .style(crate::panel::button_style)
+            .on_press(UiEvent::HomeSeriesCreateConfirm),
+            button(
+                text("Cancel")
+                    .size(scale::s(12.0))
+                    .width(FillLength)
+                    .center()
+            )
+            .padding(scale::s(6.0))
+            .width(Length::Fixed(scale::s(76.0)))
+            .style(crate::panel::button_style)
+            .on_press(UiEvent::HomeSeriesCancel),
+        ]
+        .spacing(scale::s(8.0))
+        .align_y(iced::Alignment::Center)
+        .width(FillLength),
+    )
+    .padding(scale::s(8.0))
+    .width(FillLength)
+    .style(|_| container::Style {
+        background: Some(Color::from_rgba8(43, 46, 58, 0.65).into()),
+        border: Border::default().rounded(scale::s(6.0)),
+        ..Default::default()
+    })
+    .into()
+}
+
 fn project_row<'a>(
     name: String,
     size: String,
     path: String,
-    series: Option<String>,
+    show_series: bool,
+    current_series: Option<String>,
+    series_choices: &[String],
+    selected: bool,
     rel: String,
 ) -> Element<'a, UiEvent> {
     let open_path = path.clone();
@@ -171,13 +343,13 @@ fn project_row<'a>(
     ]
     .spacing(scale::s(8.0))
     .align_y(iced::Alignment::Center);
-    // `None` hides the Series column (series-filtered view: implied).
-    if let Some(s) = series {
-        cells = cells.push(ellipsis_cell(
-            s,
-            12.0,
-            muted,
-            Length::Fixed(scale::s(SERIES_W)),
+    // `show_series` is false in the series-filtered view (implied by the
+    // selection); otherwise the cell is an inline reassignment dropdown.
+    if show_series {
+        cells = cells.push(series_dropdown_cell(
+            open_path.clone(),
+            current_series,
+            series_choices,
         ));
     }
     cells = cells.push(
@@ -189,8 +361,11 @@ fn project_row<'a>(
     button(cells)
         .width(Length::Fill)
         .padding(scale::s(10.0))
-        .style(|_, status| {
-            let bg = if status == iced::widget::button::Status::Hovered {
+        .style(move |_, status| {
+            let hovered = status == iced::widget::button::Status::Hovered;
+            let bg = if selected {
+                SELECTED_BG
+            } else if hovered {
                 Color::from_rgba8(255, 255, 255, 0.08)
             } else {
                 Color::TRANSPARENT
@@ -201,7 +376,7 @@ fn project_row<'a>(
                 ..Default::default()
             }
         })
-        .on_press(UiEvent::HomeRecentClicked(open_path))
+        .on_press(UiEvent::HomeProjectClicked(open_path))
         .into()
 }
 
@@ -221,6 +396,7 @@ pub fn view<'a, S: crate::state::UiState + ?Sized>(state: &'a S) -> Element<'a, 
     let selection = state.home_selection();
     let series_items = state.series_items();
     let names = series_names(series_items);
+    let selected_project = state.home_selected_project();
 
     // --- Sidebar top: Recent (standalone) nav + one collapsible Series group ---
     // The group lists clickable series names only (bare, single-line
@@ -349,18 +525,25 @@ pub fn view<'a, S: crate::state::UiState + ?Sized>(state: &'a S) -> Element<'a, 
             for rp in state.recent_projects().iter().take(10) {
                 n += 1;
                 let rel = easyscanlate_settings::format_relative(rp.last_opened);
-                let series = series_items
+                let current_series = series_items
                     .iter()
                     .find(|t| t.path == rp.path)
-                    .and_then(|t| t.series.clone())
-                    .unwrap_or_else(|| "—".to_string());
+                    .and_then(|t| t.series.clone());
+                let path = rp.path.clone();
+                let selected = selected_project == Some(path.as_str());
                 col = col.push(project_row(
                     rp.name.clone(),
                     file_size_display(&rp.path),
-                    rp.path.clone(),
-                    Some(series),
+                    path.clone(),
+                    true,
+                    current_series,
+                    &names,
+                    selected,
                     rel,
                 ));
+                if state.home_series_creating() == Some(path.as_str()) {
+                    col = col.push(home_series_editor(state.home_series_name()));
+                }
             }
             let body: Element<'_, UiEvent> = if n == 0 {
                 empty_hint("No recent projects. Create or open one to begin.")
@@ -384,11 +567,15 @@ pub fn view<'a, S: crate::state::UiState + ?Sized>(state: &'a S) -> Element<'a, 
                 let mut col = column![].spacing(scale::s(2.0));
                 for t in items {
                     let rel = easyscanlate_settings::format_relative(t.last_opened);
+                    let selected = selected_project == Some(t.path.as_str());
                     col = col.push(project_row(
                         t.name.clone(),
                         file_size_display(&t.path),
                         t.path.clone(),
+                        false,
                         None,
+                        &names,
+                        selected,
                         rel,
                     ));
                 }
