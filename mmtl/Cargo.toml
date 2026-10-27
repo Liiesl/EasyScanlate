@@ -7,7 +7,7 @@ edition.workspace = true
 easyscanlate-model = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-quick-xml = { version = "0.36", features = ["serialize"] }
+quick-xml = { version = "0.41", features = ["serialize"] }
 zip = { version = "8", default-features = false, features = ["deflate"] }
 tempfile = { workspace = true }
 image = { workspace = true }
