@@ -44,7 +44,7 @@ fn unesc(s: &str) -> String {
 fn attr(e: &BytesStart, key: &[u8]) -> Option<String> {
     for a in e.attributes().flatten() {
         if a.key.as_ref() == key
-            && let Ok(v) = a.unescape_value()
+            && let Ok(v) = a.normalized_value(quick_xml::XmlVersion::Implicit1_0)
         {
             return Some(v.into_owned());
         }
@@ -137,7 +137,6 @@ pub fn to_xml_string(profile: &str, lines: &[TranslationLine]) -> Result<String,
 /// is absent.
 pub fn from_xml_str(s: &str) -> Result<(String, Vec<TranslationLine>), String> {
     let mut reader = Reader::from_str(s);
-    reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
     let mut profile: Option<String> = None;
     let mut lines: Vec<TranslationLine> = Vec::new();
@@ -212,9 +211,22 @@ pub fn from_xml_str(s: &str) -> Result<(String, Vec<TranslationLine>), String> {
             }
             Ok(Event::Text(e)) => {
                 if collecting.is_some()
-                    && let Ok(txt) = e.unescape()
+                    && let Ok(txt) = e.decode()
                 {
                     text_buf.push_str(&txt);
+                }
+            }
+            Ok(Event::GeneralRef(e)) => {
+                if collecting.is_some() {
+                    if e.is_char_ref() {
+                        if let Ok(Some(ch)) = e.resolve_char_ref() {
+                            text_buf.push(ch);
+                        }
+                    } else if let Ok(name) = e.decode() {
+                        text_buf.push('&');
+                        text_buf.push_str(&name);
+                        text_buf.push(';');
+                    }
                 }
             }
             Ok(Event::CData(e)) => {
@@ -229,7 +241,7 @@ pub fn from_xml_str(s: &str) -> Result<(String, Vec<TranslationLine>), String> {
                 match name.as_str() {
                     "source" => {
                         if collecting == Some("source") {
-                            cur_source = Some(unesc(&text_buf));
+                            cur_source = Some(unesc(&text_buf).trim().to_string());
                             collecting = None;
                             text_buf.clear();
                         }
@@ -237,7 +249,7 @@ pub fn from_xml_str(s: &str) -> Result<(String, Vec<TranslationLine>), String> {
                     }
                     "text" => {
                         if collecting == Some("text") {
-                            cur_text = Some(unesc(&text_buf));
+                            cur_text = Some(unesc(&text_buf).trim().to_string());
                             collecting = None;
                             text_buf.clear();
                         }
@@ -247,7 +259,7 @@ pub fn from_xml_str(s: &str) -> Result<(String, Vec<TranslationLine>), String> {
                         // Legacy rows: only fill when `<text>` hasn't already.
                         if collecting == Some("text") {
                             if cur_text.is_none() {
-                                cur_text = Some(unesc(&text_buf));
+                                cur_text = Some(unesc(&text_buf).trim().to_string());
                             }
                             collecting = None;
                             text_buf.clear();

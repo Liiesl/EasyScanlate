@@ -36,7 +36,7 @@ fn unesc(s: &str) -> String {
 fn attr(e: &BytesStart, key: &[u8]) -> Option<String> {
     for a in e.attributes().flatten() {
         if a.key.as_ref() == key
-            && let Ok(v) = a.unescape_value()
+            && let Ok(v) = a.normalized_value(quick_xml::XmlVersion::Implicit1_0)
         {
             return Some(v.into_owned());
         }
@@ -685,7 +685,6 @@ impl Default for ParseCtx {
 
 pub fn from_xml_str(s: &str) -> Result<Project, String> {
     let mut reader = Reader::from_str(s);
-    reader.config_mut().trim_text(true);
     let mut ctx = ParseCtx::default();
     // temporary holders for nested parsing
     let mut buf = Vec::new();
@@ -1144,9 +1143,22 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
             }
             Ok(Event::Text(e)) => {
                 if collecting.is_some()
-                    && let Ok(txt) = e.unescape()
+                    && let Ok(txt) = e.decode()
                 {
                     text_buf.push_str(&txt);
+                }
+            }
+            Ok(Event::GeneralRef(e)) => {
+                if collecting.is_some() {
+                    if e.is_char_ref() {
+                        if let Ok(Some(ch)) = e.resolve_char_ref() {
+                            text_buf.push(ch);
+                        }
+                    } else if let Ok(name) = e.decode() {
+                        text_buf.push('&');
+                        text_buf.push_str(&name);
+                        text_buf.push(';');
+                    }
                 }
             }
             Ok(Event::CData(e)) => {
@@ -1164,21 +1176,21 @@ pub fn from_xml_str(s: &str) -> Result<Project, String> {
                         if let Some(entry) = cur_entry.as_mut()
                             && collecting.as_deref() == Some("text")
                         {
-                            entry.text = unesc(&text_buf);
+                            entry.text = unesc(&text_buf).trim().to_string();
                             collecting = None;
                             text_buf.clear();
                         }
                     }
                     "translation" => {
                         if collecting.as_deref() == Some("translation") {
-                            cur_delta_trans = Some(unesc(&text_buf));
+                            cur_delta_trans = Some(unesc(&text_buf).trim().to_string());
                             collecting = None;
                             text_buf.clear();
                         }
                     }
                     "note" => {
                         if let Some((eid, _)) = cur_note.take() {
-                            let note = unesc(&text_buf);
+                            let note = unesc(&text_buf).trim().to_string();
                             ctx.notes.insert(eid, note);
                             collecting = None;
                             text_buf.clear();
