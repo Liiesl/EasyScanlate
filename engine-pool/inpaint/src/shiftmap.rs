@@ -30,7 +30,7 @@ use std::collections::HashMap;
 
 use image::{GrayImage, RgbImage};
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 /// Patch side length (odd). Mirrors `patch=9`.
 pub const PATCH: usize = 9;
