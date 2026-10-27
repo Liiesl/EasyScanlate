@@ -1,4 +1,4 @@
-//! Workspace-local shim shadowing crates.io `rig-fastembed 0.43.0`.
+//! Workspace-local shim shadowing crates.io `rig-fastembed 0.45.0`.
 //!
 //! The published crate depends on `fastembed 4.5.0`, which pins
 //! `ort =2.0.0-rc.9`. That pin conflicts with our `ort ^2.0.0-rc.12`

@@ -1458,9 +1458,9 @@ async fn complete(
             choice_text(&response)
         }
         CompatKind::Anthropic => {
-            let client = rig::providers::anthropic::wire::AnthropicConfig::with_dialect(
-                key,
+            let client = rig::providers::anthropic::wire::AnthropicConfig::with_key(
                 &rig::providers::anthropic::wire::ANTHROPIC,
+                key,
             )
             .with_base_url(api)
             .client();
@@ -1601,9 +1601,9 @@ async fn complete(
             // MiniMax's Anthropic-compatible endpoint (api.minimax.io/anthropic)
             // mirrors the Anthropic Messages API shape, so it requires max_tokens
             // just like the Anthropic native client.
-            let client = rig::providers::anthropic::wire::AnthropicConfig::with_dialect(
-                key,
+            let client = rig::providers::anthropic::wire::AnthropicConfig::with_key(
                 &rig::providers::anthropic::wire::MINIMAX,
+                key,
             )
             .with_base_url(api)
             .client();
@@ -1631,7 +1631,7 @@ async fn complete(
                 config.with_api_key(key)
             };
             let client = config.client();
-            let m = client.completion(model);
+            let m = client.native_completion(model);
             let response = m
                 .call(
                     CompletionRequest::new(prompt)
