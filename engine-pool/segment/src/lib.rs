@@ -123,10 +123,12 @@ impl Engine {
                 alt.display()
             ));
         };
+        let env = easyscanlate_ort_env::environment()
+            .map_err(|e| format!("ORT init failed: {e}"))?;
         // Helper: CPU session (fallback). Keep ARNs calm: like OCR we disable memory pattern (dynamic 1024) and CPU arena —
         // otherwise each 1024 canvas triggers mmap arena grow/shrink sawtooth (+500 residual).
         let build_cpu = || -> Result<Session, String> {
-            Session::builder()
+            Session::builder(env)
                 .map_err(|e| format!("ORT init failed: {e}"))?
                 .with_optimization_level(GraphOptimizationLevel::Level3)
                 .map_err(|e| format!("ORT init failed: {e}"))?
@@ -144,7 +146,7 @@ impl Engine {
 
         #[cfg(all(feature = "directml", target_os = "windows"))]
         let build_directml = || -> Result<Session, String> {
-            Session::builder()
+            Session::builder(env)
                 .map_err(|e| format!("ORT init failed: {e}"))?
                 .with_optimization_level(GraphOptimizationLevel::Level3)
                 .map_err(|e| format!("ORT init failed: {e}"))?

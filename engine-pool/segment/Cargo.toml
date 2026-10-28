@@ -12,3 +12,4 @@ easyscanlate-settings = { workspace = true }
 image = { workspace = true }
 ndarray = { workspace = true }
 ort = { workspace = true }
+easyscanlate-ort-env = { workspace = true }

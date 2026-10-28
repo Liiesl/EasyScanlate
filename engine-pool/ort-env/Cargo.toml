@@ -1,0 +1,8 @@
+[package]
+name = "easyscanlate-ort-env"
+version.workspace = true
+edition.workspace = true
+description = "Process-wide ONNX Runtime environment shared by engine sessions"
+
+[dependencies]
+ort = { workspace = true }
