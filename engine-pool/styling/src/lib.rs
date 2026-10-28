@@ -95,7 +95,9 @@ impl Engine {
     /// Loads the styling model (CPU-only; incompatible with DirectML).
     pub fn build() -> Result<Self, String> {
         let path = easyscanlate_settings::resolve_model_path(MODEL_FILE);
-        let session = Session::builder()
+        let env = easyscanlate_ort_env::environment()
+            .map_err(|e| format!("ORT init failed: {e}"))?;
+        let session = Session::builder(env)
             .map_err(|e| format!("ORT init failed: {e}"))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| format!("ORT init failed: {e}"))?

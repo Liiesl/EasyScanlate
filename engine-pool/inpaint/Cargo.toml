@@ -5,7 +5,7 @@ edition.workspace = true
 
 [features]
 default = ["onnx"]
-onnx = ["dep:ort", "dep:ndarray"]
+onnx = ["dep:ort", "dep:ndarray", "dep:easyscanlate-ort-env"]
 directml = ["onnx", "ort/directml"]
 
 [dependencies]
@@ -14,6 +14,7 @@ imageproc = { workspace = true }
 inpaint = { workspace = true }
 ndarray = { workspace = true, optional = true }
 ort = { workspace = true, optional = true }
+easyscanlate-ort-env = { workspace = true, optional = true }
 push_relabel = { workspace = true }
 rand = { workspace = true }
 rayon = { workspace = true }

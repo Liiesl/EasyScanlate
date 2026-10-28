@@ -48,9 +48,11 @@ pub(crate) const MODEL_FILE_AOT: &str = "inpainting_aot.onnx";
 #[cfg(feature = "onnx")]
 pub(crate) fn build_session() -> Result<Session, String> {
     let path = easyscanlate_settings::resolve_model_path(MODEL_FILE_AOT);
+    let env = easyscanlate_ort_env::environment()
+        .map_err(|e| format!("ORT init failed: {e}"))?;
     // Helper to build a CPU session for a given model path.
     let build_cpu = |path: &Path| -> Result<Session, String> {
-        Session::builder()
+        Session::builder(env)
             .map_err(|e| format!("ORT init failed: {e}"))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| format!("ORT init failed: {e}"))?
@@ -65,7 +67,7 @@ pub(crate) fn build_session() -> Result<Session, String> {
     };
     #[cfg(all(feature = "directml", target_os = "windows"))]
     let build_directml = |path: &Path| -> Result<Session, String> {
-        Session::builder()
+        Session::builder(env)
             .map_err(|e| format!("ORT init failed: {e}"))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| format!("ORT init failed: {e}"))?

@@ -10,4 +10,5 @@ directml = ["rapidocr-core/directml"]
 easyscanlate-model = { workspace = true }
 easyscanlate-settings = { workspace = true }
 rapidocr-core = { workspace = true }
+easyscanlate-ort-env = { workspace = true }
 image = { workspace = true }

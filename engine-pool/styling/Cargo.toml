@@ -8,5 +8,6 @@ image = { workspace = true }
 imageproc = { workspace = true }
 ndarray = { workspace = true }
 ort = { workspace = true }
+easyscanlate-ort-env = { workspace = true }
 easyscanlate-model = { workspace = true }
 easyscanlate-settings = { workspace = true }

@@ -2547,6 +2547,7 @@ name = "easyscanlate-inpaint"
 version = "0.1.0"
 dependencies = [
  "easyscanlate-model",
+ "easyscanlate-ort-env",
  "easyscanlate-settings",
  "image",
  "imageproc 0.27.0",
@@ -2596,9 +2597,17 @@ name = "easyscanlate-ocr"
 version = "0.1.0"
 dependencies = [
  "easyscanlate-model",
+ "easyscanlate-ort-env",
  "easyscanlate-settings",
  "image",
  "rapidocr-core",
+]
+
+[[package]]
+name = "easyscanlate-ort-env"
+version = "0.1.0"
+dependencies = [
+ "ort",
 ]
 
 [[package]]
@@ -2606,6 +2615,7 @@ name = "easyscanlate-segment"
 version = "0.1.0"
 dependencies = [
  "easyscanlate-model",
+ "easyscanlate-ort-env",
  "easyscanlate-settings",
  "image",
  "ndarray 0.17.2",
@@ -2629,6 +2639,7 @@ name = "easyscanlate-styling"
 version = "0.1.0"
 dependencies = [
  "easyscanlate-model",
+ "easyscanlate-ort-env",
  "easyscanlate-settings",
  "image",
  "imageproc 0.27.0",

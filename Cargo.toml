@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["model", "translation", "ui", "settings", "mmtl", "engine-pool", "engine-pool/ocr", "engine-pool/segment", "engine-pool/styling", "engine-pool/inpaint", "engine-pool/model-store"]
+members = ["model", "translation", "ui", "settings", "mmtl", "engine-pool", "engine-pool/ocr", "engine-pool/segment", "engine-pool/styling", "engine-pool/inpaint", "engine-pool/model-store", "engine-pool/ort-env"]
 resolver = "3"
 exclude = ["iced", "rapidocr-core", "NeverLiieIcedWidgets"]
 
@@ -37,7 +37,7 @@ open = "5"
 serde = { version = "1", features = ["derive"] }
 lucide-icons = { version = "1", features = ["iced"] }
 ndarray = "0.17"
-ort = "2.0.0-rc.12"
+ort = "=2.0.0-rc.15"
 imageproc = "0.27"
 inpaint = { version = "0.1", features = ["image"] }
 serde_json = "1"
@@ -58,6 +58,7 @@ easyscanlate-ocr = { path = "engine-pool/ocr" }
 easyscanlate-styling = { path = "engine-pool/styling" }
 easyscanlate-translation = { path = "translation" }
 easyscanlate-segment = { path = "engine-pool/segment" }
+easyscanlate-ort-env = { path = "engine-pool/ort-env" }
 easyscanlate-engine-pool = { path = "engine-pool", default-features = false }
 easyscanlate-ui = { path = "ui", default-features = false }
 easyscanlate-mmtl = { path = "mmtl" }

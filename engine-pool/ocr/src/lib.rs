@@ -49,7 +49,9 @@ impl Engine {
     /// via [`config_with`] and pass it here so the engine reflects the user's
     /// settings.
     pub fn build_with_config(cfg: RapidOcrConfig) -> Result<Self, String> {
-        RapidOcr::new(cfg)
+        let env = easyscanlate_ort_env::environment()
+            .map_err(|e| format!("Engine init failed: {e}"))?;
+        RapidOcr::new_with_env(cfg, env)
             .map(|ocr| Self(Arc::new(Mutex::new(ocr))))
             .map_err(|e| format!("Engine init failed: {e}"))
     }
@@ -127,7 +129,9 @@ impl ParallelEngine {
             inter_threads: 1,
             ..cfg.inference
         };
-        let pipeline = DetRecPipeline::new(&cfg, inference, inference, workers)
+        let env = easyscanlate_ort_env::environment()
+            .map_err(|e| format!("Parallel engine init failed: {e}"))?;
+        let pipeline = DetRecPipeline::new_with_env(&cfg, inference, inference, workers, env)
             .map_err(|e| format!("Parallel engine init failed: {e}"))?;
         Ok(Self(Arc::new(pipeline)))
     }
