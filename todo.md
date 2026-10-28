@@ -1,40 +1,17 @@
 # what i need
 
-## done (milestone 0.5.0 release)
+## done (milestone 0.5.1 release)
 
 #### addition
 
-- font fixed size
-- font line height and letter spacing
-- case toggle
-- gradient support for stroke and bg
-- add series category to project
-- full crtl, alt and shift drag interaction
-  - mirror opposite side,
-  - anchor
-  - horizontal/vertical align preserve
-  - preserve ratio
-- text entry alignment and auto align
-- proper non panic error rfd
 - 
 
 #### fixes
 
-- cap free transform to prevent cowtie/flipped/collapsed quad
-- cache model json as fallback and delta update only when starting up
-- app level presist of color picker swatch and recent
-- scroll reset on minimize/focus lost.
-- duplicate inpaint introduced in 0.4.2
-- erratic retaining scroll on resize pane close to top image
-- case not working as intended
-- 
+- fix layout shift in preview vs export
 
 #### modification
 
-- move layer and edit to the left of main area
-- rework color picker ux
-- rework gradient ux
-- relayout home page
 - 
 
 ## currently in progress
@@ -43,9 +20,12 @@
 
 - textbox styles
   - add directional blur to typography
-  - add drop shadow to both
   - add
-- 
+- add manual textbox insertion
+- multi select entry
+  - add multi select to style
+  - add entry merging
+- add manual entry. 
 
 #### fixes
 
@@ -61,14 +41,12 @@
 
 #### addition
 
-- add manual textbox insertion
 - implement watermarking
 - add more items for ocr export
   - ocr tagging
   - pdf
   - docs
 - add window pos and size saves (remember from last session)
-- split ocr result
 - add z index and reordering of textbox on the same img
 - watermark detection
   - custom model for detecting watermark
@@ -81,7 +59,6 @@
 
 #### modification
 
-- dynamic link between import export ocr and translation
 - change how translation Work
   - characters, places, and lore name dictionaries
 - profile improvement:

@@ -126,9 +126,14 @@ pub fn draw_entries<'a, I, F>(
         let radius = iced::border::Radius::from(bg_radius);
         let has_radius = bg_radius > 0.5;
         let box_rect = Rectangle::new(layout_position, Size::new(layout_width, layout_height));
+        // `affine_error` scales linearly with `scale` (frame px), so compare
+        // against a scaled threshold: the warp-vs-affine branch is then
+        // decided by the image-space shape, identical for preview and export.
+        let fit_scale = if scale.is_finite() && scale > 1e-6 { scale } else { 1.0 };
         let warp = rotated.is_none()
             && layout_transform.is_some()
-            && affine_error(quad, layout_width, layout_height) > warp::warp_threshold();
+            && affine_error(quad, layout_width, layout_height)
+                > warp::warp_threshold() * fit_scale;
         if has_radius {
             if warp {
                 let bg = crate::main_area::geometry::perspective_rounded_rect_path(
@@ -206,7 +211,15 @@ pub fn draw_entries<'a, I, F>(
                 );
             }
         }
-        let wrap_width = layout_width.max(8.0);
+        // Resolution-independent fitting: cosmic-text shaping is not
+        // scale-linear, so fitting at frame pixels makes line breaks and
+        // fitted sizes depend on zoom/window/monitor (preview) vs native
+        // pixels (export). Fit in image pixels and scale the result: preview
+        // and export then share identical breaks, relative sizes and centering.
+        let layout_width_img = layout_width / fit_scale;
+        let layout_height_img = layout_height / fit_scale;
+        let wrap_width_img = layout_width_img.max(8.0);
+        let wrap_width = wrap_width_img * fit_scale;
         if entry.hide_text {
             continue;
         }
@@ -216,42 +229,46 @@ pub fn draw_entries<'a, I, F>(
         let gradient = text_fill(&entry.style);
         let shadow = ShadowPaint::for_style(&entry.style, scale);
         // Per-entry typography: relative line-height multiplier and letter
-        // spacing in image px (scaled to frame px). Spacing is real
+        // spacing in image px (scaled to frame px for drawing). Spacing is real
         // tracking via cosmic-text `Attrs::letter_spacing` (EM) shared by
         // measure and the glyph-outline draw loops.
         let lh = entry.style.line_height.clamp(0.5, 3.0);
-        let ls = entry.style.letter_spacing.clamp(0.0, 20.0) * scale;
+        let ls_img = entry.style.letter_spacing.clamp(0.0, 20.0);
+        let ls = ls_img * scale;
         let line_height_style = LineHeight::Relative(lh);
 
         if entry.style.text_align == TextAlign::Circular {
-            let bounds = Size::new(wrap_width, layout_height);
-            let (size, lines) = if entry.style.auto_size {
-                fit_circle_metrics(&display, styled, bounds, lh, ls)
+            let bounds_img = Size::new(wrap_width_img, layout_height_img);
+            let (size_img, lines_img) = if entry.style.auto_size {
+                fit_circle_metrics(&display, styled, bounds_img, lh, ls_img)
             } else {
-                let fixed = (entry.style.font_size.max(1.0) * scale).max(1.0);
-                match layout_circle_lines(&display, styled, fixed, bounds, lh, ls) {
-                    Some(lines) => (fixed, lines),
+                let fixed_img = entry.style.font_size.max(1.0);
+                match layout_circle_lines(&display, styled, fixed_img, bounds_img, lh, ls_img) {
+                    Some(lines) => (fixed_img, lines),
                     // Fixed size overflows the bubble: shrink to fit rather
                     // than drawing nothing.
-                    None => fit_circle_metrics(&display, styled, bounds, lh, ls),
+                    None => fit_circle_metrics(&display, styled, bounds_img, lh, ls_img),
                 }
             };
-            let line_height = size * lh;
-            let total_height = lines.last().map_or(0.0, |line| line.y + line_height);
+            let size = (size_img * fit_scale).max(1.0);
+            let total_height_img = lines_img
+                .last()
+                .map_or(0.0, |line| line.y + size_img * lh);
+            let total_height = total_height_img * fit_scale;
             let y_offset = (layout_height - total_height).max(0.0) / 2.0;
             let block_rect = Rectangle::new(
                 Point::new(layout_position.x, layout_position.y + y_offset),
                 Size::new(wrap_width, total_height),
             );
             if warp {
-                for line in &lines {
+                for line in &lines_img {
                     let text = Text {
                         content: line.content.clone(),
                         position: Point::new(
                             layout_position.x + wrap_width / 2.0,
-                            layout_position.y + y_offset + line.y,
+                            layout_position.y + y_offset + line.y * fit_scale,
                         ),
-                        max_width: line.chord,
+                        max_width: line.chord * fit_scale,
                         size: Pixels(size),
                         line_height: line_height_style,
                         color: rgba_to_color(entry.style.text_color),
@@ -281,14 +298,14 @@ pub fn draw_entries<'a, I, F>(
                         layout_height,
                     );
                 }
-                for line in &lines {
+                for line in &lines_img {
                     let text = Text {
                         content: line.content.clone(),
                         position: Point::new(
                             layout_position.x + wrap_width / 2.0,
-                            layout_position.y + y_offset + line.y,
+                            layout_position.y + y_offset + line.y * fit_scale,
                         ),
-                        max_width: line.chord,
+                        max_width: line.chord * fit_scale,
                         size: Pixels(size),
                         line_height: line_height_style,
                         color: rgba_to_color(entry.style.text_color),
@@ -326,14 +343,17 @@ pub fn draw_entries<'a, I, F>(
             continue;
         }
 
-        let bounds = Size::new(wrap_width, layout_height);
-        let (size, fitted_height) = if entry.style.auto_size {
-            fit_font_metrics(&display, styled, bounds, lh, ls)
+        let bounds_img = Size::new(wrap_width_img, layout_height_img);
+        let (size_img, fitted_height_img) = if entry.style.auto_size {
+            fit_font_metrics(&display, styled, bounds_img, lh, ls_img)
         } else {
-            let fixed = (entry.style.font_size.max(1.0) * scale).max(1.0);
-            let height = measure_text(&display, styled, fixed, wrap_width, lh, ls).height;
-            (fixed, height)
+            let fixed_img = entry.style.font_size.max(1.0);
+            let height_img =
+                measure_text(&display, styled, fixed_img, wrap_width_img, lh, ls_img).height;
+            (fixed_img, height_img)
         };
+        let size = (size_img * fit_scale).max(1.0);
+        let fitted_height = fitted_height_img * fit_scale;
         let y_offset = (layout_height - fitted_height).max(0.0) / 2.0;
         let block_rect = Rectangle::new(
             Point::new(layout_position.x, layout_position.y + y_offset),
